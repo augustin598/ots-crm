@@ -7,6 +7,7 @@ import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-a
 import { listMonthlySpend, formatCustomerId, listMccSubAccounts } from '$lib/server/google-ads/client';
 import { saveGoogleSessionCookies, clearGoogleSession } from '$lib/server/google-ads/google-cookies';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
+import { requireStaff } from '$lib/server/get-actor';
 
 // ---- Queries ----
 
@@ -15,6 +16,7 @@ export const getGoogleAdsConnectionStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	return getGoogleAdsStatus(event.locals.tenant.id);
 });
@@ -71,6 +73,7 @@ export const getGoogleAdsAccounts = query(async () => {
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const accounts = await db
 		.select({
@@ -99,6 +102,7 @@ export const getClientsForMapping = query(async () => {
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const clients = await db
 		.select({
@@ -172,6 +176,7 @@ export const getGoogleAdsMonthlySpend = query(
 		throw new Error('Unauthorized');
 	}
 	if (event.locals.isClientUser) throw new Error('Unauthorized');
+	await requireStaff(event);
 
 	const tenantId = event.locals.tenant.id;
 	const authResult = await getAuthenticatedClient(tenantId);
@@ -325,6 +330,8 @@ export const saveGoogleAdsConfig = command(
 			throw new Error('Unauthorized');
 		}
 
+		await requireStaff(event);
+
 		const tenantId = event.locals.tenant.id;
 		const cleanMcc = data.mccAccountId.trim().replace(/-/g, '');
 
@@ -376,6 +383,8 @@ export const fetchGoogleAdsAccounts = command(async () => {
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
 	}
+
+	await requireStaff(event);
 
 	const tenantId = event.locals.tenant.id;
 	const authResult = await getAuthenticatedClient(tenantId);
@@ -450,6 +459,8 @@ export const assignGoogleAdsAccountToClient = command(
 			throw new Error('Unauthorized');
 		}
 
+		await requireStaff(event);
+
 		const tenantId = event.locals.tenant.id;
 
 		// Verify account belongs to this tenant
@@ -507,6 +518,8 @@ export const triggerGoogleAdsSync = command(async () => {
 		throw new Error('Unauthorized');
 	}
 
+	await requireStaff(event);
+
 	try {
 		const result = await syncGoogleAdsInvoicesForTenant(event.locals.tenant.id);
 		return result;
@@ -532,6 +545,8 @@ export const deleteGoogleAdsInvoice = command(
 		if (event.locals.isClientUser) {
 			throw new Error('Unauthorized');
 		}
+
+		await requireStaff(event);
 
 		const [invoice] = await db
 			.select()
@@ -587,6 +602,8 @@ export const downloadGoogleInvoiceFromUrl = command(
 		if (event.locals.isClientUser) {
 			throw new Error('Unauthorized');
 		}
+
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 
@@ -694,6 +711,8 @@ export const bulkDownloadGoogleInvoices = command(
 			throw new Error('Unauthorized');
 		}
 
+		await requireStaff(event);
+
 		const tenantId = event.locals.tenant.id;
 
 		const [integration] = await db
@@ -751,6 +770,7 @@ export const importScrapedGoogleInvoices = command(
 		if (event.locals.isClientUser) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 
@@ -830,6 +850,8 @@ export const setGoogleAdsCookies = command(
 			throw new Error('Unauthorized');
 		}
 
+		await requireStaff(event);
+
 		const tenantId = event.locals.tenant.id;
 
 		// Find the integration for this tenant
@@ -857,6 +879,8 @@ export const clearGoogleAdsCookies = command(async () => {
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
 	}
+
+	await requireStaff(event);
 
 	const tenantId = event.locals.tenant.id;
 

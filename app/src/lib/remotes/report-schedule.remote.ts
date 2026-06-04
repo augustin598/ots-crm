@@ -8,6 +8,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { generateReportPdf } from '$lib/server/report-pdf-generator';
 import { getPlatformSpendData } from '$lib/server/scheduler/tasks/pdf-report-send';
 import { sendReportEmail } from '$lib/server/email';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -20,6 +21,7 @@ export const getReportSchedules = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 
 	const schedules = await db
 		.select({
@@ -113,6 +115,7 @@ export const upsertReportSchedule = command(upsertSchema, async (params) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 
 	const tenantId = event.locals.tenant.id;
 	const now = new Date();
@@ -225,6 +228,7 @@ export const deleteReportSchedule = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [existing] = await db
 			.select({ id: table.reportSchedule.id })
@@ -254,6 +258,7 @@ export const sendTestReportEmail = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		const toEmail = event.locals.user.email;
 		if (!toEmail) {
 			throw error(400, 'Utilizatorul curent nu are adresă de email setată');
@@ -387,6 +392,7 @@ export const getReportEmailLogs = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 
 	const logs = await db
 		.select({

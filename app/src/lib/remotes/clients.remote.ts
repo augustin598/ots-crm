@@ -1,5 +1,6 @@
 import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
+import { requireStaff } from '$lib/server/get-actor';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, ne, sql, getTableColumns } from 'drizzle-orm';
@@ -69,6 +70,7 @@ export const getClients = query(async () => {
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const clients = await db
 			.select({
@@ -98,6 +100,7 @@ export const getClientFirstInvoiceDates = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	try {
 		const rows = await db
@@ -134,6 +137,7 @@ export const getClientsStats = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	try {
 		const rows = await db
@@ -207,6 +211,15 @@ export const getClient = query(v.pipe(v.string(), v.minLength(1)), async (client
 		throw new Error('Unauthorized');
 	}
 
+	// Client-portal users may only read their own client record.
+	let conditions: any = and(
+		eq(table.client.id, clientId),
+		eq(table.client.tenantId, event.locals.tenant.id)
+	);
+	if (event.locals.isClientUser && event.locals.client) {
+		conditions = and(conditions, eq(table.client.id, event.locals.client.id));
+	}
+
 	const [client] = await db
 		.select({
 			...getTableColumns(table.client),
@@ -220,7 +233,7 @@ export const getClient = query(v.pipe(v.string(), v.minLength(1)), async (client
 				eq(table.clientWebsite.isDefault, true)
 			)
 		)
-		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
+		.where(conditions)
 		.limit(1);
 
 	if (!client) {
@@ -236,6 +249,7 @@ export const getLogoFromWebsite = query(v.pipe(v.string(), v.minLength(1)), asyn
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
 	try {
@@ -295,6 +309,7 @@ export const createClient = command(clientSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const clientId = generateClientId();
 	const tenantId = event.locals.tenant.id;
@@ -371,6 +386,7 @@ export const updateClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { clientId, ...rest } = data;
 		const tenantId = event.locals.tenant.id;
@@ -545,6 +561,7 @@ export const getClientPartnerInfo = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [client] = await db
 			.select()
@@ -620,6 +637,7 @@ export const setClientPartnerStatus = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { clientId, isPartner } = data;
 
@@ -703,6 +721,7 @@ export const getTenantPartners = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const partners = await db
 		.select({
@@ -792,6 +811,7 @@ export const deleteClient = command(v.pipe(v.string(), v.minLength(1)), async (c
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Verify client belongs to tenant
 	const [existing] = await db
@@ -842,6 +862,7 @@ export const getClientBudget = query(
 	async (params) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const [result] = await db
 			.select({ monthlyBudget: table.client.monthlyBudget })
@@ -862,6 +883,7 @@ export const updateClientBudget = command(
 	async (params) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		await db
 			.update(table.client)

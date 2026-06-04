@@ -1,5 +1,6 @@
 import { query, command, getRequestEvent } from '$app/server';
 import { error as svelteError } from '@sveltejs/kit';
+import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -217,6 +218,7 @@ export const getFirstPublishedMonthForClient = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const conditions = and(
 			eq(table.seoLink.tenantId, event.locals.tenant.id),
@@ -351,6 +353,7 @@ export const createSeoLinksBulk = command(createSeoLinksBulkSchema, async (data)
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const [invoiceSettings] = await db
 		.select()
@@ -451,6 +454,11 @@ export const createSeoLinksMulti = command(createSeoLinksMultiSchema, async (dat
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	// Client-facing + staff. A client user may only write rows under THEIR own
+	// client — never inject under a tenant-mate's clientId. Mirror createSeoLink.
+	if (event.locals.isClientUser && event.locals.client) {
+		data.clientId = event.locals.client.id;
+	}
 
 	const [invoiceSettings] = await db
 		.select()
@@ -532,6 +540,7 @@ export const getSeoLink = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [link] = await db
 			.select()
@@ -639,6 +648,7 @@ export const deleteSeoLink = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [existing] = await db
 			.select()
@@ -669,6 +679,7 @@ export const deleteSeoLinksBulk = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		if (ids.length === 0) return { deleted: 0 };
 
@@ -989,6 +1000,7 @@ export const extractSeoLinkData = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			svelteError(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Determină clientUrl din websiteId dacă e furnizat
 		let resolvedClientUrl = data.clientUrl || '';
@@ -1073,6 +1085,7 @@ export const extractTargetUrlForSeoLink = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [link] = await db
 			.select()
@@ -1164,6 +1177,7 @@ export const extractTargetUrlBatch = command(extractTargetUrlBatchSchema, async 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Când seoLinkIds e setat (selectare explicită), procesăm doar acele linkuri – ca la Verifică
 	const hasExplicitSelection = (filters.seoLinkIds?.length ?? 0) > 0;
@@ -1907,6 +1921,7 @@ export const importSeoLinksFromFile = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const base64Data = data.fileData.replace(/^data:.*;base64,/, '');
 		const buffer = Buffer.from(base64Data, 'base64');
@@ -2435,6 +2450,7 @@ export const getSeoLinkDiscoveryStatus = query(
 	async ({ jobId }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const [job] = await db
 			.select()
@@ -2478,6 +2494,7 @@ export const getSeoLinkDiscoveryResults = query(
 	async ({ jobId, afterId = 0, limit = 100 }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		// Verify job belongs to tenant (cheap lookup by pk)
 		const [job] = await db
@@ -2669,6 +2686,7 @@ export const listSeoLinkDiscoveryJobs = query(
 	async ({ limit = 20 }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const rows = await db
 			.select()

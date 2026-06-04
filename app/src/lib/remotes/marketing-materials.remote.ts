@@ -196,12 +196,16 @@ export const createMarketingMaterial = command(createSchema, async (data) => {
 		}
 	}
 
-	// Validate seoLinkId FK
+	// Validate seoLinkId FK (client users may only reference their OWN client's links)
 	if (data.seoLinkId) {
+		const seoConds = [eq(table.seoLink.id, data.seoLinkId), eq(table.seoLink.tenantId, tenantId)];
+		if (isClientUser && event.locals.client) {
+			seoConds.push(eq(table.seoLink.clientId, event.locals.client.id));
+		}
 		const [seoCheck] = await db
 			.select({ id: table.seoLink.id })
 			.from(table.seoLink)
-			.where(and(eq(table.seoLink.id, data.seoLinkId), eq(table.seoLink.tenantId, tenantId)))
+			.where(and(...seoConds))
 			.limit(1);
 		if (!seoCheck) {
 			throw new Error('SEO Link invalid');
@@ -284,12 +288,16 @@ export const updateMarketingMaterial = command(updateSchema, async (data) => {
 		throw new Error('Material negăsit sau fără permisiune');
 	}
 
-	// Validate seoLinkId FK if being updated
+	// Validate seoLinkId FK if being updated (client users may only reference their OWN client's links)
 	if (data.seoLinkId) {
+		const seoConds = [eq(table.seoLink.id, data.seoLinkId), eq(table.seoLink.tenantId, tenantId)];
+		if (event.locals.isClientUser && event.locals.client) {
+			seoConds.push(eq(table.seoLink.clientId, event.locals.client.id));
+		}
 		const [seoCheck] = await db
 			.select({ id: table.seoLink.id })
 			.from(table.seoLink)
-			.where(and(eq(table.seoLink.id, data.seoLinkId), eq(table.seoLink.tenantId, tenantId)))
+			.where(and(...seoConds))
 			.limit(1);
 		if (!seoCheck) {
 			throw new Error('SEO Link invalid');
@@ -634,12 +642,16 @@ export const createSocialUrlSets = command(socialUrlSetsSchema, async (data) => 
 		if (!clientCheck) throw new Error('Client invalid');
 	}
 
-	// Validate taskId if provided
+	// Validate taskId if provided (client users may only link their OWN client's tasks)
 	if (data.taskId) {
+		const taskConds = [eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId)];
+		if (isClientUser && event.locals.client) {
+			taskConds.push(eq(table.task.clientId, event.locals.client.id));
+		}
 		const [taskCheck] = await db
 			.select({ id: table.task.id })
 			.from(table.task)
-			.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId)))
+			.where(and(...taskConds))
 			.limit(1);
 		if (!taskCheck) throw new Error('Task invalid');
 	}

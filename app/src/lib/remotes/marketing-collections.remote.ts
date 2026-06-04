@@ -1,5 +1,6 @@
 import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
+import { requireStaff } from '$lib/server/get-actor';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray } from 'drizzle-orm';
@@ -85,6 +86,7 @@ export const getCollectionMaterialIds = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const links = await db
 			.select({ materialId: table.marketingCollectionMaterial.materialId })
@@ -109,6 +111,7 @@ export const createMarketingCollection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const id = generateId();
 		await db.insert(table.marketingCollection).values({
@@ -136,6 +139,7 @@ export const updateMarketingCollection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const updates: Record<string, any> = { updatedAt: new Date() };
 		if (data.name !== undefined) updates.name = data.name;
@@ -163,6 +167,7 @@ export const deleteMarketingCollection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Junction entries cascade-deleted via FK
 		await db
@@ -188,6 +193,7 @@ export const addMaterialsToCollection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Check collection belongs to tenant
 		const [collection] = await db
@@ -236,6 +242,7 @@ export const removeMaterialFromCollection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		await db
 			.delete(table.marketingCollectionMaterial)

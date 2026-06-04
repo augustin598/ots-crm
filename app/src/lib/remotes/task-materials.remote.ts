@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, not, inArray, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { recordTaskActivity } from '$lib/server/task-activity';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -19,10 +20,17 @@ export const getTaskMaterials = query(
 
 		const tenantId = event.locals.tenant.id;
 
+		// Client-facing (client portal task detail materials card). A client user
+		// may only read materials for their OWN client's tasks. Mirrors linkMaterialToTask.
+		let taskConditions = and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId));
+		if (event.locals.isClientUser && event.locals.client) {
+			taskConditions = and(taskConditions, eq(table.task.clientId, event.locals.client.id));
+		}
+
 		const [task] = await db
 			.select({ id: table.task.id })
 			.from(table.task)
-			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
+			.where(taskConditions)
 			.limit(1);
 
 		if (!task) throw new Error('Task not found');
@@ -56,6 +64,7 @@ export const getAvailableMaterialsForTask = query(
 	async (taskId: string) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 
@@ -115,23 +124,34 @@ export const linkMaterialToTask = command(
 
 		const tenantId = event.locals.tenant.id;
 
+		let taskConditions = and(eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId));
+		if (event.locals.isClientUser && event.locals.client) {
+			taskConditions = and(taskConditions, eq(table.task.clientId, event.locals.client.id));
+		}
+
 		const [task] = await db
 			.select({ id: table.task.id })
 			.from(table.task)
-			.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId)))
+			.where(taskConditions)
 			.limit(1);
 
 		if (!task) throw new Error('Task not found');
 
+		let materialConditions = and(
+			eq(table.marketingMaterial.id, data.materialId),
+			eq(table.marketingMaterial.tenantId, tenantId)
+		);
+		if (event.locals.isClientUser && event.locals.client) {
+			materialConditions = and(
+				materialConditions,
+				eq(table.marketingMaterial.clientId, event.locals.client.id)
+			);
+		}
+
 		const [material] = await db
 			.select({ id: table.marketingMaterial.id, title: table.marketingMaterial.title })
 			.from(table.marketingMaterial)
-			.where(
-				and(
-					eq(table.marketingMaterial.id, data.materialId),
-					eq(table.marketingMaterial.tenantId, tenantId)
-				)
-			)
+			.where(materialConditions)
 			.limit(1);
 
 		if (!material) throw new Error('Material not found');
@@ -183,10 +203,15 @@ export const unlinkMaterialFromTask = command(
 
 		const tenantId = event.locals.tenant.id;
 
+		let taskConditions = and(eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId));
+		if (event.locals.isClientUser && event.locals.client) {
+			taskConditions = and(taskConditions, eq(table.task.clientId, event.locals.client.id));
+		}
+
 		const [task] = await db
 			.select({ id: table.task.id })
 			.from(table.task)
-			.where(and(eq(table.task.id, data.taskId), eq(table.task.tenantId, tenantId)))
+			.where(taskConditions)
 			.limit(1);
 
 		if (!task) throw new Error('Task not found');

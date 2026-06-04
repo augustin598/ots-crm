@@ -6,6 +6,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { logError } from '$lib/server/logger';
+import { requireStaff } from '$lib/server/get-actor';
 import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, listDemographicInsights, listAdsetInsights, listAdInsights, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
@@ -228,6 +229,7 @@ export const getClientAdAccount = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 
 		const tenantId = event.locals.tenant.id;
 

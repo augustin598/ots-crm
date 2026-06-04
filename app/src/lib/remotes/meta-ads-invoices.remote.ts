@@ -12,6 +12,7 @@ import { generateSpendingReportPdf } from '$lib/server/meta-ads/spending-report-
 import { downloadAllReceiptsForMonth, downloadReceipt, downloadReceiptFromUrl, fetchBillingTransactions } from '$lib/server/meta-ads/invoice-downloader';
 import { uploadBuffer, deleteFile } from '$lib/server/storage';
 import { logWarning } from '$lib/server/logger';
+import { requireStaff } from '$lib/server/get-actor';
 
 // ---- Queries ----
 
@@ -20,6 +21,7 @@ export const getMetaAdsConnectionStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) return [];
 
 	const connections = await getMetaAdsConnections(event.locals.tenant.id);
@@ -48,6 +50,7 @@ export const getMetaTokenStatus = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) return [];
 
 	const integrations = await db
@@ -125,6 +128,7 @@ export const getMetaAdsAccounts = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -197,6 +201,7 @@ export const getClientsForMetaMapping = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) {
 		throw error(401, 'Unauthorized');
 	}
@@ -227,6 +232,7 @@ export const addMetaAdsConnection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -282,6 +288,7 @@ export const removeMetaAdsConnection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -330,6 +337,7 @@ export const fetchMetaAdsAccounts = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -420,6 +428,7 @@ export const assignMetaAdsAccountToClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -507,6 +516,7 @@ export const setMetaAdsAccountAsPrimary = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -557,6 +567,7 @@ export const triggerMetaAdsSync = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) {
 		throw error(401, 'Unauthorized');
 	}
@@ -573,6 +584,7 @@ export const regenerateSpendingPdf = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -687,6 +699,7 @@ export const setMetaAdsCookies = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -727,6 +740,7 @@ export const clearMetaAdsCookies = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -805,6 +819,7 @@ export const getAccountsForInvoiceDownload = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) return [];
 
 	const tenantId = event.locals.tenant.id;
@@ -845,6 +860,7 @@ export const downloadInvoiceForAccount = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -1033,6 +1049,7 @@ export const triggerInvoiceDownload = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -1050,6 +1067,7 @@ export const redownloadInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -1163,6 +1181,7 @@ export const deleteInvoiceDownload = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -1206,6 +1225,7 @@ export const deleteMetaAdsSpending = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -1257,6 +1277,7 @@ export const downloadMetaInvoiceFromUrl = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -1391,6 +1412,7 @@ export const bulkDownloadMetaInvoices = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}

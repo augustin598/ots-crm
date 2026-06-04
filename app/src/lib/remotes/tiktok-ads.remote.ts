@@ -11,6 +11,7 @@ import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
 import { generateSpendingReportPdf } from '$lib/server/tiktok-ads/spending-report-pdf';
 import { downloadAllInvoicesForMonth, downloadInvoice, listInvoicesFromTiktok } from '$lib/server/tiktok-ads/invoice-downloader';
 import { logInfo, logError } from '$lib/server/logger';
+import { requireStaff } from '$lib/server/get-actor';
 import { getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
 import { uploadBuffer, deleteFile } from '$lib/server/storage';
 import { logWarning } from '$lib/server/logger';
@@ -76,6 +77,7 @@ export const getTiktokAdsAccounts = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -109,6 +111,7 @@ export const getClientsForTiktokMapping = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) {
 		throw error(401, 'Unauthorized');
 	}
@@ -180,6 +183,7 @@ export const addTiktokAdsConnection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -238,6 +242,7 @@ export const removeTiktokAdsConnection = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -276,6 +281,7 @@ export const fetchTiktokAdsAccounts = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -359,6 +365,7 @@ export const assignTiktokAdsAccountToClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -414,6 +421,7 @@ export const triggerTiktokAdsSync = command(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) {
 		throw error(401, 'Unauthorized');
 	}
@@ -429,6 +437,7 @@ export const regenerateTiktokSpendingPdf = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -533,6 +542,7 @@ export const deleteTiktokAdsSpending = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -580,6 +590,7 @@ export const setTiktokAdsCookies = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -617,6 +628,7 @@ export const clearTiktokAdsCookies = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -653,6 +665,7 @@ export const triggerTiktokInvoiceDownload = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -669,6 +682,7 @@ export const redownloadTiktokInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -769,6 +783,7 @@ export const deleteTiktokInvoiceDownload = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}
@@ -815,6 +830,7 @@ export const assignTiktokInvoiceToClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
@@ -850,6 +866,7 @@ export const autoAssignTiktokInvoices = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
@@ -1137,6 +1154,7 @@ export const bulkDownloadTiktokInvoices = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw error(401, 'Unauthorized');
 		}

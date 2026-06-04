@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { getActor } from '$lib/server/get-actor';
+import { getActor, requireStaff } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { validateOverride } from '$lib/server/access';
 import type { AdminRoleId } from '$lib/access/catalog';
@@ -70,6 +70,7 @@ export const updateTenantUserRole = command(updateRoleSchema, async ({ tenantUse
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.team.changeRole');
 	const [target] = await db
@@ -114,6 +115,7 @@ export const updateTenantUserMeta = command(updateMetaSchema, async (data) => {
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.team.editProfile');
 	const actorRole = event.locals.tenantUser.role;
@@ -181,6 +183,7 @@ export const updateTenantUserSkills = command(skillsSchema, async ({ tenantUserI
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	const [target] = await db
 		.select()
@@ -218,6 +221,7 @@ export const suspendTenantUser = command(suspendSchema, async ({ tenantUserId })
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.team.suspend');
 	const [target] = await db
@@ -248,6 +252,7 @@ export const reactivateTenantUser = command(suspendSchema, async ({ tenantUserId
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.team.suspend');
 	const [target] = await db
@@ -281,6 +286,7 @@ export const removeTenantUser = command(removeMemberSchema, async ({ tenantUserI
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.team.suspend');
 	const [target] = await db
@@ -328,6 +334,7 @@ export const updateTenantUserCapabilities = command(capabilitiesSchema, async ({
 	if (!event?.locals.user || !event?.locals.tenant || !event?.locals.tenantUser) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.team.changeRole');
 
@@ -362,6 +369,12 @@ export const updateTenantUserCapabilities = command(capabilitiesSchema, async ({
 export const getClientUsers = query(v.pipe(v.string(), v.minLength(1)), async (clientId) => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	// Client-facing (client portal task detail). A client user may only list
+	// their OWN client's contacts; cross-client lookups stay blocked. Staff
+	// (not isClientUser) keep full access. Mirrors getAssignableClientUsers.
+	if (event.locals.isClientUser && event.locals.client?.id !== clientId) {
 		throw new Error('Unauthorized');
 	}
 

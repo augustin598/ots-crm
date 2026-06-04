@@ -14,6 +14,7 @@ import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-re
 import * as storage from '$lib/server/storage';
 import { createNotification } from '$lib/server/notifications';
 import { notifyTaskMention } from '$lib/server/telegram/task-notifications';
+import { requireStaff } from '$lib/server/get-actor';
 
 /** Sanitize TipTap HTML - allow safe tags + mention attributes */
 function sanitizeCommentHtml(html: string): string {
@@ -511,6 +512,7 @@ export const getCommentAttachmentUrl = query(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [comment] = await db
 			.select({
@@ -562,7 +564,10 @@ export const getAttachmentUrl = query(
 			.where(
 				and(
 					eq(table.taskCommentAttachment.id, attachmentId),
-					eq(table.task.tenantId, event.locals.tenant.id)
+					eq(table.task.tenantId, event.locals.tenant.id),
+					...(event.locals.isClientUser && event.locals.client
+						? [eq(table.task.clientId, event.locals.client.id)]
+						: [])
 				)
 			)
 			.limit(1);
@@ -603,9 +608,17 @@ export const toggleReaction = command(
 				.select({ tenantId: table.task.tenantId })
 				.from(table.taskComment)
 				.innerJoin(table.task, eq(table.taskComment.taskId, table.task.id))
-				.where(eq(table.taskComment.id, commentId))
+				.where(
+					and(
+						eq(table.taskComment.id, commentId),
+						eq(table.task.tenantId, tenant.id),
+						...(event.locals.isClientUser && event.locals.client
+							? [eq(table.task.clientId, event.locals.client.id)]
+							: [])
+					)
+				)
 				.limit(1);
-			if (!comment || comment.tenantId !== tenant.id) throw error(404, 'Comment not found');
+			if (!comment) throw error(404, 'Comment not found');
 
 			const bytes = crypto.getRandomValues(new Uint8Array(15));
 			const { encodeBase32LowerCase } = await import('@oslojs/encoding');

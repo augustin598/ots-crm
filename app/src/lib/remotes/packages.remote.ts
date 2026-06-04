@@ -7,6 +7,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendPackageRequestEmail } from '$lib/server/email';
 import { logError, logInfo } from '$lib/server/logger';
 import { getCategory, TIERS } from '$lib/constants/ots-catalog';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateRequestId(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -33,6 +34,7 @@ export const getPackageRequests = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	try {
 		const rows = await db
@@ -187,6 +189,7 @@ export const updatePackageRequestStatus = command(updateStatusSchema, async (dat
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const [existing] = await db
 		.select()

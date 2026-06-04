@@ -9,6 +9,7 @@ import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { listPages } from '$lib/server/meta-ads/client';
 import { syncMetaAdsLeadsForTenant, backfillLeadContactFields } from '$lib/server/meta-ads/leads-sync';
 import { logInfo } from '$lib/server/logger';
+import { requireStaff } from '$lib/server/get-actor';
 
 function escapeLike(str: string): string {
 	return str.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -249,6 +250,7 @@ export const getLastSyncInfo = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 
 	const tenantId = event.locals.tenant.id;
 
@@ -272,6 +274,7 @@ export const getClientsForLeadMapping = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) return [];
 
 	const clients = await db
@@ -295,6 +298,7 @@ export const triggerLeadSync = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
@@ -317,6 +321,7 @@ export const backfillLeadContacts = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
@@ -367,6 +372,7 @@ export const bulkUpdateLeadStatus = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		if (data.leadIds.length === 0) return { success: true, updated: 0 };
@@ -396,6 +402,7 @@ export const linkLeadToClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		await db
@@ -451,6 +458,7 @@ export const fetchAvailablePages = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const auth = await getAuthenticatedToken(integrationId);
@@ -474,6 +482,7 @@ export const addMetaAdsPage = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
@@ -533,6 +542,7 @@ export const removeMetaAdsPage = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		await db
@@ -559,6 +569,7 @@ export const togglePageMonitoring = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		await db
@@ -586,6 +597,7 @@ export const assignPageToClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;
@@ -637,6 +649,7 @@ export const convertLeadToClient = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw error(401, 'Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) throw error(401, 'Unauthorized');
 
 		const tenantId = event.locals.tenant.id;

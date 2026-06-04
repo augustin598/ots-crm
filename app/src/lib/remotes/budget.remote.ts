@@ -68,8 +68,11 @@ export const getClientAccountBudgets = query(
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 		const tenantId = event.locals.tenant.id;
 
-		// Security: client users can only access their own data
+		// Security: client users can only access their own data; secondary client
+		// contacts cannot see financial data (matches getInvoices convention).
 		if (event.locals.isClientUser && event.locals.client) {
+			if (!event.locals.isClientUserPrimary)
+				return { meta: [], tiktok: [], google: [], exchangeRates: {} };
 			if (event.locals.client.id !== clientId) {
 				console.warn(`[budget] Client user ${event.locals.user.id} tried to access budget for client ${clientId}, but owns ${event.locals.client.id}`);
 				throw new Error('Unauthorized');
@@ -334,8 +337,10 @@ export const updateAccountBudget = command(
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 		const tenantId = event.locals.tenant.id;
 
-		// Security: client users can only modify their own budgets
+		// Security: client users can only modify their own budgets; secondary
+		// client contacts cannot change financial data (matches getInvoices convention).
 		if (event.locals.isClientUser && event.locals.client) {
+			if (!event.locals.isClientUserPrimary) throw new Error('Unauthorized');
 			if (event.locals.client.id !== data.clientId) {
 				console.warn(`[budget] Client user ${event.locals.user.id} tried to update budget for client ${data.clientId}, but owns ${event.locals.client.id}`);
 				throw new Error('Unauthorized');

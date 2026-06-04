@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, count, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateClientWebsiteId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -16,6 +17,7 @@ export const getAllClientWebsites = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	return db
 		.select()
@@ -32,12 +34,16 @@ export const getClientWebsites = query(
 			throw new Error('Unauthorized');
 		}
 
+		// Client-portal users may only read websites of their own client.
+		const effectiveClientId =
+			event.locals.isClientUser && event.locals.client ? event.locals.client.id : clientId;
+
 		const websites = await db
 			.select()
 			.from(table.clientWebsite)
 			.where(
 				and(
-					eq(table.clientWebsite.clientId, clientId),
+					eq(table.clientWebsite.clientId, effectiveClientId),
 					eq(table.clientWebsite.tenantId, event.locals.tenant.id)
 				)
 			);
@@ -56,6 +62,10 @@ export const getClientWebsitesSeoStats = query(
 		}
 
 		const tenantId = event.locals.tenant.id;
+
+		// Client-portal users may only read SEO stats for their own client.
+		const effectiveClientId =
+			event.locals.isClientUser && event.locals.client ? event.locals.client.id : clientId;
 
 		const rows = await db
 			.select({
@@ -88,7 +98,7 @@ export const getClientWebsitesSeoStats = query(
 			)
 			.where(
 				and(
-					eq(table.clientWebsite.clientId, clientId),
+					eq(table.clientWebsite.clientId, effectiveClientId),
 					eq(table.clientWebsite.tenantId, tenantId)
 				)
 			)
@@ -118,6 +128,7 @@ export const createClientWebsite = command(clientWebsiteSchema, async (data) => 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
 	}
@@ -192,6 +203,7 @@ export const updateClientWebsite = command(updateClientWebsiteSchema, async (dat
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) {
 		throw new Error('Unauthorized');
 	}
@@ -247,6 +259,7 @@ export const deleteClientWebsite = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw new Error('Unauthorized');
 		}
@@ -292,6 +305,7 @@ export const setDefaultClientWebsite = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		if (event.locals.isClientUser) {
 			throw new Error('Unauthorized');
 		}

@@ -11,6 +11,7 @@ import { sendMagicLinkEmail } from '$lib/server/email';
 import { verifyMagicLinkToken } from '$lib/server/client-auth';
 import { checkAuthRateLimit } from '$lib/server/rate-limiter';
 import { logInfo } from '$lib/server/logger';
+import { requireStaff } from '$lib/server/get-actor';
 import { env as publicEnv } from '$env/dynamic/public';
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
@@ -374,6 +375,7 @@ export const getClientLinkedCompanies = query(
 	async ({ clientId }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 		// Read-only listing — any tenantUser may view, but reject cross-tenant probes.
 		if (!event.locals.tenantUser) throw new Error('Acces interzis pentru acest tenant');
 		const tenantId = event.locals.tenant.id;

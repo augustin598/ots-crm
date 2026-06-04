@@ -3,6 +3,7 @@ import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+import { requireStaff } from '$lib/server/get-actor';
 import { eq, and, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import {
@@ -42,6 +43,7 @@ export const getGoogleReportAdAccounts = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
+	await requireStaff(event);
 	if (event.locals.isClientUser) return [];
 
 	const accounts = await db
@@ -169,6 +171,20 @@ export const getGoogleActiveCampaigns = query(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
 
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.clientId, event.locals.client.id),
+					eq(table.googleAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.googleAdsAccount.googleAdsCustomerId, params.customerId)
+				))
+				.limit(1);
+			if (!clientAccount) throw error(401, 'Unauthorized');
+		}
+
 		const tenantId = event.locals.tenant.id;
 		const cacheKey = `google-campaigns:${tenantId}:${params.customerId}`;
 		const cached = getCached<any>(cacheKey);
@@ -203,6 +219,20 @@ export const getGoogleAdGroupInsights = query(
 	async (params) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
+
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.clientId, event.locals.client.id),
+					eq(table.googleAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.googleAdsAccount.googleAdsCustomerId, params.customerId)
+				))
+				.limit(1);
+			if (!clientAccount) throw error(401, 'Unauthorized');
+		}
 
 		const tenantId = event.locals.tenant.id;
 		const cacheKey = `google-adgroups:${tenantId}:${params.customerId}:${params.campaignId}:${params.since}:${params.until}`;
@@ -239,6 +269,22 @@ export const getGoogleDemographicInsights = query(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
 
+		// Client-facing (client portal Google Ads report). A client user may only
+		// read insights for an account mapped to THEIR client. Mirrors getGoogleCampaignInsights.
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.clientId, event.locals.client.id),
+					eq(table.googleAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.googleAdsAccount.googleAdsCustomerId, params.customerId)
+				))
+				.limit(1);
+			if (!clientAccount) throw error(401, 'Unauthorized');
+		}
+
 		const tenantId = event.locals.tenant.id;
 		const cacheKey = `google-demographics:${tenantId}:${params.customerId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
@@ -273,6 +319,22 @@ export const getGoogleGeographicInsights = query(
 	async (params) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
+
+		// Client-facing (client portal Google Ads report). A client user may only
+		// read insights for an account mapped to THEIR client. Mirrors getGoogleCampaignInsights.
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.clientId, event.locals.client.id),
+					eq(table.googleAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.googleAdsAccount.googleAdsCustomerId, params.customerId)
+				))
+				.limit(1);
+			if (!clientAccount) throw error(401, 'Unauthorized');
+		}
 
 		const tenantId = event.locals.tenant.id;
 		const cacheKey = `google-geographic:${tenantId}:${params.customerId}:${params.since}:${params.until}`;
@@ -309,6 +371,20 @@ export const getGoogleConversionActions = query(
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
 
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.clientId, event.locals.client.id),
+					eq(table.googleAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.googleAdsAccount.googleAdsCustomerId, params.customerId)
+				))
+				.limit(1);
+			if (!clientAccount) throw error(401, 'Unauthorized');
+		}
+
 		const tenantId = event.locals.tenant.id;
 		const cacheKey = `google-conv-actions:${tenantId}:${params.customerId}:${params.since}:${params.until}`;
 		const cached = getCached<any>(cacheKey);
@@ -343,6 +419,20 @@ export const getGoogleCampaignConversionActions = query(
 	async (params) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw error(401, 'Unauthorized');
+
+		if (event.locals.isClientUser) {
+			if (!event.locals.client) throw error(401, 'Unauthorized');
+			const [clientAccount] = await db
+				.select({ googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId })
+				.from(table.googleAdsAccount)
+				.where(and(
+					eq(table.googleAdsAccount.clientId, event.locals.client.id),
+					eq(table.googleAdsAccount.tenantId, event.locals.tenant.id),
+					eq(table.googleAdsAccount.googleAdsCustomerId, params.customerId)
+				))
+				.limit(1);
+			if (!clientAccount) throw error(401, 'Unauthorized');
+		}
 
 		const tenantId = event.locals.tenant.id;
 		const cacheKey = `google-campaign-conv:${tenantId}:${params.customerId}:${params.since}:${params.until}`;

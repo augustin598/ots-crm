@@ -5,6 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/tiktok-ads/auth';
+import { requireStaff } from '$lib/server/get-actor';
 import { listCampaignInsights, listCampaigns, listAdGroupInsights, listDemographicInsights, TIKTOK_OBJECTIVE_MAP, OPTIMIZATION_GOAL_MAP } from '$lib/server/tiktok-ads/client';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -61,7 +62,7 @@ export const getTiktokReportAdAccounts = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw error(401, 'Unauthorized');
 	}
-	if (event.locals.isClientUser) return [];
+	await requireStaff(event); // staff-only: clients use getMyTiktokAdAccount(s)
 
 	const accounts = await db
 		.select({

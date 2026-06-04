@@ -13,6 +13,7 @@ import { tenantUserPrefAllows, tenantUserPrefAllowsBatch } from '$lib/server/ten
 import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
 import { createMeetEvent } from '$lib/server/google-calendar/meet';
 import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
+import { requireStaff } from '$lib/server/get-actor';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -537,6 +538,7 @@ export const getTaskClientIds = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const rows = await db
 		.selectDistinct({ clientId: table.task.clientId })
@@ -1954,6 +1956,7 @@ export const updateTaskStatus = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [task] = await db
 			.select()
@@ -2042,6 +2045,7 @@ export const updateTaskPriority = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const [task] = await db
 			.select()
@@ -2093,6 +2097,7 @@ export const bulkUpdateTaskStatus = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 		const userId = event.locals.user.id;
 
@@ -2180,6 +2185,7 @@ export const bulkDeleteTasks = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 
 		const owned = await db
@@ -2214,6 +2220,7 @@ export const bulkDuplicateTasks = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 		const userId = event.locals.user.id;
 
@@ -2392,6 +2399,7 @@ export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Get task to know its status and position
 	const [task] = await db
@@ -2453,6 +2461,7 @@ export const watchTask = command(v.pipe(v.string(), v.minLength(1)), async (task
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Verify task belongs to tenant
 	const [task] = await db
@@ -2502,6 +2511,7 @@ export const unwatchTask = command(v.pipe(v.string(), v.minLength(1)), async (ta
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Verify task belongs to tenant
 	const [task] = await db
@@ -2536,6 +2546,7 @@ export const getTaskWatchers = query(v.pipe(v.string(), v.minLength(1)), async (
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Verify task belongs to tenant
 	const [task] = await db
@@ -2586,6 +2597,7 @@ export const isWatchingTask = query(v.pipe(v.string(), v.minLength(1)), async (t
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	// Verify task belongs to tenant
 	const [task] = await db
@@ -2736,6 +2748,7 @@ export const getTags = query(async () => {
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	return db
 		.select()
@@ -2942,6 +2955,7 @@ export const removeAssignee = command(
 	async ({ taskId, userId }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const [task] = await db.select()
 			.from(table.task)
@@ -2986,6 +3000,7 @@ export const addTag = command(
 	async ({ taskId, tagName }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const [task] = await db.select({ id: table.task.id })
 			.from(table.task)
@@ -3029,6 +3044,7 @@ export const removeTag = command(
 	async ({ taskId, tagId }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+		await requireStaff(event);
 
 		const [task] = await db.select({ id: table.task.id })
 			.from(table.task)

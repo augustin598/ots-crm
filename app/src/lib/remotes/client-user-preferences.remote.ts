@@ -1,6 +1,7 @@
 import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
+import { requireStaff } from '$lib/server/get-actor';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
@@ -115,6 +116,7 @@ export const toggleClientOnboardingTour = command(toggleOnboardingSchema, async 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const [existing] = await db
 		.select()
@@ -148,6 +150,7 @@ export const resetClientOnboardingTour = command(resetOnboardingSchema, async (d
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const [existing] = await db
 		.select()
@@ -183,6 +186,7 @@ export const getClientUsersOnboardingStatus = query(v.pipe(v.string(), v.minLeng
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const rows = await db
 		.select({

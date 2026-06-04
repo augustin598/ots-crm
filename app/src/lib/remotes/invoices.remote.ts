@@ -203,6 +203,7 @@ export const createInvoiceFromService = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only: client portal never creates invoices
 
 		const [service] = await db
 			.select()
@@ -313,6 +314,7 @@ export const createInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only: client portal never creates invoices
 
 		// Get default currency and tax rate from invoice settings
 		const [invoiceSettings] = await db
@@ -616,6 +618,7 @@ export const updateInvoice = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event); // staff-only: clients cannot edit invoices
 
 		const { invoiceId, ...updateData } = data;
 
@@ -758,6 +761,7 @@ export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event); // staff-only: clients cannot delete invoices
 
 	// Verify invoice belongs to tenant
 	const [existing] = await db
@@ -806,6 +810,7 @@ export const markInvoiceAsPaid = command(v.pipe(v.string(), v.minLength(1)), asy
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event); // staff-only: clients cannot mark invoices paid
 
 	// Verify invoice belongs to tenant
 	const [existing] = await db
@@ -874,6 +879,7 @@ export const sendInvoice = command(v.pipe(v.string(), v.minLength(1)), async (in
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event); // staff-only: clients cannot send invoices
 
 	// Verify invoice belongs to tenant
 	const [existing] = await db

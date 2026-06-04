@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -24,6 +25,7 @@ export const getTenantUserPreferences = query(async () => {
 	if (!event?.locals.user || event?.locals.isClientUser || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const userId = event.locals.user.id;
 	const tenantId = event.locals.tenant.id;
 
@@ -64,6 +66,7 @@ export const updateTenantUserPreferences = command(updateSchema, async (data) =>
 	if (!event?.locals.user || event?.locals.isClientUser || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 	const userId = event.locals.user.id;
 	const tenantId = event.locals.tenant.id;
 

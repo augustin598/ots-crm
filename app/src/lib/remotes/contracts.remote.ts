@@ -350,6 +350,7 @@ export const createContract = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Validate clientId belongs to current tenant
 		const [clientCheck] = await db
@@ -523,6 +524,7 @@ export const updateContract = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		const { contractId, version, lineItems, ...updateData } = data;
 
@@ -676,6 +678,7 @@ export const deleteContract = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Verify contract belongs to tenant
 		const [existing] = await db
@@ -742,6 +745,7 @@ export const duplicateContract = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Fetch existing contract
 		const [existing] = await db
@@ -870,6 +874,7 @@ export const sendContractForSigning = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 		const tenantSlug = event.locals.tenant.slug;
 
@@ -987,6 +992,7 @@ export const signContractAsPrestator = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 
 		const [contract] = await db
@@ -1107,6 +1113,7 @@ export const extractClientFromContract = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 		step('auth_ok', { userEmail: event.locals.user.email, tenantName: event.locals.tenant.name });
 
 		const [contract] = await db

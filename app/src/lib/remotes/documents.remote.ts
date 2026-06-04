@@ -8,6 +8,7 @@ import * as storage from '$lib/server/storage';
 import { resolveStandardVariables, replaceVariables } from '$lib/utils/document-variables';
 import { generatePDFFromHTML } from '$lib/server/pdf-generator';
 import { marked } from 'marked';
+import { requireStaff } from '$lib/server/get-actor';
 
 function generateDocumentId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -54,6 +55,7 @@ export const uploadDocument = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Upload file to storage
 		const uploadResult = await storage.uploadFile(event.locals.tenant.id, data.file, {
@@ -112,6 +114,7 @@ export const deleteDocument = command(v.pipe(v.string(), v.minLength(1)), async 
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const [document] = await db
 		.select()
@@ -150,6 +153,7 @@ export const generateDocumentFromTemplate = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get template
 		const [template] = await db
@@ -279,6 +283,7 @@ export const generateDocumentPDF = command(
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
 		}
+		await requireStaff(event);
 
 		// Get document
 		const [document] = await db
@@ -343,6 +348,7 @@ export const getDocumentPreview = query(v.pipe(v.string(), v.minLength(1)), asyn
 	if (!event?.locals.user || !event?.locals.tenant) {
 		throw new Error('Unauthorized');
 	}
+	await requireStaff(event);
 
 	const [document] = await db
 		.select()
