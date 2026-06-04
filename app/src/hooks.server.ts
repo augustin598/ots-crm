@@ -1,5 +1,7 @@
 import type { Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
+import { sequence } from '@sveltejs/kit/hooks';
+import { handleSecurityHeaders } from '$lib/server/security-headers';
 import * as auth from '$lib/server/auth';
 import * as tenantUtils from '$lib/server/tenant';
 import { initializePlugins } from '$lib/server/plugins';
@@ -184,7 +186,9 @@ export const init = async () => {
 	}
 };
 
-export const handle: Handle = handleAuth;
+// Security headers wrap auth so they apply to every response (including redirects
+// and error pages emitted inside handleAuth).
+export const handle: Handle = sequence(handleSecurityHeaders, handleAuth);
 
 // Graceful shutdown: flush logs + close Puppeteer browser + WhatsApp sockets
 process.on('SIGTERM', async () => {
