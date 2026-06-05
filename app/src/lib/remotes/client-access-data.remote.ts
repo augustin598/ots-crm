@@ -49,6 +49,9 @@ export const getAccessData = query(
 		let effectiveClientId: string;
 
 		if (event.locals.isClientUser && event.locals.client) {
+			// Stored credentials are sensitive — only primary client contacts may
+			// view them (matches the invoices/budget convention for client users).
+			if (!event.locals.isClientUserPrimary) return [];
 			effectiveClientId = event.locals.client.id;
 		} else {
 			const [clientCheck] = await db
@@ -112,6 +115,8 @@ export const createAccessData = command(createSchema, async (data) => {
 	const isClientUser = event.locals.isClientUser;
 
 	if (isClientUser && event.locals.client) {
+		if (!event.locals.isClientUserPrimary)
+			throw new Error('Doar contactul principal poate gestiona datele de acces');
 		if (data.clientId !== event.locals.client.id) {
 			throw new Error('Nu puteți crea înregistrări pentru alt client');
 		}
@@ -175,6 +180,8 @@ export const updateAccessData = command(updateSchema, async (data) => {
 	);
 
 	if (event.locals.isClientUser && event.locals.client) {
+		if (!event.locals.isClientUserPrimary)
+			throw new Error('Doar contactul principal poate gestiona datele de acces');
 		const clientUserId = (event.locals as any).clientUser?.id;
 		if (!clientUserId) throw new Error('Sesiune client invalidă');
 		conditions = and(
@@ -221,6 +228,8 @@ export const deleteAccessData = command(
 		);
 
 		if (event.locals.isClientUser && event.locals.client) {
+			if (!event.locals.isClientUserPrimary)
+				throw new Error('Doar contactul principal poate gestiona datele de acces');
 			const clientUserId = (event.locals as any).clientUser?.id;
 			if (!clientUserId) throw new Error('Sesiune client invalidă');
 			conditions = and(
