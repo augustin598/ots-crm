@@ -207,9 +207,6 @@ export const getCurrentUser = query(
 	async (): Promise<{ user?: User | null; error?: string | null }> => {
 		try {
 			const event = getRequestEvent();
-			console.log('Event:', event);
-			console.log('Session:', event?.locals.session);
-			console.log('Session user:', event?.locals.session?.userId);
 			const userResult = await db
 				.select()
 				.from(user)

@@ -50,10 +50,24 @@ export const getTenantUsers = query(async () => {
 		tenantId,
 		tenantUsers.map((u) => u.id)
 	);
-	return tenantUsers.map((u) => ({
+	const mapped = tenantUsers.map((u) => ({
 		...u,
 		whatsappPhone: phonesByUser.get(u.id) ?? normalizePhoneE164(u.phone)
 	}));
+	// Client-portal callers only need staff display names (to show task
+	// assignees/authors). Redact internal PII (phone, department, title,
+	// capabilities) so the portal can't enumerate staff contact details.
+	if (event.locals.isClientUser) {
+		return mapped.map((u) => ({
+			...u,
+			phone: null,
+			whatsappPhone: null,
+			department: null,
+			title: null,
+			capabilities: null
+		}));
+	}
+	return mapped;
 });
 
 const updateRoleSchema = v.object({

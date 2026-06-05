@@ -118,17 +118,22 @@ export const toggleClientOnboardingTour = command(toggleOnboardingSchema, async 
 	}
 	await requireStaff(event);
 
+	// Scope by tenantId too, so a staff actor can't toggle another tenant's row by raw clientUserId.
+	const prefScope = and(
+		eq(table.clientUserPreferences.clientUserId, data.clientUserId),
+		eq(table.clientUserPreferences.tenantId, event.locals.tenant.id)
+	);
 	const [existing] = await db
 		.select()
 		.from(table.clientUserPreferences)
-		.where(eq(table.clientUserPreferences.clientUserId, data.clientUserId))
+		.where(prefScope)
 		.limit(1);
 
 	if (existing) {
 		await db
 			.update(table.clientUserPreferences)
 			.set({ onboardingTourEnabled: data.enabled, updatedAt: new Date() })
-			.where(eq(table.clientUserPreferences.clientUserId, data.clientUserId));
+			.where(prefScope);
 	} else {
 		await db.insert(table.clientUserPreferences).values({
 			id: generateId(),
@@ -152,10 +157,15 @@ export const resetClientOnboardingTour = command(resetOnboardingSchema, async (d
 	}
 	await requireStaff(event);
 
+	// Scope by tenantId too, so a staff actor can't reset another tenant's row by raw clientUserId.
+	const prefScope = and(
+		eq(table.clientUserPreferences.clientUserId, data.clientUserId),
+		eq(table.clientUserPreferences.tenantId, event.locals.tenant.id)
+	);
 	const [existing] = await db
 		.select()
 		.from(table.clientUserPreferences)
-		.where(eq(table.clientUserPreferences.clientUserId, data.clientUserId))
+		.where(prefScope)
 		.limit(1);
 
 	if (existing) {
@@ -167,7 +177,7 @@ export const resetClientOnboardingTour = command(resetOnboardingSchema, async (d
 				onboardingChecklist: null,
 				updatedAt: new Date()
 			})
-			.where(eq(table.clientUserPreferences.clientUserId, data.clientUserId));
+			.where(prefScope);
 	} else {
 		await db.insert(table.clientUserPreferences).values({
 			id: generateId(),
