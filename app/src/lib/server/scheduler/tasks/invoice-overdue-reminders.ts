@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import * as table from '../../db/schema';
-import { eq, and, lt, lte, notInArray, inArray, or, isNull, gte } from 'drizzle-orm';
+import { eq, ne, and, lt, lte, notInArray, inArray, or, isNull, gte } from 'drizzle-orm';
 import { sendOverdueReminderEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
@@ -79,6 +79,14 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							eq(table.invoice.keezStatus, 'Valid'),
 							notInArray(table.invoice.status, ['overdue', 'paid', 'partially_paid', 'cancelled']),
 							lt(table.invoice.dueDate, now),
+							// DUAL-PAID GUARD: don't flip to overdue if effectively paid via the
+							// CRM (manual paidDate) or Keez (remainingAmount synced to 0). Covers
+							// the case where status is still 'sent' but a paidDate was set manually.
+							isNull(table.invoice.paidDate),
+							or(
+								isNull(table.invoice.remainingAmount),
+								ne(table.invoice.remainingAmount, 0)
+							),
 							or(eq(table.invoice.isCreditNote, false), isNull(table.invoice.isCreditNote)),
 							or(gte(table.invoice.totalAmount, 0), isNull(table.invoice.totalAmount))
 						)

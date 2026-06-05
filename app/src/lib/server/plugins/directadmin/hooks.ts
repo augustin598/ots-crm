@@ -11,6 +11,7 @@ import {
 	notifyHostingSuspended,
 	notifyHostingReactivated
 } from '$lib/server/hosting/notifications';
+import { advanceNextDueDate, isInvoiceEffectivelyPaid } from '$lib/server/hosting/billing';
 
 const PLUGIN_NAME = 'directadmin';
 
@@ -108,6 +109,18 @@ async function loadHostingAccountById(
  */
 export const onInvoiceStatusChanged: HookHandler<InvoiceStatusChangedEvent> = async (event) => {
 	if (event.newStatus !== 'overdue') return;
+
+	// DUAL-PAID GUARD: never suspend for an invoice that is effectively paid via
+	// EITHER the CRM (status='paid' / manual paidDate) OR Keez (remainingAmount=0).
+	// Keez can lag a manual mark and vice-versa, so a paid invoice that slipped to
+	// 'overdue' (e.g. paidDate set after the overdue flip) must not trigger suspend.
+	if (isInvoiceEffectivelyPaid(event.invoice as any)) {
+		logInfo('directadmin', `suspend skipped — invoice effectively paid (CRM or Keez)`, {
+			tenantId: event.tenantId,
+			metadata: { invoiceId: event.invoice.id }
+		});
+		return;
+	}
 
 	const tenantId = event.tenantId;
 	const clientId = event.invoice.clientId;
@@ -285,6 +298,46 @@ export const onInvoicePaid: HookHandler<InvoicePaidEvent> = async (event) => {
 			{ tenantId, metadata: { invoiceId, clientId } }
 		);
 		return;
+	}
+
+	// PHASE 0: advance the hosting account's next_due_date by one billing cycle on
+	// renewal payment. Nothing else maintains this date, so without it an account
+	// stays "expired" forever and the expiry safety-net can't distinguish paid-through
+	// accounts. Guarded to the renewal window (due within ~16 days or already past)
+	// so a re-fired hook or an already-renewed account can't double-advance it.
+	try {
+		const [acct] = await db
+			.select({
+				nextDueDate: table.hostingAccount.nextDueDate,
+				billingCycle: table.hostingAccount.billingCycle
+			})
+			.from(table.hostingAccount)
+			.where(eq(table.hostingAccount.id, linkedHostingAccountId))
+			.limit(1);
+		if (acct?.nextDueDate) {
+			const dueMs = Date.parse(`${acct.nextDueDate}T00:00:00Z`);
+			const withinRenewalWindow =
+				Number.isFinite(dueMs) && dueMs <= Date.now() + 16 * 24 * 60 * 60 * 1000;
+			const advanced = advanceNextDueDate(acct.nextDueDate, acct.billingCycle);
+			if (advanced && withinRenewalWindow) {
+				await db
+					.update(table.hostingAccount)
+					.set({ nextDueDate: advanced, updatedAt: new Date() })
+					.where(eq(table.hostingAccount.id, linkedHostingAccountId));
+				logInfo(
+					'directadmin',
+					`advanced next_due_date ${acct.nextDueDate} → ${advanced} on renewal payment`,
+					{ tenantId, metadata: { invoiceId, linkedHostingAccountId, billingCycle: acct.billingCycle } }
+				);
+			}
+		}
+	} catch (e) {
+		const { message, stack } = serializeError(e);
+		// Non-fatal: a failed date advance must not block unsuspend or payment flow.
+		logError('directadmin', `failed to advance next_due_date: ${message}`, {
+			tenantId,
+			stackTrace: stack
+		});
 	}
 
 	// CRITICAL: check if any OTHER overdue invoice remains for THIS hosting account.
