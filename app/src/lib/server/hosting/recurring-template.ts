@@ -251,11 +251,21 @@ export async function upsertRecurringInvoiceForHostingAccount(
 			? args.startDate
 			: new Date(args.startDate)
 		: today;
-	const nextRun = args.nextDueDate
+	// Issue the renewal proforma RENEWAL_LEAD_DAYS before the account expires, so its
+	// due date (issue + dueDateOffset=14) lands exactly on the account's next_due_date.
+	// This aligns "account expired" with "invoice due" — one date, no drift — and makes
+	// the expiry-anchored suspension (model A on the invoice due date) coincide with the
+	// account expiry. Keep RENEWAL_LEAD_DAYS == dueDateOffset (14) so due == expiry.
+	const RENEWAL_LEAD_DAYS = 14;
+	const expiryDate = args.nextDueDate
 		? args.nextDueDate instanceof Date
 			? args.nextDueDate
 			: new Date(args.nextDueDate)
-		: today;
+		: null;
+	const nextRun =
+		expiryDate && !Number.isNaN(expiryDate.getTime())
+			? new Date(expiryDate.getTime() - RENEWAL_LEAD_DAYS * 24 * 60 * 60 * 1000)
+			: today;
 	if (Number.isNaN(start.getTime())) return { action: 'skipped', reason: 'invalid_start_date' };
 	if (Number.isNaN(nextRun.getTime())) {
 		return { action: 'skipped', reason: 'invalid_next_due_date' };
