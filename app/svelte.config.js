@@ -27,7 +27,10 @@ const config = {
 				'script-src': ['self', 'https://js.stripe.com'],
 				'style-src': ['self', 'unsafe-inline', 'https://fonts.googleapis.com'],
 				'font-src': ['self', 'data:', 'https://fonts.gstatic.com'],
-				'img-src': ['self', 'data:', 'https:'],
+				// 'blob:' is required for client-side upload previews (URL.createObjectURL)
+				// in comment/material upload widgets; blob URLs are same-origin and safe.
+				'img-src': ['self', 'data:', 'blob:', 'https:'],
+				'media-src': ['self', 'data:', 'blob:', 'https:'],
 				'connect-src': ['self', 'https://api.stripe.com'],
 				'frame-src': ['self', 'https://js.stripe.com', 'https://hooks.stripe.com'],
 				'frame-ancestors': ['self'],
