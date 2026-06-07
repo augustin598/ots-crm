@@ -21,6 +21,7 @@ import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
 import { renderInvoicePaidEmailHtml } from './email-templates/invoice-paid';
+import { htmlToPlainText } from './html-text';
 
 // Re-export so existing callers can import the helper from `$lib/server/email`
 // alongside the production sender (`sendInvoicePaidEmail`). Demo scripts and
@@ -1734,7 +1735,10 @@ export async function sendTaskClientNotificationEmail(
 	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
 ): Promise<void> {
 	if (clientName) clientName = escapeHtml(clientName);
-	if (extra?.commentPreview) extra.commentPreview = escapeHtml(extra.commentPreview);
+	// commentPreview arrives as TipTap rich-text HTML — strip to plain text
+	// first, otherwise escapeHtml would render the raw tags visibly in the email.
+	if (extra?.commentPreview)
+		extra.commentPreview = escapeHtml(htmlToPlainText(extra.commentPreview));
 	if (extra?.changedFields) extra.changedFields = escapeHtml(extra.changedFields);
 	// Extract first name for a more personal greeting
 	const greeting = clientName?.split(' ')[0] || 'ziua';
