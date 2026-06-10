@@ -391,6 +391,23 @@ export async function mapInvoiceToKeez(
 		}
 	}
 
+	// Pure foreign-currency invoice (e.g. EUR invoice with EUR line items):
+	// currencyCode === referenceCurrencyCode, so Keez requires exchangeRate = 1
+	// and expects the non-suffixed amounts to EQUAL the foreign-currency amounts
+	// (see Keez `example_EUR_EUR`: currencyCode/referenceCurrencyCode = EUR,
+	// exchangeRate = 1, netAmount = netAmountCurrency).
+	//
+	// Any rate stored on `invoice.exchangeRate` here is a BNR RON rate (locked by
+	// the recurring-invoice generator at generation time, or auto-filled by the
+	// new-invoice UI). Applying it would multiply the EUR amounts by ~5 and ship
+	// an inflated invoice (e.g. 1000 EUR → 5243.60). Force the rate to 1 so the
+	// non-suffixed and Currency-suffixed amounts agree and Keez prints the real
+	// foreign-currency total. Conversion to RON for accounting is Keez's job and
+	// is NOT part of an EUR-issued invoice.
+	if (allSameCurrency) {
+		exchangeRate = 1;
+	}
+
 	// Map invoice details from line items - conform to Keez API format
 	const details: KeezInvoiceDetail[] =
 		invoice.lineItems.length > 0
