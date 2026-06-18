@@ -1338,6 +1338,88 @@ export async function listDemographicInsights(
 	return breakdown;
 }
 
+export interface PlatformSplitEntry {
+	spend: number;
+	impressions: number;
+	reach: number;
+	clicks: number;
+	linkClicks: number;
+	conversions: number;
+}
+export interface MetaPlatformSplit {
+	facebook: PlatformSplitEntry;
+	instagram: PlatformSplitEntry;
+}
+
+/**
+ * Fetch a Facebook vs Instagram split via the `publisher_platform` breakdown.
+ * Mirrors {@link listDemographicInsights} but on a single breakdown call.
+ */
+export async function listPlatformInsights(
+	adAccountId: string,
+	accessToken: string,
+	appSecret: string,
+	since: string,
+	until: string,
+	campaignIds?: string[],
+	resultActionTypes?: string[]
+): Promise<MetaPlatformSplit> {
+	logInfo('meta-ads', `Fetching platform split for ${adAccountId}`, { metadata: { since, until } });
+
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const timeRange = JSON.stringify({ since, until });
+	const resultSet = resultActionTypes && resultActionTypes.length > 0 ? new Set(resultActionTypes) : null;
+
+	const params = new URLSearchParams({
+		fields: 'spend,impressions,reach,clicks,actions',
+		breakdowns: 'publisher_platform',
+		time_range: timeRange,
+		level: campaignIds && campaignIds.length > 0 ? 'campaign' : 'account',
+		access_token: accessToken,
+		appsecret_proof: proof
+	});
+	if (campaignIds && campaignIds.length > 0) {
+		params.set('filtering', JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: campaignIds }]));
+	}
+
+	const empty = (): PlatformSplitEntry => ({ spend: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0, conversions: 0 });
+	const split: MetaPlatformSplit = { facebook: empty(), instagram: empty() };
+
+	try {
+		const res: Response = await fetch(`${META_GRAPH_URL}/${adAccountId}/insights?${params.toString()}`);
+		const data: any = await res.json();
+		if (data.error) {
+			logError('meta-ads', `Platform split error for ${adAccountId}`, { metadata: { errorMessage: data.error.message } });
+			throw new Error(data.error.message);
+		}
+		for (const row of (data.data || []) as any[]) {
+			const platform = row.publisher_platform;
+			const bucket = platform === 'facebook' ? split.facebook : platform === 'instagram' ? split.instagram : null;
+			if (!bucket) continue; // ignore audience_network / messenger for the FB-vs-IG view
+			bucket.spend += parseFloat(row.spend || '0');
+			bucket.impressions += parseInt(row.impressions || '0', 10);
+			bucket.reach += parseInt(row.reach || '0', 10);
+			bucket.clicks += parseInt(row.clicks || '0', 10);
+			if (row.actions) {
+				for (const action of row.actions as any[]) {
+					if (action.action_type === 'link_click') bucket.linkClicks += parseFloat(action.value || '0');
+					if (resultSet && resultSet.has(action.action_type)) bucket.conversions += parseFloat(action.value || '0');
+				}
+			}
+		}
+	} catch (err) {
+		logError('meta-ads', `Platform split failed for ${adAccountId}`, {
+			metadata: { reason: err instanceof Error ? err.message : String(err) }
+		});
+		throw err;
+	}
+
+	logInfo('meta-ads', `Platform split loaded for ${adAccountId}`, {
+		metadata: { fbSpend: split.facebook.spend, igSpend: split.instagram.spend }
+	});
+	return split;
+}
+
 // ---- Lead Ads API ----
 
 export interface MetaPage {

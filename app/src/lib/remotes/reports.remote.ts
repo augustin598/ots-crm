@@ -7,7 +7,7 @@ import { eq, and, desc, inArray, isNotNull } from 'drizzle-orm';
 import { getAuthenticatedToken } from '$lib/server/meta-ads/auth';
 import { logError } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
-import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, listDemographicInsights, listAdsetInsights, listAdInsights, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
+import { listCampaignInsights, listActiveCampaigns, listCampaignReachFrequency, listDemographicInsights, listPlatformInsights, listAdsetInsights, listAdInsights, updateCampaignBudget as updateCampaignBudgetApi, toggleCampaignStatus as toggleCampaignStatusApi, OPTIMIZATION_GOAL_MAP } from '$lib/server/meta-ads/client';
 import { env } from '$env/dynamic/private';
 
 // ---- Server-side cache (5 min TTL) ----
@@ -533,6 +533,62 @@ export const getMetaDemographicInsights = query(
 
 			setCache(cacheKey, demographics);
 			return demographics;
+		} catch (err) {
+			throwMetaApiError(err);
+		}
+	}
+);
+
+/** Get a Facebook vs Instagram performance split (publisher_platform breakdown) */
+export const getMetaPlatformSplit = query(
+	v.object({
+		adAccountId: v.pipe(v.string(), v.minLength(1)),
+		integrationId: v.pipe(v.string(), v.minLength(1)),
+		since: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		until: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
+		campaignIds: v.optional(v.array(v.string())),
+		resultActionTypes: v.optional(v.array(v.string()))
+	}),
+	async (params) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+
+		await verifyClientAccess(event, params.adAccountId);
+
+		const tenantId = event.locals.tenant.id;
+		const campaignKey = params.campaignIds?.length ? params.campaignIds.sort().join(',') : 'all';
+		const resultKey = params.resultActionTypes?.length ? params.resultActionTypes.sort().join(',') : 'none';
+
+		const cacheKey = `platform-split:${tenantId}:${params.adAccountId}:${params.since}:${params.until}:${campaignKey}:${resultKey}`;
+		const cached = getCached<any>(cacheKey);
+		if (cached) return cached;
+
+		const resolvedIntegrationId = await resolveAccountIntegration(params.adAccountId, tenantId);
+		const authResult = await getAuthenticatedToken(resolvedIntegrationId);
+		if (!authResult) {
+			throw error(500, 'Nu s-a putut obține token-ul Meta Ads. Verifică conexiunea din Settings.');
+		}
+
+		const appSecret = env.META_APP_SECRET;
+		if (!appSecret) {
+			throw error(500, 'META_APP_SECRET nu este configurat');
+		}
+
+		try {
+			const split = await listPlatformInsights(
+				params.adAccountId,
+				authResult.accessToken,
+				appSecret,
+				params.since,
+				params.until,
+				params.campaignIds,
+				params.resultActionTypes
+			);
+
+			setCache(cacheKey, split);
+			return split;
 		} catch (err) {
 			throwMetaApiError(err);
 		}

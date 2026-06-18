@@ -305,3 +305,20 @@ export function getRecommendedPreset(objectives: string[]): string {
 export function getPreset(key: string): ColumnPreset {
 	return COLUMN_PRESETS.find(p => p.key === key) || COLUMN_PRESETS[0];
 }
+
+/** Flat, de-duplicated registry of every column used across presets.
+ *  Powers the redesigned report's drag-reorder column manager. */
+export const ALL_COLUMNS: ColumnDef[] = (() => {
+	const seen = new Map<string, ColumnDef>();
+	for (const preset of COLUMN_PRESETS) {
+		for (const col of preset.columns) {
+			if (!seen.has(col.key)) seen.set(col.key, col);
+		}
+	}
+	return [...seen.values()];
+})();
+
+/** Look up a single column definition by key. */
+export function getColumn(key: string): ColumnDef | undefined {
+	return ALL_COLUMNS.find((c) => c.key === key);
+}
