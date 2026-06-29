@@ -66,56 +66,54 @@ export async function processHostingExpiryGuard(
 	];
 	if (params.tenantId) conditions.push(eq(table.invoice.tenantId, params.tenantId));
 
+	// Select the FULL invoice row (not a projection). The DA suspend hook reads
+	// event.invoice.id / .clientId / .hostingAccountId / .dueDate / .status /
+	// .paidDate / .remainingAmount. The previous projection aliased id → invoiceId,
+	// leaving event.invoice.id undefined — which silently set autoSuspendedByInvoiceId
+	// to NULL (so onInvoicePaid could never auto-unsuspend) and made the suspension
+	// email's invoice lookup throw. Passing the whole row matches the canonical
+	// overdue emitter (invoice-overdue-reminders.ts) so every listener gets its fields.
 	const rows = await db
 		.select({
-			tenantId: table.invoice.tenantId,
-			hostingAccountId: table.invoice.hostingAccountId,
-			domain: table.hostingAccount.domain,
-			invoiceId: table.invoice.id,
-			invoiceNumber: table.invoice.invoiceNumber,
-			clientId: table.invoice.clientId,
-			dueDate: table.invoice.dueDate,
-			status: table.invoice.status,
-			paidDate: table.invoice.paidDate,
-			remainingAmount: table.invoice.remainingAmount,
-			keezStatus: table.invoice.keezStatus
+			invoice: table.invoice,
+			domain: table.hostingAccount.domain
 		})
 		.from(table.invoice)
 		.innerJoin(table.hostingAccount, eq(table.invoice.hostingAccountId, table.hostingAccount.id))
 		.where(and(...conditions));
 
-	const candidates: ExpiryGuardCandidate[] = rows.map((r) => ({
-		tenantId: r.tenantId,
-		hostingAccountId: r.hostingAccountId as string,
-		domain: r.domain,
-		invoiceId: r.invoiceId,
-		invoiceNumber: r.invoiceNumber,
-		dueDate: r.dueDate ? new Date(r.dueDate).toISOString().slice(0, 10) : null,
-		daysOverdue: r.dueDate
-			? Math.floor((now - new Date(r.dueDate).getTime()) / (24 * 60 * 60 * 1000))
+	const candidates: ExpiryGuardCandidate[] = rows.map(({ invoice, domain }) => ({
+		tenantId: invoice.tenantId,
+		hostingAccountId: invoice.hostingAccountId as string,
+		domain,
+		invoiceId: invoice.id,
+		invoiceNumber: invoice.invoiceNumber,
+		dueDate: invoice.dueDate ? new Date(invoice.dueDate).toISOString().slice(0, 10) : null,
+		daysOverdue: invoice.dueDate
+			? Math.floor((now - new Date(invoice.dueDate).getTime()) / (24 * 60 * 60 * 1000))
 			: 0,
-		keezStatus: r.keezStatus,
-		status: r.status
+		keezStatus: invoice.keezStatus,
+		status: invoice.status
 	}));
 
 	let suspended = 0;
 	if (!dryRun && rows.length > 0) {
 		const hooks = getHooksManager();
-		for (const r of rows) {
+		for (const { invoice } of rows) {
 			try {
 				await hooks.emit({
 					type: 'invoice.status.changed',
-					invoice: r as any,
-					previousStatus: r.status ?? 'draft',
+					invoice: invoice as any,
+					previousStatus: invoice.status ?? 'draft',
 					newStatus: 'overdue',
-					tenantId: r.tenantId,
+					tenantId: invoice.tenantId,
 					userId: 'system:expiry-guard'
 				});
 				suspended++;
 			} catch (e) {
 				const { message, stack } = serializeError(e);
-				logError('scheduler', `emit failed for invoice ${r.invoiceNumber}: ${message}`, {
-					tenantId: r.tenantId,
+				logError('scheduler', `emit failed for invoice ${invoice.invoiceNumber}: ${message}`, {
+					tenantId: invoice.tenantId,
 					stackTrace: stack
 				});
 			}
