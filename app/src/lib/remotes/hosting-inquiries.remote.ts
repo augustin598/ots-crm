@@ -9,6 +9,7 @@ import { assertCan } from '$lib/server/access';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { provisionDirectAdminAccount } from '$lib/server/stripe/post-payment/provision-da';
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
+import { resolveOrCreateClientForManualOrder } from '$lib/server/hosting/resolve-client';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { insertHostingOrder } from '$lib/server/hosting/insert-order';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
@@ -816,7 +817,11 @@ const ManualOrderSchema = v.object({
 	// 'auto' lets the server pick the cheapest available DA server (matches the
 	// existing post-payment provisioning policy); a specific DA server id pins
 	// the account to that server.
-	server: v.optional(v.pipe(v.string(), v.maxLength(60)))
+	server: v.optional(v.pipe(v.string(), v.maxLength(60))),
+	// Dovadă plată (referință tranzacție / OP / chitanță POS). Obligatorie în UI
+	// când statusul e 'paid' cu metodă electronică/transfer (card/op/revolut/paypal);
+	// se stochează ca `paymentReference` pe comandă pentru audit.
+	paymentReference: v.optional(v.pipe(v.string(), v.maxLength(200)))
 });
 
 /**
@@ -829,7 +834,22 @@ const ManualOrderSchema = v.object({
  */
 export const createManualHostingOrder = command(
 	ManualOrderSchema,
-	async (data): Promise<{ id: string; orderNumber: number | null }> => {
+	async (
+		data
+	): Promise<{
+		id: string;
+		orderNumber: number | null;
+		provisioning:
+			| {
+					provisioned: true;
+					hostingAccountId: string;
+					daUsername: string;
+					domain: string;
+					created: boolean;
+			  }
+			| { provisioned: false; reason: string }
+			| null;
+	}> => {
 		const { event, tenantId } = tenantScope();
 		const actor = await getActor(event);
 		assertCan(actor, 'admin.hosting.manage');
@@ -898,6 +918,9 @@ export const createManualHostingOrder = command(
 			paymentMethod: data.paymentMethod,
 			paymentStatus,
 			paidAmountCents,
+			// Dovada plății (ref. tranzacție / OP / chitanță POS) — obligatorie în UI pentru
+			// plată achitată cu metodă electronică; altfel null (cash/proforma).
+			paymentReference: data.paymentReference?.trim() || null,
 			paidAt: paid ? now : null,
 			acceptedByUserId: paid && actor.kind === 'tenant' ? actor.userId : null,
 			acceptedAt: paid ? now : null,
@@ -927,6 +950,114 @@ export const createManualHostingOrder = command(
 			}
 		});
 
-		return { id, orderNumber: row?.orderNumber ?? null };
+		// Provisionare imediată DOAR pe "Achitat (provisionare imediată)": statusul
+		// din modal e comutatorul — adminul confirmă explicit că plata e încasată, deci
+		// creăm contul real pe DA acum. Pentru 'pending'/'processing' rămâne doar comanda
+		// (proforma / urmează plata), provisioning-ul se face ulterior din Comenzi.
+		//
+		// Comenzile manuale se inserează cu clientId=null, dar provisioning-ul cere un
+		// client cu email → întâi rezolvăm/creăm clientul și îl legăm de comandă.
+		//
+		// Idempotent: provisionDirectAdminAccount verifică conturile existente (nu
+		// dublează). NICIODATĂ nu ștergem conturi DA — pipeline-ul marchează 'failed'
+		// la eșec, fără DELETE. Eșecul de provisioning e NEFATAL: comanda rămâne creată,
+		// iar adminul poate reîncerca din Comenzi → "Forțează provisionare".
+		let provisioning:
+			| {
+					provisioned: true;
+					hostingAccountId: string;
+					daUsername: string;
+					domain: string;
+					created: boolean;
+			  }
+			| { provisioned: false; reason: string }
+			| null = null;
+
+		if (paid) {
+			try {
+				const { clientId } = await resolveOrCreateClientForManualOrder(tenantId, {
+					type: data.type,
+					name: data.contactName,
+					email: data.contactEmail,
+					companyName: data.companyName,
+					vatNumber: data.vatNumber
+				});
+
+				// Leagă clientul de comandă + activează-l (oglindă acceptHostingOrderPayment).
+				const linkNow = new Date();
+				await withTursoBusyRetry(
+					() =>
+						db
+							.update(table.hostingInquiry)
+							.set({ clientId, updatedAt: linkNow })
+							.where(
+								and(
+									eq(table.hostingInquiry.id, id),
+									eq(table.hostingInquiry.tenantId, tenantId)
+								)
+							),
+					{ tenantId, label: 'manual-order/linkClient' }
+				);
+				await db
+					.update(table.client)
+					.set({ status: 'active', onboardingStatus: 'active', updatedAt: linkNow })
+					.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
+
+				const result = await provisionDirectAdminAccount({
+					tenantId,
+					clientId,
+					productId: data.hostingProductId,
+					sessionId: `manual_${id}`,
+					stripeSubscriptionId: null,
+					inquiryId: id,
+					// Domeniul tastat de admin e sursa de adevăr (verificat în modal).
+					domain: data.domainName.trim().toLowerCase()
+				});
+
+				await withTursoBusyRetry(
+					() =>
+						db
+							.update(table.hostingInquiry)
+							.set({ hostingAccountId: result.hostingAccountId, updatedAt: new Date() })
+							.where(
+								and(
+									eq(table.hostingInquiry.id, id),
+									eq(table.hostingInquiry.tenantId, tenantId)
+								)
+							),
+					{ tenantId, label: 'manual-order/linkAccount' }
+				);
+
+				provisioning = {
+					provisioned: true,
+					hostingAccountId: result.hostingAccountId,
+					daUsername: result.daUsername,
+					domain: result.domain,
+					created: result.created
+				};
+				logInfo(
+					'directadmin',
+					`manual order ${id}: DA ${result.created ? 'provisioned' : 'already-exists'} (${result.daUsername})`,
+					{
+						tenantId,
+						metadata: {
+							inquiryId: id,
+							hostingAccountId: result.hostingAccountId,
+							daUsername: result.daUsername,
+							created: result.created
+						}
+					}
+				);
+			} catch (err) {
+				const { message } = serializeError(err);
+				provisioning = { provisioned: false, reason: message };
+				logError('directadmin', `manual order ${id}: provisioning failed: ${message}`, {
+					tenantId,
+					metadata: { inquiryId: id }
+				});
+			}
+		}
+
+		return { id, orderNumber: row?.orderNumber ?? null, provisioning };
 	}
 );

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import XIcon from '@lucide/svelte/icons/x';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import ClockIcon from '@lucide/svelte/icons/clock';
@@ -287,6 +288,10 @@
 	}
 
 	const packageColor = $derived(row.productColor ?? '#1877F2');
+
+	// Tenant slug pentru link absolut către contul din CRM (altfel /hosting/accounts/<id>
+	// fără prefix de tenant → 404).
+	const tenantSlug = $derived(page.params.tenant ?? '');
 </script>
 
 <!-- Backdrop -->
@@ -842,7 +847,7 @@
 		class="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-slate-50/40 px-5 py-3 dark:border-slate-800 dark:bg-slate-900/40"
 	>
 		<a
-			href="/{row.clientId ? '' : ''}hosting/accounts/{row.accountId}"
+			href="/{tenantSlug}/hosting/accounts/{row.accountId}"
 			class="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
 		>
 			<DatabaseIcon class="h-3 w-3" /> Vezi cont (CRM)

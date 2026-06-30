@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
@@ -29,6 +30,7 @@
 	import CriticalAlert from '$lib/components/hosting/provisioning/CriticalAlert.svelte';
 	import ProvisioningDrawer from '$lib/components/hosting/provisioning/ProvisioningDrawer.svelte';
 	import ReconcileModal from '$lib/components/hosting/provisioning/ReconcileModal.svelte';
+	import ManualOrderModal from '$lib/components/hosting/ManualOrderModal.svelte';
 	import { fmtDuration, fmtRelative } from '$lib/components/hosting/provisioning/format';
 	import type {
 		ProvisioningRow,
@@ -51,6 +53,10 @@
 		deleteOrphanHostingAccount,
 		reconcileHostingWithDA
 	} from '$lib/remotes/hosting-provisioning.remote';
+
+	// Tenant slug pentru link-uri absolute (href-uri relative se rezolvă greșit:
+	// ex. "hosting/accounts/new" pe /ots/hosting/provisioning → /ots/hosting/hosting/accounts/new → 404).
+	const tenantSlug = $derived(page.params.tenant ?? '');
 
 	// === Filtre ===
 	const filters = $state({
@@ -84,6 +90,10 @@
 	// === UI state ===
 	let openRow = $state<ProvisioningRow | null>(null);
 	let menuFor = $state<string | null>(null);
+
+	// Modal "Comandă manuală" — deschis din butonul "Cont nou" (ca în design).
+	// Refolosește componenta partajată cu pagina Comenzi (/hosting/inquiries).
+	let showManualOrder = $state(false);
 
 	// === Delete modal state ===
 	// Modal cu auto-verify DA + typed-confirm "STERGE" pentru ștergerea
@@ -325,7 +335,8 @@
 
 	function openInvoice(row: ProvisioningRow) {
 		if (!row.invoiceId) return;
-		window.open(`/invoices/${row.invoiceId}`, '_blank');
+		// Tenant-scoped: /invoices/* nu există la top-level, doar sub /[tenant]/invoices.
+		window.open(`/${tenantSlug}/invoices/${row.invoiceId}`, '_blank');
 	}
 
 	// === Delete orphan account handlers ===
@@ -519,12 +530,13 @@
 			>
 				<DownloadIcon class="h-3 w-3" /> Export CSV
 			</button>
-			<a
-				href="hosting/accounts/new"
+			<button
+				type="button"
+				onclick={() => (showManualOrder = true)}
 				class="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[12.5px] font-semibold text-white hover:bg-blue-700"
 			>
 				<PlusIcon class="h-3 w-3" /> Cont nou
-			</a>
+			</button>
 		</div>
 	</div>
 
@@ -1069,6 +1081,22 @@
 			// Drawer-ul a modificat ceva (suspend/unsuspend/reset password etc.) —
 			// refresh single-flight nu se aplică aici fiindcă ProvisioningDrawer
 			// face propriile mutații. Re-fetch toate query-urile relevante.
+			getProvisioningHistory(historyArgs).refresh();
+			getProvisioningStats().refresh();
+			getCriticalProvisionings().refresh();
+		}}
+	/>
+{/if}
+
+<!-- ===========================================================================
+   MODAL COMANDĂ MANUALĂ — deschis din "Cont nou"; componentă partajată cu /inquiries
+   =========================================================================== -->
+{#if showManualOrder}
+	<ManualOrderModal
+		onClose={() => (showManualOrder = false)}
+		onCreated={() => {
+			// Comanda nouă (dacă e achitată) declanșează provisioning → apare un cont nou.
+			// Reîmprospătăm istoricul + KPI-urile + alertele critice.
 			getProvisioningHistory(historyArgs).refresh();
 			getProvisioningStats().refresh();
 			getCriticalProvisionings().refresh();

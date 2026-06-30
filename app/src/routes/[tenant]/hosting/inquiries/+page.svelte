@@ -3,13 +3,13 @@
 		getHostingOrders,
 		acceptHostingOrderPayment,
 		provisionFromInquiry,
-		createManualHostingOrder,
 		deleteHostingInquiry,
 		type HostingOrderRow,
 		type HostingOrderItemRow
 	} from '$lib/remotes/hosting-inquiries.remote';
 	import { getDAServers } from '$lib/remotes/da-servers.remote';
 	import { getHostingProducts } from '$lib/remotes/hosting-products.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { displayOrderId } from '$lib/utils/hosting-order-id';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -40,6 +40,7 @@
 	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import PaymentMethodPicker from '$lib/components/payment-method-picker.svelte';
+	import ManualOrderModal from '$lib/components/hosting/ManualOrderModal.svelte';
 
 	// ---- Constant lookups -----------------------------------------------------
 
@@ -126,6 +127,18 @@
 	let ordersPromise = $state(getHostingOrders());
 	let serversPromise = $state(getDAServers());
 	let productsPromise = $state(getHostingProducts());
+	// TVA dinamică din setări (invoice_settings.defaultTaxRate). `currentVatRate`
+	// alimentează preview-ul comenzii noi; breakdown-ul comenzilor existente
+	// folosește rata stocată pe fiecare linie (item.vatRate), cu fallback la rata curentă.
+	let settingsPromise = $state(getInvoiceSettings());
+	let currentVatRate = $state<number | null>(null);
+	$effect(() => {
+		settingsPromise
+			.then((s) => {
+				currentVatRate = s.defaultTaxRate;
+			})
+			.catch(() => {});
+	});
 
 	async function refresh() {
 		// SvelteKit `query()` cache-uiește răspunsul. Reassigning la `getHostingOrders()`
@@ -159,22 +172,9 @@
 	let confirmProvision = $state(true);
 	let confirmBusy = $state(false);
 
-	// Manual order modal
+	// Manual order modal — folosește componenta partajată ManualOrderModal.svelte
+	// (aceeași folosită de butonul „Cont nou" din pagina Provisioning).
 	let showManual = $state(false);
-	let manualBusy = $state(false);
-	let manualDraft = $state({
-		client: '',
-		email: '',
-		type: 'person' as 'person' | 'company',
-		cui: '',
-		productId: '',
-		period: 'yearly' as 'monthly' | 'yearly',
-		domain: '',
-		domainMode: 'buy' as 'buy' | 'have' | 'transfer',
-		paymentMethod: 'card' as 'card' | 'op' | 'revolut' | 'paypal' | 'cash',
-		initialStatus: 'paid' as 'paid' | 'pending' | 'processing',
-		server: 'auto' as string
-	});
 
 	// Delete confirmation modal — typed-confirm pentru ștergere ireversibilă.
 	// Cere admin-ului să tipezească exact `STERGE` ca să previn click-uri accidentale.
@@ -267,34 +267,38 @@
 		return (o.items ?? []).find((i) => i.kind === 'domain') ?? null;
 	}
 
-	/** Net (without TVA) amount in cents for the hosting line. Falls back to
-	 * `productPrice` (stored as TTC) divided by 1.19 if no items present. */
+	/** Rata TVA a comenzii — stocată pe linie la creare (item.vatRate). Fallback:
+	 * rata curentă din setări, apoi 21 (standard RO) doar până se încarcă setările. */
+	function orderVatRate(o: HostingOrderRow): number {
+		const h = (o.items ?? []).find((i) => i.kind === 'hosting');
+		const d = domainItemOf(o);
+		return h?.vatRate ?? d?.vatRate ?? currentVatRate ?? 21;
+	}
+
+	/** Net (fără TVA) în cents pentru linia de hosting. `unitPriceCents` e stocat NET
+	 * (serverul adaugă TVA peste), deci nu mai împărțim — îl folosim direct. */
 	function hostingNetCents(o: HostingOrderRow): number {
 		const h = (o.items ?? []).find((i) => i.kind === 'hosting');
-		const ttc = h ? h.unitPriceCents * h.quantity : (o.productPrice ?? 0);
-		return Math.round(ttc / 1.19);
+		return h ? h.unitPriceCents * h.quantity : (o.productPrice ?? 0);
 	}
 
 	/** Domain net cents (always 0 unless 'buy' mode with a positive price). */
 	function domainNetCents(o: HostingOrderRow): number {
 		const d = domainItemOf(o);
 		if (!d || d.unitPriceCents <= 0) return 0;
-		return Math.round((d.unitPriceCents * d.quantity) / 1.19);
+		return d.unitPriceCents * d.quantity;
 	}
 
-	/** Sum of net portions × 19% — TVA in cents. */
+	/** Suma porțiunilor net × rata TVA stocată a comenzii — TVA în cents. */
 	function tvaCents(o: HostingOrderRow): number {
 		const net = hostingNetCents(o) + domainNetCents(o);
-		return Math.round(net * 0.19);
+		return Math.round((net * orderVatRate(o)) / 100);
 	}
 
-	/** Total TTC in cents — paidAmountCents when available, else sum of items
-	 * unit × quantity, else productPrice. */
+	/** Total TTC (gross) în cents — paidAmountCents când există, altfel net + TVA. */
 	function totalCents(o: HostingOrderRow): number {
 		if (o.paidAmountCents != null) return o.paidAmountCents;
-		if (o.items && o.items.length > 0)
-			return o.items.reduce((a, it) => a + it.unitPriceCents * it.quantity, 0);
-		return o.productPrice ?? 0;
+		return hostingNetCents(o) + domainNetCents(o) + tvaCents(o);
 	}
 
 	// ---- Timeline ----------------------------------------------------------
@@ -644,59 +648,6 @@
 		}
 	}
 
-	// ---- Manual order modal ----------------------------------------------------
-
-	async function submitManualOrder() {
-		const d = manualDraft;
-		if (!d.client.trim() || !d.email.trim() || !d.domain.trim() || !d.productId) {
-			toast.error('Completează toate câmpurile obligatorii');
-			return;
-		}
-		if (d.type === 'company' && !d.cui.trim()) {
-			toast.error('CUI obligatoriu pentru persoană juridică');
-			return;
-		}
-		manualBusy = true;
-		try {
-			const r = await createManualHostingOrder({
-				contactName: d.client.trim(),
-				contactEmail: d.email.trim(),
-				type: d.type,
-				companyName: d.type === 'company' ? d.client.trim() : undefined,
-				vatNumber: d.type === 'company' ? d.cui.trim() : undefined,
-				hostingProductId: d.productId,
-				period: d.period,
-				domainName: d.domain.trim().toLowerCase(),
-				domainMode: d.domainMode,
-				paymentMethod: d.paymentMethod,
-				initialStatus: d.initialStatus,
-				server: d.server || undefined
-			});
-			toast.success('Comandă creată manual', {
-				description: `${displayOrderId(r.orderNumber, r.id)} · ${d.client.trim()}`
-			});
-			showManual = false;
-			// Reset draft for the next call (same defaults).
-			manualDraft = {
-				client: '',
-				email: '',
-				type: 'person',
-				cui: '',
-				productId: '',
-				period: 'yearly',
-				domain: '',
-				domainMode: 'buy',
-				paymentMethod: 'card',
-				initialStatus: 'paid',
-				server: 'auto'
-			};
-			await refresh();
-		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
-		} finally {
-			manualBusy = false;
-		}
-	}
 
 	// ---- CSV export -----------------------------------------------------------
 
@@ -1509,7 +1460,7 @@
 						</div>
 					{/if}
 					<div class="ord-total-row">
-						<span>TVA 19%</span>
+						<span>TVA {orderVatRate(o)}%</span>
 						<strong>{fmtRonInt(tva / 100)}</strong>
 					</div>
 					<div class="ord-total-row big">
@@ -1569,240 +1520,9 @@
 	</div>
 {/if}
 
-<!-- Manual order modal ====================================================== -->
+<!-- Comandă manuală — componentă partajată cu pagina Provisioning (ANAF + dovadă plată + TVA dinamică + provisionare imediată pe Achitat) -->
 {#if showManual}
-	{@const d = manualDraft}
-	<button class="ord-mo-back" aria-label="Închide" onclick={() => (showManual = false)}></button>
-	<div
-		class="ord-mo"
-		role="dialog"
-		aria-label="Comandă manuală"
-		use:focusTrap={{ initialFocus: '.ord-mo-close' }}
-	>
-		<div class="ord-mo-head">
-			<div class="ord-mo-head-ic"><PlusIcon size={18} /></div>
-			<div class="ord-mo-head-text">
-				<h3>Comandă manuală</h3>
-				<p>
-					Înregistrează o comandă în numele unui client · ocolește checkout-ul public
-				</p>
-			</div>
-			<button class="ord-mo-close" aria-label="Închide" onclick={() => (showManual = false)}>
-				<XIcon size={14} />
-			</button>
-		</div>
-
-		<div class="ord-mo-body">
-			<!-- Client section -->
-			<div class="ord-mo-section">
-				<h5>Client</h5>
-				<div class="ord-mo-seg ord-mo-section-mt-sm">
-					<button
-						type="button"
-						class:active={d.type === 'person'}
-						onclick={() => (manualDraft.type = 'person')}
-					>
-						Persoană fizică
-					</button>
-					<button
-						type="button"
-						class:active={d.type === 'company'}
-						onclick={() => (manualDraft.type = 'company')}
-					>
-						Persoană juridică
-					</button>
-				</div>
-				<div class="ord-mo-grid">
-					<div>
-						<label for="mo-client" class="ord-mo-label">
-							{d.type === 'company' ? 'Denumire firmă' : 'Nume complet'}
-						</label>
-						<input
-							id="mo-client"
-							class="ord-mo-input"
-							placeholder={d.type === 'company' ? 'Firma SRL' : 'Ion Popescu'}
-							bind:value={manualDraft.client}
-						/>
-					</div>
-					<div>
-						<label for="mo-email" class="ord-mo-label">Email</label>
-						<input
-							id="mo-email"
-							class="ord-mo-input"
-							placeholder="contact@…"
-							bind:value={manualDraft.email}
-						/>
-					</div>
-					{#if d.type === 'company'}
-						<div>
-							<label for="mo-cui" class="ord-mo-label">CUI</label>
-							<input
-								id="mo-cui"
-								class="ord-mo-input mono"
-								placeholder="RO12345678"
-								bind:value={manualDraft.cui}
-							/>
-						</div>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Plan section -->
-			<div class="ord-mo-section">
-				<h5>Pachet hosting</h5>
-				{#await productsPromise}
-					<div class="ord-mo-loading">Se încarcă pachetele…</div>
-				{:then products}
-					{@const visible = products.filter((p) => p.isActive)}
-					<div class="ord-mo-plans">
-						{#each visible as p (p.id)}
-							<button
-								type="button"
-								class="ord-mo-plan"
-								class:active={d.productId === p.id}
-								style="--c:#1877F2"
-								onclick={() => (manualDraft.productId = p.id)}
-							>
-								<span class="ord-mo-plan-sw"></span>
-								<strong>{p.name}</strong>
-								<span class="price">{fmtRon(p.price)}</span>
-							</button>
-						{/each}
-					</div>
-				{/await}
-				<div class="ord-mo-section-mt-sm">
-					<div class="ord-mo-label">Facturare</div>
-					<div class="ord-mo-seg">
-						<button
-							type="button"
-							class:active={d.period === 'monthly'}
-							onclick={() => (manualDraft.period = 'monthly')}
-						>
-							Lunar
-						</button>
-						<button
-							type="button"
-							class:active={d.period === 'yearly'}
-							onclick={() => (manualDraft.period = 'yearly')}
-						>
-							Anual <span class="ord-mo-seg-savings">–2 luni</span>
-						</button>
-					</div>
-				</div>
-			</div>
-
-			<!-- Domain section -->
-			<div class="ord-mo-section">
-				<h5>Domeniu</h5>
-				<div class="ord-mo-grid">
-					<div>
-						<label for="mo-domain" class="ord-mo-label">Nume domeniu</label>
-						<input
-							id="mo-domain"
-							class="ord-mo-input mono"
-							placeholder="exemplu.ro"
-							bind:value={manualDraft.domain}
-						/>
-					</div>
-					<div>
-						<label for="mo-domain-mode" class="ord-mo-label">Mod</label>
-						<select id="mo-domain-mode" class="ord-mo-select" bind:value={manualDraft.domainMode}>
-							<option value="buy">Cumpără nou (+49 RON)</option>
-							<option value="transfer">Transfer (gratuit)</option>
-							<option value="have">Există deja</option>
-						</select>
-					</div>
-				</div>
-			</div>
-
-			<!-- Payment section -->
-			<div class="ord-mo-section">
-				<h5>Plată</h5>
-				<div class="ord-mo-grid">
-					<div>
-						<label for="mo-method" class="ord-mo-label">Metodă</label>
-						<select id="mo-method" class="ord-mo-select" bind:value={manualDraft.paymentMethod}>
-							<option value="card">Card</option>
-							<option value="op">Ordin de plată</option>
-							<option value="revolut">Revolut</option>
-							<option value="paypal">PayPal</option>
-							<option value="cash">Cash</option>
-						</select>
-					</div>
-					<div>
-						<label for="mo-status" class="ord-mo-label">Status inițial</label>
-						<select id="mo-status" class="ord-mo-select" bind:value={manualDraft.initialStatus}>
-							<option value="paid">Achitat (provisionare imediată)</option>
-							<option value="pending">În așteptare (proforma)</option>
-							<option value="processing">Se procesează</option>
-						</select>
-					</div>
-				</div>
-			</div>
-
-			<!-- Server section -->
-			<div class="ord-mo-section">
-				<h5>Server</h5>
-				{#await serversPromise then servers}
-					<select class="ord-mo-select" bind:value={manualDraft.server} aria-label="Server">
-						<option value="auto">Auto-alocare (recomandat)</option>
-						{#each servers as s (s.id)}
-							<option value={s.id}>{s.name}</option>
-						{/each}
-					</select>
-				{/await}
-			</div>
-
-			<!-- Live summary -->
-			{#await productsPromise then products}
-				{@const sel = products.find((p) => p.id === d.productId)}
-				{@const planAmount = sel ? sel.price : 0}
-				{@const domCost = d.domainMode === 'buy' ? 4900 : 0}
-				{@const sub = planAmount + domCost}
-				{@const moVat = Math.round(sub * 0.19)}
-				{@const moTotal = sub + moVat}
-				<div class="ord-mo-summary">
-					<div class="row">
-						<span
-							>Hosting {sel?.name ?? '—'} ({d.period === 'yearly' ? 'anual' : 'lunar'})</span
-						>
-						<strong>{fmtRon(planAmount)}</strong>
-					</div>
-					{#if domCost > 0}
-						<div class="row">
-							<span>Domeniu {d.domain || '—'}</span>
-							<strong>{fmtRon(domCost)}</strong>
-						</div>
-					{/if}
-					<div class="row">
-						<span>TVA 19%</span>
-						<strong>{fmtRon(moVat)}</strong>
-					</div>
-					<div class="row big">
-						<span>Total {d.initialStatus === 'paid' ? 'achitat' : 'de plată'}</span>
-						<strong>{fmtRon(moTotal)}</strong>
-					</div>
-				</div>
-			{/await}
-		</div>
-
-		<div class="ord-mo-foot">
-			<button class="btn-secondary" onclick={() => (showManual = false)}>Anulează</button>
-			<div class="ord-mo-foot-spacer"></div>
-			<button
-				class="btn-primary"
-				disabled={manualBusy ||
-					!d.client.trim() ||
-					!d.email.trim() ||
-					!d.domain.trim() ||
-					!d.productId ||
-					(d.type === 'company' && !d.cui.trim())}
-				onclick={submitManualOrder}
-			>
-				<CheckIcon size={13} /> Creează comanda
-			</button>
-		</div>
-	</div>
+	<ManualOrderModal onClose={() => (showManual = false)} onCreated={() => refresh()} />
 {/if}
 
 <!-- ===========================================================================
@@ -2926,244 +2646,8 @@
 	}
 
 	/* Manual order modal */
-	.ord-mo-back {
-		position: fixed;
-		inset: 0;
-		background: rgba(15, 23, 42, 0.42);
-		backdrop-filter: blur(2px);
-		z-index: 80;
-		border: 0;
-		padding: 0;
-	}
-	.ord-mo {
-		position: fixed;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		width: 720px;
-		max-width: calc(100vw - 48px);
-		max-height: calc(100vh - 48px);
-		background: white;
-		border-radius: 14px;
-		box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
-		display: flex;
-		flex-direction: column;
-		z-index: 81;
-		overflow: hidden;
-	}
-	.ord-mo-head {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		padding: 16px 20px;
-		border-bottom: 1px solid #f1f5f9;
-	}
-	.ord-mo-head-ic {
-		width: 38px;
-		height: 38px;
-		border-radius: 10px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: linear-gradient(135deg, #1877f2, #0d5cc7);
-		color: white;
-	}
-	.ord-mo-head-text {
-		flex: 1;
-	}
-	.ord-mo-head h3 {
-		margin: 0;
-		font-size: 15px;
-		font-weight: 700;
-		color: #0f172a;
-	}
-	.ord-mo-head p {
-		margin: 2px 0 0;
-		font-size: 12px;
-		color: #94a3b8;
-	}
-	.ord-mo-close {
-		width: 28px;
-		height: 28px;
-		border-radius: 7px;
-		background: #f4f6fa;
-		border: 0;
-		color: #475569;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-	}
-	.ord-mo-close:hover {
-		background: #e5e9f0;
-		color: #0f172a;
-	}
-	.ord-mo-body {
-		padding: 16px 20px;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
-	.ord-mo-foot {
-		padding: 12px 20px;
-		border-top: 1px solid #f1f5f9;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		background: #fafbfd;
-	}
 	.ord-mo-foot-spacer {
 		flex: 1;
-	}
-	.ord-mo-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 10px;
-	}
-	.ord-mo-label {
-		font-size: 11px;
-		color: #475569;
-		font-weight: 600;
-		display: block;
-		margin-bottom: 5px;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-	.ord-mo-input,
-	.ord-mo-select {
-		width: 100%;
-		box-sizing: border-box;
-		border: 1px solid #e5e9f0;
-		border-radius: 8px;
-		padding: 9px 11px;
-		font: inherit;
-		font-size: 13px;
-		color: #0f172a;
-		background: white;
-	}
-	.ord-mo-input.mono {
-		font-family: ui-monospace, monospace;
-	}
-	.ord-mo-section {
-		display: flex;
-		flex-direction: column;
-	}
-	.ord-mo-section h5 {
-		margin: 0 0 8px;
-		font-size: 11px;
-		font-weight: 700;
-		color: #94a3b8;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-	.ord-mo-section-mt-sm {
-		margin-top: 10px;
-	}
-	.ord-mo-plans {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 8px;
-	}
-	.ord-mo-plan {
-		border: 1.5px solid #e5e9f0;
-		border-radius: 10px;
-		padding: 10px 8px;
-		cursor: pointer;
-		background: white;
-		text-align: left;
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		transition: all 0.15s;
-		font-family: inherit;
-	}
-	.ord-mo-plan:hover {
-		border-color: #cbd5e1;
-	}
-	.ord-mo-plan.active {
-		border-color: var(--c, #1877f2);
-		background: color-mix(in srgb, var(--c, #1877f2) 6%, white);
-	}
-	.ord-mo-plan-sw {
-		width: 10px;
-		height: 10px;
-		border-radius: 3px;
-		background: var(--c, #1877f2);
-	}
-	.ord-mo-plan strong {
-		font-size: 13px;
-		color: #0f172a;
-		font-weight: 700;
-	}
-	.ord-mo-plan .price {
-		font-size: 11px;
-		color: #475569;
-		font-variant-numeric: tabular-nums;
-	}
-	.ord-mo-loading {
-		font-size: 12px;
-		color: #94a3b8;
-		padding: 8px 0;
-	}
-	.ord-mo-seg {
-		display: flex;
-		gap: 4px;
-		background: #f4f6fa;
-		padding: 3px;
-		border-radius: 8px;
-	}
-	.ord-mo-seg button {
-		flex: 1;
-		border: 0;
-		background: transparent;
-		padding: 7px 10px;
-		border-radius: 6px;
-		font: inherit;
-		font-size: 12px;
-		font-weight: 600;
-		color: #64748b;
-		cursor: pointer;
-	}
-	.ord-mo-seg button.active {
-		background: white;
-		color: #0f172a;
-		box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-	}
-	.ord-mo-seg-savings {
-		color: #10b981;
-		font-size: 10px;
-		margin-left: 4px;
-	}
-	.ord-mo-summary {
-		background: linear-gradient(135deg, #f0f4ff, #fafbfd);
-		border: 1px solid #dbe6ff;
-		border-radius: 10px;
-		padding: 12px 14px;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.ord-mo-summary .row {
-		display: flex;
-		justify-content: space-between;
-		font-size: 12px;
-		color: #475569;
-	}
-	.ord-mo-summary .row strong {
-		color: #0f172a;
-		font-variant-numeric: tabular-nums;
-	}
-	.ord-mo-summary .row.big {
-		font-size: 14px;
-		padding-top: 6px;
-		margin-top: 2px;
-		border-top: 1px solid #dbe6ff;
-	}
-	.ord-mo-summary .row.big strong {
-		font-size: 18px;
-		font-weight: 800;
-		color: #1877f2;
 	}
 
 	/* Responsive */
@@ -3178,12 +2662,6 @@
 		}
 		.hst-drawer {
 			width: 100vw !important;
-		}
-		.ord-mo {
-			width: calc(100vw - 24px);
-		}
-		.ord-mo-plans {
-			grid-template-columns: repeat(2, 1fr);
 		}
 	}
 

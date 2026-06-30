@@ -33,6 +33,7 @@
 	} from '$lib/remotes/hosting-accounts.remote';
 	import { getDAServers, getDAPackagesForServer } from '$lib/remotes/da-servers.remote';
 	import { getHostingProducts } from '$lib/remotes/hosting-products.remote';
+	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import PackageIcon from '@lucide/svelte/icons/package';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
@@ -171,6 +172,18 @@
 		{ value: 'biennially', label: '2 ani', suffix: '/ 24 luni', save: 'cea mai bună valoare' }
 	];
 
+	// TVA dinamică din setări (invoice_settings.defaultTaxRate). Fallback 21 (standard RO)
+	// doar până se încarcă setările; NU hardcodăm rata.
+	let vatSettingsPromise = $state(getInvoiceSettings());
+	let currentVatRate = $state<number | null>(null);
+	$effect(() => {
+		vatSettingsPromise
+			.then((s) => {
+				currentVatRate = s.defaultTaxRate;
+			})
+			.catch(() => {});
+	});
+
 	const totalDisplay = $derived.by(() => {
 		const ron = draft.recurringAmount / 100;
 		const cycleLabel =
@@ -181,7 +194,8 @@
 					: draft.billingCycle === 'biennially'
 						? '24 luni'
 						: CYCLE_LABEL[draft.billingCycle] ?? draft.billingCycle;
-		const vat = ron * 1.19;
+		// `vat` = totalul cu TVA inclus (gross), la rata curentă a tenant-ului.
+		const vat = ron * (1 + (currentVatRate ?? 21) / 100);
 		return {
 			ron,
 			vat,
