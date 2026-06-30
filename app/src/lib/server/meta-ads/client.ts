@@ -1,4 +1,4 @@
-import { logInfo, logError } from '$lib/server/logger';
+import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { createHmac } from 'crypto';
 import { META_ACTIVE_AD_ACCOUNT_STATUSES } from './constants';
 
@@ -85,7 +85,16 @@ function generateAppSecretProof(accessToken: string, appSecret: string): string 
 }
 
 /**
- * List all ad accounts accessible by a Business Manager (owned + client/shared)
+ * List all ad accounts accessible by a Business Manager (owned + client/shared).
+ *
+ * A BM exposes its ad accounts on two separate edges, and neither is a superset
+ * of the other:
+ *   - owned_ad_accounts  → accounts the BM owns directly
+ *   - client_ad_accounts → accounts shared *with* the BM (agency/partner access)
+ *
+ * We query both and dedupe by id. Querying only client_ad_accounts silently
+ * returns 0 for BMs that own their ad accounts directly instead of holding them
+ * as shared clients.
  */
 export async function listBusinessAdAccounts(
 	businessId: string,
@@ -93,22 +102,27 @@ export async function listBusinessAdAccounts(
 ): Promise<MetaAdsAdAccount[]> {
 	logInfo('meta-ads', `Listing ad accounts for BM`, { metadata: { businessId } });
 
-	const accounts: MetaAdsAdAccount[] = [];
-	// Fields include: balance (outstanding, cents), currency (ISO), amount_spent
-	// (lifetime, cents). These let us show "430 RON outstanding" directly to the
-	// client, matching what Meta shows inside Ads Manager.
-	let url: string | null = `${META_GRAPH_URL}/${businessId}/client_ad_accounts?fields=id,name,account_status,disable_reason,balance,currency&limit=100&access_token=${accessToken}`;
+	// Fields include: balance (outstanding, cents) and currency (ISO). These let
+	// us show "430 RON outstanding" directly to the client, matching Ads Manager.
+	const fields = 'id,name,account_status,disable_reason,balance,currency';
 
-	try {
+	// Dedupe by ad account id — an account theoretically can't appear on both
+	// edges, but a Map keeps us safe regardless of ordering/overlap.
+	const byId = new Map<string, MetaAdsAdAccount>();
+
+	async function collectEdge(edge: 'owned_ad_accounts' | 'client_ad_accounts'): Promise<void> {
+		let url: string | null = `${META_GRAPH_URL}/${businessId}/${edge}?fields=${fields}&limit=100&access_token=${accessToken}`;
 		while (url) {
 			const res: Response = await fetch(url);
 			const data: any = await res.json();
 
 			if (data.error) {
-				throw new Error(`Meta API error: ${data.error.message}`);
+				throw new Error(`Meta API error (${edge}): ${data.error.message}`);
 			}
 
 			for (const acc of data.data || []) {
+				const adAccountId = acc.id || '';
+				if (!adAccountId) continue;
 				// Meta returns balance as a stringified integer in smallest unit.
 				const rawBalance = acc.balance;
 				const balanceCents =
@@ -117,8 +131,8 @@ export async function listBusinessAdAccounts(
 							? Math.trunc(Number(rawBalance))
 							: null
 						: null;
-				accounts.push({
-					adAccountId: acc.id || '',
+				byId.set(adAccountId, {
+					adAccountId,
 					accountName: acc.name || '',
 					accountStatus: acc.account_status || 0,
 					isActive: META_ACTIVE_AD_ACCOUNT_STATUSES.has(acc.account_status),
@@ -130,15 +144,33 @@ export async function listBusinessAdAccounts(
 
 			url = data.paging?.next || null;
 		}
-
-		logInfo('meta-ads', `Found ${accounts.length} ad accounts`, { metadata: { businessId } });
-		return accounts;
-	} catch (err) {
-		logError('meta-ads', `Failed to list ad accounts`, {
-			metadata: { businessId, error: err instanceof Error ? err.message : String(err) }
-		});
-		throw err;
 	}
+
+	// Query both edges independently: a failure on one (e.g. a permission quirk)
+	// must not hide the accounts returned by the other. Only surface a hard error
+	// if BOTH edges fail and we collected nothing.
+	const errors: string[] = [];
+	for (const edge of ['owned_ad_accounts', 'client_ad_accounts'] as const) {
+		try {
+			await collectEdge(edge);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			errors.push(message);
+			logWarning('meta-ads', `Failed to list ${edge}`, { metadata: { businessId, error: message } });
+		}
+	}
+
+	const accounts = Array.from(byId.values());
+
+	if (accounts.length === 0 && errors.length === 2) {
+		logError('meta-ads', `Failed to list ad accounts`, {
+			metadata: { businessId, errors }
+		});
+		throw new Error(`Meta API error: ${errors.join('; ')}`);
+	}
+
+	logInfo('meta-ads', `Found ${accounts.length} ad accounts`, { metadata: { businessId } });
+	return accounts;
 }
 
 /**
