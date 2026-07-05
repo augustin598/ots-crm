@@ -7,6 +7,7 @@ import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-a
 import { listMonthlySpend, formatCustomerId, listMccSubAccounts } from '$lib/server/google-ads/client';
 import { saveGoogleSessionCookies, clearGoogleSession } from '$lib/server/google-ads/google-cookies';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
+import { refreshGoogleSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
 import { requireStaff } from '$lib/server/get-actor';
 
 // ---- Queries ----
@@ -30,9 +31,14 @@ export const getGoogleAdsInvoices = query(async () => {
 	let conditions: any = eq(table.googleAdsInvoice.tenantId, event.locals.tenant.id);
 
 	// If user is a client user, filter by their client ID
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.googleAdsInvoice.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff. The `!user || !tenant` guard is
+		// bypassable via the x-sveltekit-pathname header (see assertStaff), so
+		// without this a non-provisioned account could read all clients' invoices.
+		await requireStaff(event);
 	}
 
 	const invoices = await db
@@ -59,7 +65,7 @@ export const getGoogleAdsInvoices = query(async () => {
 		.leftJoin(table.client, eq(table.googleAdsInvoice.clientId, table.client.id))
 		.where(conditions)
 		.orderBy(desc(table.googleAdsInvoice.issueDate))
-		.limit(500);
+		.limit(5000);
 
 	return invoices;
 });
@@ -126,9 +132,12 @@ export const getGoogleAdsSpendingList = query(async () => {
 
 	let conditions: any = eq(table.googleAdsSpending.tenantId, event.locals.tenant.id);
 
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.googleAdsSpending.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff (see assertStaff note above).
+		await requireStaff(event);
 	}
 
 	const rows = await db
@@ -159,7 +168,7 @@ export const getGoogleAdsSpendingList = query(async () => {
 		))
 		.where(conditions)
 		.orderBy(desc(table.googleAdsSpending.periodStart))
-		.limit(500);
+		.limit(5000);
 
 	return rows;
 });
@@ -642,9 +651,9 @@ export const downloadGoogleInvoiceFromUrl = command(
 			{ type: 'google-ads-invoice', customerId: cleanCustomerId, invoiceId }
 		);
 
-		// Find the client for this Google Ads account
+		// Find the client + currency for this Google Ads account
 		const [account] = await db
-			.select({ clientId: table.googleAdsAccount.clientId })
+			.select({ clientId: table.googleAdsAccount.clientId, currencyCode: table.googleAdsAccount.currencyCode })
 			.from(table.googleAdsAccount)
 			.where(and(
 				eq(table.googleAdsAccount.tenantId, tenantId),
@@ -665,8 +674,9 @@ export const downloadGoogleInvoiceFromUrl = command(
 			.limit(1);
 
 		if (existing) {
+			// Refresh clientId too so a reassigned account's invoice follows the account.
 			await db.update(table.googleAdsInvoice)
-				.set({ pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date() })
+				.set({ clientId: account.clientId, pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date() })
 				.where(eq(table.googleAdsInvoice.id, existing.id));
 		} else {
 			await db.insert(table.googleAdsInvoice).values({
@@ -677,7 +687,7 @@ export const downloadGoogleInvoiceFromUrl = command(
 				googleInvoiceId: invoiceId,
 				invoiceNumber: invoiceId,
 				issueDate: new Date(),
-				currencyCode: 'USD',
+				currencyCode: account.currencyCode || 'RON',
 				invoiceType: 'INVOICE',
 				pdfPath: upload.path,
 				status: 'synced',
@@ -896,4 +906,33 @@ export const clearGoogleAdsCookies = command(async () => {
 
 	await clearGoogleSession(integration.id, tenantId);
 	return { success: true };
+});
+
+/**
+ * Refresh the Google session server-side with a headless browser.
+ * Injects stored cookies, visits the billing docs page and saves back the
+ * rotated cookies — no visible browser, works in production.
+ */
+export const refreshGoogleSessionOnServer = command(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	if (event.locals.isClientUser) {
+		throw new Error('Unauthorized');
+	}
+	await requireStaff(event);
+
+	const tenantId = event.locals.tenant.id;
+	const [integration] = await db
+		.select({ id: table.googleAdsIntegration.id })
+		.from(table.googleAdsIntegration)
+		.where(eq(table.googleAdsIntegration.tenantId, tenantId))
+		.limit(1);
+
+	if (!integration) {
+		throw new Error('Integrarea Google Ads nu este configurată');
+	}
+
+	return await refreshGoogleSessionHeadless(tenantId, integration.id);
 });

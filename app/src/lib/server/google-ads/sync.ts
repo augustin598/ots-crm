@@ -185,20 +185,28 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 						const issueDate = inv.issueDate ? new Date(inv.issueDate) : null;
 						const dueDate = inv.dueDate ? new Date(inv.dueDate) : null;
 
-						// Dedup: check if this invoice already exists for this client
+						// Dedup on (tenant, invoice) — NOT clientId. Keying on clientId
+						// would insert a duplicate invoice when the account is reassigned
+						// to another client. If the account moved, follow it: update the
+						// existing row's clientId instead of duplicating.
 						const [existing] = await db
-							.select({ id: table.googleAdsInvoice.id })
+							.select({ id: table.googleAdsInvoice.id, clientId: table.googleAdsInvoice.clientId })
 							.from(table.googleAdsInvoice)
 							.where(
 								and(
 									eq(table.googleAdsInvoice.tenantId, tenantId),
-									eq(table.googleAdsInvoice.googleInvoiceId, inv.invoiceId),
-									eq(table.googleAdsInvoice.clientId, mapping.clientId!)
+									eq(table.googleAdsInvoice.googleInvoiceId, inv.invoiceId)
 								)
 							)
 							.limit(1);
 
 						if (existing) {
+							if (existing.clientId !== mapping.clientId!) {
+								await db
+									.update(table.googleAdsInvoice)
+									.set({ clientId: mapping.clientId!, googleAdsCustomerId: mapping.googleAdsCustomerId, updatedAt: new Date() })
+									.where(eq(table.googleAdsInvoice.id, existing.id));
+							}
 							skipped++;
 							continue;
 						}
@@ -290,6 +298,8 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 					await db
 						.update(table.googleAdsSpending)
 						.set({
+							clientId: mapping.clientId!,
+							periodEnd,
 							spendAmount: ms.spend.toString(),
 							spendCents,
 							currencyCode: ms.currencyCode,

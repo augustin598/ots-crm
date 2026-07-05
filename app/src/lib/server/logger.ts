@@ -34,6 +34,8 @@ export type LogSource =
 	| 'tt-cookies'
 	| 'invoice-scraper'
 	| 'fb-session-refresh'
+	| 'google-session-refresh'
+	| 'tt-session-refresh'
 	| 'meta-scraper'
 	| 'google-scraper'
 	| 'tiktok-scraper'

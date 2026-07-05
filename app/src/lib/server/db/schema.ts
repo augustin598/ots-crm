@@ -2321,6 +2321,7 @@ export const googleAdsIntegration = sqliteTable('google_ads_integration', {
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
 	googleSessionCookies: text('google_session_cookies'), // AES-256-GCM encrypted Google session cookies
 	googleSessionStatus: text('google_session_status').notNull().default('none'), // 'none' | 'active'
+	googleSessionRefreshedAt: timestamp('google_session_refreshed_at', { withTimezone: true, mode: 'date' }), // last time the Google session was confirmed alive (fresh cookies saved)
 	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
 	lastRefreshError: text('last_refresh_error'),
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),
@@ -2647,6 +2648,7 @@ export const tiktokAdsIntegration = sqliteTable('tiktok_ads_integration', {
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
 	ttSessionCookies: text('tt_session_cookies'), // AES-256-GCM encrypted TikTok session cookies
 	ttSessionStatus: text('tt_session_status').notNull().default('none'), // 'none' | 'active'
+	ttSessionRefreshedAt: timestamp('tt_session_refreshed_at', { withTimezone: true, mode: 'date' }), // last time the TikTok session was confirmed alive (fresh cookies saved)
 	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
 	lastRefreshError: text('last_refresh_error'),
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),

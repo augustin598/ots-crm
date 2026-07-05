@@ -3,17 +3,22 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or } from 'drizzle-orm';
 import { logInfo, logError } from '$lib/server/logger';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
+import { refreshGoogleSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
 import { createNotification } from '$lib/server/notifications';
 
 /**
  * Process Google Ads invoice sync for all active integrations
  * Runs monthly (1st of each month at 6AM)
+ *
+ * Step 0: headless Google session refresh (fresh cookies for the downloads)
+ * Step 1: invoice + spending sync per tenant
  */
 export async function processGoogleAdsInvoiceSync() {
 	logInfo('scheduler', 'Starting Google Ads invoice sync', { metadata: { trigger: 'scheduled' } });
 
 	const integrations = await db
 		.select({
+			id: table.googleAdsIntegration.id,
 			tenantId: table.googleAdsIntegration.tenantId
 		})
 		.from(table.googleAdsIntegration)
@@ -25,6 +30,25 @@ export async function processGoogleAdsInvoiceSync() {
 		);
 
 	logInfo('scheduler', `Found ${integrations.length} active Google Ads integrations`, { metadata: { integrationCount: integrations.length } });
+
+	// Step 0: refresh Google session cookies headless (best-effort — on failure the
+	// downloads still run with the stored cookies, as before)
+	for (const integration of integrations) {
+		try {
+			const result = await refreshGoogleSessionHeadless(integration.tenantId, integration.id, {
+				skipIfFresherThanMs: 24 * 60 * 60 * 1000 // keep-alive at 5:00 already covers the 1st
+			});
+			logInfo('scheduler', `Google session pre-sync refresh: ${result.status}`, {
+				tenantId: integration.tenantId,
+				metadata: { integrationId: integration.id, status: result.status }
+			});
+		} catch (err) {
+			logError('scheduler', `Google session pre-sync refresh failed for integration ${integration.id}`, {
+				tenantId: integration.tenantId,
+				metadata: { error: err instanceof Error ? err.message : String(err) }
+			});
+		}
+	}
 
 	let totalImported = 0;
 	let totalErrors = 0;

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getGoogleAdsInvoices, getGoogleAdsSpendingList, deleteGoogleAdsInvoice, triggerGoogleAdsSync, downloadGoogleInvoiceFromUrl, bulkDownloadGoogleInvoices, importScrapedGoogleInvoices, getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
+	import { getGoogleAdsInvoices, getGoogleAdsSpendingList, deleteGoogleAdsInvoice, triggerGoogleAdsSync, downloadGoogleInvoiceFromUrl, bulkDownloadGoogleInvoices, importScrapedGoogleInvoices, getGoogleAdsConnectionStatus, refreshGoogleSessionOnServer } from '$lib/remotes/google-ads-invoices.remote';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -19,6 +19,7 @@
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
+	import ServerIcon from '@lucide/svelte/icons/server';
 	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 	import { getDefaultDateRange, getDatePresets } from '$lib/utils/report-helpers';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -53,6 +54,36 @@
 		}
 		return null;
 	});
+
+	let refreshingSession = $state(false);
+	async function handleServerSessionRefresh() {
+		if (!googleIntegrationId) return;
+		refreshingSession = true;
+		try {
+			const result = await refreshGoogleSessionOnServer().updates(connectionStatusQuery);
+			switch (result.status) {
+				case 'refreshed':
+					toast.success(`Sesiune Google reîmprospătată pe server (${result.cookieCount ?? 0} cookie-uri)`);
+					break;
+				case 'expired':
+					toast.error('Sesiunea Google a expirat — e nevoie de login manual (Scan cu Browser sau cookie-uri noi din Settings).');
+					break;
+				case 'no_cookies':
+					toast.warning('Nu există cookie-uri salvate — fă întâi un Scan cu Browser sau lipește cookie-uri în Settings.');
+					break;
+				case 'busy':
+					toast.info('Un refresh de sesiune rulează deja — încearcă din nou în câteva secunde.');
+					break;
+				default:
+					toast.error(`Refresh eșuat: ${result.error || 'eroare necunoscută'}`);
+			}
+		} catch (e) {
+			clientLogger.apiError('google_session_refresh', e, 'GOOGLE_API_FETCH_FAILED');
+			toast.error('Refresh-ul sesiunii a eșuat — vezi logurile.');
+		} finally {
+			refreshingSession = false;
+		}
+	}
 
 	const invoicesQuery = getGoogleAdsInvoices();
 	const invoices = $derived(invoicesQuery.current || []);
@@ -534,6 +565,10 @@
 				{/if}
 			</Button>
 			{#if googleIntegrationId}
+				<Button variant="outline" size="sm" onclick={handleServerSessionRefresh} disabled={refreshingSession}
+					title="Reîmprospătează sesiunea Google pe server (headless, fără fereastră)">
+					{#if refreshingSession}<ServerIcon class="mr-2 h-4 w-4 animate-pulse" />Refresh sesiune...{:else}<ServerIcon class="mr-2 h-4 w-4" />Refresh Sesiune (Server){/if}
+				</Button>
 				<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()}>
 					<MonitorIcon class="mr-2 h-4 w-4" />Scan cu Browser
 				</Button>

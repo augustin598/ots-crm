@@ -4,12 +4,14 @@ import { eq, and, or } from 'drizzle-orm';
 import { logInfo, logError } from '$lib/server/logger';
 import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
 import { downloadAllInvoicesForMonth } from '$lib/server/tiktok-ads/invoice-downloader';
+import { refreshTtSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
 import { createNotification } from '$lib/server/notifications';
 
 /**
  * Process TikTok Ads sync: spending data + invoice PDF downloads.
  * Runs monthly (2nd of each month at 8AM).
  *
+ * Step 0: headless TikTok session refresh (fresh cookies for the downloads)
  * Step 1: Sync spending data from Reporting API
  * Step 2: Download billing PDF invoices via cookie-based flow
  */
@@ -18,6 +20,7 @@ export async function processTiktokAdsSpendingSync() {
 
 	const integrations = await db
 		.select({
+			id: table.tiktokAdsIntegration.id,
 			tenantId: table.tiktokAdsIntegration.tenantId
 		})
 		.from(table.tiktokAdsIntegration)
@@ -31,6 +34,24 @@ export async function processTiktokAdsSpendingSync() {
 	const tenantIds = [...new Set(integrations.map(i => i.tenantId))];
 
 	logInfo('scheduler', `Found ${tenantIds.length} tenants with active TikTok Ads integrations`, { metadata: { tenantCount: tenantIds.length } });
+
+	// Step 0: refresh TikTok session cookies headless (best-effort)
+	for (const integration of integrations) {
+		try {
+			const result = await refreshTtSessionHeadless(integration.tenantId, integration.id, {
+				skipIfFresherThanMs: 24 * 60 * 60 * 1000
+			});
+			logInfo('scheduler', `TikTok session pre-sync refresh: ${result.status}`, {
+				tenantId: integration.tenantId,
+				metadata: { integrationId: integration.id, status: result.status }
+			});
+		} catch (err) {
+			logError('scheduler', `TikTok session pre-sync refresh failed for integration ${integration.id}`, {
+				tenantId: integration.tenantId,
+				metadata: { error: err instanceof Error ? err.message : String(err) }
+			});
+		}
+	}
 
 	let totalImported = 0;
 	let totalUpdated = 0;

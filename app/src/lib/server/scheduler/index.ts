@@ -16,7 +16,7 @@ import { processInvoiceOverdueReminders } from './tasks/invoice-overdue-reminder
 import { processContractLifecycle } from './tasks/contract-lifecycle';
 import { processGoogleAdsInvoiceSync } from './tasks/google-ads-invoice-sync';
 import { processMetaAdsInvoiceSync } from './tasks/meta-ads-invoice-sync';
-import { processFbSessionKeepalive } from './tasks/fb-session-keepalive';
+import { processAdsSessionKeepalive } from './tasks/ads-session-keepalive';
 import { processTiktokAdsSpendingSync } from './tasks/tiktok-ads-spending-sync';
 import { processAdsStatusMonitor } from './tasks/ads-status-monitor';
 import { processAdsPerformanceMonitor } from './tasks/ads-performance-monitor';
@@ -134,7 +134,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	contract_lifecycle: processContractLifecycle,
 	google_ads_invoice_sync: processGoogleAdsInvoiceSync,
 	meta_ads_invoice_sync: processMetaAdsInvoiceSync,
-	fb_session_keepalive: processFbSessionKeepalive,
+	ads_session_keepalive: processAdsSessionKeepalive,
 	tiktok_ads_spending_sync: processTiktokAdsSpendingSync,
 	ads_status_monitor: processAdsStatusMonitor,
 	ads_performance_monitor: processAdsPerformanceMonitor,
@@ -277,7 +277,7 @@ export const startScheduler = async () => {
 		'spv-invoice-sync', 'revolut-transaction-sync', 'keez-invoice-sync',
 		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
-		'meta-ads-invoice-sync', 'fb-session-keepalive', 'tiktok-ads-spending-sync', 'ads-status-monitor',
+		'meta-ads-invoice-sync', 'ads-session-keepalive', 'tiktok-ads-spending-sync', 'ads-status-monitor',
 		'ads-performance-monitor', 'ads-snapshot-retention', 'meta-ads-leads-sync',
 		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'stripe-event-cleanup', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
@@ -545,13 +545,14 @@ export const startScheduler = async () => {
 		}
 	);
 
-	// Schedule FB session keep-alive every 3 days at 5:00 AM — headless browser
-	// touches business.facebook.com and saves back rotated cookies so the session
-	// never goes stale. On the 1st it runs 2h before the monthly invoice sync.
+	// Schedule ad-platform session keep-alive every 3 days at 5:00 AM — headless
+	// browser touches each platform's billing page (Meta/Google/TikTok) and saves
+	// back rotated cookies so the sessions never go stale. On the 1st it runs
+	// before the monthly invoice syncs.
 	await schedulerQueue.add(
-		'fb-session-keepalive',
+		'ads-session-keepalive',
 		{
-			type: 'fb_session_keepalive',
+			type: 'ads_session_keepalive',
 			params: {}
 		},
 		{
@@ -559,7 +560,7 @@ export const startScheduler = async () => {
 				pattern: '0 5 */3 * *', // Days 1,4,7,... at 5:00 AM
 				tz: 'Europe/Bucharest'
 			},
-			jobId: 'fb-session-keepalive'
+			jobId: 'ads-session-keepalive'
 		}
 	);
 

@@ -7,28 +7,32 @@ import { findChromePath } from './find-chrome';
 import {
 	normalizeCookiesForInjection,
 	extractBrowserCookies,
-	saveCookiesFromBrowser
+	saveCookiesFromBrowser,
+	type ScraperPlatform,
+	type StoredCookie
 } from './invoice-scraper';
 import { getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
+import { getDecryptedGoogleCookies } from '$lib/server/google-ads/google-cookies';
+import { getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
 import { FB_USER_AGENT } from '$lib/server/meta-ads/constants';
-import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError, type LogSource } from '$lib/server/logger';
 
 /**
- * Headless Facebook session refresh — the server-side replacement for the
- * "Scan cu Browser" laptop ritual.
+ * Headless ad-platform session refresh — the server-side replacement for the
+ * "Scan cu Browser" laptop ritual, generalized across Meta, Google and TikTok.
  *
  * Injects the DB-stored session cookies into a fresh ALWAYS-headless browser,
- * visits the Billing Hub, and — if the session is still alive — saves back the
- * cookies Facebook rotated during the visit. Regular runs keep the session
- * alive indefinitely; the visible-browser flow is only needed for the first
- * login (bootstrap) or after a Facebook checkpoint.
+ * visits the platform's billing page, and — if the session is still alive —
+ * saves back the cookies the platform rotated during the visit. Regular runs
+ * keep the session alive indefinitely; the visible-browser flow is only needed
+ * for the first login (bootstrap) or after a platform checkpoint/2FA.
  */
 
 export type HeadlessRefreshStatus =
 	| 'refreshed' // session alive, rotated cookies saved back to DB
-	| 'expired' // Facebook redirected to login/checkpoint — needs manual bootstrap
+	| 'expired' // platform redirected to login/checkpoint — needs manual bootstrap
 	| 'no_cookies' // nothing stored to refresh
-	| 'skipped_fresh' // fbSessionRefreshedAt newer than opts.skipIfFresherThanMs
+	| 'skipped_fresh' // session refreshedAt newer than opts.skipIfFresherThanMs
 	| 'busy' // another refresh for this integration is in flight
 	| 'error'; // navigation/infra error — session status left untouched
 
@@ -38,25 +42,123 @@ export interface HeadlessRefreshResult {
 	error?: string;
 }
 
-const BILLING_HUB_URL = 'https://business.facebook.com/billing_hub/accounts';
 const NAV_TIMEOUT_MS = 45_000;
 const SETTLE_DELAY_MS = 3_000;
+// Google/TikTok invoice downloaders send this UA; the refresh browser must match
+// so the rotated cookie jar stays consistent with the fetch-based downloads.
+const CHROME_131_UA =
+	'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-function isLoginOrCheckpointUrl(url: string): boolean {
-	return (
-		url.includes('/login') ||
-		url.includes('checkpoint') ||
-		url.includes('cookie/consent') ||
-		url.includes('two_step_verification')
-	);
+interface SessionMeta {
+	refreshedAt: Date | null;
 }
 
-function isLoggedInUrl(url: string): boolean {
-	return url.includes('billing_hub') && !isLoginOrCheckpointUrl(url);
+interface PlatformAdapter {
+	logSource: LogSource;
+	billingUrl: string;
+	userAgent: string;
+	getCookies: (integrationId: string, tenantId: string) => Promise<StoredCookie[] | null>;
+	getSessionMeta: (integrationId: string, tenantId: string) => Promise<SessionMeta | null>;
+	markExpired: (integrationId: string, tenantId: string) => Promise<void>;
+	isLoginRedirect: (url: string) => boolean;
+	isLoggedIn: (url: string) => boolean;
+	/** Validate the freshly-extracted cookie jar actually carries a live session. */
+	hasSession: (cookieNames: Set<string>) => boolean;
 }
 
-// In-flight guard per integration (survives HMR via globalThis symbol)
-const IN_FLIGHT_SYMBOL = Symbol.for('fb_session_refresh_in_flight');
+function anyOf(names: Set<string>, wanted: string[]): boolean {
+	return wanted.some((w) => names.has(w));
+}
+
+const ADAPTERS: Record<ScraperPlatform, PlatformAdapter> = {
+	meta: {
+		logSource: 'fb-session-refresh',
+		billingUrl: 'https://business.facebook.com/billing_hub/accounts',
+		userAgent: FB_USER_AGENT,
+		getCookies: getDecryptedFbCookies,
+		getSessionMeta: async (id, t) => {
+			const [r] = await db
+				.select({ refreshedAt: table.metaAdsIntegration.fbSessionRefreshedAt })
+				.from(table.metaAdsIntegration)
+				.where(and(eq(table.metaAdsIntegration.id, id), eq(table.metaAdsIntegration.tenantId, t)))
+				.limit(1);
+			return r ? { refreshedAt: r.refreshedAt } : null;
+		},
+		markExpired: async (id, t) => {
+			await db
+				.update(table.metaAdsIntegration)
+				.set({ fbSessionStatus: 'expired', updatedAt: new Date() })
+				.where(and(eq(table.metaAdsIntegration.id, id), eq(table.metaAdsIntegration.tenantId, t)));
+		},
+		isLoginRedirect: (url) =>
+			url.includes('/login') ||
+			url.includes('checkpoint') ||
+			url.includes('cookie/consent') ||
+			url.includes('two_step_verification'),
+		isLoggedIn: (url) =>
+			url.includes('billing_hub') &&
+			!(url.includes('/login') || url.includes('checkpoint') || url.includes('cookie/consent')),
+		hasSession: (names) => names.has('c_user') && names.has('xs')
+	},
+	google: {
+		logSource: 'google-session-refresh',
+		billingUrl: 'https://ads.google.com/aw/billing/documents',
+		userAgent: CHROME_131_UA,
+		getCookies: getDecryptedGoogleCookies,
+		getSessionMeta: async (id, t) => {
+			const [r] = await db
+				.select({ refreshedAt: table.googleAdsIntegration.googleSessionRefreshedAt })
+				.from(table.googleAdsIntegration)
+				.where(and(eq(table.googleAdsIntegration.id, id), eq(table.googleAdsIntegration.tenantId, t)))
+				.limit(1);
+			return r ? { refreshedAt: r.refreshedAt } : null;
+		},
+		markExpired: async (id, t) => {
+			await db
+				.update(table.googleAdsIntegration)
+				.set({ googleSessionStatus: 'expired', updatedAt: new Date() })
+				.where(and(eq(table.googleAdsIntegration.id, id), eq(table.googleAdsIntegration.tenantId, t)));
+		},
+		isLoginRedirect: (url) =>
+			url.includes('accounts.google.com/signin') ||
+			url.includes('accounts.google.com/v3') ||
+			url.includes('accounts.google.com/ServiceLogin'),
+		isLoggedIn: (url) =>
+			url.includes('ads.google.com') &&
+			!url.includes('accounts.google.com/signin') &&
+			!url.includes('accounts.google.com/v3'),
+		hasSession: (names) => anyOf(names, ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID', '__Secure-1PSID'])
+	},
+	tiktok: {
+		logSource: 'tt-session-refresh',
+		billingUrl: 'https://business.tiktok.com/manage/billing/v2',
+		userAgent: CHROME_131_UA,
+		getCookies: getDecryptedTtCookies,
+		getSessionMeta: async (id, t) => {
+			const [r] = await db
+				.select({ refreshedAt: table.tiktokAdsIntegration.ttSessionRefreshedAt })
+				.from(table.tiktokAdsIntegration)
+				.where(and(eq(table.tiktokAdsIntegration.id, id), eq(table.tiktokAdsIntegration.tenantId, t)))
+				.limit(1);
+			return r ? { refreshedAt: r.refreshedAt } : null;
+		},
+		markExpired: async (id, t) => {
+			await db
+				.update(table.tiktokAdsIntegration)
+				.set({ ttSessionStatus: 'expired', updatedAt: new Date() })
+				.where(and(eq(table.tiktokAdsIntegration.id, id), eq(table.tiktokAdsIntegration.tenantId, t)));
+		},
+		isLoginRedirect: (url) => url.includes('/login') || url.includes('signin'),
+		isLoggedIn: (url) =>
+			url.includes('business.tiktok.com/manage') &&
+			!url.includes('login') &&
+			!url.includes('signin'),
+		hasSession: (names) => anyOf(names, ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard'])
+	}
+};
+
+// In-flight guard per platform+integration (survives HMR via globalThis symbol)
+const IN_FLIGHT_SYMBOL = Symbol.for('ads_session_refresh_in_flight');
 function getInFlight(): Set<string> {
 	if (!(globalThis as any)[IN_FLIGHT_SYMBOL]) {
 		(globalThis as any)[IN_FLIGHT_SYMBOL] = new Set<string>();
@@ -67,10 +169,10 @@ function getInFlight(): Set<string> {
 async function launchHeadlessBrowser(): Promise<Browser> {
 	const chromePath = findChromePath();
 	// Fresh browser per run, no persistent profile: identity continuity comes from
-	// the injected cookie jar itself (datr/sb), and a separate temp profile avoids
-	// lock conflicts with the interactive scraper singleton.
+	// the injected cookie jar itself, and a separate temp profile avoids lock
+	// conflicts with the interactive scraper singleton.
 	return puppeteer.launch({
-		headless: true, // new headless — faithful SPA rendering on business.facebook.com
+		headless: true, // new headless — faithful SPA rendering
 		executablePath: chromePath,
 		defaultViewport: { width: 1440, height: 900 },
 		ignoreDefaultArgs: ['--enable-automation'],
@@ -87,69 +189,59 @@ async function launchHeadlessBrowser(): Promise<Browser> {
 }
 
 /**
- * Refresh the Facebook session for one Meta Ads integration, fully headless.
+ * Refresh the session for one ad-platform integration, fully headless.
  * Never opens a visible window — safe to run on the server and from cron.
  *
  * opts.skipIfFresherThanMs: skip (status 'skipped_fresh') when the session was
  * already confirmed alive more recently than this. UI-triggered refreshes pass 0.
  */
-export async function refreshFbSessionHeadless(
+export async function refreshSessionHeadless(
+	platform: ScraperPlatform,
 	tenantId: string,
 	integrationId: string,
 	opts: { skipIfFresherThanMs?: number } = {}
 ): Promise<HeadlessRefreshResult> {
+	const cfg = ADAPTERS[platform];
 	const inFlight = getInFlight();
-	if (inFlight.has(integrationId)) {
+	const flightKey = `${platform}:${integrationId}`;
+	if (inFlight.has(flightKey)) {
 		return { status: 'busy' };
 	}
-	inFlight.add(integrationId);
+	inFlight.add(flightKey);
 
 	let browser: Browser | null = null;
 	try {
-		const [integration] = await db
-			.select({
-				fbSessionStatus: table.metaAdsIntegration.fbSessionStatus,
-				fbSessionRefreshedAt: table.metaAdsIntegration.fbSessionRefreshedAt
-			})
-			.from(table.metaAdsIntegration)
-			.where(
-				and(
-					eq(table.metaAdsIntegration.id, integrationId),
-					eq(table.metaAdsIntegration.tenantId, tenantId)
-				)
-			)
-			.limit(1);
-
-		if (!integration) {
+		const meta = await cfg.getSessionMeta(integrationId, tenantId);
+		if (!meta) {
 			return { status: 'error', error: 'integration_not_found' };
 		}
 
 		if (
 			opts.skipIfFresherThanMs &&
-			integration.fbSessionRefreshedAt &&
-			Date.now() - integration.fbSessionRefreshedAt.getTime() < opts.skipIfFresherThanMs
+			meta.refreshedAt &&
+			Date.now() - meta.refreshedAt.getTime() < opts.skipIfFresherThanMs
 		) {
 			return { status: 'skipped_fresh' };
 		}
 
-		const cookies = await getDecryptedFbCookies(integrationId, tenantId);
+		const cookies = await cfg.getCookies(integrationId, tenantId);
 		if (!cookies || cookies.length === 0) {
 			return { status: 'no_cookies' };
 		}
 
-		const params = normalizeCookiesForInjection(cookies, 'meta');
+		const params = normalizeCookiesForInjection(cookies, platform);
 		if (params.length === 0) {
 			return { status: 'no_cookies' };
 		}
 
-		logInfo('fb-session-refresh', `Starting headless session refresh`, {
+		logInfo(cfg.logSource, `Starting headless session refresh`, {
 			tenantId,
-			metadata: { integrationId, cookieCount: params.length }
+			metadata: { integrationId, platform, cookieCount: params.length }
 		});
 
 		browser = await launchHeadlessBrowser();
 		const page = await browser.newPage();
-		await page.setUserAgent(FB_USER_AGENT);
+		await page.setUserAgent(cfg.userAgent);
 		await page.evaluateOnNewDocument(() => {
 			Object.defineProperty(navigator, 'webdriver', { get: () => false });
 		});
@@ -160,7 +252,7 @@ export async function refreshFbSessionHeadless(
 		await page.setCookie(...params);
 
 		try {
-			await page.goto(BILLING_HUB_URL, { waitUntil: 'networkidle2', timeout: NAV_TIMEOUT_MS });
+			await page.goto(cfg.billingUrl, { waitUntil: 'networkidle2', timeout: NAV_TIMEOUT_MS });
 		} catch {
 			// Navigation timeout on a heavy SPA is common — judge by the final URL below
 		}
@@ -168,66 +260,49 @@ export async function refreshFbSessionHeadless(
 
 		const finalUrl = page.url();
 
-		if (isLoginOrCheckpointUrl(finalUrl)) {
-			await db
-				.update(table.metaAdsIntegration)
-				.set({ fbSessionStatus: 'expired', updatedAt: new Date() })
-				.where(
-					and(
-						eq(table.metaAdsIntegration.id, integrationId),
-						eq(table.metaAdsIntegration.tenantId, tenantId)
-					)
-				);
-			logWarning('fb-session-refresh', `FB session expired (redirected to ${finalUrl.slice(0, 120)})`, {
+		if (cfg.isLoginRedirect(finalUrl)) {
+			await cfg.markExpired(integrationId, tenantId);
+			logWarning(cfg.logSource, `Session expired (redirected to ${finalUrl.slice(0, 120)})`, {
 				tenantId,
-				metadata: { integrationId }
+				metadata: { integrationId, platform }
 			});
 			return { status: 'expired' };
 		}
 
-		if (!isLoggedInUrl(finalUrl)) {
-			// Unknown landing page (interstitial, network error page) — don't false-expire
-			logWarning('fb-session-refresh', `Unexpected landing URL, leaving session status untouched: ${finalUrl.slice(0, 120)}`, {
+		if (!cfg.isLoggedIn(finalUrl)) {
+			// Unknown landing page (interstitial, network error) — don't false-expire
+			logWarning(cfg.logSource, `Unexpected landing URL, leaving session status untouched: ${finalUrl.slice(0, 120)}`, {
 				tenantId,
-				metadata: { integrationId }
+				metadata: { integrationId, platform }
 			});
 			return { status: 'error', error: `unexpected_url: ${finalUrl.slice(0, 200)}` };
 		}
 
 		// Logged in — harvest the (possibly rotated) cookies and save them back
-		const freshCookies = await extractBrowserCookies(page, 'meta');
-		const hasSession =
-			freshCookies.some((c) => c.name === 'c_user') && freshCookies.some((c) => c.name === 'xs');
+		const freshCookies = await extractBrowserCookies(page, platform);
+		const names = new Set(freshCookies.map((c) => c.name));
 
-		if (!hasSession) {
-			logWarning('fb-session-refresh', 'Landed on billing hub but c_user/xs missing — treating as expired', {
+		if (!cfg.hasSession(names)) {
+			logWarning(cfg.logSource, 'Landed on billing page but session cookies missing — treating as expired', {
 				tenantId,
-				metadata: { integrationId, cookieNames: freshCookies.map((c) => c.name).join(',') }
+				metadata: { integrationId, platform, cookieNames: [...names].join(',') }
 			});
-			await db
-				.update(table.metaAdsIntegration)
-				.set({ fbSessionStatus: 'expired', updatedAt: new Date() })
-				.where(
-					and(
-						eq(table.metaAdsIntegration.id, integrationId),
-						eq(table.metaAdsIntegration.tenantId, tenantId)
-					)
-				);
+			await cfg.markExpired(integrationId, tenantId);
 			return { status: 'expired' };
 		}
 
-		await saveCookiesFromBrowser('meta', integrationId, tenantId, freshCookies);
+		await saveCookiesFromBrowser(platform, integrationId, tenantId, freshCookies);
 
-		logInfo('fb-session-refresh', `Session refreshed: ${freshCookies.length} cookies saved`, {
+		logInfo(cfg.logSource, `Session refreshed: ${freshCookies.length} cookies saved`, {
 			tenantId,
-			metadata: { integrationId, cookieCount: freshCookies.length }
+			metadata: { integrationId, platform, cookieCount: freshCookies.length }
 		});
 		return { status: 'refreshed', cookieCount: freshCookies.length };
 	} catch (err) {
 		const { message, stack } = serializeError(err);
-		logError('fb-session-refresh', `Headless refresh failed: ${message}`, {
+		logError(cfg.logSource, `Headless refresh failed: ${message}`, {
 			tenantId,
-			metadata: { integrationId },
+			metadata: { integrationId, platform },
 			stackTrace: stack
 		});
 		return { status: 'error', error: message };
@@ -235,6 +310,31 @@ export async function refreshFbSessionHeadless(
 		if (browser) {
 			await browser.close().catch(() => {});
 		}
-		inFlight.delete(integrationId);
+		inFlight.delete(flightKey);
 	}
+}
+
+/** Backward-compatible Meta wrapper. */
+export function refreshFbSessionHeadless(
+	tenantId: string,
+	integrationId: string,
+	opts: { skipIfFresherThanMs?: number } = {}
+): Promise<HeadlessRefreshResult> {
+	return refreshSessionHeadless('meta', tenantId, integrationId, opts);
+}
+
+export function refreshGoogleSessionHeadless(
+	tenantId: string,
+	integrationId: string,
+	opts: { skipIfFresherThanMs?: number } = {}
+): Promise<HeadlessRefreshResult> {
+	return refreshSessionHeadless('google', tenantId, integrationId, opts);
+}
+
+export function refreshTtSessionHeadless(
+	tenantId: string,
+	integrationId: string,
+	opts: { skipIfFresherThanMs?: number } = {}
+): Promise<HeadlessRefreshResult> {
+	return refreshSessionHeadless('tiktok', tenantId, integrationId, opts);
 }

@@ -58,6 +58,7 @@ export async function saveTtSessionCookies(
 		.set({
 			ttSessionCookies: encrypted,
 			ttSessionStatus: 'active',
+			ttSessionRefreshedAt: new Date(),
 			updatedAt: new Date()
 		})
 		.where(

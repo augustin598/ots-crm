@@ -2,7 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getAuthenticatedToken } from './auth';
-import { listAdvertiserInsights, getSyncDateRange } from './client';
+import { listAdvertiserInsights, getSyncDateRange, fetchAdvertiserBalances } from './client';
 import { generateSpendingReportPdf } from './spending-report-pdf';
 import type { SpendingPeriod } from './spending-report-pdf';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
@@ -107,6 +107,14 @@ async function syncForIntegration(
 		.limit(1);
 
 	const { startDate, endDate } = getSyncDateRange();
+
+	// Resolve each advertiser's real billing currency once (insights don't carry
+	// it). Without this, USD/EUR accounts get mislabeled — and summed — as RON.
+	const currencyByAdvertiser = await fetchAdvertiserBalances(
+		accountsWithClient.map(a => a.tiktokAdvertiserId),
+		accessToken
+	);
+
 	let imported = 0;
 	let updated = 0;
 	let errors = 0;
@@ -125,6 +133,9 @@ async function syncForIntegration(
 				continue;
 			}
 
+			// Real billing currency for this advertiser (RON fallback if unknown)
+			const currencyCode = currencyByAdvertiser.get(account.tiktokAdvertiserId)?.currencyCode || 'RON';
+
 			// Get client name for PDF
 			const [clientInfo] = await db
 				.select({ name: table.client.name })
@@ -138,22 +149,26 @@ async function syncForIntegration(
 			for (const insight of insights) {
 				const spendCents = spendToCents(insight.spend);
 
-				// Dedup: check if this period already exists
+				// Dedup on (tenant, advertiser, period) — NOT clientId. Keying on
+				// clientId would insert a duplicate row when the account is
+				// reassigned to another client, double-counting the same spend.
+				// Keying on the advertiser lets the update below MOVE the row.
 				const [existing] = await db
 					.select({
 						id: table.tiktokAdsSpending.id,
+						clientId: table.tiktokAdsSpending.clientId,
 						spendCents: table.tiktokAdsSpending.spendCents,
 						impressions: table.tiktokAdsSpending.impressions,
 						clicks: table.tiktokAdsSpending.clicks,
-						conversions: table.tiktokAdsSpending.conversions
+						conversions: table.tiktokAdsSpending.conversions,
+						periodEnd: table.tiktokAdsSpending.periodEnd
 					})
 					.from(table.tiktokAdsSpending)
 					.where(
 						and(
 							eq(table.tiktokAdsSpending.tenantId, tenantId),
 							eq(table.tiktokAdsSpending.tiktokAdvertiserId, account.tiktokAdvertiserId),
-							eq(table.tiktokAdsSpending.periodStart, insight.dateStart),
-							eq(table.tiktokAdsSpending.clientId, account.clientId!)
+							eq(table.tiktokAdsSpending.periodStart, insight.dateStart)
 						)
 					)
 					.limit(1);
@@ -167,12 +182,16 @@ async function syncForIntegration(
 						existing.spendCents !== spendCents ||
 						existing.impressions !== newImpressions ||
 						existing.clicks !== newClicks ||
-						existing.conversions !== newConversions;
+						existing.conversions !== newConversions ||
+						existing.periodEnd !== insight.dateStop ||
+						existing.clientId !== account.clientId!;
 
 					if (metricsChanged) {
 						await db
 							.update(table.tiktokAdsSpending)
 							.set({
+								clientId: account.clientId!,
+								periodEnd: insight.dateStop,
 								spendAmount: insight.spend,
 								spendCents,
 								impressions: newImpressions,
@@ -195,7 +214,7 @@ async function syncForIntegration(
 						periodEnd: insight.dateStop,
 						spendAmount: insight.spend,
 						spendCents,
-						currencyCode: 'RON',
+						currencyCode,
 						impressions: parseInt(insight.impressions) || 0,
 						clicks: parseInt(insight.clicks) || 0,
 						conversions: parseInt(insight.conversions) || 0,
@@ -224,7 +243,7 @@ async function syncForIntegration(
 						clientName: clientInfo?.name || '',
 						adAccountId: account.tiktokAdvertiserId,
 						adAccountName: account.accountName,
-						currencyCode: 'RON',
+						currencyCode,
 						periods: pdfPeriods,
 						generatedAt: new Date()
 					});

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, deleteTiktokInvoiceDownload, autoAssignTiktokInvoices } from '$lib/remotes/tiktok-ads.remote';
+	import { getTiktokInvoiceDownloads, getTiktokAdsConnectionStatus, bulkDownloadTiktokInvoices, redownloadTiktokInvoice, deleteTiktokInvoiceDownload, autoAssignTiktokInvoices, refreshTtSessionOnServer } from '$lib/remotes/tiktok-ads.remote';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
@@ -11,6 +11,7 @@
 
 	import { Download, Search, Eye, FileArchive } from '@lucide/svelte';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
+	import ServerIcon from '@lucide/svelte/icons/server';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import DollarSignIcon from '@lucide/svelte/icons/dollar-sign';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
@@ -53,6 +54,36 @@
 		}
 		return null;
 	});
+
+	let refreshingSession = $state(false);
+	async function handleServerSessionRefresh() {
+		if (!tiktokIntegrationId) return;
+		refreshingSession = true;
+		try {
+			const result = await refreshTtSessionOnServer({ integrationId: tiktokIntegrationId }).updates(connectionStatusQuery);
+			switch (result.status) {
+				case 'refreshed':
+					toast.success(`Sesiune TikTok reîmprospătată pe server (${result.cookieCount ?? 0} cookie-uri)`);
+					break;
+				case 'expired':
+					toast.error('Sesiunea TikTok a expirat — e nevoie de login manual (Scan cu Browser sau cookie-uri noi din Settings).');
+					break;
+				case 'no_cookies':
+					toast.warning('Nu există cookie-uri salvate — fă întâi un Scan cu Browser sau lipește cookie-uri în Settings.');
+					break;
+				case 'busy':
+					toast.info('Un refresh de sesiune rulează deja — încearcă din nou în câteva secunde.');
+					break;
+				default:
+					toast.error(`Refresh eșuat: ${result.error || 'eroare necunoscută'}`);
+			}
+		} catch (e) {
+			clientLogger.apiError('tiktok_session_refresh', e, 'TIKTOK_API_FETCH_FAILED');
+			toast.error('Refresh-ul sesiunii a eșuat — vezi logurile.');
+		} finally {
+			refreshingSession = false;
+		}
+	}
 
 	const invoicesQuery = getTiktokInvoiceDownloads();
 	const invoices = $derived(invoicesQuery.current || []);
@@ -447,6 +478,10 @@
 				<Download class="mr-2 h-4 w-4" />Import Facturi
 			</Button>
 			{#if tiktokIntegrationId}
+				<Button variant="outline" size="sm" onclick={handleServerSessionRefresh} disabled={refreshingSession}
+					title="Reîmprospătează sesiunea TikTok pe server (headless, fără fereastră)">
+					{#if refreshingSession}<ServerIcon class="mr-2 h-4 w-4 animate-pulse" />Refresh sesiune...{:else}<ServerIcon class="mr-2 h-4 w-4" />Refresh Sesiune (Server){/if}
+				</Button>
 				<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()}>
 					<MonitorIcon class="mr-2 h-4 w-4" />Scan cu Browser
 				</Button>

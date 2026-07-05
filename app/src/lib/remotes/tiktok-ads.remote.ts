@@ -8,6 +8,7 @@ import { getTiktokAdsConnections, disconnectTiktokAds, getAuthenticatedToken } f
 import { listAdvertiserAccounts } from '$lib/server/tiktok-ads/client';
 import { saveTtSessionCookies, clearTtSession } from '$lib/server/tiktok-ads/tt-cookies';
 import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
+import { refreshTtSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
 import { generateSpendingReportPdf } from '$lib/server/tiktok-ads/spending-report-pdf';
 import { downloadAllInvoicesForMonth, downloadInvoice, listInvoicesFromTiktok } from '$lib/server/tiktok-ads/invoice-downloader';
 import { logInfo, logError } from '$lib/server/logger';
@@ -36,9 +37,14 @@ export const getTiktokAdsSpendingList = query(async () => {
 
 	let conditions: any = eq(table.tiktokAdsSpending.tenantId, event.locals.tenant.id);
 
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.tiktokAdsSpending.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff. The `!user || !tenant` guard is
+		// bypassable via the x-sveltekit-pathname header (see assertStaff), so
+		// without this a non-provisioned account could read all clients' spend.
+		await requireStaff(event);
 	}
 
 	const rows = await db
@@ -65,7 +71,7 @@ export const getTiktokAdsSpendingList = query(async () => {
 		.leftJoin(table.client, eq(table.tiktokAdsSpending.clientId, table.client.id))
 		.where(conditions)
 		.orderBy(desc(table.tiktokAdsSpending.periodStart))
-		.limit(500);
+		.limit(5000);
 
 	return rows;
 });
@@ -137,9 +143,12 @@ export const getTiktokInvoiceDownloads = query(async () => {
 
 	let conditions: any = eq(table.tiktokInvoiceDownload.tenantId, event.locals.tenant.id);
 
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.tiktokInvoiceDownload.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff (see assertStaff note above).
+		await requireStaff(event);
 	}
 
 	const rows = await db
@@ -166,7 +175,7 @@ export const getTiktokInvoiceDownloads = query(async () => {
 		.leftJoin(table.client, eq(table.tiktokInvoiceDownload.clientId, table.client.id))
 		.where(conditions)
 		.orderBy(desc(table.tiktokInvoiceDownload.periodStart))
-		.limit(500);
+		.limit(5000);
 
 	return rows;
 });
@@ -652,6 +661,43 @@ export const clearTiktokAdsCookies = command(
 
 		await clearTtSession(integrationId, tenantId);
 		return { success: true };
+	}
+);
+
+/**
+ * Refresh the TikTok session server-side with a headless browser.
+ * Injects stored cookies, visits the billing page and saves back the rotated
+ * cookies — no visible browser, works in production.
+ */
+export const refreshTtSessionOnServer = command(
+	v.object({ integrationId: v.pipe(v.string(), v.minLength(1)) }),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		await requireStaff(event);
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+		const [integration] = await db
+			.select({ id: table.tiktokAdsIntegration.id })
+			.from(table.tiktokAdsIntegration)
+			.where(
+				and(
+					eq(table.tiktokAdsIntegration.id, data.integrationId),
+					eq(table.tiktokAdsIntegration.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw error(404, 'Integrare TikTok Ads negăsită');
+		}
+
+		return await refreshTtSessionHeadless(tenantId, data.integrationId);
 	}
 );
 

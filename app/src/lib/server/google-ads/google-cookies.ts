@@ -48,6 +48,7 @@ export async function saveGoogleSessionCookies(
 		.set({
 			googleSessionCookies: encrypted,
 			googleSessionStatus: 'active',
+			googleSessionRefreshedAt: new Date(),
 			updatedAt: new Date()
 		})
 		.where(
