@@ -31,6 +31,7 @@ import { logInfo, logError, logWarning, serializeError, type LogSource } from '$
 export type HeadlessRefreshStatus =
 	| 'refreshed' // session alive, rotated cookies saved back to DB
 	| 'expired' // platform redirected to login/checkpoint — needs manual bootstrap
+	| 'two_factor' // session valid but platform challenged the headless browser with 2FA — cookies kept, rotation blocked
 	| 'no_cookies' // nothing stored to refresh
 	| 'skipped_fresh' // session refreshedAt newer than opts.skipIfFresherThanMs
 	| 'busy' // another refresh for this integration is in flight
@@ -285,6 +286,18 @@ export async function refreshSessionHeadless(
 				metadata: { integrationId, platform }
 			});
 			return { status: 'expired' };
+		}
+
+		// A 2FA / device-verification challenge means the stored cookies ARE valid
+		// (the platform recognized the session) but it won't let a headless browser
+		// from this IP through. Don't mark expired — the cookies stay usable for the
+		// fetch-based invoice downloads; only the browser rotation is blocked.
+		if (/two[-_]step[-_]verification|two[-_]factor|\/verify(\/|\?|$)/i.test(finalUrl)) {
+			logWarning(cfg.logSource, `2FA challenge on headless refresh — session left intact`, {
+				tenantId,
+				metadata: { integrationId, platform }
+			});
+			return { status: 'two_factor' };
 		}
 
 		if (!cfg.isLoggedIn(finalUrl)) {

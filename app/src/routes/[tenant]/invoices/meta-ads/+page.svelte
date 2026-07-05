@@ -83,6 +83,9 @@
 						case 'expired':
 							problems.push(`${bm}: sesiune expirată — login manual necesar`);
 							break;
+						case 'two_factor':
+							problems.push(`${bm}: 2FA cerut de platformă — cookie-uri valabile, rotația blocată`);
+							break;
 						case 'no_cookies':
 							problems.push(`${bm}: fără cookie-uri salvate`);
 							break;

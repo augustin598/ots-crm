@@ -169,6 +169,9 @@ export async function processAdsSessionKeepalive(
 					break;
 				case 'skipped_fresh':
 				case 'busy':
+				case 'two_factor':
+					// two_factor = cookies still valid, platform just blocks headless
+					// rotation with 2FA; not a failure, nothing to notify.
 					totals.skipped++;
 					break;
 				case 'expired':

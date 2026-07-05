@@ -68,6 +68,9 @@
 				case 'expired':
 					toast.error('Sesiunea TikTok a expirat — e nevoie de login manual (Scan cu Browser sau cookie-uri noi din Settings).');
 					break;
+				case 'two_factor':
+					toast.info('Sesiunea TikTok e salvată și validă, dar TikTok cere verificare 2FA pentru accesul de pe server — reîmprospătarea automată e blocată. Cookie-urile rămân valabile pentru descărcarea facturilor.');
+					break;
 				case 'no_cookies':
 					toast.warning('Nu există cookie-uri salvate — fă întâi un Scan cu Browser sau lipește cookie-uri în Settings.');
 					break;
