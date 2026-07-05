@@ -1,6 +1,6 @@
 import puppeteer from 'puppeteer-core';
 import type { Browser } from 'puppeteer-core';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { findChromePath } from './find-chrome';
@@ -51,6 +51,8 @@ const CHROME_131_UA =
 
 interface SessionMeta {
 	refreshedAt: Date | null;
+	/** True when an encrypted cookie blob is stored (regardless of decryptability). */
+	hasStoredCookies: boolean;
 }
 
 interface PlatformAdapter {
@@ -78,11 +80,11 @@ const ADAPTERS: Record<ScraperPlatform, PlatformAdapter> = {
 		getCookies: getDecryptedFbCookies,
 		getSessionMeta: async (id, t) => {
 			const [r] = await db
-				.select({ refreshedAt: table.metaAdsIntegration.fbSessionRefreshedAt })
+				.select({ refreshedAt: table.metaAdsIntegration.fbSessionRefreshedAt, hasCookies: sql<number>`length(coalesce(${table.metaAdsIntegration.fbSessionCookies}, ''))` })
 				.from(table.metaAdsIntegration)
 				.where(and(eq(table.metaAdsIntegration.id, id), eq(table.metaAdsIntegration.tenantId, t)))
 				.limit(1);
-			return r ? { refreshedAt: r.refreshedAt } : null;
+			return r ? { refreshedAt: r.refreshedAt, hasStoredCookies: r.hasCookies > 0 } : null;
 		},
 		markExpired: async (id, t) => {
 			await db
@@ -107,11 +109,11 @@ const ADAPTERS: Record<ScraperPlatform, PlatformAdapter> = {
 		getCookies: getDecryptedGoogleCookies,
 		getSessionMeta: async (id, t) => {
 			const [r] = await db
-				.select({ refreshedAt: table.googleAdsIntegration.googleSessionRefreshedAt })
+				.select({ refreshedAt: table.googleAdsIntegration.googleSessionRefreshedAt, hasCookies: sql<number>`length(coalesce(${table.googleAdsIntegration.googleSessionCookies}, ''))` })
 				.from(table.googleAdsIntegration)
 				.where(and(eq(table.googleAdsIntegration.id, id), eq(table.googleAdsIntegration.tenantId, t)))
 				.limit(1);
-			return r ? { refreshedAt: r.refreshedAt } : null;
+			return r ? { refreshedAt: r.refreshedAt, hasStoredCookies: r.hasCookies > 0 } : null;
 		},
 		markExpired: async (id, t) => {
 			await db
@@ -136,11 +138,11 @@ const ADAPTERS: Record<ScraperPlatform, PlatformAdapter> = {
 		getCookies: getDecryptedTtCookies,
 		getSessionMeta: async (id, t) => {
 			const [r] = await db
-				.select({ refreshedAt: table.tiktokAdsIntegration.ttSessionRefreshedAt })
+				.select({ refreshedAt: table.tiktokAdsIntegration.ttSessionRefreshedAt, hasCookies: sql<number>`length(coalesce(${table.tiktokAdsIntegration.ttSessionCookies}, ''))` })
 				.from(table.tiktokAdsIntegration)
 				.where(and(eq(table.tiktokAdsIntegration.id, id), eq(table.tiktokAdsIntegration.tenantId, t)))
 				.limit(1);
-			return r ? { refreshedAt: r.refreshedAt } : null;
+			return r ? { refreshedAt: r.refreshedAt, hasStoredCookies: r.hasCookies > 0 } : null;
 		},
 		markExpired: async (id, t) => {
 			await db
@@ -226,11 +228,27 @@ export async function refreshSessionHeadless(
 
 		const cookies = await cfg.getCookies(integrationId, tenantId);
 		if (!cookies || cookies.length === 0) {
+			// A stored-but-undecryptable blob (Turso truncation / key change) means a
+			// dead session that would otherwise keep showing "Active" forever and the
+			// keep-alive would silently no-op. Flip it to expired so the UI offers a
+			// re-paste and admins get notified. Genuinely-absent cookies stay no_cookies.
+			if (meta.hasStoredCookies) {
+				await cfg.markExpired(integrationId, tenantId);
+				logWarning(cfg.logSource, 'Stored cookies could not be decrypted — marking session expired', {
+					tenantId,
+					metadata: { integrationId, platform }
+				});
+				return { status: 'expired' };
+			}
 			return { status: 'no_cookies' };
 		}
 
 		const params = normalizeCookiesForInjection(cookies, platform);
 		if (params.length === 0) {
+			if (meta.hasStoredCookies) {
+				await cfg.markExpired(integrationId, tenantId);
+				return { status: 'expired' };
+			}
 			return { status: 'no_cookies' };
 		}
 
