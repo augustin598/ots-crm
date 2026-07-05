@@ -15,6 +15,7 @@ import { getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
 import { getDecryptedGoogleCookies } from '$lib/server/google-ads/google-cookies';
 import { getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
 import { FB_USER_AGENT } from '$lib/server/meta-ads/constants';
+import { refreshTtSessionViaApi } from '$lib/server/tiktok-ads/session-refresh';
 import { logInfo, logError, logWarning, serializeError, type LogSource } from '$lib/server/logger';
 
 /**
@@ -204,6 +205,14 @@ export async function refreshSessionHeadless(
 	integrationId: string,
 	opts: { skipIfFresherThanMs?: number } = {}
 ): Promise<HeadlessRefreshResult> {
+	// TikTok is validated purely via its billing API (fetch) — no browser at all.
+	// TikTok challenges a headless browser from a datacenter IP with 2FA, but the
+	// fetch-based download the API accepts the cookies directly, so a browser is
+	// both unnecessary and counter-productive here.
+	if (platform === 'tiktok') {
+		return refreshTtSessionViaApi(tenantId, integrationId, opts);
+	}
+
 	const cfg = ADAPTERS[platform];
 	const inFlight = getInFlight();
 	const flightKey = `${platform}:${integrationId}`;
