@@ -14,6 +14,7 @@ import {
 	notifyHostingAccountCreated,
 	notifyHostingPasswordReset
 } from '$lib/server/hosting/notifications';
+import { createHostingAccountFromDiscovery } from '$lib/server/hosting/create-account';
 import { logError } from '$lib/server/logger';
 
 /* ============================================================
@@ -1643,4 +1644,291 @@ export const reconcileHostingWithDA = command(async () => {
 		startedAt,
 		finishedAt: new Date().toISOString()
 	};
+});
+
+/* ============================================================
+ * DA → CRM discovery import (DirectAdmin is the source of truth)
+ *
+ * WHMCS import is retired. reconcileHostingWithDA checks CRM rows AGAINST DA
+ * (finds orphans/zombies) but never the reverse — DA users with no CRM row.
+ * These two exports close that gap: discover DA-only accounts, then import the
+ * ones staff approve. The insert path (createHostingAccountFromDiscovery) makes
+ * NO DirectAdmin write, so importing can never re-provision or mutate a live user.
+ * ============================================================ */
+
+const DiscoverDaOnlySchema = v.optional(v.object({ serverId: v.optional(v.string()) }));
+
+export type DiscoveredDaAccount = {
+	daServerId: string;
+	serverName: string | null;
+	serverHostname: string;
+	daUsername: string;
+	primaryDomain: string;
+	additionalDomains: string[];
+	daPackageName: string | null;
+	suspended: boolean;
+	daEmail: string | null;
+	/** null when no single active catalog product maps to the DA package (→ imports at 0). */
+	pricePreview: { amountCents: number; currency: string } | null;
+};
+
+export const getDiscoveredDaOnlyAccounts = query(DiscoverDaOnlySchema, async (filters) => {
+	const event = getRequestEvent();
+	const tenantId = tenantIdFromEvent(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.view');
+	if (actor.kind !== 'tenant') throw new Error('Forbidden');
+
+	const servers = await db
+		.select()
+		.from(table.daServer)
+		.where(
+			and(
+				eq(table.daServer.tenantId, tenantId),
+				eq(table.daServer.isActive, true),
+				filters?.serverId ? eq(table.daServer.id, filters.serverId) : undefined
+			)
+		);
+
+	// Price-preview maps, loaded once for the whole tenant:
+	//   (serverId::daName lowercased) → daPackageId ; daPackageId → single active product price.
+	const daPackages = await db
+		.select({
+			id: table.daPackage.id,
+			daServerId: table.daPackage.daServerId,
+			daName: table.daPackage.daName
+		})
+		.from(table.daPackage)
+		.where(eq(table.daPackage.tenantId, tenantId));
+	const packageIdByServerName = new Map<string, string>();
+	for (const p of daPackages) {
+		packageIdByServerName.set(`${p.daServerId}::${p.daName.toLowerCase()}`, p.id);
+	}
+
+	const products = await db
+		.select({
+			daPackageId: table.hostingProduct.daPackageId,
+			price: table.hostingProduct.price,
+			currency: table.hostingProduct.currency,
+			isActive: table.hostingProduct.isActive
+		})
+		.from(table.hostingProduct)
+		.where(eq(table.hostingProduct.tenantId, tenantId));
+	const productsByPackage = new Map<string, Array<{ price: number; currency: string }>>();
+	for (const pr of products) {
+		if (!pr.daPackageId || !pr.isActive || pr.price <= 0) continue;
+		const arr = productsByPackage.get(pr.daPackageId) ?? [];
+		arr.push({ price: pr.price, currency: (pr.currency || 'RON').toUpperCase() });
+		productsByPackage.set(pr.daPackageId, arr);
+	}
+
+	function pricePreview(
+		serverId: string,
+		packageName: string | null
+	): { amountCents: number; currency: string } | null {
+		if (!packageName) return null;
+		const pkgId = packageIdByServerName.get(`${serverId}::${packageName.toLowerCase()}`);
+		if (!pkgId) return null;
+		const list = productsByPackage.get(pkgId);
+		if (!list || list.length !== 1) return null;
+		return { amountCents: list[0].price, currency: list[0].currency };
+	}
+
+	const serverSummaries: Array<{
+		id: string;
+		name: string | null;
+		hostname: string;
+		ok: boolean;
+		error?: string;
+		daUserCount?: number;
+		daOnlyCount?: number;
+	}> = [];
+	const discovered: DiscoveredDaAccount[] = [];
+
+	for (const server of servers) {
+		try {
+			// CRM usernames already on this server (lowercased) — the set to subtract.
+			const crmRows = await db
+				.select({ daUsername: table.hostingAccount.daUsername })
+				.from(table.hostingAccount)
+				.where(
+					and(
+						eq(table.hostingAccount.tenantId, tenantId),
+						eq(table.hostingAccount.daServerId, server.id)
+					)
+				);
+			const crmSet = new Set(crmRows.map((r) => r.daUsername.trim().toLowerCase()));
+
+			const daClient = createDAClient(tenantId, server, { timeoutMs: 15000 });
+			const daUsers = await daClient.searchUsers();
+			const daOnly = daUsers.filter(
+				(u) => !crmSet.has((u.username ?? '').trim().toLowerCase())
+			);
+
+			// Full config per DA-only user (bounded concurrency) for package + suspended + all domains.
+			const configs = await mapWithConcurrency(daOnly, PER_SERVER_CONCURRENCY, async (u) => {
+				try {
+					return { u, cfg: await daClient.getUserConfig(u.username) };
+				} catch {
+					return { u, cfg: null };
+				}
+			});
+
+			let added = 0;
+			for (const { u, cfg } of configs) {
+				const primary = (cfg?.domain || u.domain || (cfg?.domains ?? [])[0] || '').trim();
+				if (!primary) continue;
+				const allDomains = cfg?.domains ?? [];
+				const packageName = cfg?.package ?? null;
+				discovered.push({
+					daServerId: server.id,
+					serverName: server.name,
+					serverHostname: server.hostname,
+					daUsername: u.username,
+					primaryDomain: primary,
+					additionalDomains: allDomains.filter(
+						(d) => d && d.toLowerCase() !== primary.toLowerCase()
+					),
+					daPackageName: packageName,
+					suspended: cfg?.suspended === true,
+					daEmail: cfg?.email ?? u.email ?? null,
+					pricePreview: pricePreview(server.id, packageName)
+				});
+				added++;
+			}
+			serverSummaries.push({
+				id: server.id,
+				name: server.name,
+				hostname: server.hostname,
+				ok: true,
+				daUserCount: daUsers.length,
+				daOnlyCount: added
+			});
+		} catch (err) {
+			serverSummaries.push({
+				id: server.id,
+				name: server.name,
+				hostname: server.hostname,
+				ok: false,
+				error: err instanceof Error ? err.message : String(err)
+			});
+		}
+	}
+
+	discovered.sort((a, b) => a.primaryDomain.localeCompare(b.primaryDomain));
+
+	return { scannedAt: new Date().toISOString(), servers: serverSummaries, discovered };
+});
+
+const ImportDaOnlySchema = v.object({
+	items: v.pipe(
+		v.array(
+			v.object({
+				daServerId: v.pipe(v.string(), v.minLength(1)),
+				daUsername: v.pipe(v.string(), v.minLength(1))
+			})
+		),
+		v.minLength(1),
+		v.maxLength(500)
+	)
+});
+
+type ImportResultRow = {
+	daServerId: string;
+	daUsername: string;
+	status: 'created' | 'skipped_exists' | 'failed';
+	id: string | null;
+	domain?: string;
+	priced?: boolean;
+	reason?: string;
+};
+
+export const importDaOnlyAccounts = command(ImportDaOnlySchema, async ({ items }) => {
+	const event = getRequestEvent();
+	const tenantId = tenantIdFromEvent(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.hosting.manage');
+	if (actor.kind !== 'tenant') throw new Error('Forbidden');
+
+	// Group by server so we build one DA client per server.
+	const byServer = new Map<string, string[]>();
+	for (const it of items) {
+		const list = byServer.get(it.daServerId) ?? [];
+		list.push(it.daUsername);
+		byServer.set(it.daServerId, list);
+	}
+
+	const serverIds = Array.from(byServer.keys());
+	const servers = await db
+		.select()
+		.from(table.daServer)
+		.where(and(inArray(table.daServer.id, serverIds), eq(table.daServer.tenantId, tenantId)));
+	const serverById = new Map(servers.map((s) => [s.id, s]));
+
+	const results: ImportResultRow[] = [];
+
+	for (const [serverId, usernames] of byServer.entries()) {
+		const server = serverById.get(serverId);
+		if (!server) {
+			for (const u of usernames) {
+				results.push({
+					daServerId: serverId,
+					daUsername: u,
+					status: 'failed',
+					id: null,
+					reason: 'server_not_found'
+				});
+			}
+			continue;
+		}
+		const daClient = createDAClient(tenantId, server, { timeoutMs: 15000 });
+		const rows = await mapWithConcurrency(usernames, PER_SERVER_CONCURRENCY, async (username) => {
+			try {
+				// Re-fetch DA config server-side — authoritative. Never trust a client-supplied
+				// domain/package (tenant-isolation + freshness).
+				const cfg = await daClient.getUserConfig(username);
+				const primary = (cfg.domain || (cfg.domains ?? [])[0] || '').trim();
+				if (!primary) {
+					return {
+						daServerId: serverId,
+						daUsername: username,
+						status: 'failed',
+						id: null,
+						reason: 'no_primary_domain'
+					} satisfies ImportResultRow;
+				}
+				const res = await createHostingAccountFromDiscovery(tenantId, {
+					daServerId: serverId,
+					daUsername: username,
+					domain: primary,
+					additionalDomains: cfg.domains ?? [],
+					daPackageName: cfg.package ?? null,
+					suspended: cfg.suspended === true,
+					daEmail: cfg.email ?? null
+				});
+				return {
+					daServerId: serverId,
+					daUsername: username,
+					status: res.action === 'created' ? 'created' : 'skipped_exists',
+					id: res.id,
+					domain: primary,
+					priced: res.priced
+				} satisfies ImportResultRow;
+			} catch (err) {
+				return {
+					daServerId: serverId,
+					daUsername: username,
+					status: 'failed',
+					id: null,
+					reason: err instanceof Error ? err.message : String(err)
+				} satisfies ImportResultRow;
+			}
+		});
+		results.push(...rows);
+	}
+
+	const created = results.filter((r) => r.status === 'created').length;
+	const skipped = results.filter((r) => r.status === 'skipped_exists').length;
+	const failed = results.filter((r) => r.status === 'failed').length;
+	return { created, skipped, failed, total: results.length, results };
 });

@@ -13,6 +13,7 @@
 	import ColumnManager from '$lib/components/hosting/column-manager.svelte';
 	import ClientGroupCard from '$lib/components/hosting/client-group-card.svelte';
 	import HostingAccountEditDialog from '$lib/components/hosting/hosting-account-edit-dialog.svelte';
+	import HostingDaImportDialog from '$lib/components/hosting/hosting-da-import-dialog.svelte';
 	import {
 		loadPersistedColumnConfig,
 		savePersistedColumnConfig,
@@ -29,6 +30,7 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import DownloadCloudIcon from '@lucide/svelte/icons/download-cloud';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
 	import CheckIcon from '@lucide/svelte/icons/check';
@@ -46,6 +48,7 @@
 	let showOnlyOverdue = $state(false);
 	let columnDrawerOpen = $state(false);
 	let editingAccountId = $state<string | null>(null);
+	let daImportOpen = $state(false);
 
 	const DEFAULT_CONFIG = buildDefaultConfig(HOSTING_ACCOUNT_COLUMNS, HOSTING_ACCOUNT_DEFAULT_VISIBLE);
 	let columnConfig = $state<ColumnConfig>(
@@ -298,6 +301,13 @@
 					<RefreshCwIcon class="size-4 {bulkSyncing ? 'animate-spin' : ''}" />
 					{bulkSyncing ? 'Sync…' : 'Sync DA'}
 				</button>
+				<button
+					type="button"
+					onclick={() => (daImportOpen = true)}
+					class="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-200"
+				>
+					<DownloadCloudIcon class="size-4" /> Import din DA
+				</button>
 				<a
 					href={`/${tenantSlug}/hosting/accounts/new`}
 					class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -506,6 +516,10 @@
 		onClose={() => (editingAccountId = null)}
 		onSaved={refresh}
 	/>
+{/if}
+
+{#if daImportOpen}
+	<HostingDaImportDialog onClose={() => (daImportOpen = false)} onImported={refresh} />
 {/if}
 
 {#if columnDrawerOpen}

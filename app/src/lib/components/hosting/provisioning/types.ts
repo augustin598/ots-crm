@@ -12,7 +12,10 @@ export type DaSyncStatus =
 	| 'active_on_da'
 	| 'package_mismatch'
 	| 'zombie_on_da'
-	| 'server_error';
+	| 'server_error'
+	// Set by the DA→CRM discovery import (createHostingAccountFromDiscovery): the row
+	// was imported from DirectAdmin and still needs a client (and possibly a price).
+	| 'da_only';
 
 export const DA_SYNC_LABELS: Record<DaSyncStatus, string> = {
 	ok: 'Confirmat pe DA',
@@ -21,7 +24,8 @@ export const DA_SYNC_LABELS: Record<DaSyncStatus, string> = {
 	active_on_da: 'Activ pe DA',
 	package_mismatch: 'Pachet diferit',
 	zombie_on_da: 'Încă există pe DA',
-	server_error: 'DA inaccesibil'
+	server_error: 'DA inaccesibil',
+	da_only: 'Importat din DA'
 };
 
 export type ProvisioningTrigger =

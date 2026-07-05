@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock, type DaAuditTrigger } from '$lib/server/plugins/directadmin/audit';
@@ -282,4 +282,219 @@ export async function createHostingAccountInternal(
 
 	// Unreachable — loop either returns or throws. Type-narrowing aid.
 	throw new Error('createHostingAccountInternal: exhausted retries without resolution');
+}
+
+// =============================================================================
+//  DA → CRM discovery import (WHMCS retired; DirectAdmin is the source of truth)
+// =============================================================================
+
+export interface DiscoveredDaAccountInput {
+	daServerId: string;
+	daUsername: string;
+	/** Primary domain as DA reports it (getUserConfig().domain / searchUsers().domain). */
+	domain: string;
+	/** All domains on the user MINUS the primary (addon/parked). */
+	additionalDomains?: string[] | undefined;
+	daPackageName?: string | null | undefined;
+	/** DA suspension flag → status 'suspended' vs 'active'. NEVER derives 'terminated'. */
+	suspended?: boolean | undefined;
+	/** DA account email — stored in notes for reference (hosting_account has no email column). */
+	daEmail?: string | null | undefined;
+}
+
+export interface DiscoveredImportResult {
+	action: 'created' | 'skipped_exists';
+	id: string | null;
+	daPackageId: string | null;
+	hostingProductId: string | null;
+	recurringAmount: number;
+	currency: string;
+	billingCycle: string;
+	/** true when the DA package resolved to a single active catalog product with price>0. */
+	priced: boolean;
+}
+
+/**
+ * Insert-only CRM row for a hosting account that ALREADY EXISTS live on DirectAdmin.
+ *
+ * This is the DA→CRM discovery/import path. WHMCS import is retired — DirectAdmin is now
+ * the single source of truth — so accounts created directly on DA (never provisioned through
+ * the CRM) need this to surface in `/hosting/accounts`.
+ *
+ * It is deliberately SEPARATE from `createHostingAccountInternal` because that helper ALWAYS
+ * provisions a NEW DA user via `daClient.createUserAccount` — calling it for an already-live
+ * user would error `username_exists` or, worse, mutate a live account. This helper performs
+ * NO DirectAdmin write of any kind; it only reads the CRM catalog to auto-price, then inserts.
+ *
+ * Decisions baked in (2026-07-01):
+ *  - clientId = null ("— Neasignat —"); staff assigns later from the accounts UI.
+ *  - Auto-price: DA package name → daPackage → the single active linked hostingProduct's price.
+ *    If no unique priced product maps, recurringAmount stays 0 and daSyncStatus='da_only' flags it.
+ *  - status derived ONLY from DA `suspended` ('suspended' | 'active') — NEVER 'terminated'
+ *    (strict CRM rule: no automated path sets terminated).
+ *  - Idempotent on (tenantId, daServerId, daUsername), case-insensitive — re-running skips.
+ *  - daCredentialsEncrypted stays null (DA does not expose plaintext passwords; do NOT reset
+ *    the live account's password to backfill).
+ *
+ * Caller MUST have authorized the actor (`assertCan(..., 'admin.hosting.manage')`).
+ */
+export async function createHostingAccountFromDiscovery(
+	tenantId: string,
+	input: DiscoveredDaAccountInput
+): Promise<DiscoveredImportResult> {
+	const [server] = await db
+		.select({ id: table.daServer.id })
+		.from(table.daServer)
+		.where(and(eq(table.daServer.id, input.daServerId), eq(table.daServer.tenantId, tenantId)))
+		.limit(1);
+	if (!server) throw new Error('Server DA inexistent sau aparține altui tenant.');
+
+	const usernameNorm = input.daUsername.trim();
+	if (!usernameNorm) throw new Error('daUsername gol.');
+	if (!input.domain.trim()) throw new Error('domain gol.');
+
+	// Idempotency: one CRM row per (tenant, server, DA username). Case-insensitive —
+	// DA listings are lowercased but a stored value could differ in case.
+	const [existing] = await db
+		.select({ id: table.hostingAccount.id })
+		.from(table.hostingAccount)
+		.where(
+			and(
+				eq(table.hostingAccount.tenantId, tenantId),
+				eq(table.hostingAccount.daServerId, input.daServerId),
+				sql`lower(${table.hostingAccount.daUsername}) = ${usernameNorm.toLowerCase()}`
+			)
+		)
+		.limit(1);
+	if (existing) {
+		return {
+			action: 'skipped_exists',
+			id: existing.id,
+			daPackageId: null,
+			hostingProductId: null,
+			recurringAmount: 0,
+			currency: 'RON',
+			billingCycle: 'monthly',
+			priced: false
+		};
+	}
+
+	// Resolve daPackageId from the DA package name (scoped to this server + tenant).
+	let daPackageId: string | null = null;
+	if (input.daPackageName) {
+		const [pkg] = await db
+			.select({ id: table.daPackage.id })
+			.from(table.daPackage)
+			.where(
+				and(
+					eq(table.daPackage.tenantId, tenantId),
+					eq(table.daPackage.daServerId, input.daServerId),
+					eq(table.daPackage.daName, input.daPackageName)
+				)
+			)
+			.limit(1);
+		daPackageId = pkg?.id ?? null;
+	}
+
+	// Auto-price: a DA package mapping to exactly ONE active catalog product with price>0
+	// yields the recurring amount + currency + cycle. Otherwise import at 0 and flag for review.
+	let hostingProductId: string | null = null;
+	let recurringAmount = 0;
+	let currency = 'RON';
+	let billingCycle = 'monthly';
+	let priced = false;
+	if (daPackageId) {
+		const products = await db
+			.select({
+				id: table.hostingProduct.id,
+				price: table.hostingProduct.price,
+				currency: table.hostingProduct.currency,
+				billingCycle: table.hostingProduct.billingCycle
+			})
+			.from(table.hostingProduct)
+			.where(
+				and(
+					eq(table.hostingProduct.tenantId, tenantId),
+					eq(table.hostingProduct.daPackageId, daPackageId),
+					eq(table.hostingProduct.isActive, true)
+				)
+			);
+		if (products.length === 1 && products[0].price > 0) {
+			hostingProductId = products[0].id;
+			recurringAmount = products[0].price;
+			currency = (products[0].currency || 'RON').toUpperCase();
+			billingCycle = products[0].billingCycle || 'monthly';
+			priced = true;
+		}
+	}
+
+	// status from DA suspension ONLY. Never 'terminated' (strict rule:
+	// feedback_never_auto_terminate_status).
+	const status = input.suspended ? 'suspended' : 'active';
+
+	const primaryLower = input.domain.trim().toLowerCase();
+	const additional = (input.additionalDomains ?? [])
+		.map((d) => (typeof d === 'string' ? d.trim() : ''))
+		.filter((d) => d && d.toLowerCase() !== primaryLower);
+
+	const id = generateId();
+	const now = new Date();
+
+	await withTursoBusyRetry(
+		() =>
+			db.insert(table.hostingAccount).values({
+				id,
+				tenantId,
+				clientId: null,
+				daServerId: input.daServerId,
+				daPackageId,
+				hostingProductId,
+				daUsername: usernameNorm,
+				domain: input.domain.trim(),
+				status,
+				daCredentialsEncrypted: null,
+				recurringAmount,
+				currency,
+				billingCycle,
+				daPackageName: input.daPackageName ?? null,
+				additionalDomains: additional.length ? additional : null,
+				daSyncStatus: 'da_only',
+				daSyncIssue: priced
+					? 'Importat din DirectAdmin. Atribuie client.'
+					: 'Importat din DirectAdmin. Atribuie client + verifică prețul (fără produs mapat).',
+				notes: input.daEmail ? `Email DA la import: ${input.daEmail}` : null,
+				lastSyncedAt: now.toISOString(),
+				suspendedAt: input.suspended ? now : null
+			}),
+		{ tenantId, label: `createHostingAccountFromDiscovery:${usernameNorm}` }
+	);
+
+	// Best-effort audit (mirror updateHostingAccountClient's pattern: 'package-change'
+	// reused as the "config change" enum value). A hiccup here must not fail the import.
+	await db
+		.insert(table.daAuditLog)
+		.values({
+			id: generateId(),
+			tenantId,
+			hostingAccountId: id,
+			daServerId: input.daServerId,
+			action: 'package-change',
+			trigger: 'manual',
+			success: true,
+			errorMessage: `imported from DA (discovery): ${usernameNorm} / ${input.domain.trim()}${
+				priced ? '' : ' [no price mapped]'
+			}`
+		})
+		.catch(() => {});
+
+	return {
+		action: 'created',
+		id,
+		daPackageId,
+		hostingProductId,
+		recurringAmount,
+		currency,
+		billingCycle,
+		priced
+	};
 }
