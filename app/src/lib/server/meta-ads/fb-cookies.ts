@@ -50,6 +50,7 @@ export async function saveFbSessionCookies(
 		.set({
 			fbSessionCookies: encrypted,
 			fbSessionStatus: 'active',
+			fbSessionRefreshedAt: new Date(),
 			updatedAt: new Date()
 		})
 		.where(

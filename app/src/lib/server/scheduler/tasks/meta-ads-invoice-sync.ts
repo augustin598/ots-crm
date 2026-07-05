@@ -4,12 +4,14 @@ import { eq, and, or } from 'drizzle-orm';
 import { logInfo, logError } from '$lib/server/logger';
 import { syncMetaAdsInvoicesForTenant } from '$lib/server/meta-ads/sync';
 import { downloadAllReceiptsForMonth } from '$lib/server/meta-ads/invoice-downloader';
+import { refreshFbSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
 import { createNotification } from '$lib/server/notifications';
 
 /**
  * Process Meta Ads sync: spending data + invoice PDF downloads.
- * Runs monthly (2nd of each month at 9AM).
+ * Runs monthly (1st of each month at 7:00 AM Europe/Bucharest).
  *
+ * Step 0: Headless FB session refresh (fresh cookies for the downloads)
  * Step 1: Sync spending data from Insights API
  * Step 2: Download billing PDF receipts from invoices_generator
  */
@@ -18,6 +20,7 @@ export async function processMetaAdsInvoiceSync() {
 
 	const integrations = await db
 		.select({
+			id: table.metaAdsIntegration.id,
 			tenantId: table.metaAdsIntegration.tenantId
 		})
 		.from(table.metaAdsIntegration)
@@ -31,6 +34,25 @@ export async function processMetaAdsInvoiceSync() {
 	const tenantIds = [...new Set(integrations.map(i => i.tenantId))];
 
 	logInfo('scheduler', `Found ${tenantIds.length} tenants with active Meta Ads integrations`, { metadata: { tenantCount: tenantIds.length } });
+
+	// Step 0: Refresh FB session cookies headless (best-effort — on failure the
+	// downloads below still run with the stored cookies, as before)
+	for (const integration of integrations) {
+		try {
+			const result = await refreshFbSessionHeadless(integration.tenantId, integration.id, {
+				skipIfFresherThanMs: 24 * 60 * 60 * 1000 // keep-alive at 5:00 already covers the 1st
+			});
+			logInfo('scheduler', `FB session pre-sync refresh: ${result.status}`, {
+				tenantId: integration.tenantId,
+				metadata: { integrationId: integration.id, status: result.status }
+			});
+		} catch (err) {
+			logError('scheduler', `FB session pre-sync refresh failed for integration ${integration.id}`, {
+				tenantId: integration.tenantId,
+				metadata: { error: err instanceof Error ? err.message : String(err) }
+			});
+		}
+	}
 
 	let totalImported = 0;
 	let totalUpdated = 0;

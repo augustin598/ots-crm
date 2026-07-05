@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount, getMappedMetaAdsClients } from '$lib/remotes/meta-ads-invoices.remote';
+	import { getMetaAdsSpendingList, triggerMetaAdsSync, getMetaInvoiceDownloads, redownloadInvoice, deleteInvoiceDownload, getMetaTokenStatus, getMetaAdsConnectionStatus, bulkDownloadMetaInvoices, getAccountsForInvoiceDownload, downloadInvoiceForAccount, getMappedMetaAdsClients, refreshFbSessionOnServer } from '$lib/remotes/meta-ads-invoices.remote';
 	import { page } from '$app/state';
 	import { Card } from '$lib/components/ui/card';
 	import ScraperPanel from '$lib/components/invoice-scraper/scraper-panel.svelte';
@@ -9,6 +9,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Download, Search, Eye, Trash2, FileArchive } from '@lucide/svelte';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
+	import ServerIcon from '@lucide/svelte/icons/server';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import JSZip from 'jszip';
 	import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
@@ -53,6 +54,60 @@
 		}
 		return null;
 	});
+	const sessionLastRefresh = $derived.by(() => {
+		const connections = connectionStatusQuery.current || [];
+		const dates = connections
+			.map((c: any) => (c.fbSessionRefreshedAt ? new Date(c.fbSessionRefreshedAt) : null))
+			.filter((d: Date | null): d is Date => d != null && !isNaN(d.getTime()));
+		if (dates.length === 0) return null;
+		return new Date(Math.max(...dates.map((d) => d.getTime())));
+	});
+
+	let refreshingSession = $state(false);
+
+	async function handleServerSessionRefresh() {
+		const connections = connectionStatusQuery.current || [];
+		if (connections.length === 0) return;
+		refreshingSession = true;
+		try {
+			let refreshed = 0;
+			const problems: string[] = [];
+			for (const conn of connections) {
+				const bm = conn.businessName || 'BM';
+				try {
+					const result = await refreshFbSessionOnServer({ integrationId: conn.id }).updates(connectionStatusQuery);
+					switch (result.status) {
+						case 'refreshed':
+							refreshed++;
+							break;
+						case 'expired':
+							problems.push(`${bm}: sesiune expirată — login manual necesar`);
+							break;
+						case 'no_cookies':
+							problems.push(`${bm}: fără cookie-uri salvate`);
+							break;
+						case 'busy':
+							problems.push(`${bm}: refresh deja în curs`);
+							break;
+						default:
+							problems.push(`${bm}: ${result.error || 'eroare necunoscută'}`);
+					}
+				} catch (e) {
+					clientLogger.apiError('fb_session_refresh', e, 'META_API_FETCH_FAILED');
+					problems.push(`${bm}: eroare la refresh`);
+				}
+			}
+			if (problems.length === 0) {
+				toast.success(`Sesiune Facebook reîmprospătată pe server pentru ${refreshed} BM-uri`);
+			} else if (refreshed > 0) {
+				toast.warning(`Reîmprospătate ${refreshed} BM-uri; probleme: ${problems.join(' · ')}`);
+			} else {
+				toast.error(problems.join(' · '));
+			}
+		} finally {
+			refreshingSession = false;
+		}
+	}
 
 	// Token expiration check
 	const tokenStatusQuery = getMetaTokenStatus();
@@ -652,6 +707,10 @@
 				{#if syncing}<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />Sincronizare...{:else}<RefreshCwIcon class="mr-2 h-4 w-4" />Sync Acum{/if}
 			</Button>
 			{#if firstIntegrationId}
+				<Button variant="outline" size="sm" onclick={handleServerSessionRefresh} disabled={refreshingSession}
+					title={sessionLastRefresh ? `Ultima reîmprospătare: ${sessionLastRefresh.toLocaleString('ro-RO')}` : 'Reîmprospătează sesiunea Facebook pe server (headless, fără fereastră)'}>
+					{#if refreshingSession}<ServerIcon class="mr-2 h-4 w-4 animate-pulse" />Refresh sesiune...{:else}<ServerIcon class="mr-2 h-4 w-4" />Refresh Sesiune (Server){/if}
+				</Button>
 				<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()}>
 					<MonitorIcon class="mr-2 h-4 w-4" />Scan cu Browser
 				</Button>
@@ -774,6 +833,10 @@
 				<a href="/{tenantSlug}/settings/meta-ads" class="underline font-medium ml-1">Settings → Meta Ads</a>
 			</p>
 		</div>
+	{:else if sessionLastRefresh}
+		<p class="text-xs text-muted-foreground">
+			Sesiune Facebook activă · ultima reîmprospătare: {sessionLastRefresh.toLocaleString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · se reîmprospătează automat pe server la 3 zile
+		</p>
 	{/if}
 
 	<!-- Token warning -->

@@ -4,13 +4,14 @@ import { eq, and } from 'drizzle-orm';
 import { getDecryptedFbCookies } from './fb-cookies';
 import { getAuthenticatedToken } from './auth';
 import { META_GRAPH_URL } from './client';
+import { FB_USER_AGENT } from './constants';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { uploadBuffer } from '$lib/server/storage';
 import JSZip from 'jszip';
 import type { FbCookie } from './fb-cookies';
 
 const INVOICES_GENERATOR_URL = 'https://business.facebook.com/ads/manage/invoices_generator/';
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+const USER_AGENT = FB_USER_AGENT;
 const DOWNLOAD_DELAY_MS = 2000;
 
 interface DownloadParams {
@@ -443,8 +444,11 @@ export async function downloadAllReceiptsForMonth(
 					}
 
 					if (!firstSaved && existing) {
-						// Update existing record with first PDF
+						// Update existing record with first PDF. Refresh clientId to the
+						// account's current client so a reassigned account's re-downloaded
+						// invoices follow the account, not the stale prior client.
 						const updateData: Record<string, unknown> = {
+							clientId: account.clientId!,
 							pdfPath: storagePath,
 							status: 'downloaded',
 							downloadedAt: new Date(),
@@ -545,6 +549,7 @@ export async function downloadAllReceiptsForMonth(
 										if (isFirstTx && existing) {
 											await db.update(table.metaInvoiceDownload)
 												.set({
+													clientId: account.clientId!,
 													pdfPath: upload.path,
 													txid: tx.txid,
 													amountText: tx.amount || null,

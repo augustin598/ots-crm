@@ -17,3 +17,10 @@ export const META_ACTIVE_AD_ACCOUNT_STATUSES = new Set([
 	META_AD_ACCOUNT_STATUS.ACTIVE,
 	META_AD_ACCOUNT_STATUS.IN_GRACE_PERIOD,
 ]);
+
+// Single User-Agent for everything that talks to business.facebook.com with the
+// stored session cookies (plain fetch downloads + headless session refresh).
+// Facebook binds sessions to browser fingerprints — the UA must stay identical
+// across all consumers of the same cookie jar or the session gets invalidated.
+export const FB_USER_AGENT =
+	'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';

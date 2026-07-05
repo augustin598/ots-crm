@@ -10,6 +10,8 @@ import { saveFbSessionCookies, clearFbSession, getDecryptedFbCookies } from '$li
 import { syncMetaAdsInvoicesForTenant } from '$lib/server/meta-ads/sync';
 import { generateSpendingReportPdf } from '$lib/server/meta-ads/spending-report-pdf';
 import { downloadAllReceiptsForMonth, downloadReceipt, downloadReceiptFromUrl, fetchBillingTransactions } from '$lib/server/meta-ads/invoice-downloader';
+import { refreshFbSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
+import { parseInvoicePeriod } from '$lib/server/meta-ads/date-parse';
 import { uploadBuffer, deleteFile } from '$lib/server/storage';
 import { logWarning } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
@@ -30,13 +32,17 @@ export const getMetaAdsConnectionStatus = query(async () => {
 	const enriched = await Promise.all(
 		connections.map(async (conn: any) => {
 			const [integration] = await db
-				.select({ fbSessionStatus: table.metaAdsIntegration.fbSessionStatus })
+				.select({
+					fbSessionStatus: table.metaAdsIntegration.fbSessionStatus,
+					fbSessionRefreshedAt: table.metaAdsIntegration.fbSessionRefreshedAt
+				})
 				.from(table.metaAdsIntegration)
 				.where(eq(table.metaAdsIntegration.id, conn.id))
 				.limit(1);
 			return {
 				...conn,
-				fbSessionStatus: integration?.fbSessionStatus || 'none'
+				fbSessionStatus: integration?.fbSessionStatus || 'none',
+				fbSessionRefreshedAt: integration?.fbSessionRefreshedAt ?? null
 			};
 		})
 	);
@@ -80,9 +86,14 @@ export const getMetaAdsSpendingList = query(async () => {
 	let conditions: any = eq(table.metaAdsSpending.tenantId, event.locals.tenant.id);
 
 	// If user is a client user, filter by their client ID
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.metaAdsSpending.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff. The `!user || !tenant` guard above is
+		// bypassable via the x-sveltekit-pathname header (see assertStaff), so
+		// without this a non-provisioned account could read all clients' spend.
+		await requireStaff(event);
 	}
 
 	const rows = await db
@@ -115,7 +126,7 @@ export const getMetaAdsSpendingList = query(async () => {
 		))
 		.where(conditions)
 		.orderBy(desc(table.metaAdsSpending.periodStart))
-		.limit(500);
+		.limit(5000);
 
 	return rows;
 });
@@ -172,9 +183,12 @@ export const getMappedMetaAdsClients = query(async () => {
 	);
 
 	// Client users only see their own mapped accounts
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.metaAdsAccount.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff (see assertStaff note above).
+		await requireStaff(event);
 	}
 
 	const accounts = await db
@@ -768,6 +782,49 @@ export const clearMetaAdsCookies = command(
 	}
 );
 
+/**
+ * Refresh the Facebook session server-side with a headless browser.
+ * Injects the stored cookies, visits the Billing Hub and saves back the
+ * rotated cookies — no visible browser, works in production.
+ */
+export const refreshFbSessionOnServer = command(
+	v.object({
+		integrationId: v.pipe(v.string(), v.minLength(1))
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw error(401, 'Unauthorized');
+		}
+		await requireStaff(event);
+		if (event.locals.isClientUser) {
+			throw error(401, 'Unauthorized');
+		}
+
+		const tenantId = event.locals.tenant.id;
+
+		// Verify integration belongs to tenant
+		const [integration] = await db
+			.select({ id: table.metaAdsIntegration.id })
+			.from(table.metaAdsIntegration)
+			.where(
+				and(
+					eq(table.metaAdsIntegration.id, data.integrationId),
+					eq(table.metaAdsIntegration.tenantId, tenantId)
+				)
+			)
+			.limit(1);
+
+		if (!integration) {
+			throw error(404, 'Integrare Meta Ads negăsită');
+		}
+
+		// Manual trigger → always run (no freshness skip)
+		const result = await refreshFbSessionHeadless(tenantId, data.integrationId);
+		return result;
+	}
+);
+
 /** Get all invoice downloads for the tenant (or filtered by client for client users) */
 export const getMetaInvoiceDownloads = query(async () => {
 	const event = getRequestEvent();
@@ -778,9 +835,12 @@ export const getMetaInvoiceDownloads = query(async () => {
 	let conditions: any = eq(table.metaInvoiceDownload.tenantId, event.locals.tenant.id);
 
 	// Client users: only primary client user sees their own downloads
-	if (event.locals.isClientUser && event.locals.client) {
-		if (!event.locals.isClientUserPrimary) return [];
+	if (event.locals.isClientUser) {
+		if (!event.locals.client || !event.locals.isClientUserPrimary) return [];
 		conditions = and(conditions, eq(table.metaInvoiceDownload.clientId, event.locals.client.id));
+	} else {
+		// Non-client callers must be staff (see assertStaff note above).
+		await requireStaff(event);
 	}
 
 	const rows = await db
@@ -808,7 +868,7 @@ export const getMetaInvoiceDownloads = query(async () => {
 		.leftJoin(table.client, eq(table.metaInvoiceDownload.clientId, table.client.id))
 		.where(conditions)
 		.orderBy(desc(table.metaInvoiceDownload.periodStart))
-		.limit(500);
+		.limit(5000);
 
 	return rows;
 });
@@ -1454,35 +1514,37 @@ export const bulkDownloadMetaInvoices = command(
 			throw error(400, 'Sesiune Facebook lipsă — setează cookies din Settings');
 		}
 
+		const numericAdAccountId = data.adAccountId.replace(/^act_/, '');
+
 		let downloaded = 0;
 		let skipped = 0;
 		let errors = 0;
 		const errorDetails: string[] = [];
 
 		for (const link of data.links) {
+			// Guard against attributing another account's receipt to this client:
+			// the URL's act= must match the selected account.
+			const actInUrl = link.url.match(/[?&]act=(\d+)/)?.[1];
+			if (actInUrl && actInUrl !== numericAdAccountId) {
+				errors++;
+				errorDetails.push(`Link cu act=${actInUrl} nu aparține contului selectat (${numericAdAccountId}) — sărit`);
+				continue;
+			}
+
 			// Extract txid from URL or from JSON field
 			const txidFromUrl = link.url.match(/txid=([^&]+)/);
 			const txid = link.txid || (txidFromUrl ? txidFromUrl[1] : undefined);
 
-			// Parse period from date string (e.g. "6 Jan 2025" or "2025-01-06")
-			let periodStart: string;
-			let periodEnd: string;
-			if (link.date) {
-				const d = new Date(link.date);
-				if (!isNaN(d.getTime())) {
-					const y = d.getFullYear();
-					const m = String(d.getMonth() + 1).padStart(2, '0');
-					periodStart = `${y}-${m}-01`;
-					const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
-					periodEnd = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
-				} else {
-					periodStart = '1970-01-01';
-					periodEnd = '1970-01-31';
-				}
-			} else {
-				periodStart = '1970-01-01';
-				periodEnd = '1970-01-31';
+			// Parse period from date string (ISO, English or Romanian). If the date
+			// is unparseable we do NOT invent an epoch period — skip the link so it
+			// never lands under the wrong month.
+			const period = parseInvoicePeriod(link.date);
+			if (!period) {
+				errors++;
+				errorDetails.push(`Dată nevalidă „${link.date ?? ''}" pentru ${link.invoiceId || link.invoiceNumber || txid || link.url.substring(0, 40)} — sărit`);
+				continue;
 			}
+			const { periodStart, periodEnd } = period;
 
 			// Check dedup by txid (primary) or fallback to period
 			if (txid) {
@@ -1495,7 +1557,8 @@ export const bulkDownloadMetaInvoices = command(
 					// Update invoiceNumber/amountText if missing or incorrect in DB but present in JSON
 					const updates: Record<string, unknown> = {};
 					const isMissingOrTxid = !existing.invoiceNumber || /^\d+-\d+$/.test(existing.invoiceNumber);
-					if (isMissingOrTxid && link.invoiceNumber) updates.invoiceNumber = link.invoiceNumber;
+					const linkInvoiceNumber = link.invoiceNumber || link.invoiceId;
+					if (isMissingOrTxid && linkInvoiceNumber) updates.invoiceNumber = linkInvoiceNumber;
 					if (link.amount) {
 						const [existingDl] = await db
 							.select({ amountText: table.metaInvoiceDownload.amountText })
@@ -1527,6 +1590,10 @@ export const bulkDownloadMetaInvoices = command(
 						{ type: 'meta-invoice', adAccountId: data.adAccountId, invoiceId: link.invoiceId || '' }
 					);
 
+					// Extractors put the FBADS number in either `invoiceNumber` or
+					// `invoiceId`; read both so a real invoice isn't misfiled as a credit.
+					const invoiceNumber = link.invoiceNumber || link.invoiceId || null;
+
 					await db.insert(table.metaInvoiceDownload).values({
 						id: crypto.randomUUID(),
 						tenantId,
@@ -1538,9 +1605,9 @@ export const bulkDownloadMetaInvoices = command(
 						periodStart,
 						periodEnd,
 						txid: txid || null,
-						invoiceNumber: link.invoiceNumber || null,
+						invoiceNumber,
 						amountText: link.amount || null,
-						invoiceType: link.invoiceNumber ? 'invoice' : 'credit',
+						invoiceType: invoiceNumber ? 'invoice' : 'credit',
 						pdfPath: upload.path,
 						status: 'downloaded',
 						downloadedAt: new Date(),

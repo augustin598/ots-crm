@@ -2432,6 +2432,7 @@ export const metaAdsIntegration = sqliteTable('meta_ads_integration', {
 	lastSyncResults: text('last_sync_results'), // JSON: {imported, errors, timestamp}
 	fbSessionCookies: text('fb_session_cookies'), // AES-256-GCM encrypted Facebook session cookies
 	fbSessionStatus: text('fb_session_status').notNull().default('none'), // 'none' | 'active'
+	fbSessionRefreshedAt: timestamp('fb_session_refreshed_at', { withTimezone: true, mode: 'date' }), // last time the FB session was confirmed alive (fresh cookies saved)
 	lastRefreshAttemptAt: timestamp('last_refresh_attempt_at', { withTimezone: true, mode: 'date' }),
 	lastRefreshError: text('last_refresh_error'),
 	consecutiveRefreshFailures: integer('consecutive_refresh_failures').default(0),

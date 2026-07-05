@@ -25,6 +25,7 @@ export interface MetaAdsInsightData {
 	clicks: string;
 	dateStart: string; // "2026-02-01"
 	dateStop: string; // "2026-02-28"
+	accountCurrency: string | null; // ISO code (RON/EUR/USD) — the ad account's billing currency
 }
 
 export interface MetaAdsCampaignInsight {
@@ -188,7 +189,7 @@ export async function listAdAccountInsights(
 
 	const proof = generateAppSecretProof(accessToken, appSecret);
 	const timeRange = JSON.stringify({ since, until });
-	const fields = 'spend,impressions,clicks';
+	const fields = 'spend,impressions,clicks,account_currency';
 
 	const params = new URLSearchParams({
 		fields,
@@ -218,7 +219,8 @@ export async function listAdAccountInsights(
 				impressions: row.impressions || '0',
 				clicks: row.clicks || '0',
 				dateStart: row.date_start,
-				dateStop: row.date_stop
+				dateStop: row.date_stop,
+				accountCurrency: typeof row.account_currency === 'string' ? row.account_currency : null
 			});
 		}
 

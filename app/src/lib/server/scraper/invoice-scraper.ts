@@ -1,13 +1,13 @@
 import puppeteer from 'puppeteer-core';
-import type { Browser, Page, Cookie } from 'puppeteer-core';
+import type { Browser, Page, Cookie, CookieParam } from 'puppeteer-core';
 import { findChromePath } from './find-chrome';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { join } from 'path';
 import { homedir } from 'os';
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'fs';
-import { saveFbSessionCookies } from '$lib/server/meta-ads/fb-cookies';
-import { saveGoogleSessionCookies } from '$lib/server/google-ads/google-cookies';
-import { saveTtSessionCookies } from '$lib/server/tiktok-ads/tt-cookies';
+import { saveFbSessionCookies, getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
+import { saveGoogleSessionCookies, getDecryptedGoogleCookies } from '$lib/server/google-ads/google-cookies';
+import { saveTtSessionCookies, getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -92,6 +92,134 @@ const COOKIE_DOMAINS: Record<ScraperPlatform, string[]> = {
 	google: ['.google.com', '.ads.google.com', '.payments.google.com'],
 	tiktok: ['.tiktok.com', '.business.tiktok.com']
 };
+
+// ── Stored-cookie injection ───────────────────────────────────────
+
+/**
+ * Shape of cookies as stored in the DB. Covers both sources:
+ * - puppeteer extraction (sameSite: 'Strict'|'Lax'|'None', expires: unix seconds)
+ * - Cookie-Editor JSON paste (sameSite: 'no_restriction'|'lax'|'strict'|'unspecified', expirationDate)
+ */
+export interface StoredCookie {
+	name: string;
+	value: string;
+	domain: string;
+	path?: string;
+	expires?: number;
+	expirationDate?: number;
+	httpOnly?: boolean;
+	secure?: boolean;
+	sameSite?: string | null;
+}
+
+const SAME_SITE_MAP: Record<string, CookieParam['sameSite']> = {
+	strict: 'Strict',
+	lax: 'Lax',
+	none: 'None',
+	no_restriction: 'None'
+};
+
+/**
+ * Convert DB-stored cookies (puppeteer or Cookie-Editor format) into puppeteer
+ * CookieParam objects safe to inject with page.setCookie().
+ * Filters out junk (empty name/value) and cookies outside the platform's domains.
+ */
+export function normalizeCookiesForInjection(
+	cookies: StoredCookie[],
+	platform: ScraperPlatform
+): CookieParam[] {
+	const domains = COOKIE_DOMAINS[platform];
+	const params: CookieParam[] = [];
+
+	for (const c of cookies) {
+		if (!c?.name || typeof c.value !== 'string' || c.value === '') continue;
+		if (!c.domain) continue;
+		const bareDomain = c.domain.replace(/^\./, '');
+		const inScope = domains.some((d) => {
+			const bare = d.replace(/^\./, '');
+			return bareDomain === bare || bareDomain.endsWith(`.${bare}`) || bare.endsWith(`.${bareDomain}`);
+		});
+		if (!inScope) continue;
+
+		const param: CookieParam = {
+			name: c.name,
+			value: c.value,
+			domain: c.domain,
+			path: c.path || '/'
+		};
+
+		// expires: unix seconds; -1/missing = session cookie (omit)
+		const expires = typeof c.expires === 'number' && c.expires > 0
+			? c.expires
+			: typeof c.expirationDate === 'number' && c.expirationDate > 0
+				? c.expirationDate
+				: undefined;
+		if (expires) param.expires = expires;
+
+		if (typeof c.httpOnly === 'boolean') param.httpOnly = c.httpOnly;
+		if (typeof c.secure === 'boolean') param.secure = c.secure;
+
+		if (c.sameSite) {
+			const mapped = SAME_SITE_MAP[String(c.sameSite).toLowerCase()];
+			if (mapped) param.sameSite = mapped;
+		}
+
+		params.push(param);
+	}
+
+	return params;
+}
+
+/**
+ * Load the decrypted DB-stored session cookies for a platform integration.
+ */
+export async function getStoredPlatformCookies(
+	platform: ScraperPlatform,
+	integrationId: string,
+	tenantId: string
+): Promise<StoredCookie[] | null> {
+	switch (platform) {
+		case 'meta':
+			return getDecryptedFbCookies(integrationId, tenantId);
+		case 'google':
+			return getDecryptedGoogleCookies(integrationId, tenantId);
+		case 'tiktok':
+			return getDecryptedTtCookies(integrationId, tenantId);
+	}
+}
+
+/**
+ * Inject the DB-stored session cookies into a page before navigation.
+ * Best-effort: on any failure the caller just proceeds to the login screen.
+ * Returns the number of injected cookies (0 = nothing injected).
+ */
+export async function injectStoredCookies(
+	page: Page,
+	platform: ScraperPlatform,
+	integrationId: string,
+	tenantId: string
+): Promise<number> {
+	try {
+		const stored = await getStoredPlatformCookies(platform, integrationId, tenantId);
+		if (!stored || stored.length === 0) return 0;
+
+		const params = normalizeCookiesForInjection(stored, platform);
+		if (params.length === 0) return 0;
+
+		await page.setCookie(...params);
+		logInfo('invoice-scraper', `Injected ${params.length} stored cookies for ${platform}`, {
+			tenantId,
+			metadata: { integrationId, storedCount: stored.length, injectedCount: params.length }
+		});
+		return params.length;
+	} catch (err) {
+		logWarning('invoice-scraper', `Cookie injection failed for ${platform}: ${err instanceof Error ? err.message : String(err)}`, {
+			tenantId,
+			metadata: { integrationId }
+		});
+		return 0;
+	}
+}
 
 // ── Interactive Browser Singleton ─────────────────────────────────
 
@@ -371,6 +499,10 @@ export async function createSession(
 	};
 
 	getSessions().set(sessionId, session);
+
+	// Inject DB-stored session cookies (if any) — with a still-valid session the
+	// browser lands directly logged in and the user skips the manual login step.
+	await injectStoredCookies(page, platform, integrationId, tenantId);
 
 	// Navigate to billing page
 	const { billingUrl } = LOGIN_INDICATORS[platform];

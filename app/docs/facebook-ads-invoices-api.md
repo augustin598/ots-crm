@@ -455,3 +455,33 @@ https://business.facebook.com/ads/manage/billing_transaction/?act=19834131578643
 - The "Download" button at the top of the page allows bulk CSV export (separate from individual PDFs)
 - Transaction details page: `/latest/billing_hub/payment_activity/transaction_details/?transaction_id={txid}&...`
 - External accounts (owned by other businesses like BeautyOne Bulgaria) may have limited access
+
+---
+
+## 11. Automated Session Keeper (2026-07-05)
+
+The manual "Scan cu Browser" laptop ritual is replaced by a **server-side headless
+session keeper**. The stored cookies (`metaAdsIntegration.fbSessionCookies`,
+AES-256-GCM) are now kept alive automatically:
+
+### Components
+
+| Piece | File | What it does |
+|-------|------|--------------|
+| Cookie injection | `src/lib/server/scraper/invoice-scraper.ts` (`normalizeCookiesForInjection`, `injectStoredCookies`) | DB cookies are injected into every scraper browser before navigation — a valid session skips the login step entirely (works headless) |
+| Headless refresh | `src/lib/server/scraper/headless-session-refresh.ts` (`refreshFbSessionHeadless`) | Fresh always-headless Chromium, injects cookies, visits Billing Hub, saves back the cookies Facebook rotated. Marks `fbSessionStatus='expired'` ONLY on explicit login/checkpoint redirects (never on timeouts) |
+| Keep-alive cron | `scheduler/tasks/fb-session-keepalive.ts`, jobId `fb-session-keepalive` | Every 3 days at 5:00 AM (`0 5 */3 * *` Europe/Bucharest); notifies admins on active→expired transition |
+| Monthly sync step 0 | `scheduler/tasks/meta-ads-invoice-sync.ts` | The 1st-of-month 7:00 AM invoice sync refreshes the session first (skipped if fresher than 24h — the 5:00 keep-alive already ran) |
+| UI | `/{tenant}/invoices/meta-ads` → "Refresh Sesiune (Server)" | Manual trigger via `refreshFbSessionOnServer` remote command; shows last refresh time (`fbSessionRefreshedAt`) |
+
+### Rules
+
+- **User-Agent must stay identical** across all consumers of the cookie jar:
+  everything uses `FB_USER_AGENT` from `src/lib/server/meta-ads/constants.ts`.
+- Identity continuity comes from the injected cookie jar (`datr`/`sb`), so pod
+  restarts don't matter — no persistent Chrome profile needed on the server.
+- Bootstrap (first login or after a Facebook checkpoint) is still manual:
+  cookie paste in Settings → Meta Ads, or "Scan cu Browser" on the laptop.
+  After bootstrap, the keeper maintains the session indefinitely.
+- Expired sessions are NOT hammered — keep-alive only touches integrations with
+  `fbSessionStatus='active'`.

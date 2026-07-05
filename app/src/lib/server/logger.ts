@@ -33,6 +33,7 @@ export type LogSource =
 	| 'tiktok-invoice-downloader'
 	| 'tt-cookies'
 	| 'invoice-scraper'
+	| 'fb-session-refresh'
 	| 'meta-scraper'
 	| 'google-scraper'
 	| 'tiktok-scraper'

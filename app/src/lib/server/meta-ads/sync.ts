@@ -164,43 +164,57 @@ async function syncForIntegration(
 			for (const insight of insights) {
 				const spendCents = spendToCents(insight.spend);
 
-				// Dedup: check if this period already exists
+				// Dedup on (tenant, account, period) — NOT clientId. Keying on
+				// clientId would leave a stale row behind when an account is
+				// reassigned to another client and insert a second row for the
+				// new client, double-counting the same spend across both. Keying
+				// on the account alone lets the update below MOVE the row to the
+				// account's current client instead.
 				const [existing] = await db
 					.select({
 						id: table.metaAdsSpending.id,
+						clientId: table.metaAdsSpending.clientId,
 						spendCents: table.metaAdsSpending.spendCents,
 						impressions: table.metaAdsSpending.impressions,
-						clicks: table.metaAdsSpending.clicks
+						clicks: table.metaAdsSpending.clicks,
+						periodEnd: table.metaAdsSpending.periodEnd
 					})
 					.from(table.metaAdsSpending)
 					.where(
 						and(
 							eq(table.metaAdsSpending.tenantId, tenantId),
 							eq(table.metaAdsSpending.metaAdAccountId, account.metaAdAccountId),
-							eq(table.metaAdsSpending.periodStart, insight.dateStart),
-							eq(table.metaAdsSpending.clientId, account.clientId!)
+							eq(table.metaAdsSpending.periodStart, insight.dateStart)
 						)
 					)
 					.limit(1);
 
 				const newImpressions = parseInt(insight.impressions) || 0;
 				const newClicks = parseInt(insight.clicks) || 0;
+				const currencyCode = insight.accountCurrency || 'RON';
 
 				if (existing) {
 					// Update if any metric changed (Meta/TikTok sometimes backfill
 					// impressions/clicks after the spend is already final — checking
-					// only spend misses those late updates).
+					// only spend misses those late updates), OR if the period end /
+					// client attribution has drifted (account reassigned, or the row
+					// was first inserted mid-month with a shorter period).
 					const metricsChanged =
 						existing.spendCents !== spendCents ||
 						existing.impressions !== newImpressions ||
-						existing.clicks !== newClicks;
+						existing.clicks !== newClicks ||
+						existing.periodEnd !== insight.dateStop ||
+						existing.clientId !== account.clientId!;
 
 					if (metricsChanged) {
 						await db
 							.update(table.metaAdsSpending)
 							.set({
+								clientId: account.clientId!,
+								periodEnd: insight.dateStop,
 								spendAmount: insight.spend,
 								spendCents,
+								currencyCode,
 								impressions: newImpressions,
 								clicks: newClicks,
 								syncedAt: new Date(),
@@ -221,7 +235,7 @@ async function syncForIntegration(
 						periodEnd: insight.dateStop,
 						spendAmount: insight.spend,
 						spendCents,
-						currencyCode: 'RON', // Meta Ads in Romania bills in RON
+						currencyCode,
 						impressions: parseInt(insight.impressions) || 0,
 						clicks: parseInt(insight.clicks) || 0,
 						syncedAt: new Date(),
