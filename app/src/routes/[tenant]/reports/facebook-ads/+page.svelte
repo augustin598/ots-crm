@@ -1,5 +1,5 @@
 <script lang="ts">
-	import './rk-report.css';
+	import '$lib/components/reports/rk/rk-report.css';
 	import {
 		getReportAdAccounts,
 		getMetaCampaignInsights,
@@ -41,23 +41,23 @@
 	import Pause from '@lucide/svelte/icons/pause';
 	import Search from '@lucide/svelte/icons/search';
 
-	import KpiRow from './components/KpiRow.svelte';
-	import SpendChart from './components/SpendChart.svelte';
-	import ComboChart from './components/ComboChart.svelte';
-	import AdvancedKpi from './components/AdvancedKpi.svelte';
-	import Audience from './components/Audience.svelte';
-	import Funnel from './components/Funnel.svelte';
-	import PlatformSplit from './components/PlatformSplit.svelte';
-	import FilterBar, { type RkFilters } from './components/FilterBar.svelte';
-	import ColumnManager from './components/ColumnManager.svelte';
-	import PresetSelect from './components/PresetSelect.svelte';
-	import { rkIcon } from './components/rk-icons';
+	import KpiRow from '$lib/components/reports/rk/KpiRow.svelte';
+	import SpendChart from '$lib/components/reports/rk/SpendChart.svelte';
+	import ComboChart from '$lib/components/reports/rk/ComboChart.svelte';
+	import AdvancedKpi from '$lib/components/reports/rk/AdvancedKpi.svelte';
+	import Audience from '$lib/components/reports/rk/Audience.svelte';
+	import Funnel from '$lib/components/reports/rk/Funnel.svelte';
+	import PlatformSplit from '$lib/components/reports/rk/PlatformSplit.svelte';
+	import FilterBar, { type RkFilters } from '$lib/components/reports/rk/FilterBar.svelte';
+	import ColumnManager from '$lib/components/reports/rk/ColumnManager.svelte';
+	import PresetSelect from '$lib/components/reports/rk/PresetSelect.svelte';
+	import { rkIcon } from '$lib/components/reports/rk/rk-icons';
 	import {
 		aggregateMetrics,
 		getObjectiveConfig,
 		getObjectiveKpis,
 		getDefaultKpis
-	} from './components/rk-helpers';
+	} from '$lib/components/reports/rk/rk-helpers';
 
 	import {
 		aggregateInsightsByDate,
