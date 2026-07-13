@@ -280,9 +280,15 @@ export const getMyAdAccounts = query(async () => {
 			metaAdAccountId: table.metaAdsAccount.metaAdAccountId,
 			accountName: table.metaAdsAccount.accountName,
 			integrationId: table.metaAdsAccount.integrationId,
-			clientId: table.metaAdsAccount.clientId
+			clientId: table.metaAdsAccount.clientId,
+			isActive: table.metaAdsAccount.isActive,
+			accountStatus: table.metaAdsAccount.accountStatus,
+			disableReason: table.metaAdsAccount.disableReason,
+			tokenExpiresAt: table.metaAdsIntegration.tokenExpiresAt,
+			integrationActive: table.metaAdsIntegration.isActive
 		})
 		.from(table.metaAdsAccount)
+		.leftJoin(table.metaAdsIntegration, eq(table.metaAdsAccount.integrationId, table.metaAdsIntegration.id))
 		.where(
 			and(
 				eq(table.metaAdsAccount.tenantId, event.locals.tenant.id),
@@ -301,7 +307,7 @@ export const getMyAdAccounts = query(async () => {
 			.where(eq(table.metaAdsSpending.metaAdAccountId, account.metaAdAccountId))
 			.orderBy(desc(table.metaAdsSpending.periodStart))
 			.limit(1);
-		result.push({ ...account, currency: spending?.currencyCode || 'RON' });
+		result.push({ ...account, currency: spending?.currencyCode || 'RON', integrationActive: account.integrationActive ?? true });
 	}
 
 	return result;
