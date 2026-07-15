@@ -98,6 +98,44 @@ export interface UpsertDiff {
 	before?: TemplateSnapshot | null;
 	after?: TemplateSnapshot;
 	priceSource?: PriceSource;
+	healed?: {
+		clientId?: { from: string; to: string };
+		nextRunDate?: { from: string; to: string };
+	};
+}
+
+export interface TemplateHeal {
+	/** New clientId to write, or null when the existing link is already correct. */
+	clientId: string | null;
+	/** nextRunDate to write (monotonic guard applied for templates that already generated). */
+	nextRunDate: Date;
+	changed: boolean;
+}
+
+/**
+ * Decide how to heal a template's clientId + nextRunDate against the
+ * account-derived values.
+ *
+ * - clientId: the hosting account's client is the source of truth. Templates
+ *   created against an import-time duplicate client (no email/CUI) would
+ *   otherwise stay wrong forever — the plain UPDATE branch never touched it.
+ * - nextRunDate: a template that has NEVER generated snaps to the computed
+ *   date (expiry - lead days). One that already generated may only move
+ *   FORWARD: the account's next_due_date only advances on payment, so a
+ *   backward move would re-bill the cycle the template just invoiced.
+ */
+export function resolveTemplateHeal(
+	existing: { clientId: string; nextRunDate: Date; lastRunDate: Date | null },
+	computed: { clientId: string | null; nextRunDate: Date }
+): TemplateHeal {
+	const clientId =
+		computed.clientId && computed.clientId !== existing.clientId ? computed.clientId : null;
+	const nextRunDate =
+		existing.lastRunDate == null || computed.nextRunDate.getTime() > existing.nextRunDate.getTime()
+			? computed.nextRunDate
+			: existing.nextRunDate;
+	const changed = clientId !== null || nextRunDate.getTime() !== existing.nextRunDate.getTime();
+	return { clientId, nextRunDate, changed };
 }
 
 /**
@@ -321,13 +359,16 @@ export async function upsertRecurringInvoiceForHostingAccount(
 	const [existing] = await db
 		.select({
 			id: table.recurringInvoice.id,
+			clientId: table.recurringInvoice.clientId,
 			amount: table.recurringInvoice.amount,
 			currency: table.recurringInvoice.currency,
 			recurringType: table.recurringInvoice.recurringType,
 			recurringInterval: table.recurringInvoice.recurringInterval,
 			taxRate: table.recurringInvoice.taxRate,
 			isActive: table.recurringInvoice.isActive,
-			lineItemsJson: table.recurringInvoice.lineItemsJson
+			lineItemsJson: table.recurringInvoice.lineItemsJson,
+			nextRunDate: table.recurringInvoice.nextRunDate,
+			lastRunDate: table.recurringInvoice.lastRunDate
 		})
 		.from(table.recurringInvoice)
 		.where(eq(table.recurringInvoice.hostingAccountId, args.hostingAccountId))
@@ -345,8 +386,32 @@ export async function upsertRecurringInvoiceForHostingAccount(
 			lineItemDescription: beforeDescription ?? ''
 		};
 
+		const heal = resolveTemplateHeal(
+			{
+				clientId: existing.clientId,
+				nextRunDate: existing.nextRunDate,
+				lastRunDate: existing.lastRunDate
+			},
+			{ clientId: args.clientId, nextRunDate: nextRun }
+		);
+		const healedDiff: UpsertDiff['healed'] = heal.changed
+			? {
+					...(heal.clientId
+						? { clientId: { from: existing.clientId, to: heal.clientId } }
+						: {}),
+					...(heal.nextRunDate.getTime() !== existing.nextRunDate.getTime()
+						? {
+								nextRunDate: {
+									from: existing.nextRunDate.toISOString().slice(0, 10),
+									to: heal.nextRunDate.toISOString().slice(0, 10)
+								}
+							}
+						: {})
+				}
+			: undefined;
+
 		// noop when nothing would change
-		if (snapshotsEqual(beforeSnapshot, afterSnapshot)) {
+		if (snapshotsEqual(beforeSnapshot, afterSnapshot) && !heal.changed) {
 			return { action: 'noop', before: beforeSnapshot, after: afterSnapshot, priceSource };
 		}
 
@@ -355,19 +420,26 @@ export async function upsertRecurringInvoiceForHostingAccount(
 				.update(table.recurringInvoice)
 				.set({
 					name,
+					...(heal.clientId ? { clientId: heal.clientId } : {}),
 					amount: effectiveAmount,
 					taxRate: taxRateBps,
 					currency: effectiveCurrency,
 					recurringType: cycleMap.type,
 					recurringInterval: cycleMap.interval,
-					nextRunDate: nextRun,
+					nextRunDate: heal.nextRunDate,
 					isActive: args.status === 'active',
 					lineItemsJson,
 					updatedAt: new Date()
 				})
 				.where(eq(table.recurringInvoice.id, existing.id));
 		}
-		return { action: 'updated', before: beforeSnapshot, after: afterSnapshot, priceSource };
+		return {
+			action: 'updated',
+			before: beforeSnapshot,
+			after: afterSnapshot,
+			priceSource,
+			healed: healedDiff
+		};
 	}
 
 	if (!dryRun) {
