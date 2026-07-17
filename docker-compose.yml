@@ -1,0 +1,35 @@
+# Local development dependencies.
+#
+# Production runs Redis 7.0.5 in k8s (quay.io/opstree/redis:v7.0.5), so dev pins
+# the same major.minor — a local Redis 8 would let us ship code that works here
+# and breaks there.
+#
+#   docker compose up -d      start
+#   docker compose down       stop (data survives in the named volume)
+#   docker compose down -v    stop and wipe the data
+#
+# Port and URL match app/.env: REDIS_URL=redis://localhost:6379
+# No password on purpose: prod authenticates, dev does not, and dev must never
+# hold a credential that could be pointed at prod by accident.
+
+services:
+  redis:
+    image: redis:7.0.5-alpine
+    container_name: crm-redis
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:6379:6379'
+    # appendonly keeps the queue's repeatable-job registrations across restarts.
+    # They are disposable (startScheduler re-registers them on boot), but losing
+    # them silently on every restart makes local scheduler behaviour confusing.
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
