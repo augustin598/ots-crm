@@ -14,6 +14,7 @@ import { env } from '$env/dynamic/private';
 import { requireStaff } from '$lib/server/get-actor';
 import { recordContractActivity } from '$lib/server/contract-activity';
 import { shouldZeroVatForClient } from '$lib/server/vat/classify-client';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 const DEBUG_EXTRACTION = () => env.DEBUG_CONTRACT_EXTRACTION === 'true';
 
@@ -224,7 +225,7 @@ export const getContracts = query(
 			.from(table.invoiceSettings)
 			.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
 			.limit(1);
-		const taxRate = settings?.defaultTaxRate ?? 19;
+		const taxRate = resolveVatPercent(settings?.defaultTaxRate);
 
 		const contractIds = contracts.map(c => c.id);
 		const priceMap = new Map<string, number>();

@@ -19,6 +19,7 @@ import * as table from '$lib/server/db/schema';
 import { logError, logInfo, logWarning } from '$lib/server/logger';
 import { mapInvoiceToKeez } from './mapper';
 import { createKeezClientForTenant } from './factory';
+import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
 
 function generateSyncId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -105,7 +106,8 @@ export async function pushInvoiceToKeez(
 
 		// Ensure all items exist in Keez before creating invoice
 		const itemExternalIds = new Map<string, string>();
-		const vatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
+		// A genuine 0% invoice (reverse charge / export) must stay 0% — never coerce to 19/21%.
+		const vatPercent = invoiceVatPercentFromBps(invoice.taxRate);
 		const currency = invoice.currency || settings?.defaultCurrency || 'RON';
 
 		// Trace entry: snapshot of CRM-side line items *before* we touch Keez.

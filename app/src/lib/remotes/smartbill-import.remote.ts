@@ -6,6 +6,8 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import XLSX from 'xlsx';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { vatPercentToBps } from '$lib/utils/vat';
 
 function generateClientId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -344,10 +346,17 @@ export const importInvoicesFromExcel = command(
 			const taxAmount = parseAmount(row['Valoare TVA'] || 0);
 			const totalAmount = parseAmount(row['Valoare Totala(RON)'] || row['Valoare Totala'] || 0);
 
-			// Calculate tax rate
-			let taxRate: number = 1900; // Default 19%
+			// Calculate tax rate. A genuine 0% invoice (taxAmount = 0) must stay 0% —
+			// the old `= 1900` default silently stamped 19% on zero-VAT imports. Only
+			// fall back to the RO standard when the rate is truly indeterminable (no
+			// net amount to divide by).
+			let taxRate: number;
 			if (amount > 0 && taxAmount > 0) {
 				taxRate = Math.round((taxAmount / amount) * 10000);
+			} else if (amount > 0) {
+				taxRate = 0;
+			} else {
+				taxRate = vatPercentToBps(DEFAULT_VAT_PERCENT);
 			}
 
 			// Map status

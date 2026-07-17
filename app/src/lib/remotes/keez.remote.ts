@@ -11,6 +11,7 @@ import { syncKeezInvoicesForTenant, KeezSyncAbortedError } from '$lib/server/plu
 import { cancelPendingKeezRetry, enqueueKeezRetry } from '$lib/server/scheduler/tasks/keez-invoice-sync-retry';
 import { handleKeezSyncFailure } from '$lib/server/plugins/keez/failure-handler';
 import { classifyKeezError } from '$lib/server/plugins/keez/error-classification';
+import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
 import {
 	mapInvoiceToKeez,
 	mapKeezInvoiceToCRM,
@@ -452,7 +453,9 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 
 	// Ensure all items exist in Keez before creating invoice
 	const itemExternalIds = new Map<string, string>();
-	const vatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
+	// taxRate is stored as bps (percent × 100). A genuine 0 (reverse charge /
+	// export / intracom) must stay 0 — never coerce a zero-VAT invoice to 19/21%.
+	const vatPercent = invoiceVatPercentFromBps(invoice.taxRate);
 	const currency = invoice.currency || settings?.defaultCurrency || 'RON';
 
 	for (const lineItem of lineItems) {

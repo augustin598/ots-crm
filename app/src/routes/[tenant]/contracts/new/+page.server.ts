@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 export const load: PageServerLoad = async (event) => {
 	const clients = await db
@@ -23,6 +24,6 @@ export const load: PageServerLoad = async (event) => {
 	return {
 		clients,
 		templates,
-		defaultTaxRate: invoiceSettings?.defaultTaxRate ?? 19
+		defaultTaxRate: resolveVatPercent(invoiceSettings?.defaultTaxRate)
 	};
 };

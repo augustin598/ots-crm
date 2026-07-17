@@ -1429,7 +1429,7 @@ export const invoiceSettings = sqliteTable('invoice_settings', {
 	// error if BNR rate is stale (>24h). Prevents silent exchangeRate=1 fallback.
 	whmcsStrictBnrConversion: boolean('whmcs_strict_bnr_conversion').notNull().default(true),
 	defaultCurrency: text('default_currency').notNull().default('RON'), // 'RON', 'EUR', 'USD'
-	defaultTaxRate: integer('default_tax_rate').notNull().default(19), // VAT percentage, e.g., 19 for 19%
+	defaultTaxRate: integer('default_tax_rate').notNull().default(21), // VAT percentage, e.g., 21 for RO standard (was 19 pre-2025)
 	invoiceEmailsEnabled: boolean('invoice_emails_enabled').notNull().default(true),
 	sendInvoiceEmailEnabled: boolean('send_invoice_email_enabled').notNull().default(true),
 	paidConfirmationEmailEnabled: boolean('paid_confirmation_email_enabled').notNull().default(true),

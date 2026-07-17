@@ -13,6 +13,7 @@
 	} from '$lib/components/ui/dialog';
 	import { X, Plus } from '@lucide/svelte';
 	import { extractErrorMessage } from '$lib/utils';
+	import { DEFAULT_VAT_PERCENT } from '$lib/utils/vat';
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
 	import { createKeezItem } from '$lib/remotes/keez.remote';
 
@@ -44,7 +45,7 @@
 		onRemove,
 		onKeezItemCreated,
 		currency = 'RON',
-		defaultTaxRate = 19
+		defaultTaxRate = DEFAULT_VAT_PERCENT
 	}: Props = $props();
 
 	// Dialog state for creating new Keez item

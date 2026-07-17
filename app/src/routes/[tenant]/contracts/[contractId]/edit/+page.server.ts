@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 export const load: PageServerLoad = async (event) => {
 	try {
@@ -21,7 +22,7 @@ export const load: PageServerLoad = async (event) => {
 			contract,
 			clients,
 			templates,
-			defaultTaxRate: invoiceSettings?.defaultTaxRate ?? 19
+			defaultTaxRate: resolveVatPercent(invoiceSettings?.defaultTaxRate)
 		};
 	} catch {
 		throw error(404, 'Contract not found');

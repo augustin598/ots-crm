@@ -5,6 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { resolveVatPercent, DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 
 function generateInvoiceSettingsId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -54,7 +55,7 @@ export const getInvoiceSettings = query(async () => {
 			whmcsZeroVatNoteExport: null,
 			whmcsStrictBnrConversion: true,
 			defaultCurrency: 'RON',
-			defaultTaxRate: 19,
+			defaultTaxRate: DEFAULT_VAT_PERCENT,
 			invoiceEmailsEnabled: true,
 			sendInvoiceEmailEnabled: true,
 			paidConfirmationEmailEnabled: true,
@@ -88,7 +89,7 @@ export const getInvoiceSettings = query(async () => {
 		whmcsZeroVatNoteExport: settings.whmcsZeroVatNoteExport,
 		whmcsStrictBnrConversion: settings.whmcsStrictBnrConversion ?? true,
 		defaultCurrency: settings.defaultCurrency || 'RON',
-		defaultTaxRate: settings.defaultTaxRate ?? 19,
+		defaultTaxRate: resolveVatPercent(settings.defaultTaxRate),
 		invoiceEmailsEnabled: settings.invoiceEmailsEnabled ?? true,
 		sendInvoiceEmailEnabled: settings.sendInvoiceEmailEnabled ?? true,
 		paidConfirmationEmailEnabled: settings.paidConfirmationEmailEnabled ?? true,
@@ -235,7 +236,7 @@ export const updateInvoiceSettings = command(
 				whmcsZeroVatNoteExport: data.whmcsZeroVatNoteExport ?? null,
 				whmcsStrictBnrConversion: data.whmcsStrictBnrConversion ?? true,
 				defaultCurrency: data.defaultCurrency || 'RON',
-				defaultTaxRate: data.defaultTaxRate ?? 19,
+				defaultTaxRate: resolveVatPercent(data.defaultTaxRate),
 				invoiceEmailsEnabled: data.invoiceEmailsEnabled ?? true,
 				sendInvoiceEmailEnabled: data.sendInvoiceEmailEnabled ?? true,
 				paidConfirmationEmailEnabled: data.paidConfirmationEmailEnabled ?? true,

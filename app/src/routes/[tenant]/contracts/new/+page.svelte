@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createContract } from '$lib/remotes/contracts.remote';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -103,7 +104,7 @@
 	}
 
 	// TVA rate from settings
-	const defaultTaxRate = $derived(data?.defaultTaxRate ?? 19);
+	const defaultTaxRate = $derived(resolveVatPercent(data?.defaultTaxRate));
 	let includeTVA = $state(true);
 
 	// Calculate total

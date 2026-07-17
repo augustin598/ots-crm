@@ -9,6 +9,7 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Receipt, Upload, X } from '@lucide/svelte';
 	import { CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
 
@@ -64,7 +65,7 @@
 			keezAutoSync = settings.keezAutoSync || false;
 			keezDefaultPaymentTypeId = String(settings.keezDefaultPaymentTypeId ?? 3);
 			defaultCurrency = (settings.defaultCurrency || 'RON') as Currency;
-			defaultTaxRate = settings.defaultTaxRate ?? 19;
+			defaultTaxRate = resolveVatPercent(settings.defaultTaxRate);
 			invoiceEmailsEnabled = settings.invoiceEmailsEnabled ?? true;
 			sendInvoiceEmailEnabled = settings.sendInvoiceEmailEnabled ?? true;
 			paidConfirmationEmailEnabled = settings.paidConfirmationEmailEnabled ?? true;

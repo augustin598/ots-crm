@@ -8,6 +8,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { generateInvoiceFromRecurringTemplate, calculateNextRunDate } from '$lib/server/invoice-utils';
 import { logInfo } from '$lib/server/logger';
 import { validateLineItems } from '$lib/server/recurring-invoice-validation';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 function generateRecurringInvoiceId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -127,7 +128,7 @@ export const createRecurringInvoice = command(recurringInvoiceSchema, async (dat
 		.limit(1);
 
 	const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
-	const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+	const defaultTaxRatePercent = resolveVatPercent(invoiceSettings?.defaultTaxRate);
 	const defaultTaxRateCents = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
 
 	let amount = 0;
@@ -341,7 +342,7 @@ export const updateRecurringInvoice = command(
 			.where(eq(table.invoiceSettings.tenantId, event.locals.tenant.id))
 			.limit(1);
 
-		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+		const defaultTaxRatePercent = resolveVatPercent(invoiceSettings?.defaultTaxRate);
 		const defaultTaxRateCents = defaultTaxRatePercent * 100;
 
 		// Validate line items before processing

@@ -38,3 +38,39 @@ export function computeVatBreakdown(netCents: number, vatPercent: number): VatBr
 export function vatPercentToBps(vatPercent: number): number {
 	return Math.round(vatPercent * 100);
 }
+
+/**
+ * Canonical fallback for the Romanian standard VAT rate, as an integer percent.
+ *
+ * Romania moved 19% → 21% in 2025. The normal path always reads the tenant's
+ * `invoiceSettings.defaultTaxRate`; this constant is ONLY the fallback for a
+ * tenant with no settings row (or a code path that has no settings loaded).
+ * Kept HERE (client-safe, no server imports) so Svelte pages and server code
+ * share ONE source — `$lib/server/vat/rate.ts` re-exports it for back-compat.
+ * Scattered `?? 19` / `?? 21` literals had drifted apart across the billing
+ * code (audit M3/GAP-10); resolve every fallback through here instead.
+ */
+export const DEFAULT_VAT_PERCENT = 21;
+
+/**
+ * Resolve a tenant's VAT percent from its (possibly missing) setting.
+ * `??` preserves a legitimate stored 0 (a fully reverse-charge tenant); only
+ * null/undefined falls back to the Romanian standard. Never hard-code 19/21 at
+ * the call site — route it through here.
+ */
+export function resolveVatPercent(settingRate: number | null | undefined): number {
+	return settingRate ?? DEFAULT_VAT_PERCENT;
+}
+
+/**
+ * Convert a stored invoice/line-item `taxRate` (percent × 100, bps) to an
+ * integer percent for downstream APIs (e.g. Keez article vatRate).
+ *
+ * A stored `0` means a genuine 0% invoice (reverse charge / export / intracom)
+ * and MUST stay 0 — the old `taxRate ? taxRate / 100 : 19` truthy-coerced 0 → 19
+ * and pushed 19% articles to Keez for zero-VAT invoices. Only a missing rate
+ * (null/undefined) falls back to the Romanian standard.
+ */
+export function invoiceVatPercentFromBps(taxRateBps: number | null | undefined): number {
+	return taxRateBps == null ? DEFAULT_VAT_PERCENT : taxRateBps / 100;
+}

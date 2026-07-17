@@ -39,6 +39,7 @@
 	} from '$lib/components/ui/dialog';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { CURRENCIES, type Currency, formatAmount } from '$lib/utils/currency';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
 	import { Calendar as CalendarIcon, X, Plus, Trash2, FileText, Send, Save, Hash, CreditCard, ArrowLeftRight, Percent, Clock, FolderOpen, RefreshCw, BadgePercent, Banknote, User, Building2, MapPin, Mail, Phone, Landmark } from '@lucide/svelte';
 	import { Calendar } from '$lib/components/ui/calendar';
@@ -446,7 +447,7 @@
 	);
 
 	// Get default tax rate from settings
-	const defaultTaxRate = $derived(invoiceSettings?.defaultTaxRate ?? 19);
+	const defaultTaxRate = $derived(resolveVatPercent(invoiceSettings?.defaultTaxRate));
 
 	// Calculate totals grouped by currency
 	const totalsByCurrency = $derived.by(() => {

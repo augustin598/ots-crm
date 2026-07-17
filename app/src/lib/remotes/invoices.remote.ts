@@ -9,6 +9,7 @@ import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 import { logInfo } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -231,7 +232,7 @@ export const createInvoiceFromService = command(
 			.limit(1);
 
 		const currency = invoiceSettings?.defaultCurrency || 'RON';
-		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+		const defaultTaxRatePercent = resolveVatPercent(invoiceSettings?.defaultTaxRate);
 		const taxRate = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
 		const taxAmount = Math.round((amount * taxRate) / 10000);
 		const totalAmount = amount + taxAmount;
@@ -324,7 +325,7 @@ export const createInvoice = command(
 			.limit(1);
 
 		const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
-		const defaultTaxRatePercent = invoiceSettings?.defaultTaxRate ?? 19;
+		const defaultTaxRatePercent = resolveVatPercent(invoiceSettings?.defaultTaxRate);
 		const defaultTaxRateCents = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
 		const taxApplicationType = data.taxApplicationType || 'apply';
 

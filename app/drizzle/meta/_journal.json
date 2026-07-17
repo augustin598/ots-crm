@@ -2766,6 +2766,13 @@
       "when": 1779916800027507,
       "tag": "0397_tt_session_refreshed_at",
       "breakpoints": true
+    },
+    {
+      "idx": 398,
+      "version": "6",
+      "when": 1779916800027508,
+      "tag": "0398_invoice_settings_default_tax_rate_21",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import Combobox from '$lib/components/ui/combobox/combobox.svelte';
 	import { CURRENCIES, CURRENCY_LABELS, type Currency } from '$lib/utils/currency';
+	import { DEFAULT_VAT_PERCENT, invoiceVatPercentFromBps } from '$lib/utils/vat';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -39,7 +40,7 @@
 	let clientId = $state('');
 	let projectId = $state('');
 	let amount = $state('');
-	let taxRate = $state('19');
+	let taxRate = $state(String(DEFAULT_VAT_PERCENT));
 	let currency = $state<Currency>('RON');
 	let status = $state('draft');
 	let issueDate = $state('');
@@ -53,7 +54,7 @@
 			clientId = invoice.clientId || '';
 			projectId = invoice.projectId || '';
 			amount = invoice.amount ? (invoice.amount / 100).toString() : '';
-			taxRate = invoice.taxRate ? (invoice.taxRate / 100).toString() : '19';
+			taxRate = String(invoiceVatPercentFromBps(invoice.taxRate));
 			currency = (invoice.currency || invoiceSettings?.defaultCurrency || 'RON') as Currency;
 			status = invoice.status || 'draft';
 			issueDate = invoice.issueDate ? new Date(invoice.issueDate).toISOString().split('T')[0] : '';

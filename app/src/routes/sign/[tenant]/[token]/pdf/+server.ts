@@ -7,6 +7,7 @@ import { encodeHexLowerCase } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
 import * as storage from '$lib/server/storage';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 function hashToken(token: string): string {
 	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
@@ -95,7 +96,7 @@ export const GET: RequestHandler = async ({ params }) => {
 		.where(eq(table.invoiceSettings.tenantId, tenant.id))
 		.limit(1);
 
-	const pdfBuffer = await generateContractPDF({ contract, lineItems, tenant, client, taxRate: invoiceSettings?.defaultTaxRate ?? 19 });
+	const pdfBuffer = await generateContractPDF({ contract, lineItems, tenant, client, taxRate: resolveVatPercent(invoiceSettings?.defaultTaxRate) });
 	const uint8 = new Uint8Array(pdfBuffer);
 
 	return new Response(uint8, {

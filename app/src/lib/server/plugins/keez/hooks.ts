@@ -6,6 +6,7 @@ import { createKeezClientForTenant, KeezCredentialsCorruptError } from './factor
 import { mapInvoiceToKeez, generateNextInvoiceNumber } from './mapper';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
 
 function generateSyncId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -135,8 +136,9 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	// Use invoiceCurrency if available, otherwise fall back to currency
 	const currency =
 		invoice.invoiceCurrency || invoice.currency || settings?.defaultCurrency || 'RON';
-	// Default VAT rate for items without specific tax rate
-	const defaultVatPercent = invoice.taxRate ? invoice.taxRate / 100 : 19;
+	// Default VAT rate for items without a specific tax rate. A genuine 0% invoice
+	// (reverse charge / export) must stay 0% — never coerce it to 19/21%.
+	const defaultVatPercent = invoiceVatPercentFromBps(invoice.taxRate);
 
 	for (const lineItem of lineItems) {
 		// If line item already has a Keez external ID (set on recurring invoice template items,

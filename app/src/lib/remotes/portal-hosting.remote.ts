@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 /**
  * Portal hosting remotes — read-only views for client portal users.
@@ -117,7 +118,7 @@ export const getAvailableHostingPackages = query(async () => {
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
-	const vatRate = settings?.defaultTaxRate ?? 19; // fallback dacă tenantul n-are settings
+	const vatRate = resolveVatPercent(settings?.defaultTaxRate);
 
 	const rows = await db
 		.select({

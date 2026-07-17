@@ -24,6 +24,24 @@ describe('classifyKeezError', () => {
 		e.name = 'AbortError';
 		expect(classifyKeezError(e)).toBe('transient');
 	});
+
+	test('plain Error("Not found") (the 404 shape from client.ts) → permanent', () => {
+		// A resolved-but-missing resource won't self-heal by retrying. The classifier
+		// must treat it as permanent, matching its own docstring (4xx = permanent),
+		// even though client.ts throws 404 as a bare Error, not a KeezClientError.
+		expect(classifyKeezError(new Error('Not found'))).toBe('permanent');
+	});
+
+	test('KeezClientError 404 → permanent (missing resource, not a transient blip)', () => {
+		expect(classifyKeezError(new KeezClientError('Not found', 404))).toBe('permanent');
+	});
+
+	test('KeezClientError 400 "nu exista" (missing invoice signal) → permanent', () => {
+		const body = '{"Code":"VALIDATION_ERROR","Message":"Factura (xxx) nu exista!"}';
+		expect(classifyKeezError(new KeezClientError(`Keez API client error 400: ${body}`, 400))).toBe(
+			'permanent'
+		);
+	});
 });
 
 describe('KeezClientError discriminates retry behaviour by status', () => {

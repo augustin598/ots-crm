@@ -15,7 +15,7 @@ import {
 	getPublishableKeyForTenant,
 	getOrCreateStripeTaxRate
 } from '$lib/server/plugins/stripe/factory';
-import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { DEFAULT_VAT_PERCENT, resolveVatPercent } from '$lib/server/vat/rate';
 import { computeVatBreakdown } from '$lib/utils/vat';
 import { getOrCreateStripeCustomer } from '$lib/server/stripe/customer';
 import { getOrCreateStripePrice } from '$lib/server/stripe/price';
@@ -94,7 +94,7 @@ export const getPublicHostingPackages = query(async () => {
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
-	const vatRate = settings?.defaultTaxRate ?? 19;
+	const vatRate = resolveVatPercent(settings?.defaultTaxRate);
 
 	// Public-safe tenant info for the footer ("Sediu / Telefon / Email / CUI / RegCom").
 	// These fields are publicly listed on invoices and the business registry — exposing

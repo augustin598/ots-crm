@@ -6,6 +6,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
 import * as storage from '$lib/server/storage';
 import { getRequestAccessFlags } from '$lib/server/portal-access';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 
 export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.isClientUser || !event.locals.client || !event.locals.tenant) {
@@ -81,7 +82,7 @@ export const GET: RequestHandler = async (event) => {
 		lineItems,
 		tenant: event.locals.tenant,
 		client: event.locals.client,
-		taxRate: invoiceSettings?.defaultTaxRate ?? 19
+		taxRate: resolveVatPercent(invoiceSettings?.defaultTaxRate)
 	});
 
 	const clientName = (event.locals.client.businessName || event.locals.client.name || 'Client').replace(/[^a-zA-Z0-9-_]/g, '_');

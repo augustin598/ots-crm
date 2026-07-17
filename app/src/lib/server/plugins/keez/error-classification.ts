@@ -36,6 +36,14 @@ export function classifyKeezError(error: unknown): FailureKind {
 		if (TRANSIENT_NETWORK_PATTERN.test(msg)) return 'transient';
 	}
 
+	// A resolved-but-missing resource is permanent — retrying won't recreate it.
+	// client.ts throws the 404 case as a bare `Error('Not found')` (not a
+	// KeezClientError), so it would otherwise slip through to the optimistic
+	// default below and be retried 4× over ~8.5h. Aligns with this module's own
+	// docstring (4xx = permanent). Network 'ENOTFOUND' etc. already returned
+	// 'transient' above, so it never reaches here.
+	if (isMissingOnKeez(error)) return 'permanent';
+
 	return 'transient';
 }
 

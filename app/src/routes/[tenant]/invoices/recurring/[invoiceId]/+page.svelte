@@ -32,6 +32,7 @@
 	} from '$lib/components/ui/dialog';
 	import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
 	import { CURRENCIES, type Currency, formatAmount } from '$lib/utils/currency';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
 	import { Calendar, X, Plus, Save } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
@@ -404,7 +405,7 @@
 	);
 
 	// Get default tax rate from settings
-	const defaultTaxRate = $derived(invoiceSettings?.defaultTaxRate ?? 19);
+	const defaultTaxRate = $derived(resolveVatPercent(invoiceSettings?.defaultTaxRate));
 
 	// Calculate totals grouped by currency
 	const totalsByCurrency = $derived.by(() => {

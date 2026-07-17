@@ -5,6 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { generateContractPDF } from '$lib/server/contract-pdf-generator';
 import { classifyClientVat } from '$lib/server/vat/classify-client';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 import * as storage from '$lib/server/storage';
 
 export const GET: RequestHandler = async (event) => {
@@ -71,7 +72,7 @@ export const GET: RequestHandler = async (event) => {
 		.limit(1);
 
 	const vatScenario = classifyClientVat({ country: client.country, cui: client.cui });
-	const settingsTaxRate = invoiceSettings?.defaultTaxRate ?? 19;
+	const settingsTaxRate = resolveVatPercent(invoiceSettings?.defaultTaxRate);
 	const effectiveTaxRate = vatScenario === 'ro_domestic' ? settingsTaxRate : 0;
 
 	const pdfBuffer = await generateContractPDF({
