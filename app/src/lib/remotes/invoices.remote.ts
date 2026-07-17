@@ -10,6 +10,13 @@ import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/serv
 import { logInfo } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
 import { resolveVatPercent, resolveVatBps } from '$lib/server/vat/rate';
+import { classifyClientVat } from '$lib/server/vat/classify-client';
+import {
+	DEFAULT_INTRACOM_NOTE,
+	DEFAULT_EXPORT_NOTE,
+	ZERO_VAT_NOTE_PREFIX,
+	appendZeroVatNote
+} from '$lib/server/whmcs/zero-vat-detection';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -326,8 +333,28 @@ export const createInvoice = command(
 
 		const currency = data.currency || invoiceSettings?.defaultCurrency || 'RON';
 		const defaultTaxRatePercent = resolveVatPercent(invoiceSettings?.defaultTaxRate);
-		const defaultTaxRateCents = defaultTaxRatePercent * 100; // Convert percentage to cents (19 → 1900)
-		const taxApplicationType = data.taxApplicationType || 'apply';
+		const defaultTaxRateCents = defaultTaxRatePercent * 100; // percent → bps (21 → 2100)
+
+		// VAT applies only to RO clients. An intracom/export client must be invoiced at 0%
+		// AND carry the legal mention. Mirrors the hosting/recurring path in invoice-utils.ts
+		// — the manual path never classified the client, so EU invoices went out at 0% but
+		// flagged 'apply' and with no note (audit 2026-07-17). Classification wins over
+		// whatever the form sent, same rule as invoice-utils.ts.
+		const [vatClient] = await db
+			.select({ country: table.client.country, cui: table.client.cui })
+			.from(table.client)
+			.where(
+				and(eq(table.client.id, data.clientId), eq(table.client.tenantId, event.locals.tenant.id))
+			)
+			.limit(1);
+		const zeroVatAutoDetect = invoiceSettings?.whmcsZeroVatAutoDetect ?? true;
+		const vatScenario =
+			vatClient && zeroVatAutoDetect
+				? classifyClientVat({ country: vatClient.country, cui: vatClient.cui })
+				: null;
+		const forceZeroVat = vatScenario === 'intracom' || vatScenario === 'export';
+
+		const taxApplicationType = forceZeroVat ? 'none' : data.taxApplicationType || 'apply';
 
 		// Use user-provided invoice series and number if provided, otherwise auto-generate
 		let invoiceNumber: string;
@@ -460,6 +487,17 @@ export const createInvoice = command(
 			}
 		}
 
+		// Append the zero-VAT legal mention for intracom/export clients. Wording comes from
+		// invoice settings (/[tenant]/settings/keez), falling back to the module defaults.
+		let finalNotes: string | null = data.notes || null;
+		if (forceZeroVat) {
+			const noteBody =
+				vatScenario === 'intracom'
+					? invoiceSettings?.whmcsZeroVatNoteIntracom?.trim() || DEFAULT_INTRACOM_NOTE
+					: invoiceSettings?.whmcsZeroVatNoteExport?.trim() || DEFAULT_EXPORT_NOTE;
+			finalNotes = appendZeroVatNote(finalNotes, ZERO_VAT_NOTE_PREFIX + noteBody);
+		}
+
 		const newInvoice = {
 			id: invoiceId,
 			tenantId: event.locals.tenant.id,
@@ -478,7 +516,7 @@ export const createInvoice = command(
 			dueDate: data.dueDate
 				? new Date(data.dueDate)
 				: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-			notes: data.notes || null,
+			notes: finalNotes,
 			invoiceSeries: data.invoiceSeries || null,
 			invoiceCurrency: data.invoiceCurrency || null,
 			paymentTerms: data.paymentTerms || null,
