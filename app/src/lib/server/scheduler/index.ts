@@ -105,9 +105,45 @@ function createSchedulerQueue() {
 	return queue;
 }
 
-export const schedulerQueue =
-	(globalThis as any)[SCHEDULER_QUEUE_SYMBOL] ||
-	((globalThis as any)[SCHEDULER_QUEUE_SYMBOL] = createSchedulerQueue());
+/** Resolve the queue singleton, creating it on first call. Distinct from the
+ *  public `getSchedulerQueue()` below, which just hands out the proxy. */
+function resolveSchedulerQueue(): Queue {
+	const existing = (globalThis as any)[SCHEDULER_QUEUE_SYMBOL];
+	if (existing) return existing;
+	return ((globalThis as any)[SCHEDULER_QUEUE_SYMBOL] = createSchedulerQueue());
+}
+
+/**
+ * The scheduler queue — created on FIRST USE, not at import.
+ *
+ * Why lazy: SvelteKit's build imports every `+server.ts` / `+page.server.ts` to
+ * read their exported config (`prerender`, `ssr`, …). Several of those modules
+ * reach this one, so a top-level `new Queue(...)` used to open an ioredis
+ * connection *during the build*. REDIS_URL isn't set there, so it fell back to
+ * localhost:6379 and retried for the whole build — thousands of ECONNREFUSED
+ * lines and steady memory growth, which OOMKilled the 4Gi build container
+ * (build #6caa5570, 2026-07-17). Deferring creation means an import costs
+ * nothing and only real runtime use connects.
+ *
+ * A Proxy (rather than a `getSchedulerQueue()` export) keeps the value shape
+ * every existing call site already expects — `schedulerQueue.add(...)` and
+ * friends — so nothing else had to change.
+ */
+export const schedulerQueue: Queue = new Proxy({} as Queue, {
+	get(_target, prop) {
+		const queue = resolveSchedulerQueue() as any;
+		const value = queue[prop];
+		// Bind methods to the real queue so `this` isn't the proxy.
+		return typeof value === 'function' ? value.bind(queue) : value;
+	},
+	set(_target, prop, value) {
+		(resolveSchedulerQueue() as any)[prop] = value;
+		return true;
+	},
+	has(_target, prop) {
+		return prop in (resolveSchedulerQueue() as any);
+	},
+});
 
 /**
  * Task handler type

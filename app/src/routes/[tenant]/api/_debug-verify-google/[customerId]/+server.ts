@@ -47,8 +47,12 @@ export const GET: RequestHandler = async (event) => {
 		refresh_token: integration.refreshToken,
 	});
 
+	// No suspension-reason field is selected: the Google Ads API has none (see
+	// docs/ads-status-mappings.md). Selecting `customer.suspension_reasons`
+	// returns UNRECOGNIZED_FIELD and fails this entire endpoint — which is
+	// exactly what it did until 2026-07-17.
 	const customerRows = await customer.query(`
-		SELECT customer.id, customer.status, customer.suspension_reasons
+		SELECT customer.id, customer.status
 		FROM customer
 		LIMIT 1
 	`);
