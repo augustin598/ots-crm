@@ -9,7 +9,7 @@ import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 import { logInfo } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
-import { resolveVatPercent } from '$lib/server/vat/rate';
+import { resolveVatPercent, resolveVatBps } from '$lib/server/vat/rate';
 
 function generateInvoiceLineItemId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -638,7 +638,9 @@ export const updateInvoice = command(
 
 		// Recalculate amounts if amount or taxRate changed
 		let amount = existing.amount || 0;
-		let taxRate = existing.taxRate || 1900;
+		// `||` here silently flipped a genuine 0% invoice (reverse charge / export) to
+		// 19% on ANY edit — taxRate is written back unconditionally below.
+		let taxRate = resolveVatBps(existing.taxRate);
 		let taxAmount = existing.taxAmount || 0;
 		let totalAmount = existing.totalAmount || 0;
 

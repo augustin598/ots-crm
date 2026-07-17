@@ -6,6 +6,7 @@
 		submitHostingOrder
 	} from '$lib/remotes/public-hosting.remote';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -18,7 +19,7 @@
 
 	const packagesQuery = getPublicHostingPackages();
 	const packages = $derived(packagesQuery.current?.packages ?? []);
-	const vatRate = $derived(packagesQuery.current?.vatRate ?? 21);
+	const vatRate = $derived(resolveVatPercent(packagesQuery.current?.vatRate));
 	const packageIdFromUrl = $derived(page.url.searchParams.get('package') ?? '');
 	const selectedPackage = $derived(packages.find((p) => p.id === packageIdFromUrl));
 

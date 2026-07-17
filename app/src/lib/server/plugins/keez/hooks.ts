@@ -158,8 +158,9 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		const itemCode = `CRM_${invoice.id.slice(0, 8)}_${lineItem.id.slice(0, 8)}`;
 		const uniqueName = `${lineItem.description || 'Item'} · #OTSH-${lineItem.id.slice(0, 4)}`;
 
-		// Use per-item tax rate if available, otherwise use invoice tax rate
-		const itemVatPercent = lineItem.taxRate ? lineItem.taxRate / 100 : defaultVatPercent;
+		// Use per-item tax rate if available, otherwise use invoice tax rate.
+		// `!= null` (not truthy) so a genuine 0% line keeps 0% on its Keez article.
+		const itemVatPercent = lineItem.taxRate != null ? lineItem.taxRate / 100 : defaultVatPercent;
 		// Use per-item currency if available, otherwise use invoice currency
 		const itemCurrency = lineItem.currency || currency;
 		// Map unit of measure - Keez uses measureUnitId as number (1 = "Buc")

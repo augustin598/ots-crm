@@ -8,6 +8,7 @@
 		type HostingOrderItemRow
 	} from '$lib/remotes/hosting-inquiries.remote';
 	import { getDAServers } from '$lib/remotes/da-servers.remote';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { getHostingProducts } from '$lib/remotes/hosting-products.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import { displayOrderId } from '$lib/utils/hosting-order-id';
@@ -272,7 +273,7 @@
 	function orderVatRate(o: HostingOrderRow): number {
 		const h = (o.items ?? []).find((i) => i.kind === 'hosting');
 		const d = domainItemOf(o);
-		return h?.vatRate ?? d?.vatRate ?? currentVatRate ?? 21;
+		return h?.vatRate ?? d?.vatRate ?? resolveVatPercent(currentVatRate);
 	}
 
 	/** Net (fără TVA) în cents pentru linia de hosting. `unitPriceCents` e stocat NET

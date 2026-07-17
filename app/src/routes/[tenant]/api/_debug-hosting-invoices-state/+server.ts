@@ -16,6 +16,7 @@
 
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 import * as table from '$lib/server/db/schema';
 import { and, eq, isNotNull, isNull, sql, desc, count } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
@@ -166,7 +167,7 @@ export const GET: RequestHandler = async (event) => {
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
-	const tenantDefaultTaxRateBps = (settingsRow?.defaultTaxRate ?? 21) * 100;
+	const tenantDefaultTaxRateBps = resolveVatPercent(settingsRow?.defaultTaxRate) * 100;
 
 	// 7a. Draft hosting invoices with taxRate ≠ current tenant default (typical:
 	//     drafts generated under 19% that need patching to 21%).

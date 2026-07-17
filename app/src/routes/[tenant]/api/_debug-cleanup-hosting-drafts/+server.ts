@@ -23,6 +23,7 @@
 
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 import * as table from '$lib/server/db/schema';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
@@ -64,7 +65,7 @@ export const POST: RequestHandler = async (event) => {
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
 
-	const tenantTaxRatePercent = settings?.defaultTaxRate ?? 21;
+	const tenantTaxRatePercent = resolveVatPercent(settings?.defaultTaxRate);
 	const tenantTaxRateBps = tenantTaxRatePercent * 100;
 
 	// All draft hosting invoices that haven't been pushed to Keez.

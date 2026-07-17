@@ -32,6 +32,7 @@
 		type AccountPaymentHistoryRow
 	} from '$lib/remotes/hosting-accounts.remote';
 	import { getDAServers, getDAPackagesForServer } from '$lib/remotes/da-servers.remote';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { getHostingProducts } from '$lib/remotes/hosting-products.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import PackageIcon from '@lucide/svelte/icons/package';
@@ -195,7 +196,7 @@
 						? '24 luni'
 						: CYCLE_LABEL[draft.billingCycle] ?? draft.billingCycle;
 		// `vat` = totalul cu TVA inclus (gross), la rata curentă a tenant-ului.
-		const vat = ron * (1 + (currentVatRate ?? 21) / 100);
+		const vat = ron * (1 + resolveVatPercent(currentVatRate) / 100);
 		return {
 			ron,
 			vat,

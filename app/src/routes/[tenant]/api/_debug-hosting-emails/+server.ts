@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 import * as table from '$lib/server/db/schema';
 import { and, desc, eq } from 'drizzle-orm';
 import {
@@ -336,7 +337,7 @@ export const GET: RequestHandler = async (event) => {
 			// Use tenant invoiceSettings.defaultTaxRate when available; fall back
 			// to 21 (Romania 2025+ standard rate) for the preview.
 			const previewSubtotal = account.recurringAmount || 4990;
-			const previewVatRate = 21;
+			const previewVatRate = DEFAULT_VAT_PERCENT;
 			const previewVatAmount = Math.round((previewSubtotal * previewVatRate) / 100);
 			rendered = await renderRenewalReminder({
 				tenantId,

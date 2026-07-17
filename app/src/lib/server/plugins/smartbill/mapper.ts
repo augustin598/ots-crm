@@ -1,5 +1,6 @@
 import type { Invoice, InvoiceLineItem, Client, Tenant } from '$lib/server/db/schema';
 import type { SmartBillInvoice, SmartBillProduct, SmartBillInvoiceResponse } from './client';
+import { resolveVatBps } from '$lib/server/vat/rate';
 
 /**
  * Convert CRM invoice to SmartBill invoice format
@@ -43,7 +44,7 @@ export function mapInvoiceToSmartBill(
 
 	for (const item of invoice.lineItems) {
 		// Use per-item tax rate if available, otherwise use invoice tax rate
-		const itemTaxRateCents = item.taxRate ?? invoice.taxRate ?? 1900;
+		const itemTaxRateCents = item.taxRate ?? resolveVatBps(invoice.taxRate);
 		const itemTaxPercentage = itemTaxRateCents / 100;
 
 		// Use per-item currency if available, otherwise use invoice currency
@@ -245,10 +246,12 @@ export function mapSmartBillResponseToInvoice(
 	taxAmount = Math.round(taxAmount * 100);
 	totalAmount = Math.round(totalAmount * 100);
 
-	// Determine tax rate (use first product's tax rate or default to 19%)
-	const taxRate = smartBillInvoice.products[0]?.taxPercentage
-		? Math.round(smartBillInvoice.products[0].taxPercentage * 100)
-		: 1900;
+	// Determine tax rate (use first product's tax rate, else the RO standard).
+	// A 0% product must import as 0%, so null-check rather than truthy-check.
+	const firstTaxPercentage = smartBillInvoice.products[0]?.taxPercentage;
+	const taxRate = resolveVatBps(
+		firstTaxPercentage != null ? Math.round(firstTaxPercentage * 100) : null
+	);
 
 	// Parse dates
 	const parseDate = (dateStr: string | undefined): Date | null => {

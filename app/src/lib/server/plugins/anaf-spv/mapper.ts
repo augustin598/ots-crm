@@ -9,6 +9,7 @@ import type {
 import type { ParsedUblInvoice } from './xml-parser';
 import type { AnafCompanyData } from './client';
 import { logInfo } from '$lib/server/logger';
+import { resolveVatBps } from '$lib/server/vat/rate';
 
 /**
  * Map parsed UBL invoice to CRM invoice format
@@ -30,10 +31,12 @@ export function mapUblInvoiceToCrm(
 	const taxAmount = Math.round(ublData.taxAmount * 100);
 	const totalAmount = Math.round(ublData.total * 100);
 
-	// Determine tax rate from line items or default to 19%
-	const taxRate = ublData.lineItems[0]?.taxRate
-		? Math.round(ublData.lineItems[0].taxRate * 100) // Convert percentage to cents (19% = 1900)
-		: 1900;
+	// Determine tax rate from line items, else the RO standard. A 0% line (reverse
+	// charge / export) must import as 0%, so null-check rather than truthy-check.
+	const firstLineTaxRate = ublData.lineItems[0]?.taxRate;
+	const taxRate = resolveVatBps(
+		firstLineTaxRate != null ? Math.round(firstLineTaxRate * 100) : null
+	);
 
 	// Map line items
 	const lineItems = ublData.lineItems.map((item, index) => {

@@ -5,6 +5,7 @@
 		validateCuiAndFetch
 	} from '$lib/remotes/public-hosting.remote';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -40,7 +41,7 @@
 
 	const packagesQuery = getPublicHostingPackages();
 	const packages = $derived<Pkg[]>((packagesQuery.current?.packages ?? []) as Pkg[]);
-	const vatRate = $derived(packagesQuery.current?.vatRate ?? 21);
+	const vatRate = $derived(resolveVatPercent(packagesQuery.current?.vatRate));
 	const tenantInfo = $derived(packagesQuery.current?.tenantInfo ?? null);
 	// Surfaced so the checkout modal can preload Stripe.js as soon as it
 	// opens — well before submitHostingOrder returns the per-intent key.

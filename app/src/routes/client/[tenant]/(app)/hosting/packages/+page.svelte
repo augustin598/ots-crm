@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getAvailableHostingPackages } from '$lib/remotes/portal-hosting.remote';
+	import { resolveVatPercent } from '$lib/utils/vat';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { page } from '$app/state';
@@ -14,7 +15,7 @@
 
 	const packagesQuery = getAvailableHostingPackages();
 	const packages = $derived(packagesQuery.current?.packages ?? []);
-	const vatRate = $derived(packagesQuery.current?.vatRate ?? 21);
+	const vatRate = $derived(resolveVatPercent(packagesQuery.current?.vatRate));
 	const loading = $derived(packagesQuery.loading && !packagesQuery.current);
 	const tenantSlug = $derived(page.params.tenant);
 

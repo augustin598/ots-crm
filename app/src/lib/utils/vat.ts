@@ -74,3 +74,17 @@ export function resolveVatPercent(settingRate: number | null | undefined): numbe
 export function invoiceVatPercentFromBps(taxRateBps: number | null | undefined): number {
 	return taxRateBps == null ? DEFAULT_VAT_PERCENT : taxRateBps / 100;
 }
+
+/**
+ * Resolve a stored `taxRate` that may be missing, staying in bps — the sibling of
+ * `resolveVatPercent` for the many code paths that keep the rate in bps
+ * (`invoice.taxRate`, `invoice_line_item.taxRate`).
+ *
+ * Use this instead of `taxRate || 1900`: `||` treats a genuine 0% invoice (reverse
+ * charge / export) as missing and silently stamps 19/21% on it. That bug shipped in
+ * updateInvoice and in the Keez/SmartBill/ANAF import mappers — a 0% invoice could be
+ * flipped to 19% by an unrelated edit. `??` only falls back on null/undefined.
+ */
+export function resolveVatBps(taxRateBps: number | null | undefined): number {
+	return taxRateBps ?? vatPercentToBps(DEFAULT_VAT_PERCENT);
+}

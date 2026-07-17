@@ -12,6 +12,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getLatestBnrRate, getLatestBnrRateWithDate } from '$lib/server/bnr/client';
 import { BnrRateStaleError } from '$lib/server/whmcs/errors';
 import { logWarning, logError, serializeError } from '$lib/server/logger';
+import { resolveVatBps, invoiceVatPercentFromBps } from '$lib/server/vat/rate';
 import type {
 	KeezInvoice,
 	KeezInvoiceDetail,
@@ -434,7 +435,8 @@ export async function mapInvoiceToKeez(
 					// Use per-item tax rate if available, otherwise use invoice tax rate
 					// If taxApplicationType is 'none', force VAT to 0
 					const taxAppType = invoice.taxApplicationType || 'apply';
-					const itemTaxRateCents = taxAppType === 'none' ? 0 : (item.taxRate ?? invoice.taxRate ?? 1900);
+					const itemTaxRateCents =
+						taxAppType === 'none' ? 0 : (item.taxRate ?? resolveVatBps(invoice.taxRate));
 					const itemVatPercent = itemTaxRateCents / 100;
 
 					// Use item currency if available, otherwise use invoice currency
@@ -646,7 +648,7 @@ export async function mapInvoiceToKeez(
 				})
 			: (() => {
 					// If no line items, create a generic one from invoice totals
-					const fallbackVatPercent = (invoice.taxRate ?? 1900) / 100;
+					const fallbackVatPercent = invoiceVatPercentFromBps(invoice.taxRate);
 					const fallbackNetRON = Math.round(((invoice.amount || 0) / 100) * 100) / 100;
 					const fallbackVatRON = Math.round(((invoice.taxAmount || 0) / 100) * 100) / 100;
 					const fallbackGrossRON = Math.round(((invoice.totalAmount || 0) / 100) * 100) / 100;
@@ -849,11 +851,10 @@ export function mapKeezInvoiceToCRM(
 	taxAmount = Math.round(taxAmount * 100);
 	totalAmount = Math.round(totalAmount * 100);
 
-	// Determine tax rate (use first detail's tax rate or default to 19%)
+	// Determine tax rate (use first detail's tax rate, else the RO standard).
+	// A 0% detail must import as 0%, so null-check rather than truthy-check.
 	const firstVat = keezInvoice.invoiceDetails[0]?.vatPercent;
-	const taxRate = firstVat !== undefined && firstVat !== null
-		? Math.round(firstVat * 100)
-		: 1900;
+	const taxRate = resolveVatBps(firstVat != null ? Math.round(firstVat * 100) : null);
 
 	// Parse dates
 	// Keez API returns dates in YYYYMMDD format as numbers (e.g., 20260112 = 2026-01-12)

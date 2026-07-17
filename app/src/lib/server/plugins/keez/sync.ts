@@ -6,6 +6,7 @@ import { createKeezClientForTenant } from './factory';
 import type { KeezInvoiceHeader } from './client';
 import { mapKeezInvoiceToCRM, mapKeezDetailsToLineItems, findOrCreateClientForKeezPartner } from './mapper';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { resolveVatBps } from '$lib/server/vat/rate';
 import { clearNotificationsByType } from '$lib/server/notifications';
 import { classifyKeezError } from './error-classification';
 import { reconcileMissingKeezInvoices } from './sync-reconcile';
@@ -548,7 +549,8 @@ async function _syncKeezInvoicesForTenantInner(
 						invoiceNumber: invoiceInsertData.invoiceNumber || invoiceHeader.externalId,
 						status: invoiceInsertData.status || 'sent',
 						amount: invoiceInsertData.amount || 0,
-						taxRate: invoiceInsertData.taxRate || 1900,
+						// `||` would import a genuine 0% Keez invoice as 19%.
+						taxRate: resolveVatBps(invoiceInsertData.taxRate),
 						taxAmount: invoiceInsertData.taxAmount || 0,
 						totalAmount: invoiceInsertData.totalAmount || 0,
 						currency: invoiceInsertData.currency || 'RON',

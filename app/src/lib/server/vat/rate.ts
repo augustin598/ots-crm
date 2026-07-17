@@ -9,4 +9,9 @@
  * `invoiceSettings.defaultTaxRate` (tenant-scoped); these helpers are ONLY the
  * fallback for a tenant with no invoiceSettings row.
  */
-export { DEFAULT_VAT_PERCENT, resolveVatPercent, invoiceVatPercentFromBps } from '$lib/utils/vat';
+export {
+	DEFAULT_VAT_PERCENT,
+	resolveVatPercent,
+	invoiceVatPercentFromBps,
+	resolveVatBps
+} from '$lib/utils/vat';
