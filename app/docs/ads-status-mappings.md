@@ -91,6 +91,34 @@ Forward-compat: dacă Meta adaugă `disable_reason` necunoscut (e.g. cod 13+), t
 - [CustomerStatusEnum](https://developers.google.com/google-ads/api/reference/rpc/latest/CustomerStatusEnum)
 - [BillingSetupStatusEnum](https://developers.google.com/google-ads/api/reference/rpc/latest/BillingSetupStatusEnum)
 
+### Verificare LIVE a mapărilor (2026-07-17)
+
+Nu te baza pe „verificat împotriva docs" — asta a lăsat `suspension_reasons`
+(câmp inexistent) să treacă drept funcțional luni de zile. Mapările int→string
+sunt confirmate prin **două metode independente care se validează reciproc**:
+
+1. **Empiric:** aceeași interogare GAQL prin REST (întoarce *numele* enum-ului,
+   serializat de server) și prin bibliotecă (întoarce *numărul*), corelate după id.
+2. **Proto:** `import { enums } from 'google-ads-api'` → numerotarea compilată.
+
+| int | Google real | noi | confirmat |
+|---|---|---|---|
+| 2 | `ENABLED` | `ENABLED` | 40 conturi live + proto |
+| 3 | `CANCELED` | `CANCELLED` | 37 conturi live + proto |
+| 4 | `SUSPENDED` | `SUSPENDED` | 1 cont live + proto |
+| 5 | `CLOSED` | `CLOSED` | 2 conturi live + proto |
+
+`billing_setup.status`: **4 = APPROVED confirmat live** pe 11 billing setup-uri
+reale (exact maparea inversată în incidentul din 2026-04-22). Valorile 2 PENDING,
+3 APPROVED_HELD, 5 CANCELLED sunt confirmate din proto — nu apar în datele noastre,
+deci nu pot fi confirmate empiric.
+
+**Capcană — nu repeta greșeala:** `SELECT ... enum_values` din `googleAdsFields`
+întoarce valorile **sortate alfabetic**, NU în ordinea numerică din proto. Dacă
+tratezi indexul ca valoare numerică, obții „nepotriviri" complet false
+(CANCELED, CLOSED, ENABLED, SUSPENDED... arată ca 0,1,2,3 — dar nu sunt).
+Folosește REST-vs-bibliotecă sau proto-ul.
+
 ### `CustomerStatusEnum` (convertit din int → string în `client.ts`)
 
 | Cod | Simbol | Mapare |
