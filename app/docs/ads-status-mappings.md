@@ -85,7 +85,11 @@ Forward-compat: dacă Meta adaugă `disable_reason` necunoscut (e.g. cod 13+), t
 
 ---
 
-## Google Ads API v17+
+## Google Ads API v21
+
+Endpoint-ul live e **v21** (`https://googleads.googleapis.com/v21/...`) — verificat
+2026-07-17; v20 întoarce deja `INVALID_ARGUMENT`. Titlul zicea „v17+" fără ca
+nimeni să fi confirmat vreodată versiunea reală.
 
 **Surse:**
 - [CustomerStatusEnum](https://developers.google.com/google-ads/api/reference/rpc/latest/CustomerStatusEnum)
@@ -222,6 +226,54 @@ perfect sănătoase (4 din 9 live) — sunt performanță, nu plată. Mapate la
 
 ---
 
+### De ce nu există semnal direct — confirmat extern (2026-07-17)
+
+Întrebarea „chiar nu se poate mai bine?" a fost pusă și cercetată. Răspuns: **nu**,
+și e confirmat de Google însuși. Nu relua căutarea; citește asta.
+
+**Nu există alertă de sold în API.** Echipa Google, pe forumul oficial:
+> „this functionality is not currently supported via the Google Ads API… there are
+> no alternative methods to monitor account balance and set up low balance alerts
+> via the API"
+
+Se potrivește cu măsurătoarea noastră: `SELECT name WHERE name LIKE '%balance%'`
+și `'%unpaid%'` pe catalogul `googleAdsFields` → **zero câmpuri**.
+
+**Nu există motiv de suspendare.** Tot Google:
+> „The status for suspended accounts is currently not available in the Google Ads
+> API, though Google's team has submitted a feature request for this subject"
+> „you cannot check the status of accounts via the API or check if the account has
+> payment issues — the only way to check on the status of these accounts is
+> through the UI"
+
+**Documentația de billing** expune exact 3 resurse — `BillingSetup`, `AccountBudget`,
+`Invoice`. Niciun sold, nicio alertă, niciun semnal de oprire a difuzării.
+
+**Resursa `invoice` NU e o opțiune pentru noi.** Cere facturare lunară. Testat live
+pe conturile noastre (card/plată manuală): `SELECT invoice.id, invoice.due_date …`
+→ `UNRECOGNIZED_FIELD`. Deci nu putem detecta facturi scadente pe ruta asta.
+
+**Workaround-ul recomandat de comunitate = exact ce am implementat:** monitorizarea
+livrării (impresii) sau calculul din rapoarte. Nu există cale directă.
+
+**Atenție la forumuri:** multe răspunsuri sunt din era AdWords API și afirmă că
+„conturile nu au deloc câmp de status". **Fals azi** — `customer.status` există și
+i-am confirmat live valoarea `SUSPENDED` pe un cont real. Verifică orice afirmație
+de pe forum împotriva catalogului `googleAdsFields` înainte s-o crezi.
+
+**Nefolosit intenționat:** `metrics.search_budget_lost_impression_share` arată cât
+trafic pierzi din buget — dar e performanță, nu plată; pe o pagină de status plată
+ar produce același zgomot ca `BUDGET_CONSTRAINED`.
+
+Surse:
+- <https://groups.google.com/g/adwords-api/c/PKwAU1ZI1HQ> — low balance alerts: nesuportat
+- <https://groups.google.com/g/adwords-api/c/U--urRADnO8> — status cont suspendat via API
+- <https://groups.google.com/g/adwords-api/c/PMnD1kmZPdg> — suspendare pentru sold restant
+- <https://developers.google.com/google-ads/api/docs/billing/overview> — resursele de billing
+- <https://developers.google.com/google-ads/api/docs/billing/billing-setups> — statusuri billing_setup (a treia confirmare a mapării)
+
+---
+
 ## TikTok Business API v1.3
 
 **Sursă:** [/v1.3/advertiser/info/](https://business-api.tiktok.com/portal/docs?id=1738449495615490)
@@ -270,9 +322,27 @@ Clasificatorul pur: [`campaign-health.ts:classifySecondaryStatus`](../src/lib/se
 
 ---
 
-## Date reale observate (tenant OTS, 2026-04-22)
+## Date reale observate (tenant OTS)
 
-Pe acest tenant specific, la primul run cu fix-ul aplicat:
+### 2026-07-17 — Google, cele 9 conturi cu client
+
+Măsurat live (impresii reale vs. status raportat):
+
+| Cont | camp. ENABLED | imp. 7z | status API | al nostru |
+|---|---|---|---|---|
+| Casaelena.ro | 2 | 28.465 | ENABLED+APPROVED | `ok` |
+| Heylux.ro | 3 | 384.040 | ENABLED+APPROVED | `ok` |
+| Wow Agency | 4 | 150.049 | ENABLED+APPROVED | `ok` |
+| beautyoneshop.ro | 4 | 21.831 | ENABLED+APPROVED | `ok` |
+| New - Gomad.ro | 3 | 7.790 | ENABLED+APPROVED | `ok` |
+| **DS TECH SERVICES** | **2** | **0** | **ENABLED+APPROVED** | **`risk_review` / no_delivery** |
+| Meduza / PROFESIONAL / beonemedical | 0 | — | ENABLED+APPROVED | `ok` (0 campanii → guard) |
+
+DS TECH: API-ul îl raporta sănătos pe toate câmpurile, dar avea bannerul de sold
+restant în UI și 0 impresii de 14 zile. Detectorul `no_delivery` produce **1 alertă,
+0 false positive** pe acest set.
+
+### 2026-04-22 — la primul run cu fix-ul de enum aplicat
 
 | Provider | Distribuția cod raw | Total | Observații |
 |---|---|---|---|
