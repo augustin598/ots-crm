@@ -138,7 +138,6 @@
 					rawDisableReason: item.rawDisableReason,
 					rejectReasonMessage: item.rejectReasonMessage,
 					rejectReasonEndsAt: item.rejectReasonEndsAt,
-					googleSuspensionReasons: item.googleSuspensionReasons,
 					rawStatusCode: item.rawStatusCode,
 				})}
 				{@const isCritical = isCriticalStatus(item.paymentStatus)}

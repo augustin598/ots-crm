@@ -2,7 +2,7 @@
 
 **Scop:** document single-source-of-truth pentru cum statusurile raw de la Meta, Google și TikTok sunt mapate la categoria noastră unificată `AdsPaymentStatus`. Consultă acest document când adaugi un status nou, investighezi o alertă sau scrii teste.
 
-**Ultima verificare împotriva docs oficiale:** 2026-04-24 (Claude Opus 4.7 + Gemini review) — added TikTok secondary fields
+**Ultima verificare împotriva docs oficiale:** 2026-07-17 — verificat live împotriva catalogului `googleAdsFields` v21 (nu doar docs): `customer.suspension_reasons` NU există, tot lanțul a fost eliminat (vezi secțiunea Google).
 
 ---
 
@@ -121,23 +121,76 @@ Forward-compat: dacă Meta adaugă `disable_reason` necunoscut (e.g. cod 13+), t
 
 **2026-04-22:** Mapperul inițial avea codurile 3→'APPROVED' și 4→'CANCELLED' (inversate). Rezultat: 39 din 78 conturi Google de la un tenant au fost clasificate `payment_failed` când erau de fapt APPROVED. Fix-ul e în [`google-ads/client.ts:999-1013`](../src/lib/server/google-ads/client.ts) cu comentariu inline.
 
-### `customer.suspension_reasons` (array — 2026-04-24)
+### `customer.suspension_reasons` — NU EXISTĂ. Nu-l re-adăuga.
 
-Stocat în `paymentStatusRaw.googleSecondary.suspensionReasons`. Enum names din Google Ads API v17+ `CustomerStatusEnum.SuspensionReason`. Capturate via `fetchCustomerSuspensionReasons` în [`google-ads/client.ts`](../src/lib/server/google-ads/client.ts) — query GAQL `SELECT customer.suspension_reasons FROM customer LIMIT 1`, rulat doar pentru conturi `SUSPENDED` (quota-aware, billing_setup rămâne pentru `ENABLED`).
+**Verificat live 2026-07-17** împotriva catalogului de metadate al API-ului
+(`POST /v21/googleAdsFields:search`), care e sursa autoritativă:
 
-| Valoare | RO | Sugestie acționabilă |
+- `SELECT name WHERE name LIKE 'customer.%'` → **38 câmpuri**, niciunul nu e `suspension_reasons`.
+- `SELECT name WHERE name LIKE '%suspension%'` pe tot API-ul → **un singur** rezultat, `recommendation.shopping_fix_merchant_center_account_suspension_warning_recommendation` (Merchant Center, fără legătură).
+- `SELECT name WHERE name LIKE '%unpaid%'` / `'%balance%'` → **zero**.
+- Query-ul real pe cont: `SELECT customer.suspension_reasons FROM customer` → `UNRECOGNIZED_FIELD`, pe fiecare cont.
+
+Enum-ul `CustomerStatusEnum.SuspensionReason` (cu `UNPAID_BALANCE` etc.) **nu există**
+în Google Ads API. Versiunile anterioare ale acestui document îl documentau ca
+funcțional; era fals — nu a returnat niciodată nimic.
+
+**Ce s-a întâmplat (2026-04-24 → 2026-07-17):** `fetchCustomerSuspensionReasons`
+rula acel query pentru fiecare cont `SUSPENDED`, primea `UNRECOGNIZED_FIELD`, iar
+un `try/catch` înghițea eroarea și returna `null`. Testele treceau fiindcă testau
+doar traducătorul pur cu string-uri scrise de mână — niciun test nu atingea API-ul.
+Coloana `paymentStatusRaw.googleSecondary` era `null` pe **toate** rândurile din
+prod: dovada că n-a funcționat niciodată. Tot lanțul (fetch, `googleSecondary`,
+`translateGoogleSuspensionReason`, randarea în UI) a fost eliminat.
+
+**Consecință pentru mapare:** pentru Google, `suspended` e cel mai specific status
+pe care API-ul îl poate da. Motivul suspendării e vizibil DOAR în interfața Google
+Ads. Copy-ul din [`status-copy.ts`](../src/lib/ads/status-copy.ts) enumeră cauzele
+frecvente (sold neachitat / plată suspicioasă / politici) și trimite admin-ul în
+Google Ads → Billing, în loc să pretindă un motiv pe care nu-l avem.
+
+### Override `no_delivery` — cum prindem soldul restant (2026-07-17)
+
+**Problema:** un cont Google cu sold restant e oprit din difuzare, dar API-ul îl
+raportează perfect sănătos pe TOATE câmpurile de status. Verificat live pe
+DS TECH SERVICES (`3278389595`), care avea în UI bannerul *„Anunțurile tale nu
+sunt difuzate — efectuează o plată pentru a acoperi soldul restant"*:
+
+| Câmp | Valoare raportată | |
 |---|---|---|
-| `UNPAID_BALANCE` | Sold neachitat | Deschide Google Ads → Billing → Summary, achită soldul restant. |
-| `SUSPICIOUS_PAYMENT_ACTIVITY` | Activitate de plată suspicioasă | Verifică metoda de plată, confirmă proprietatea cardului. |
-| `CIRCUMVENTING_SYSTEMS` | Eludarea sistemelor Google | Recurs oficial prin Google Ads Help Center cu documentație de conformitate. |
-| `MISREPRESENTATION` | Reprezentare falsă a afacerii | Apel oficial cu documente de identitate a firmei. |
-| `UNACCEPTABLE_BUSINESS_PRACTICES` | Practici comerciale inacceptabile | Revizuiește conform politicilor, appeal după remediere. |
-| `UNAUTHORIZED_ACCOUNT_ACTIVITY` | Activitate neautorizată | Schimbă parola, activează 2FA, revocă acces. |
-| `UNSPECIFIED` / `UNKNOWN` / alte | Motiv nespecificat | Deschide ticket Google Ads Support. |
+| `customer.status` | `ENABLED` | ✅ sănătos |
+| `billing_setup.status` | `APPROVED` | ✅ sănătos |
+| `account_budget.status` | `APPROVED` | ✅ sănătos |
+| `campaign.primary_status` | `ELIGIBLE` / `LIMITED` | ✅ sănătos |
+| **impresii reale, 14 zile** | **0** | 🚨 **cont mort** |
 
-Translate + sugestii live în [`$lib/ads/status-copy.ts:translateGoogleSuspensionReason`](../src/lib/ads/status-copy.ts). Exprimate identic în UI admin, card client și email digest.
+Motivul campaniei `LIMITED` vine literalmente ca `UNKNOWN` — inclusiv prin REST,
+deci nu e o problemă de proto vechi în bibliotecă. Google pur și simplu nu spune.
 
-Forward-compat: dacă Google adaugă enum nou (v18+), `fetchCustomerSuspensionReasons` emite `logWarning('google-ads', 'Unknown Google suspension_reasons enum', ...)` ca să nu rămână blind spot.
+**Soluția** (analogul lui `fetchAdvertiserCampaignHealth` de la TikTok):
+`fetchGoogleDeliveryHealth` în [`google-ads/client.ts`](../src/lib/server/google-ads/client.ts)
++ regula pură `shouldFlagGoogleNoDelivery` în [`status-mappers.ts`](../src/lib/server/ads/status-mappers.ts).
+Rulează DOAR când status-ul a ieșit `ok` (nu costă query-uri pe conturi deja flagged):
+
+- fără campanii `ENABLED` → nu flagui (pauză intenționată, nu defect)
+- `health === null` (query eșuat) → nu flagui (un hiccup de API nu inventează alerte)
+- campanii `ENABLED` + **0 impresii ieri** → `risk_review` + `rawDisableReason='no_delivery'`
+
+Se folosește `DURING YESTERDAY`, nu `TODAY`: o zi închisă complet în fusul orar al
+contului, ca să nu citim o zi parțială drept „oprit".
+
+**Validat pe toate cele 9 conturi cu client (2026-07-17):** 1 alertă (DS TECH),
+0 false positive. Cele 5 conturi sănătoase livrau în fiecare zi; cele 3 fără
+campanii active au fost excluse de guard.
+
+**Prag:** 1 zi, ales explicit de user. Riscul acceptat: campanii cu ad schedule
+weekday-only pot alerta în weekend. Dacă apare zgomot, schimbă `YESTERDAY` în
+`LAST_3_DAYS` în `fetchGoogleDeliveryHealth` și pragul devine 3 zile.
+
+**Ce să NU mapezi:** `BUDGET_CONSTRAINED` / `SEARCH_VOLUME_LIMITED` /
+`BIDDING_STRATEGY_LIMITED` din `campaign.primary_status_reasons` apar pe conturi
+perfect sănătoase (4 din 9 live) — sunt performanță, nu plată. Mapate la
+`risk_review` ar produce alerte permanente false.
 
 ---
 

@@ -185,96 +185,77 @@ describe('describeStatus', () => {
 	});
 });
 
-import { translateGoogleSuspensionReason, translateGoogleSuspensionReasons } from './status-copy';
-
-describe('translateGoogleSuspensionReason', () => {
-	test('UNPAID_BALANCE → billing copy', () => {
-		const out = translateGoogleSuspensionReason('UNPAID_BALANCE');
-		expect(out.label).toBe('Sold neachitat');
-		expect(out.suggestion).toContain('Billing');
-	});
-	test('SUSPICIOUS_PAYMENT_ACTIVITY → payment method copy', () => {
-		const out = translateGoogleSuspensionReason('SUSPICIOUS_PAYMENT_ACTIVITY');
-		expect(out.label).toBe('Activitate de plată suspicioasă');
-		expect(out.suggestion).toContain('metoda de plată');
-	});
-	test('CIRCUMVENTING_SYSTEMS → policy appeal copy', () => {
-		const out = translateGoogleSuspensionReason('CIRCUMVENTING_SYSTEMS');
-		expect(out.label).toBe('Eludarea sistemelor Google');
-		expect(out.suggestion).toContain('Help Center');
-	});
-	test('MISREPRESENTATION → identity copy', () => {
-		const out = translateGoogleSuspensionReason('MISREPRESENTATION');
-		expect(out.label).toBe('Reprezentare falsă a afacerii');
-	});
-	test('UNACCEPTABLE_BUSINESS_PRACTICES → practices copy', () => {
-		const out = translateGoogleSuspensionReason('UNACCEPTABLE_BUSINESS_PRACTICES');
-		expect(out.label).toBe('Practici comerciale inacceptabile');
-	});
-	test('UNAUTHORIZED_ACCOUNT_ACTIVITY → security copy', () => {
-		const out = translateGoogleSuspensionReason('UNAUTHORIZED_ACCOUNT_ACTIVITY');
-		expect(out.suggestion).toContain('2FA');
-	});
-	test('UNSPECIFIED / UNKNOWN → generic fallback', () => {
-		expect(translateGoogleSuspensionReason('UNSPECIFIED').label).toBe('Motiv nespecificat');
-		expect(translateGoogleSuspensionReason('UNKNOWN').label).toBe('Motiv nespecificat');
-	});
-	test('unknown string → generic fallback (forward-compat)', () => {
-		const out = translateGoogleSuspensionReason('SOMETHING_NEW');
-		expect(out.label).toBe('Motiv nespecificat');
-	});
-});
-
-describe('translateGoogleSuspensionReasons (array)', () => {
-	test('empty array / null → null', () => {
-		expect(translateGoogleSuspensionReasons([])).toBe(null);
-		expect(translateGoogleSuspensionReasons(null)).toBe(null);
-	});
-	test('single reason returns that translation', () => {
-		const out = translateGoogleSuspensionReasons(['UNPAID_BALANCE']);
-		expect(out?.label).toBe('Sold neachitat');
-	});
-	test('multiple reasons — joins labels with " · ", uses first suggestion', () => {
-		const out = translateGoogleSuspensionReasons(['UNPAID_BALANCE', 'SUSPICIOUS_PAYMENT_ACTIVITY']);
-		expect(out?.label).toBe('Sold neachitat · Activitate de plată suspicioasă');
-		expect(out?.suggestion).toContain('Billing');
-	});
-});
-
-describe('describeStatus — Google suspension', () => {
-	test('Google suspended with UNPAID_BALANCE → composed headline', () => {
+describe('describeStatus — Google', () => {
+	// The Google Ads API exposes NO suspension-reason field: the v21
+	// googleAdsFields catalog lists 38 `customer.*` fields and none carries a
+	// reason (the only API-wide match for "suspension" is a Merchant Center
+	// recommendation). We previously queried `customer.suspension_reasons`,
+	// which failed with UNRECOGNIZED_FIELD on every call and was swallowed by a
+	// try/catch — so the copy must stand on its own without a reason.
+	test('suspended → names the likely causes and points to the Google Ads UI', () => {
 		const out = describeStatus({
 			provider: 'google',
 			paymentStatus: 'suspended',
 			rawDisableReason: null,
 			rejectReasonMessage: null,
 			rejectReasonEndsAt: null,
-			googleSuspensionReasons: ['UNPAID_BALANCE'],
 		});
-		expect(out?.headline).toBe('Cont suspendat de Google — Sold neachitat');
+		expect(out?.headline).toBe('Cont suspendat de Google');
+		// Must stay actionable: the reason lives in the Google Ads UI, not the API.
+		expect(out?.body).toContain('sold neachitat');
 		expect(out?.suggestion).toContain('Billing');
+		expect(out?.suggestion).toContain('Help Center');
 	});
-	test('Google risk_review with SUSPICIOUS_PAYMENT_ACTIVITY', () => {
+
+	test('suspended copy does not promise an API-provided reason', () => {
+		const out = describeStatus({
+			provider: 'google',
+			paymentStatus: 'suspended',
+			rawDisableReason: null,
+			rejectReasonMessage: null,
+			rejectReasonEndsAt: null,
+		});
+		// Guards the regression: no "— <Reason>" suffix can be composed anymore.
+		expect(out?.headline).not.toContain('—');
+	});
+
+	test('risk_review + no_delivery → leads with unpaid balance, without asserting it', () => {
 		const out = describeStatus({
 			provider: 'google',
 			paymentStatus: 'risk_review',
-			rawDisableReason: null,
+			rawDisableReason: 'no_delivery',
 			rejectReasonMessage: null,
 			rejectReasonEndsAt: null,
-			googleSuspensionReasons: ['SUSPICIOUS_PAYMENT_ACTIVITY'],
 		});
-		expect(out?.headline).toBe('Cont restricționat de Google — Activitate de plată suspicioasă');
+		expect(out?.headline).toBe('Reclamele nu se difuzează');
+		expect(out?.body).toContain('sold restant');
+		expect(out?.suggestion).toContain('Billing');
+		// Google never tells us the cause — copy must hedge, not assert.
+		expect(out?.body).toContain('cea mai frecventă');
 	});
-	test('Google suspended without suspension_reasons → falls through to generic', () => {
+
+	test('no_delivery and billing-PENDING are distinct copies (both are risk_review)', () => {
+		const base = {
+			provider: 'google' as const,
+			paymentStatus: 'risk_review' as const,
+			rejectReasonMessage: null,
+			rejectReasonEndsAt: null,
+		};
+		const noDelivery = describeStatus({ ...base, rawDisableReason: 'no_delivery' });
+		const pending = describeStatus({ ...base, rawDisableReason: 'PENDING' });
+		expect(noDelivery?.headline).not.toBe(pending?.headline);
+	});
+
+	test('risk_review (billing PENDING/NONE) → billing-setup copy, not generic', () => {
 		const out = describeStatus({
 			provider: 'google',
-			paymentStatus: 'suspended',
-			rawDisableReason: null,
+			paymentStatus: 'risk_review',
+			rawDisableReason: 'PENDING',
 			rejectReasonMessage: null,
 			rejectReasonEndsAt: null,
-			googleSuspensionReasons: null,
 		});
-		expect(out?.headline).toBe('Cont suspendat');
+		expect(out?.headline).toBe('Facturare neconfigurată complet');
+		expect(out?.suggestion).toContain('Billing');
 	});
 });
 

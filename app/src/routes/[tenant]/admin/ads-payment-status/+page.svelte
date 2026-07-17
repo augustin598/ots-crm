@@ -80,6 +80,12 @@
 		tiktok: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400',
 	};
 
+	/** Google's `no_delivery` is a derived flag, not a Google status code — render it
+	 *  as a delivery issue (like TikTok's) rather than a raw `reason:` enum. */
+	function isGoogleNoDelivery(row: { provider: string; rawDisableReason: string | null }): boolean {
+		return row.provider === 'google' && row.rawDisableReason === 'no_delivery';
+	}
+
 	function formatCheckedAt(iso: string | null): string {
 		if (!iso) return '—';
 		const date = new Date(iso);
@@ -316,9 +322,14 @@
 										<code class="rounded bg-muted px-1.5 py-0.5 text-xs">
 											{row.rawStatusCode || '—'}
 										</code>
-										{#if row.rawDisableReason}
+										{#if row.rawDisableReason && !isGoogleNoDelivery(row)}
 											<div class="text-xs text-muted-foreground">
 												reason: {row.rawDisableReason}
+											</div>
+										{/if}
+										{#if isGoogleNoDelivery(row)}
+											<div class="text-xs text-amber-700 dark:text-amber-300">
+												delivery: nicio afișare ieri
 											</div>
 										{/if}
 										{#if row.provider === 'tiktok'}
@@ -342,11 +353,6 @@
 													delivery: {row.rawDeliveryIssue}
 												</div>
 											{/if}
-										{/if}
-										{#if row.provider === 'google' && row.googleSuspensionReasons && row.googleSuspensionReasons.length > 0}
-											<div class="text-xs text-muted-foreground">
-												suspension: <code>{row.googleSuspensionReasons.join(', ')}</code>
-											</div>
 										{/if}
 									</td>
 									<td class="py-3 pr-3 text-xs text-muted-foreground">

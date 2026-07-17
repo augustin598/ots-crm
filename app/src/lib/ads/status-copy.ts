@@ -23,8 +23,6 @@ export interface DescribeStatusInput {
 	rejectReasonMessage: string | null;
 	/** TikTok only: parsed endtime from rejection_reason. */
 	rejectReasonEndsAt: string | null;
-	/** Google only: `customer.suspension_reasons` enum names (uppercase). */
-	googleSuspensionReasons?: string[] | null;
 	/** Provider-native primary status code (Meta numeric account_status as string, etc.). Used by Meta branch. */
 	rawStatusCode?: string | null;
 }
@@ -46,76 +44,6 @@ export function parseTikTokRejectReason(raw: string | null): {
 	const codeMatch = withoutEnd.match(/^\d+:(.+)$/);
 	const message = codeMatch ? codeMatch[1].trim() : withoutEnd.trim();
 	return { message, endsAt };
-}
-
-/**
- * RO translation + actionable suggestion for a single Google Ads
- * `customer.suspension_reasons` enum value. Unknown codes fall through to
- * a generic "motiv nespecificat" + "deschide ticket support" suggestion.
- */
-export function translateGoogleSuspensionReason(reason: string): {
-	label: string;
-	suggestion: string;
-} {
-	switch (reason) {
-		case 'UNPAID_BALANCE':
-			return {
-				label: 'Sold neachitat',
-				suggestion:
-					'Deschide Google Ads → Billing → Summary și achită soldul restant pentru a relua livrarea reclamelor.',
-			};
-		case 'SUSPICIOUS_PAYMENT_ACTIVITY':
-			return {
-				label: 'Activitate de plată suspicioasă',
-				suggestion:
-					'Verifică metoda de plată în Google Ads → Billing, confirmă proprietatea cardului, contactează suportul dacă persistă.',
-			};
-		case 'CIRCUMVENTING_SYSTEMS':
-			return {
-				label: 'Eludarea sistemelor Google',
-				suggestion:
-					'Suspendare gravă pentru încercarea de a eluda politicile Google Ads. Depune un recurs oficial prin Google Ads Help Center și pregătește documentație care demonstrează conformitate cu politicile.',
-			};
-		case 'MISREPRESENTATION':
-			return {
-				label: 'Reprezentare falsă a afacerii',
-				suggestion:
-					'Google a identificat informații false sau inexacte despre afacere. Dacă datele din Google Ads sunt corecte, deschide un apel oficial prin Google Ads Help Center, cu documente de identitate a firmei.',
-			};
-		case 'UNACCEPTABLE_BUSINESS_PRACTICES':
-			return {
-				label: 'Practici comerciale inacceptabile',
-				suggestion:
-					'Revizuiește reclamele și landing page-ul conform politicilor Google Ads (înșelăciune utilizatori, taxe ascunse). Depune appeal după remediere.',
-			};
-		case 'UNAUTHORIZED_ACCOUNT_ACTIVITY':
-			return {
-				label: 'Activitate neautorizată',
-				suggestion:
-					'Schimbă parola Google imediat, activează 2FA, revocă accesul utilizatorilor suspecți din Google Ads → Access & security.',
-			};
-		default:
-			return {
-				label: 'Motiv nespecificat',
-				suggestion: 'Deschide un ticket în Google Ads Support pentru detalii despre suspendare.',
-			};
-	}
-}
-
-/**
- * Combine multiple suspension reasons into one details block: labels joined
- * with " · ", suggestion taken from the first (most relevant) reason. Returns
- * null for empty/null input.
- */
-export function translateGoogleSuspensionReasons(
-	reasons: string[] | null,
-): { label: string; suggestion: string } | null {
-	if (!reasons || reasons.length === 0) return null;
-	const translated = reasons.map(translateGoogleSuspensionReason);
-	return {
-		label: translated.map((r) => r.label).join(' · '),
-		suggestion: translated[0].suggestion,
-	};
 }
 
 /**
@@ -342,20 +270,44 @@ export function describeStatus(input: DescribeStatusInput): StatusDetails | null
 		};
 	}
 
-	// Google with explicit suspension_reasons — translate each + compose headline.
-	if (provider === 'google' && (paymentStatus === 'suspended' || paymentStatus === 'risk_review')) {
-		const translated = translateGoogleSuspensionReasons(input.googleSuspensionReasons ?? null);
-		if (translated) {
-			return {
-				headline:
-					paymentStatus === 'suspended'
-						? `Cont suspendat de Google — ${translated.label}`
-						: `Cont restricționat de Google — ${translated.label}`,
-				body: 'Google Ads a aplicat această restricție pe cont. Detalii de mai jos.',
-				suggestion: translated.suggestion,
-				deadline: null,
-			};
-		}
+	// Google suspension: the Ads API exposes NO suspension-reason field (verified
+	// against the v21 googleAdsFields catalog — `customer.*` has 38 fields, none
+	// of them a reason). The reason IS visible in the Google Ads UI, so we say
+	// what we know, name the common causes, and send the admin where the answer is.
+	if (provider === 'google' && paymentStatus === 'suspended') {
+		return {
+			headline: 'Cont suspendat de Google',
+			body: 'Google Ads a suspendat contul și reclamele nu mai rulează. API-ul Google Ads nu expune motivul suspendării — cauzele frecvente sunt sold neachitat, activitate de plată suspicioasă sau o încălcare de politici.',
+			suggestion:
+				'Deschide Google Ads → Billing → Summary și achită eventualul sold restant. Motivul exact al suspendării apare ca notificare în interfața Google Ads; dacă e o încălcare de politici, depune appeal prin Google Ads Help Center.',
+			deadline: null,
+		};
+	}
+
+	// Google: account looks healthy on every status field but served nothing
+	// yesterday despite ENABLED campaigns. The most frequent cause is an unpaid
+	// balance — Google stops delivery but keeps customer.status = ENABLED, so this
+	// is the only way we can see it. We lead with the likely cause without
+	// asserting it, because Google never tells us why.
+	if (provider === 'google' && paymentStatus === 'risk_review' && rawDisableReason === 'no_delivery') {
+		return {
+			headline: 'Reclamele nu se difuzează',
+			body: 'Contul are campanii active, dar nu a înregistrat nicio afișare ieri. Cauza cea mai frecventă este un sold restant — Google oprește livrarea, dar contul rămâne marcat activ. Alte cauze posibile: reclame respinse la audit sau targetare fără audiență.',
+			suggestion:
+				'Deschide Google Ads → Billing → Summary și verifică dacă există sold restant de achitat. Bannerul din interfața Google Ads îți arată cauza exactă.',
+			deadline: null,
+		};
+	}
+
+	// Google ENABLED + billing PENDING/NONE — billing setup never completed.
+	if (provider === 'google' && paymentStatus === 'risk_review') {
+		return {
+			headline: 'Facturare neconfigurată complet',
+			body: 'Contul e activ, dar configurarea de facturare este în așteptare sau lipsește, așa că livrarea reclamelor poate fi blocată.',
+			suggestion:
+				'Deschide Google Ads → Billing → Settings și finalizează configurarea metodei de plată.',
+			deadline: null,
+		};
 	}
 
 	// Meta with explicit disable_reason — translate + compose headline keyed off

@@ -98,6 +98,27 @@ export function isKnownGoogleCustomerStatus(status: string): boolean {
 	return ['ENABLED', 'SUSPENDED', 'CANCELLED', 'CLOSED', 'UNKNOWN', 'UNSPECIFIED'].includes(status);
 }
 
+/**
+ * Google delivery override: is an otherwise-healthy account actually stopped?
+ *
+ * Google reports NO field for "unpaid balance / ads stopped" — a stopped account
+ * still reads customer.status=ENABLED, billing_setup=APPROVED, account_budget=
+ * APPROVED, campaign.primary_status=ELIGIBLE (verified live 2026-07-17 against a
+ * real stopped account). Delivery is the only observable that moves.
+ *
+ * Rules:
+ *  - `null` health (lookup failed) → never flag; an API hiccup must not invent an alert.
+ *  - no ENABLED campaigns → never flag; the account is paused on purpose.
+ *  - ENABLED campaigns + zero impressions yesterday → flag.
+ */
+export function shouldFlagGoogleNoDelivery(
+	health: { hasEnabledCampaigns: boolean; impressionsYesterday: number } | null,
+): boolean {
+	if (!health) return false;
+	if (!health.hasEnabledCampaigns) return false;
+	return health.impressionsYesterday === 0;
+}
+
 // --- TIKTOK ----------------------------------------------------------------
 
 export function mapTikTokStatusPure(status: string): Status {

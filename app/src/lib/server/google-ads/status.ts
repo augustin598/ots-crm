@@ -3,9 +3,18 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { logWarning } from '$lib/server/logger';
 import { getAuthenticatedClient } from './auth';
-import { listMccSubAccounts, fetchBillingSetupStatus, fetchCustomerSuspensionReasons, formatCustomerId } from './client';
+import {
+	listMccSubAccounts,
+	fetchBillingSetupStatus,
+	fetchGoogleDeliveryHealth,
+	formatCustomerId,
+} from './client';
 import type { PaymentStatusSnapshot } from '$lib/server/ads/payment-status-types';
-import { mapGoogleStatusPure, isKnownGoogleCustomerStatus } from '$lib/server/ads/status-mappers';
+import {
+	mapGoogleStatusPure,
+	isKnownGoogleCustomerStatus,
+	shouldFlagGoogleNoDelivery,
+} from '$lib/server/ads/status-mappers';
 
 /** Wraps the pure mapper with unknown-code logging. */
 export function mapGoogleStatusToPayment(
@@ -75,29 +84,40 @@ export async function fetchGooglePaymentStatus(
 		const row = storedByCustomer.get(formatCustomerId(acc.customerId));
 		if (!row) continue;
 
-		let billingSetupStatus: string | null = null;
-		let suspensionReasons: string[] = [];
-		if (acc.status === 'ENABLED' || acc.status === 'SUSPENDED') {
-			const [billing, reasons] = await Promise.all([
-				acc.status === 'ENABLED'
-					? fetchBillingSetupStatus(
-							refreshed.mccAccountId,
-							acc.customerId,
-							refreshed.developerToken,
-							refreshed.refreshToken,
-						)
-					: Promise.resolve(null),
-				acc.status === 'SUSPENDED'
-					? fetchCustomerSuspensionReasons(
-							refreshed.mccAccountId,
-							acc.customerId,
-							refreshed.developerToken,
-							refreshed.refreshToken,
-						)
-					: Promise.resolve(null),
-			]);
-			billingSetupStatus = billing;
-			suspensionReasons = reasons ?? [];
+		// billing_setup only exists for ENABLED customers. A SUSPENDED customer
+		// carries no queryable reason — the Google Ads API exposes no suspension
+		// reason field at all (see docs/ads-status-mappings.md), so `suspended`
+		// is as specific as we can get from the API.
+		const billingSetupStatus =
+			acc.status === 'ENABLED'
+				? await fetchBillingSetupStatus(
+						refreshed.mccAccountId,
+						acc.customerId,
+						refreshed.developerToken,
+						refreshed.refreshToken,
+					)
+				: null;
+
+		let paymentStatus = mapGoogleStatusToPayment(acc.status, billingSetupStatus);
+		let rawDisableReason: string | null = billingSetupStatus;
+
+		// Delivery override — the Google analogue of TikTok's campaign-health check.
+		// Every Google status field can report healthy while the account is in fact
+		// stopped (unpaid balance being the common cause; Google surfaces that only
+		// in its UI). If the account looks fine but served nothing yesterday despite
+		// having ENABLED campaigns, it is not fine. Only runs when the status-level
+		// check said `ok`, so already-flagged accounts cost no extra queries.
+		if (paymentStatus === 'ok') {
+			const health = await fetchGoogleDeliveryHealth(
+				refreshed.mccAccountId,
+				acc.customerId,
+				refreshed.developerToken,
+				refreshed.refreshToken,
+			);
+			if (shouldFlagGoogleNoDelivery(health)) {
+				paymentStatus = 'risk_review';
+				rawDisableReason = 'no_delivery';
+			}
 		}
 
 		snapshots.push({
@@ -107,11 +127,10 @@ export async function fetchGooglePaymentStatus(
 			externalAccountId: acc.customerId,
 			clientId: row.clientId ?? null,
 			accountName: acc.descriptiveName || row.accountName || acc.customerId,
-			paymentStatus: mapGoogleStatusToPayment(acc.status, billingSetupStatus),
+			paymentStatus,
 			rawStatusCode: acc.status,
-			rawDisableReason: billingSetupStatus,
+			rawDisableReason,
 			checkedAt,
-			googleSecondary: suspensionReasons.length > 0 ? { suspensionReasons } : null,
 		});
 	}
 
