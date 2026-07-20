@@ -40,4 +40,9 @@ describe('extractArticle', () => {
 		const r = extractArticle('<html><body><p>too short</p></body></html>', 'https://x.ro/y');
 		expect(r.wordCount).toBeLessThan(250);
 	});
+	test('decodes numeric + named HTML entities in title', () => {
+		const html = `<meta property="og:title" content="Heylux &#8211; studio &mdash; Ia&#537;i &amp; co &#x2019;24">`;
+		const r = extractArticle(html, 'https://x.ro/y');
+		expect(r.title).toBe('Heylux – studio — Iași & co ’24');
+	});
 });

@@ -23,10 +23,22 @@ function metaContent(html: string, key: string): string | null {
 	return null;
 }
 
+function safeCodePoint(n: number): string {
+	try {
+		return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+	} catch {
+		return '';
+	}
+}
+
 function decodeEntities(s: string): string {
 	return s
 		.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&#x27;/gi, "'").replace(/&nbsp;/g, ' ');
+		.replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&#x27;/gi, "'").replace(/&nbsp;/g, ' ')
+		.replace(/&ndash;/g, '–').replace(/&mdash;/g, '—').replace(/&hellip;/g, '…')
+		// Generic numeric entities (common in RO press titles: &#8211; en-dash, &#537; ș, …)
+		.replace(/&#x([0-9a-fA-F]+);/g, (_m, n) => safeCodePoint(parseInt(n, 16)))
+		.replace(/&#(\d+);/g, (_m, n) => safeCodePoint(parseInt(n, 10)));
 }
 
 function textToWords(text: string): number {
