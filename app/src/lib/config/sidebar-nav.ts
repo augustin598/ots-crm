@@ -231,6 +231,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
 				]
 			},
 			{ id: 'seo-links', label: 'Linkuri SEO', icon: 'seo-links', href: '/seo-links' },
+			{ id: 'content-heylux', label: 'Content Heylux', icon: 'seo-links', href: '/content/heylux' },
 			{ id: 'wordpress', label: 'WordPress', icon: 'wordpress', href: '/wordpress' },
 			{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', href: '/whatsapp' }
 		]
