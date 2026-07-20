@@ -290,6 +290,28 @@ export const startScheduler = async () => {
 		logWarning('scheduler', `Failed to mark interrupted discovery jobs: ${message}`);
 	}
 
+	// Mark any in-flight content extraction jobs as interrupted — the in-process
+	// launcher does not survive a server restart; staff re-run via "Reîncearcă".
+	try {
+		const now = new Date();
+		const res = await db
+			.update(table.contentImportJob)
+			.set({
+				status: 'interrupted',
+				error: 'Serverul a repornit în timpul rulării',
+				finishedAt: now,
+				updatedAt: now
+			})
+			.where(sql`${table.contentImportJob.status} in ('running', 'pending')`);
+		const count = (res as { rowsAffected?: number })?.rowsAffected ?? 0;
+		if (count > 0) {
+			logWarning('scheduler', `Marked ${count} content import job(s) as interrupted after restart`);
+		}
+	} catch (e) {
+		const { message } = serializeError(e);
+		logWarning('scheduler', `Failed to mark interrupted content jobs: ${message}`);
+	}
+
 	// Recover any email retries stuck in 'retrying' state from a crash
 	await recoverInterruptedRetries();
 
