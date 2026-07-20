@@ -1962,6 +1962,69 @@ export const seoLinkCheck = sqliteTable('seo_link_check', {
 	errorMessage: text('error_message')
 });
 
+// ==================== CONTENT PIPELINE TABLES ====================
+
+export const contentArticle = sqliteTable('content_article', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	brand: text('brand').notNull().default('unknown'), // heylux|luckystudio|preziosa|forumvideochat|vivadiva|unknown
+	sourceUrl: text('source_url').notNull(),
+	sourceDomain: text('source_domain').notNull(),
+	title: text('title'),
+	slug: text('slug'),
+	excerpt: text('excerpt'),
+	bodyHtml: text('body_html'),
+	bodyText: text('body_text'),
+	wordCount: integer('word_count').notNull().default(0),
+	featuredImageUrl: text('featured_image_url'),
+	images: text('images'), // JSON string[]
+	publishedAt: timestamp('published_at', { withTimezone: true, mode: 'date' }),
+	extractStatus: text('extract_status').notNull().default('pending'), // pending|ok|failed|thin
+	extractError: text('extract_error'),
+	usedPuppeteer: boolean('used_puppeteer').notNull().default(false),
+	extractedAt: timestamp('extracted_at', { withTimezone: true, mode: 'date' }),
+	// Phase 2-3 placeholders (inactive in phase 1):
+	rewriteStatus: text('rewrite_status').notNull().default('none'), // none|drafting|ready
+	targetWpSiteId: text('target_wp_site_id'),
+	wpPostId: integer('wp_post_id'),
+	scheduledAt: timestamp('scheduled_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+}, (t) => [
+	uniqueIndex('content_article_tenant_source_idx').on(t.tenantId, t.sourceUrl),
+	index('content_article_tenant_status_idx').on(t.tenantId, t.extractStatus),
+	index('content_article_tenant_brand_idx').on(t.tenantId, t.brand)
+]);
+
+export const contentImportJob = sqliteTable('content_import_job', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	userId: text('user_id').notNull(),
+	status: text('status').notNull().default('pending'), // pending|running|completed|failed|interrupted|cancelled
+	totalArticles: integer('total_articles').notNull().default(0),
+	processedArticles: integer('processed_articles').notNull().default(0),
+	okCount: integer('ok_count').notNull().default(0),
+	failedCount: integer('failed_count').notNull().default(0),
+	thinCount: integer('thin_count').notNull().default(0),
+	error: text('error'),
+	startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+	finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
 // ==================== CONTRACT TABLES ====================
 
 export const contract = sqliteTable('contract', {

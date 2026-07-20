@@ -2773,6 +2773,41 @@
       "when": 1779916800027508,
       "tag": "0398_invoice_settings_default_tax_rate_21",
       "breakpoints": true
+    },
+    {
+      "idx": 399,
+      "version": "6",
+      "when": 1779916800027509,
+      "tag": "0399_content_article_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 400,
+      "version": "6",
+      "when": 1779916800027510,
+      "tag": "0400_content_article_source_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 401,
+      "version": "6",
+      "when": 1779916800027511,
+      "tag": "0401_content_article_status_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 402,
+      "version": "6",
+      "when": 1779916800027512,
+      "tag": "0402_content_article_brand_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 403,
+      "version": "6",
+      "when": 1779916800027513,
+      "tag": "0403_content_import_job_table",
+      "breakpoints": true
     }
   ]
 }
