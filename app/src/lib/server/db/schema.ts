@@ -2074,6 +2074,7 @@ export const contentArticle = sqliteTable('content_article', {
 	generatedHtml: text('generated_html'),
 	generatedExcerpt: text('generated_excerpt'),
 	generatedAt: timestamp('generated_at', { withTimezone: true, mode: 'date' }),
+	articleDirection: text('article_direction'), // direcție/context per articol (override profil general)
 	targetWpSiteId: text('target_wp_site_id'),
 	wpPostId: integer('wp_post_id'),
 	scheduledAt: timestamp('scheduled_at', { withTimezone: true, mode: 'date' }),

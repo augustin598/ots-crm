@@ -2969,6 +2969,13 @@
       "when": 1779916800027536,
       "tag": "0426_content_article_website_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 427,
+      "version": "6",
+      "when": 1779916800027537,
+      "tag": "0427_content_article_article_direction",
+      "breakpoints": true
     }
   ]
 }
