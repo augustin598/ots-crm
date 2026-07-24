@@ -53,14 +53,23 @@ export function normalizeStudio(raw: string | null | undefined): string {
 	return 'Heylux Studio';
 }
 
-/** Deduce statusul din coloanele „Admisa"/„Respinsa" ale Excel-ului. */
+/**
+ * Deduce statusul din coloanele „Admisa"/„Respinsa".
+ * 2024 folosește cuvinte în col. Admisa („acceptata"/„refuzata"); 2025/2026 bifează cu „x".
+ */
 export function normalizeStatus(
 	admisaCol: string | null | undefined,
 	respinsaCol?: string | null | undefined
 ): 'admisa' | 'respinsa' | 'in_evaluare' {
-	const s = `${admisaCol ?? ''} ${respinsaCol ?? ''}`.toLowerCase();
-	if (/accept|admis/.test(s)) return 'admisa';
-	if (/refuz|respin/.test(s)) return 'respinsa';
+	const a = String(admisaCol ?? '').trim().toLowerCase();
+	const r = String(respinsaCol ?? '').trim().toLowerCase();
+	// Cuvinte explicite (respingerea are prioritate — „refuzata" apare uneori în col. Admisa).
+	if (/refuz|respins/.test(`${a} ${r}`)) return 'respinsa';
+	if (/accept|admis/.test(`${a} ${r}`)) return 'admisa';
+	// Bife scurte (2025/2026): „x" în coloana respectivă.
+	const isMark = (s: string) => /^(x{1,2}|da|yes|✓|✔|1)$/.test(s);
+	if (isMark(r)) return 'respinsa';
+	if (isMark(a)) return 'admisa';
 	return 'in_evaluare';
 }
 
@@ -78,6 +87,41 @@ const RO_MONTHS = [
 	'noiembrie',
 	'decembrie'
 ];
+
+export interface ColMap {
+	nume: number;
+	data: number;
+	inceput: number;
+	sfarsit: number;
+	studio: number;
+	sursa: number;
+	admisa: number;
+	respinsa: number;
+	observatii: number;
+}
+
+/**
+ * Mapează coloanele DUPĂ antet (nu după poziție) — filele variază între ani:
+ * 2024/2025 au 7 coloane, 2026 inserează „Data inceperii"/„Data incetarii".
+ */
+export function mapColumns(header: (string | Date)[]): ColMap {
+	const norm = header.map((h) => String(h ?? '').trim().toLowerCase());
+	const find = (re: RegExp) => norm.findIndex((h) => re.test(h));
+	return {
+		nume: find(/nume/),
+		data: (() => {
+			const exact = norm.findIndex((h) => /^data( interviului)?$/.test(h));
+			return exact >= 0 ? exact : find(/data interviu/);
+		})(),
+		inceput: find(/incep/),
+		sfarsit: find(/incetar|sf[aâ]r[sș]it/),
+		studio: find(/optat|studio/),
+		sursa: find(/de unde/),
+		admisa: find(/^admis/),
+		respinsa: find(/^respins/),
+		observatii: find(/observ/)
+	};
+}
 
 /** Numele filei „Aprilie 2024" → { year, month(1-12) }, sau null. */
 export function sheetToYearMonth(sheetName: string): { year: number; month: number } | null {

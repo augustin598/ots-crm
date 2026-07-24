@@ -15,7 +15,8 @@ import {
 	normalizeStudio,
 	toIsoDate,
 	sheetToYearMonth,
-	isNonCandidateRow
+	isNonCandidateRow,
+	mapColumns
 } from '$lib/server/interviuri/classify';
 import type { RequestHandler } from './$types';
 
@@ -95,14 +96,18 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 				defval: '',
 				raw: false
 			});
+			if (rows.length === 0) continue;
+			const col = mapColumns(rows[0]); // coloane mapate după antet (structura variază pe ani)
 			const period = sheetToYearMonth(sheetName);
+			const cell = (row: (string | Date)[], i: number) => (i >= 0 ? row[i] : '');
 			let count = 0;
 			for (const row of rows) {
-				const nume = String(row[0] ?? '').trim();
-				if (!nume || /nume\s*\/?\s*prenume/i.test(nume)) continue; // header/gol
-				if (isNonCandidateRow(nume, row[1] as string)) continue; // sumar lunar / antet colorat
+				const nume = String(cell(row, col.nume >= 0 ? col.nume : 0) ?? '').trim();
+				if (!nume || /^nume.*prenume$/i.test(nume)) continue; // header/gol
+				const dateRaw = cell(row, col.data >= 0 ? col.data : 1);
+				if (isNonCandidateRow(nume, dateRaw as string)) continue; // sumar lunar / antet colorat
 				// Dată exactă; dacă lipsește/e greșită, fallback la luna filei (ziua 01).
-				let dataInterviu = toIsoDate(row[1] as string);
+				let dataInterviu = toIsoDate(dateRaw as string);
 				if (!dataInterviu && period) {
 					dataInterviu = `${period.year}-${String(period.month).padStart(2, '0')}-01`;
 				}
@@ -110,20 +115,19 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 					skipped++;
 					continue;
 				}
-				const studio = normalizeStudio(row[2] as string);
-				const sursa = String(row[3] ?? '').trim();
-				const status = normalizeStatus(row[4] as string, row[5] as string);
-				const observatii = String(row[6] ?? '').trim();
-				const channelName = classifySource(sursa);
-				const channelId = chByName.get(channelName) ?? nespecId;
+				const studio = normalizeStudio(cell(row, col.studio) as string);
+				const sursa = String(cell(row, col.sursa) ?? '').trim();
+				const status = normalizeStatus(cell(row, col.admisa) as string, cell(row, col.respinsa) as string);
+				const observatii = String(cell(row, col.observatii) ?? '').trim();
+				const channelId = chByName.get(classifySource(sursa)) ?? nespecId;
 
 				toInsert.push({
 					id: generateId(),
 					tenantId,
 					nume,
 					dataInterviu,
-					dataInceput: null,
-					dataSfarsit: null,
+					dataInceput: toIsoDate(cell(row, col.inceput) as string) || null,
+					dataSfarsit: toIsoDate(cell(row, col.sfarsit) as string) || null,
 					studio,
 					sursa: sursa || null,
 					channelId,
