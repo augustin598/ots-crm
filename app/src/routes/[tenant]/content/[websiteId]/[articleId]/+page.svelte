@@ -9,7 +9,9 @@
 		regenerateArticle,
 		modifyArticle,
 		generateArticleSeo,
-		getContentWebsites
+		getContentWebsites,
+		publishArticle,
+		scheduleArticle
 	} from '$lib/remotes/content-articles.remote';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import { analyzeSeo } from '$lib/content/seo-analysis';
@@ -20,6 +22,8 @@
 	import SaveIcon from '@lucide/svelte/icons/save';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import Wand2Icon from '@lucide/svelte/icons/wand-2';
+	import SendIcon from '@lucide/svelte/icons/send';
+	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 
 	// Route params (guaranteed by the [websiteId]/[articleId] segments).
 	const tenant = $derived(page.params.tenant!);
@@ -165,6 +169,36 @@
 		}
 	}
 
+	// ---- Publicare / programare ----
+	let publishing = $state(false);
+	let scheduleOpen = $state(false);
+	let scheduleValue = $state(''); // datetime-local
+
+	async function publishNow(mode: 'draft' | 'publish') {
+		if (publishing) return;
+		publishing = true;
+		try {
+			const r = await publishArticle({ articleId, mode });
+			toast.success(mode === 'publish' ? 'Publicat pe WordPress' : 'Trimis ca ciornă în WordPress');
+			if (r?.link) window.open(r.link, '_blank', 'noopener');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Publicare eșuată');
+		} finally {
+			publishing = false;
+		}
+	}
+
+	async function scheduleNow() {
+		if (!scheduleValue) return;
+		try {
+			await scheduleArticle({ articleId, scheduledAt: new Date(scheduleValue).toISOString() });
+			toast.success('Articol programat');
+			scheduleOpen = false;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Programare eșuată');
+		}
+	}
+
 	const scoreClass = (n: number) => (n >= 70 ? 'ct-score-g' : n >= 40 ? 'ct-score-o' : 'ct-score-r');
 	const barColor = (n: number) => (n >= 70 ? '#10b981' : n >= 40 ? '#f59e0b' : '#ef4444');
 </script>
@@ -202,8 +236,27 @@
 				<button class="cl-btn-success" onclick={() => save(true)} disabled={saving}>
 					<CheckIcon size={15} /> Aprobă
 				</button>
+				<button
+					class="cl-btn-secondary"
+					onclick={() => (scheduleOpen = !scheduleOpen)}
+					disabled={publishing}
+				>
+					<CalendarClockIcon size={15} /> Programează
+				</button>
+				<button class="cl-btn-primary" onclick={() => publishNow('publish')} disabled={publishing}>
+					<SendIcon size={15} /> {publishing ? 'Se publică…' : 'Publică'}
+				</button>
 			</div>
 		</div>
+
+		{#if scheduleOpen}
+			<div class="cl-schedule-row">
+				<input type="datetime-local" class="cl-input" bind:value={scheduleValue} />
+				<button class="cl-btn-primary" onclick={scheduleNow} disabled={!scheduleValue}>
+					Confirmă programarea
+				</button>
+			</div>
+		{/if}
 
 		<div class="ct-editor-grid">
 			<div class="ct-editor-main">
