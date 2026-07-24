@@ -37,4 +37,4 @@ Da. Anul acesta, studioul și-a dus modelele într-o vacanță la Dubai, ca surp
 **Unde își desfășoară activitatea modelele Heylux?**
 La Iași. Fetele din echipă sunt ieșence, iar studioul funcționează local.
 
-Vrei să faci parte din echipa Heylux și să trăiești experiențe ca aceasta? Intră pe www.heylux.ro sau sună la 0744.33.77.11 și programează un interviu.
+Vrei să faci parte din echipa Heylux și să trăiești experiențe ca aceasta? Vino la un interviu și hai să ne cunoaștem.

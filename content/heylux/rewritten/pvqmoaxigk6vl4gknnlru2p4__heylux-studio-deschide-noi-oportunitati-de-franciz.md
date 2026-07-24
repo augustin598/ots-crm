@@ -48,4 +48,4 @@ Heylux este studio certificat LiveJasmin, site-ul pe care s-au înregistrat reco
 **Unde are Heylux sedii?**
 Sediul central este în zona Iași, iar studioul are franchize în Suceava și în Baia Mare.
 
-Dacă vrei să afli mai multe sau să începi o carieră ca model de videochat, sună-ne la 0744 33.77.11 sau intră pe www.heylux.ro.
+Dacă vrei să afli mai multe sau să începi o carieră ca model de videochat, vino la o discuție la sediul Heylux.

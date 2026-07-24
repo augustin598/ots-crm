@@ -46,4 +46,4 @@ LiveJasmin este cel mai important site de videochat premium din lume, iar Heylux
 **Cum sunt aleși partenerii de franciză?**
 Analizăm fiecare candidat atent și organizăm câteva interviuri, pentru că lucrăm cu sume importante și ne asumăm reputația construită în peste 10 ani.
 
-Dacă vrei să discutăm despre preluarea unei francize de studio de videochat Heylux în orașul tău, contactează-ne acum la 0744.33.77.11 sau intră pe www.heylux.ro.
+Dacă vrei să preiei o franciză de videochat Heylux în orașul tău, programează o discuție cu echipa noastră.

@@ -26,7 +26,7 @@ Te ducem și te aducem cu mașini Mercedes. Colegele noastre șoferițe vin dup�
 
 Înainte de fiecare tură, machiajul îl fac profesioniste, zilnic, ca să arăți impecabil pe ecran, fără să scoți un ban.
 
-Pentru că lucrezi pe platforme premium precum LiveJasmin și Flirt4Free, unde totul se construiește pe dialog, îți punem la dispoziție cursuri de engleză. O engleză mai bună înseamnă conversații mai lungi și venituri mai mari.
+Pentru că lucrezi pe LiveJasmin, platforma premium a industriei, și pe Flirt4Free, unde totul se construiește pe dialog, îți punem la dispoziție cursuri de engleză. O engleză mai bună înseamnă conversații mai lungi și venituri mai mari.
 
 ## Un început fără griji
 
@@ -49,8 +49,4 @@ Modelele au venituri între 400 și 6.500 lei pe zi, iar recordul din oraș apar
 Transport cu Mercedes de acasă și înapoi, machiaj profesional zilnic și cursuri de engleză. Începătoarele primesc cazare gratuită două luni în vila Heylux.
 
 **Pe ce platforme se lucrează?**
-Pe platforme premium precum LiveJasmin și Flirt4Free.
-
-Heylux, studio de videochat în Iași
-Telefon: 0744.33.77.11
-www.heylux.ro
+Pe LiveJasmin, platforma premium a industriei, și pe Flirt4Free.

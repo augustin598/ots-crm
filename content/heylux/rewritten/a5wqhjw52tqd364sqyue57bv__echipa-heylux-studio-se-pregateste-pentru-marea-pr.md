@@ -3,7 +3,7 @@ id: "a5wqhjw52tqd364sqyue57bv"
 brand: "heylux"
 sourceUrl: "https://iasitvlife.ro/stiri/echipa-heylux-studio-se-pregateste-pentru-marea-premiere-pe-scena-din-lisabona/"
 rewrittenTitle: "Job videochat Iași la Heylux: comision până la 70%"
-rewrittenExcerpt: "Studio de videochat în Iași care angajează femei cu sau fără experiență. Comision până la 70%, program flexibil și cursuri incluse. Aplică pe www.heylux.ro."
+rewrittenExcerpt: "Studio de videochat în Iași care angajează femei cu sau fără experiență. Comision până la 70%, program flexibil și cursuri incluse în studio."
 ---
 
 Un job de videochat în Iași la Heylux înseamnă un comision de 60% sau 70% în primele 6 luni de colaborare, program flexibil și cursuri incluse în studio. Suntem echipa Heylux Studio din Iași și lucrăm cu femei care vor un venit mai mare, cu sau fără experiență. La începutul acestui an, un model din studioul nostru a înregistrat un record de 111.232,41 $ câștigați într-o singură lună calendaristică.
@@ -46,4 +46,4 @@ Nu. În cadrul studioului ai cursuri de dans, engleză, dezvoltare personală ș
 **Ce comision pot avea după primele 6 luni?**
 După 6 luni poți ajunge la un comision de 70% dacă ești serioasă, muncești constant și îți dai silința ca totul să fie impecabil.
 
-Dacă vrei să faci primul pas, contactează-ne și hai să te punem în lumina reflectoarelor. Aplică pentru interviu pe **www.heylux.ro**.
+Dacă vrei să faci primul pas, vino la un interviu și hai să te punem în lumina reflectoarelor.

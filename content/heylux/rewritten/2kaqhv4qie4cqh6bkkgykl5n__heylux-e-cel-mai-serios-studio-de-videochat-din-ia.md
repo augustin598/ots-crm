@@ -3,7 +3,7 @@ id: "2kaqhv4qie4cqh6bkkgykl5n"
 brand: "heylux"
 sourceUrl: "https://www.viata-libera.ro/cariere/93384-heylux-e-cel-mai-serios-studio-de-videochat-din-iasi-pe-bune"
 rewrittenTitle: "Studio videochat Iași: Heylux, discret și serios"
-rewrittenExcerpt: "Heylux e un studio de videochat serios din Iași, cu discreție absolută și acte legale. Vezi cine suntem și cum aplici. Sună la 0744.33.77.11."
+rewrittenExcerpt: "Heylux e un studio de videochat serios din Iași, cu discreție absolută și acte legale. Vezi cine suntem, cum lucrăm și cum decurge angajarea."
 ---
 
 Heylux este un studio de videochat din Iași, condus de femei cu ani de experiență în administrarea studiourilor de videochat. Dacă te-ai gândit la un job de model de videochat, dar te-a oprit frica să nu se afle unde lucrezi, la noi lucrurile stau simplu: ce faci la Heylux rămâne la Heylux.
@@ -41,5 +41,3 @@ Da. Ne ocupăm noi ca toate actele tale să fie complet în regulă.
 
 **Cât se câștigă din videochat?**
 Studioul îți oferă cadrul potrivit ca să te concentrezi pe câștiguri, iar modelele noastre câștigă mii de euro din videochat.
-
-Vrei să afli mai multe sau să vii la un interviu? Sună la 0744.33.77.11 sau intră pe www.heylux.ro.

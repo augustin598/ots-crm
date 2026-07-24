@@ -3,7 +3,7 @@ id: "hamf52x625cn7wmpbeg7bxal"
 brand: "heylux"
 sourceUrl: "https://bogdanalupoaie.ro/7-motive-sa-te-angajezi-ca-model-de-videochat-in-iasi-la-heylux/"
 rewrittenTitle: "Videochat Iași: 300–1.200 lei/zi la Heylux"
-rewrittenExcerpt: "Model videochat în Iași la Heylux: câștigi între 300 și 1.200 lei pe zi, plătiți zilnic, plus bonus. Studio exclusiv feminin. Sună la 0744.33.77.11."
+rewrittenExcerpt: "Model videochat în Iași la Heylux: câștigi între 300 și 1.200 lei pe zi, plătiți zilnic, plus bonus de angajare. Studio exclusiv feminin."
 ---
 
 Ca model de videochat în Iași la Heylux poți câștiga, în medie, între 300 și 1.200 lei pe zi, iar banii îi primești chiar la finalul programului, cash sau pe card. Heylux este un studio de videochat din Iași, condus de o echipă de management cu ani de experiență în domeniu. Mai jos ai motivele concrete pentru care merită să lucrezi cu noi.
@@ -48,4 +48,4 @@ Toți banii câștigați într-o zi de muncă îi primești la sfârșitul progr
 **E un studio serios?**
 Da. Heylux e condus de o echipă cu ani de experiență în industrie, e exclusiv feminin, iar toate colegele au experiență în domeniu.
 
-Dacă ești interesată de aceste beneficii, sună-ne oricând pentru detalii, cu multă răbdare și politețe îți oferim orice informație dorești. Dă-ne un telefon la **0744.33.77.11** sau intră pe **www.heylux.ro**.
+Dacă ești interesată de aceste beneficii, vino la o discuție: cu multă răbdare și politețe îți oferim orice informație dorești.

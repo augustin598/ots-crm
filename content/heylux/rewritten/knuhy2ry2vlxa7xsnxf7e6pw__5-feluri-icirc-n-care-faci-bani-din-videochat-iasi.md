@@ -41,4 +41,4 @@ Recomandarea noastră e minimum 8 ore online pe zi, 5 zile pe săptămână, pe 
 **Ai nevoie de experiență sau de engleză perfectă?**
 Nu. Lucrăm cu fete care arată normal și învață pe parcurs. Dacă engleza îți dă bătăi de cap, o iei câte un cuvânt pe zi, iar trainera te ajută să progresezi rapid.
 
-Hai să vorbim la telefon, ca să începi și tu să faci bani din videochat în Iași la Heylux. Sună la 0744.33.77.11 sau intră pe www.heylux.ro.
+Vino la o discuție și începe și tu să faci bani din videochat în Iași la Heylux.

@@ -3,7 +3,7 @@ id: "ldetoygrugrvaysnyehe467w"
 brand: "heylux"
 sourceUrl: "https://www.divahair.ro/cuplu/bmw-urile-aurii-de-la-heylux-sunt-vedetele-videochatului-in-iasi"
 rewrittenTitle: "Videochat Iași la Heylux: studioul serios"
-rewrittenExcerpt: "Vrei să faci videochat în Iași? Heylux e studioul cu echipă feminină, discreție și câștiguri mari. Vezi condițiile și aplică pe www.heylux.ro."
+rewrittenExcerpt: "Vrei să faci videochat în Iași? Heylux e studioul cu echipă feminină, discreție și câștiguri mari. Vezi condițiile și cum decurge angajarea."
 ---
 
 Heylux este un studio de videochat în Iași unde lucrezi într-un mediu serios și discret, condus de o echipă exclusiv feminină. Aici se câștigă mulți bani, iar angajarea se face pe bază de seriozitate: dai un test de personalitate, treci printr-un interviu și devii colega noastră. Suntem o echipă cu ani de experiență în administrarea studiourilor de videochat, așa că știi de la început că ai de-a face cu un business real.
@@ -48,4 +48,4 @@ Seriozitate, respect pentru colege și discreție. Angajarea se face după un in
 **E discret jobul?**
 Da. Respectăm intimitatea și ne asigurăm că toate fetele din echipă fac la fel.
 
-Când vezi BMW-urile aurii de la Heylux prin Iași, să știi ce e în spatele lor: un studio unde se câștigă mulți bani, cu oameni serioși, în care lucrezi relaxată. Te așteptăm și pe tine cu drag: intră pe www.heylux.ro și hai la un interviu.
+Când vezi BMW-urile aurii de la Heylux prin Iași, să știi ce e în spatele lor: un studio unde se câștigă mulți bani, cu oameni serioși, în care lucrezi relaxată. Te așteptăm și pe tine cu drag la un interviu.

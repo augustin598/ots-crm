@@ -50,4 +50,4 @@ Colegele de la management rezolvă toate formele legale, ca tu să te poți conc
 **Cum crește venitul în timp?**
 Cu cât câștigi mai bine, cu atât primești un procent mai mare din studio, așa că veniturile urcă odată cu experiența.
 
-Vino la Heylux, studioul de videochat cu BMW-uri aurii din Iași, și schimbă-ți viața în bine. E de ajuns să ne dai un telefon: 0744.33.77.11. Ne găsești și pe www.heylux.ro
+Vino la Heylux, studioul de videochat cu BMW-uri aurii din Iași, și schimbă-ți viața în bine.

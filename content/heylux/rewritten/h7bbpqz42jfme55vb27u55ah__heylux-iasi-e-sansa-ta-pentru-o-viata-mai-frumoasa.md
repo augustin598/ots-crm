@@ -43,4 +43,4 @@ Nu. Angajăm modele fără experiență în fiecare an, iar cele 14 trainere ale
 **Ce se întâmplă dacă vin doar la o vizită?**
 Vizitezi studioul, vezi camerele și vorbești cu celelalte modele, fără nicio obligație. Îți plătim și taxiul până aici.
 
-Fă primul pas spre o viață mai frumoasă: sună-ne la 0744 337 711 sau intră pe www.heylux.ro și programează-ți vizita la studioul Heylux Iași.
+Fă primul pas spre o viață mai frumoasă: programează-ți o vizită la studioul Heylux Iași.
