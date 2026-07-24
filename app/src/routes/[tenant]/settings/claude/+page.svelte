@@ -301,7 +301,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
-		max-width: 860px;
+		width: 100%;
 	}
 
 	:global(.dark) .claude-cfg {
