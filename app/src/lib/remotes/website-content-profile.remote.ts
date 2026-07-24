@@ -5,6 +5,7 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 export const getWebsiteContentProfile = query(v.string(), async (websiteId) => {
 	const event = getRequestEvent();
@@ -57,15 +58,35 @@ export const updateWebsiteContentProfile = command(
 		const tenantId = event.locals.tenant.id;
 		const patch: Record<string, unknown> = { updatedAt: new Date() };
 		for (const k of PROFILE_FIELDS) if (input[k] !== undefined) patch[k] = input[k];
-		await db
-			.update(table.websiteContentProfile)
-			.set(patch)
+		// Upsert: dacă website-ul n-are încă profil, îl creează (scalabil pt website-uri noi).
+		const existing = await db
+			.select({ id: table.websiteContentProfile.id })
+			.from(table.websiteContentProfile)
 			.where(
 				and(
 					eq(table.websiteContentProfile.websiteId, input.websiteId),
 					eq(table.websiteContentProfile.tenantId, tenantId)
 				)
-			);
+			)
+			.limit(1);
+		if (existing.length) {
+			await db
+				.update(table.websiteContentProfile)
+				.set(patch)
+				.where(
+					and(
+						eq(table.websiteContentProfile.websiteId, input.websiteId),
+						eq(table.websiteContentProfile.tenantId, tenantId)
+					)
+				);
+		} else {
+			await db.insert(table.websiteContentProfile).values({
+				id: encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15))),
+				tenantId,
+				websiteId: input.websiteId,
+				...patch
+			});
+		}
 		return { ok: true };
 	}
 );
