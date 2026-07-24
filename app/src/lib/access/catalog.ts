@@ -217,6 +217,24 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		unsafeUnlessRole: 'admin'
 	},
 
+	// Claude (plugin)
+	{
+		id: 'admin.claude.view',
+		domain: 'admin',
+		groupLabel: 'Claude',
+		label: 'Vezi configurare Claude',
+		description: 'Acces la /settings/claude (status integrare Claude/Anthropic).'
+	},
+	{
+		id: 'admin.claude.manage',
+		domain: 'admin',
+		groupLabel: 'Claude',
+		label: 'Gestionare cheie Claude',
+		description:
+			'Adăugare/actualizare/ștergere cheie API Claude (Anthropic). Acțiune sensibilă financiar.',
+		unsafeUnlessRole: 'admin'
+	},
+
 	// Scheduler / Operations
 	{
 		id: 'admin.scheduler.view',
@@ -400,6 +418,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Stripe
 		'admin.stripe.view',
 		'admin.stripe.manage',
+		// Claude
+		'admin.claude.view',
+		'admin.claude.manage',
 		// Operations
 		'admin.scheduler.view',
 		'admin.scheduler.trigger',
@@ -436,6 +457,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Stripe
 		'admin.stripe.view',
 		'admin.stripe.manage',
+		// Claude
+		'admin.claude.view',
+		'admin.claude.manage',
 		// Operations (no scheduler.trigger)
 		'admin.scheduler.view',
 		'admin.logs.view',

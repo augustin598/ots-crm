@@ -4,7 +4,8 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { requireStaff } from '$lib/server/get-actor';
+import { getActor } from '$lib/server/get-actor';
+import { assertCan } from '$lib/server/access';
 import { encryptVerified } from '$lib/server/plugins/claude/crypto';
 import { detectKeyType, keyHint, isValidClaudeKey } from '$lib/server/plugins/claude/key-utils';
 import { getClaudeClient } from '$lib/server/plugins/claude';
@@ -24,7 +25,8 @@ function generateId(): string {
 /** Status integrare pentru tenantul curent. NU întoarce niciodată cheia. */
 export const getClaudeIntegration = query(async () => {
 	const { event, tenantId } = scope();
-	await requireStaff(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.claude.view');
 
 	const [row] = await db
 		.select({
@@ -51,7 +53,8 @@ const SaveSchema = v.object({
 
 export const saveClaudeIntegration = command(SaveSchema, async (data) => {
 	const { event, tenantId } = scope();
-	await requireStaff(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.claude.manage');
 
 	const model = data.defaultModel;
 	if (!isKnownClaudeModel(model)) throw new Error('Model Claude necunoscut.');
@@ -112,7 +115,8 @@ export const saveClaudeIntegration = command(SaveSchema, async (data) => {
 
 export const testClaudeConnection = command(async () => {
 	const { event, tenantId } = scope();
-	await requireStaff(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.claude.manage');
 
 	try {
 		const client = await getClaudeClient(tenantId);
@@ -141,7 +145,8 @@ export const testClaudeConnection = command(async () => {
 
 export const deleteClaudeIntegration = command(async () => {
 	const { event, tenantId } = scope();
-	await requireStaff(event);
+	const actor = await getActor(event);
+	assertCan(actor, 'admin.claude.manage');
 
 	await db.delete(table.claudeIntegration).where(eq(table.claudeIntegration.tenantId, tenantId));
 	logInfo('plugin', 'Claude integration deleted', { tenantId, userId: event.locals.user!.id });
