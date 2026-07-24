@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'bun:test';
-import { buildSystemPrompt, parseGeneration, parseSeoMeta, slugify } from '../article-prompt';
+import {
+	buildSeoSystemPrompt,
+	buildSystemPrompt,
+	HUMANIZER_RULES,
+	parseGeneration,
+	parseSeoMeta,
+	slugify
+} from '../article-prompt';
 
 describe('buildSystemPrompt', () => {
 	it('include profilul + guardrails + direcția', () => {
@@ -27,6 +34,37 @@ describe('buildSystemPrompt', () => {
 		const s = buildSystemPrompt(null, null);
 		expect(typeof s).toBe('string');
 		expect(s.length).toBeGreaterThan(0);
+	});
+	it('include regulile anti-AI (humanizer) by default, cu sau fără profil', () => {
+		for (const s of [
+			buildSystemPrompt(null, null),
+			buildSystemPrompt(
+				{
+					tone: 'cald',
+					audience: null,
+					language: null,
+					keywords: null,
+					topics: null,
+					doList: null,
+					dontList: null,
+					guardrails: null,
+					sampleUrls: null,
+					extraNotes: null
+				},
+				null
+			)
+		]) {
+			expect(s).toContain(HUMANIZER_RULES);
+		}
+	});
+	it('regulile anti-AI apar ÎNAINTE de instrucțiunea de format JSON', () => {
+		const s = buildSystemPrompt(null, null);
+		const i = s.indexOf(HUMANIZER_RULES);
+		expect(i).toBeGreaterThan(-1);
+		expect(i).toBeLessThan(s.indexOf('Răspunde DOAR cu un obiect JSON'));
+	});
+	it('promptul SEO primește regula anti-promoțională', () => {
+		expect(buildSeoSystemPrompt(null)).toContain('Fără limbaj promoțional gol');
 	});
 });
 
