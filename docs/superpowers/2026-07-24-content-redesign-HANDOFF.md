@@ -4,13 +4,11 @@ Status complet al redesign-ului `/ots/content` (mono-brand Heylux → sistem mul
 
 ---
 
-## ⚠️ ACȚIUNE IMEDIATĂ (blochează testarea generării)
+## ✅ REZOLVAT (blocajul de generare 429)
 
-Generarea AI dă **`Claude 429 rate_limit_error`** chiar și după 3 retry-uri. **NU e quota** (user are Max 5x, ~97% sesiune / 99% săptămânal liber) — e **limita de rată pe minut/burst** a token-ului OAuth (Abonament) folosit pe API-ul Messages.
+Generarea AI dădea **`Claude 429 rate_limit_error`** — limita de rată pe minut/burst a token-ului OAuth (Abonament), NU quota. **Rezolvat 2026-07-24:** ruta `copywriting` mutată pe **cheia API + Sonnet 5** (`claude_integration.routes` pe Turso: `{"copywriting":{"keyType":"api","model":"claude-sonnet-5"}}`). Sonnet 5 e suficient pt texte + limite de rată mult mai mari decât Opus pe API. Retry pe 429/529 rămâne ca plasă de siguranță (`article-generator.ts`).
 
-**Fix durabil:** în `/ots/settings/claude` → tabelul „Rutare pe utilizări" → pune **„Copywriting / conținut"** pe **🔑 API** (nu Abonament). User are ambele chei configurate (oat primar + api secundar). Cheia API (console.anthropic.com) are limite de rată proprii, mari, pentru generare programatică. *(Alternativ, se poate schimba default-ul `copywriting.defaultKeyType` din `'oat'` în `'api'` în `src/lib/claude-usecases.ts`, dar decizia e a userului — rutarea per-tenant din UI e mecanismul corect.)*
-
-Retry-ul cu backoff (respectă `retry-after`, 3 încercări) e deja implementat în `src/lib/server/content/article-generator.ts` (`createMessageWithRetry`).
+**Rămâne (la user):** click de test live în `/ots/content` (Regenerează / Modifică cu AI + „Generează AI" SEO) — testul programatic direct e blocat de classifier (decriptare cheie + call extern), dar calea API e configurată corect.
 
 ---
 
@@ -54,7 +52,7 @@ Pivot `content_article` de la string `brand` la `websiteId`. Hub = `clientWebsit
 `client_website`: `wp_site_id`(FK wordpressSite).
 Tabel nou `website_content_profile` (1:1 cu clientWebsite): profil brand (tone/audience/language/keywords/topics/doList/dontList/guardrails/sampleUrls/extraNotes) + politică publicare (publishMode/cadencePerWeek/daysOfWeek/publishTime/defaultWpStatus/autoApprove).
 
-Convenții migrări: hand-authored, un statement/fișier, journal patch manual (`db:gen` le drop-ează), `bun run db:migrate`, verificare `PRAGMA table_info` pe Turso. Următoarea migrare liberă = **0432**.
+Convenții migrări: hand-authored, un statement/fișier, journal patch manual (`db:gen` le drop-ează), `bun run db:migrate`, verificare `PRAGMA table_info` pe Turso. F3 a adăugat 0432 (`publish_status`) + 0433 (index). Următoarea migrare liberă = **0434**.
 
 ---
 
@@ -83,8 +81,17 @@ Convenții migrări: hand-authored, un statement/fișier, journal patch manual (
 - **Buton „Generează SEO pt toate"** / batch rescriere per website (Task 5 F2, amânat).
 - Butoanele scrape (`importHeyluxSources`/`startContentExtraction`) rămân doar în remote fără UI → source-mgmt UI.
 
-### F3 — Publicare + calendar + automatizare (neînceput)
-Din spec §7. Publicare pe WordPress prin `WpClient.createPost` (există; status `future`+publishedAt = programare nativă), ținta = `clientWebsite.wpSiteId`. Calendar lunar pe `scheduled_at`. Moduri per website (`website_content_profile.publishMode`): manual / programat / auto. Scheduler tasks (ca `wordpress-*`): `content-auto-publish` + `content-auto-generate`. **Bug de reparat înainte de auto-publish:** upsert `wordpress_post` face lookup pe `wpPostId` FĂRĂ scoping `siteId` (`src/lib/server/wordpress/sync.ts`) → coliziune multi-site. Coloana `publish_status` (draft|scheduled|published|failed) de adăugat în F3.
+### F3 — Publicare + calendar + automatizare ✅ GATA (2026-07-24)
+Din spec §7. Comis pe `feat/heylux-content-rewrite` (10 commit-uri F3). Plan: `docs/superpowers/plans/2026-07-24-content-f3-publishing.md` (reconciliat cu second-opinion Gemini).
+- **Migrări 0432 (publish_status) + 0433 (index tenant/website/publish)** aplicate pe Turso (PRAGMA verificat: 326 rânduri pe `none`). `publish_status` enum: `none|draft|scheduled|publishing|published|failed` (`publishing` = stare tranzitorie de claim).
+- **Fix bug coliziune** `wordpress_post`: upsert-ul din `sync.ts` acum scopat pe `(siteId, wpPostId)` (test regresie `sync-scope.test.ts`).
+- **Publisher** `src/lib/server/content/publisher.ts` (`publishArticleToWordpress`): reutilizează `extractAndUploadInlineImages` + `WpClient.createPost`, ținta = `targetWpSiteId ?? clientWebsite.wpSiteId`, persistă `wp_post_id` + `publish_status`, refresh cache.
+- **Remote** (content-articles): `publishArticle` (draft/live), `scheduleArticle`/`unscheduleArticle`, `getWebsiteCalendar`, `getTenantWordpressSites`, `setWebsiteWpSite` (validare cross-tenant); (profile): `updateWebsitePublishPolicy` (`daysOfWeek` = number[] → JSON).
+- **Scheduler**: `content-auto-publish` (orar; claim atomic `publishing` → zero duplicate; respectă `defaultWpStatus`) + `content-auto-generate` (zilnic 06:30; umple calendarul pe cadență; `auto_approve` → `scheduled`, altfel `none`). Ambele înregistrate în `scheduler/index.ts`.
+- **UI**: editor articol (butoane Publică/Programează), pagina website tab-uri **Calendar** (grilă lunară `buildMonthGrid`) + **Setări** (link WP, mod publicare, cadență, zile, oră, auto-aprobare). CSS `cl-cal-*`/`cl-seg` în `content.css`.
+- **Teste**: content 45 pass, scheduler content 3 pass, sync-scope 1 pass; **svelte-check 0 erori/0 warnings**. (Testele rulează pe grupuri compatibile — mock.module leak cross-file e caracteristică pre-existentă a repo-ului.)
+
+Următoarea migrare liberă = **0434**. Nedeploiat.
 
 ---
 
