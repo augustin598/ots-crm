@@ -108,7 +108,8 @@ async function decryptSlot(
  */
 export async function getClaudeClient(
 	tenantId: string,
-	keyType?: ClaudeKeyType
+	keyType?: ClaudeKeyType,
+	timeoutMs?: number
 ): Promise<ClaudeClient | null> {
 	const registry = getPluginRegistry();
 	if (!(await registry.isPluginActiveForTenant(tenantId, 'claude'))) return null;
@@ -126,7 +127,8 @@ export async function getClaudeClient(
 	return createClaudeClient({
 		apiKey: resolved.plaintext,
 		keyType: resolved.slot.keyType,
-		defaultModel: resolved.row.defaultModel
+		defaultModel: resolved.row.defaultModel,
+		timeoutMs
 	});
 }
 
@@ -139,7 +141,8 @@ export async function getClaudeClient(
  */
 export async function getClaudeClientFor(
 	tenantId: string,
-	useCaseId: ClaudeUseCaseId
+	useCaseId: ClaudeUseCaseId,
+	timeoutMs?: number
 ): Promise<ClaudeClient | null> {
 	const registry = getPluginRegistry();
 	if (!(await registry.isPluginActiveForTenant(tenantId, 'claude'))) return null;
@@ -156,6 +159,7 @@ export async function getClaudeClientFor(
 	return createClaudeClient({
 		apiKey: resolved.plaintext,
 		keyType: resolved.slot.keyType,
-		defaultModel: isKnownClaudeModel(route.model) ? route.model : resolved.row.defaultModel
+		defaultModel: isKnownClaudeModel(route.model) ? route.model : resolved.row.defaultModel,
+		timeoutMs
 	});
 }
