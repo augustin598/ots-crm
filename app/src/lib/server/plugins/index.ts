@@ -8,6 +8,7 @@ import { bankingTransilvaniaPlugin } from './banking/transilvania/plugin';
 import { bankingBCRPlugin } from './banking/bcr/plugin';
 import { directAdminPlugin } from './directadmin/plugin';
 import { stripePlugin } from './stripe/plugin';
+import { claudePlugin } from './claude/plugin';
 import { migrateStripeFromEnv } from './stripe/env-migration';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -42,6 +43,9 @@ export async function initializePlugins(): Promise<void> {
 	// Register Stripe plugin
 	registry.register(stripePlugin);
 
+	// Register Claude plugin
+	registry.register(claudePlugin);
+
 	// Load plugin from database and ensure plugins are registered
 	await ensureSmartBillPluginInDatabase();
 	await ensureKeezPluginInDatabase();
@@ -49,6 +53,7 @@ export async function initializePlugins(): Promise<void> {
 	await ensureBankingPluginsInDatabase();
 	await ensureDirectAdminPluginInDatabase();
 	await ensureStripePluginInDatabase();
+	await ensureClaudePluginInDatabase();
 
 	// Initialize all registered plugins
 	await manager.loadPlugins();
@@ -265,5 +270,37 @@ async function ensureStripePluginInDatabase(): Promise<void> {
 	} catch (error) {
 		const { message, stack } = serializeError(error);
 		logError('plugin', `Failed to ensure Stripe plugin: ${message}`, { stackTrace: stack });
+	}
+}
+
+/**
+ * Ensure Claude plugin exists in database (credențiale per-tenant).
+ */
+async function ensureClaudePluginInDatabase(): Promise<void> {
+	try {
+		const [existing] = await db
+			.select()
+			.from(table.plugin)
+			.where(eq(table.plugin.name, 'claude'))
+			.limit(1);
+
+		if (!existing) {
+			const pluginId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+			await db.insert(table.plugin).values({
+				id: pluginId,
+				name: 'claude',
+				displayName: 'Claude',
+				description:
+					'Cheie Claude (Anthropic) per-tenant — API key sau Claude Code OAuth token, criptată. Folosită de funcțiile AI din CRM.',
+				version: '1.0.0',
+				isActive: true,
+				config: {}
+			});
+			logInfo('plugin', 'Created Claude plugin in database');
+		}
+	} catch (error) {
+		const { message, stack } = serializeError(error);
+		logError('plugin', `Failed to ensure Claude plugin: ${message}`, { stackTrace: stack });
+		// Don't throw - allow app to continue
 	}
 }
