@@ -9,7 +9,7 @@ import { encryptVerified } from '$lib/server/plugins/claude/crypto';
 import { detectKeyType, keyHint, isValidClaudeKey } from '$lib/server/plugins/claude/key-utils';
 import { getClaudeClient } from '$lib/server/plugins/claude';
 import { isKnownClaudeModel } from '$lib/claude-models';
-import { logInfo, serializeError } from '$lib/server/logger';
+import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 
 function scope() {
 	const event = getRequestEvent();
@@ -106,7 +106,7 @@ export const saveClaudeIntegration = command(SaveSchema, async (data) => {
 		});
 	}
 
-	logInfo('plugin', 'Claude integration saved', { tenantId });
+	logInfo('plugin', 'Claude integration saved', { tenantId, userId: event.locals.user!.id });
 	return { connected: true };
 });
 
@@ -114,12 +114,11 @@ export const testClaudeConnection = command(async () => {
 	const { event, tenantId } = scope();
 	await requireStaff(event);
 
-	const client = await getClaudeClient(tenantId);
-	if (!client) {
-		throw new Error('Nicio cheie Claude configurată sau plugin dezactivat.');
-	}
-
 	try {
+		const client = await getClaudeClient(tenantId);
+		if (!client) {
+			throw new Error('Nicio cheie Claude configurată sau plugin dezactivat.');
+		}
 		const result = await client.testConnection();
 		await db
 			.update(table.claudeIntegration)
@@ -132,6 +131,10 @@ export const testClaudeConnection = command(async () => {
 			.update(table.claudeIntegration)
 			.set({ lastError: message, lastTestedAt: new Date(), updatedAt: new Date() })
 			.where(eq(table.claudeIntegration.tenantId, tenantId));
+		logWarning('plugin', 'Claude test connection failed', {
+			tenantId,
+			userId: event.locals.user!.id
+		});
 		throw new Error(message);
 	}
 });
@@ -140,9 +143,7 @@ export const deleteClaudeIntegration = command(async () => {
 	const { event, tenantId } = scope();
 	await requireStaff(event);
 
-	await db
-		.delete(table.claudeIntegration)
-		.where(eq(table.claudeIntegration.tenantId, tenantId));
-	logInfo('plugin', 'Claude integration deleted', { tenantId });
+	await db.delete(table.claudeIntegration).where(eq(table.claudeIntegration.tenantId, tenantId));
+	logInfo('plugin', 'Claude integration deleted', { tenantId, userId: event.locals.user!.id });
 	return { connected: false };
 });

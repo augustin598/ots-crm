@@ -16,12 +16,14 @@
 
 	const integrationQuery = getClaudeIntegration();
 	const current = $derived(integrationQuery.current ?? null);
+	const loading = $derived(integrationQuery.loading);
 
 	let apiKey = $state('');
 	let defaultModel = $state<string>(DEFAULT_CLAUDE_MODEL);
 	let modelInitialized = $state(false);
 	let saving = $state(false);
 	let testing = $state(false);
+	let deleting = $state(false);
 
 	// Pre-umple dropdown-ul cu modelul salvat, o singură dată.
 	$effect(() => {
@@ -34,7 +36,9 @@
 	async function save() {
 		saving = true;
 		try {
-			await saveClaudeIntegration({ apiKey: apiKey.trim(), defaultModel }).updates(integrationQuery);
+			await saveClaudeIntegration({ apiKey: apiKey.trim(), defaultModel }).updates(
+				integrationQuery
+			);
 			toast.success('Cheia Claude a fost salvată.');
 			apiKey = '';
 		} catch (e) {
@@ -62,6 +66,7 @@
 
 	async function remove() {
 		if (!confirm('Sigur ștergi cheia Claude a acestui tenant?')) return;
+		deleting = true;
 		try {
 			await deleteClaudeIntegration().updates(integrationQuery);
 			toast.success('Cheia Claude a fost ștearsă.');
@@ -70,6 +75,8 @@
 			modelInitialized = false;
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
+		} finally {
+			deleting = false;
 		}
 	}
 </script>
@@ -78,8 +85,8 @@
 	<div>
 		<h1 class="text-2xl font-bold">Claude</h1>
 		<p class="text-slate-500">
-			Conectează cheia ta Claude (Anthropic). Suportă atât API key (sk-ant-api…) cât și Claude
-			Code OAuth token (sk-ant-oat…). Cheia e criptată și nu părăsește serverul.
+			Conectează cheia ta Claude (Anthropic). Suportă atât API key (sk-ant-api…) cât și Claude Code
+			OAuth token (sk-ant-oat…). Cheia e criptată și nu părăsește serverul.
 		</p>
 	</div>
 
@@ -118,6 +125,7 @@
 					bind:value={apiKey}
 					placeholder={current?.connected ? 'Lasă gol ca să păstrezi cheia actuală' : 'sk-ant-…'}
 					autocomplete="off"
+					disabled={loading}
 					class="w-full rounded-md border px-3 py-2 text-sm dark:bg-slate-900"
 				/>
 			</div>
@@ -126,6 +134,7 @@
 				<select
 					id="claude-model"
 					bind:value={defaultModel}
+					disabled={loading}
 					class="w-full rounded-md border px-3 py-2 text-sm dark:bg-slate-900"
 				>
 					{#each CLAUDE_MODELS as m (m.id)}
@@ -153,10 +162,11 @@
 					</button>
 					<button
 						onclick={remove}
-						class="inline-flex items-center gap-2 rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-900/40"
+						disabled={deleting}
+						class="inline-flex items-center gap-2 rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/40"
 					>
 						<TrashIcon class="h-4 w-4" />
-						Șterge
+						{deleting ? 'Se șterge…' : 'Șterge'}
 					</button>
 				{/if}
 			</div>
