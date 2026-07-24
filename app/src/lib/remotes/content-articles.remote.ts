@@ -9,7 +9,10 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
 import { generateArticle, generateSeoMeta } from '$lib/server/content/article-generator';
-import { publishArticleToWordpress } from '$lib/server/content/publisher';
+import {
+	publishArticleToWordpress,
+	refreshWebsiteWpCategories as refreshWpCategoriesForWebsite
+} from '$lib/server/content/publisher';
 
 function genId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -195,7 +198,8 @@ export const getWebsiteArticles = query(
 				sourceUrl: table.contentArticle.sourceUrl,
 				scheduledAt: table.contentArticle.scheduledAt,
 				publishStatus: table.contentArticle.publishStatus,
-				wpPostId: table.contentArticle.wpPostId
+				wpPostId: table.contentArticle.wpPostId,
+				wpCategories: table.contentArticle.wpCategories
 			})
 			.from(table.contentArticle)
 			.where(and(...conds))
@@ -501,6 +505,18 @@ export const humanizeArticle = command(v.string(), async (articleId) => {
 			.set({ rewriteStatus: 'ready', updatedAt: new Date() })
 			.where(eq(table.contentArticle.id, articleId));
 		svelteError(500, e instanceof Error ? e.message : 'Umanizare eșuată');
+	}
+});
+
+/** Reîmprospătează categoriile WP pt articolele unui website (conector ≥0.7.0 pe site). */
+export const refreshArticleWpCategories = command(v.string(), async (websiteId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	try {
+		return await refreshWpCategoriesForWebsite(event.locals.tenant.id, websiteId);
+	} catch (e) {
+		svelteError(500, e instanceof Error ? e.message : 'Refresh categorii eșuat');
 	}
 });
 

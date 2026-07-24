@@ -2082,6 +2082,7 @@ export const contentArticle = sqliteTable('content_article', {
 	focusKeyword: text('focus_keyword'),
 	targetWpSiteId: text('target_wp_site_id'),
 	wpPostId: integer('wp_post_id'),
+	wpCategories: text('wp_categories'), // JSON [{id, name, slug}] — categoriile postării pe WP
 	scheduledAt: timestamp('scheduled_at', { withTimezone: true, mode: 'date' }),
 	publishStatus: text('publish_status').notNull().default('none'), // none|draft|scheduled|publishing|published|failed
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })

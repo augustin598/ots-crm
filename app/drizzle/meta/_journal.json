@@ -3018,6 +3018,13 @@
 			"when": 1784908176175853,
 			"tag": "0433_content_article_publish_idx",
 			"breakpoints": true
+		},
+		{
+			"idx": 434,
+			"version": "6",
+			"when": 1784908176176853,
+			"tag": "0434_content_article_wp_categories",
+			"breakpoints": true
 		}
 	]
 }

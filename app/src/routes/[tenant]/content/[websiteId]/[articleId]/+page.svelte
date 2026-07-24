@@ -341,6 +341,26 @@
 			</div>
 
 			<aside class="ct-seo">
+				{#if article.wpCategories}
+					{@const cats = (() => {
+						try {
+							const v = JSON.parse(article.wpCategories);
+							return Array.isArray(v) ? (v as Array<{ id: number; name: string }>) : [];
+						} catch {
+							return [];
+						}
+					})()}
+					{#if cats.length > 0}
+						<div class="ct-seo-card">
+							<h4>Categorii WP</h4>
+							<span class="ct-web-badges">
+								{#each cats as c (c.id)}
+									<span class="ct-badge off">{c.name}</span>
+								{/each}
+							</span>
+						</div>
+					{/if}
+				{/if}
 				<div class="ct-seo-card">
 					<h4>Imagine featured</h4>
 					{#if featuredImageUrl}

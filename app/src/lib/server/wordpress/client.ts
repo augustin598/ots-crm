@@ -58,6 +58,12 @@ export interface WpBackupResponse {
 }
 
 /** Post shape returned by the plugin for list & single. */
+export interface WpPostCategory {
+	id: number;
+	name: string;
+	slug: string;
+}
+
 export interface WpPost {
 	id: number;
 	title: string;
@@ -68,6 +74,8 @@ export interface WpPost {
 	featuredMediaId: number | null;
 	featuredMediaUrl: string | null;
 	authorWpId: number;
+	/** Prezent din conector v0.7.0; absent la site-urile cu versiuni mai vechi. */
+	categories?: WpPostCategory[];
 	link: string;
 	publishedAt: string | null;
 	createdAt: string;
@@ -92,6 +100,21 @@ export interface WpPostPayload {
 	status?: 'publish' | 'draft' | 'pending' | 'private' | 'future';
 	publishedAt?: string; // ISO 8601, required for status=future
 	featuredMediaId?: number | null;
+	/** ID-uri de categorii WP; omis = categoriile existente rămân neatinse (conector ≥0.7.0). */
+	categoryIds?: number[];
+}
+
+export interface WpCategory {
+	id: number;
+	name: string;
+	slug: string;
+	count: number;
+}
+
+export interface WpCategoryListResponse {
+	items: WpCategory[];
+	total: number;
+	timestamp: number;
 }
 
 export interface WpMediaUploadResponse {
@@ -261,6 +284,16 @@ export class WpClient {
 			method: 'GET',
 			path,
 			timeoutMs: opts?.timeoutMs ?? 20_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/** Categoriile site-ului (conector ≥0.7.0; site-urile mai vechi întorc 404). */
+	async listCategories(opts?: { timeoutMs?: number; siteId?: string }): Promise<WpCategoryListResponse> {
+		return this.request<WpCategoryListResponse>({
+			method: 'GET',
+			path: '/categories',
+			timeoutMs: opts?.timeoutMs ?? 15_000,
 			siteId: opts?.siteId
 		});
 	}

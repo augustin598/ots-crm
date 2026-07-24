@@ -8,6 +8,19 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.7.0 — 2026-07-24
+
+- `GET /posts` și `GET /posts/{id}` includ acum `categories`
+  (`[{id, name, slug}]`) în shape-ul postării.
+- Rută nouă `GET /categories` — toate categoriile site-ului
+  (id, name, slug, count), inclusiv cele goale.
+- `POST /posts` / `PUT /posts/{id}` acceptă opțional `categoryIds:
+  int[]` → `post_category`. Câmp omis, listă goală sau integral
+  invalidă = categoriile existente rămân neatinse (nu resetăm
+  niciodată silențios la Uncategorized; backwards compatible cu
+  CRM-urile care nu trimit câmpul). Elementele non-numerice sunt
+  ignorate, nu coerce-uite.
+
 ## 0.6.8 — 2026-04-23
 
 - HOTFIX follow-up to v0.6.7: FPM workers that handled v0.6.6 still have

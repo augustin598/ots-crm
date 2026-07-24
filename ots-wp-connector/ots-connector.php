@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.6.8
+ * Version:           0.7.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.6.8' );
+define( 'OTS_CONNECTOR_VERSION', '0.7.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -713,9 +713,23 @@ function ots_connector_rrmdir( string $path ): void {
  * Shape the response returned for a single post. Keeps the CRM client
  * happy with stable field names regardless of how WordPress evolves.
  */
+// Fără type hint WP_Term: filtrul `get_the_categories` poate injecta obiecte
+// non-WP_Term (teme vechi) — un TypeError aici ar omorî TOT /posts, nu doar categoriile.
+function ots_connector_shape_category( $term ): array {
+	return [
+		'id'   => (int) $term->term_id,
+		'name' => (string) $term->name,
+		'slug' => (string) $term->slug,
+	];
+}
+
 function ots_connector_shape_post( WP_Post $post ): array {
 	$thumb_id  = (int) get_post_thumbnail_id( $post->ID );
 	$thumb_url = $thumb_id ? (string) wp_get_attachment_url( $thumb_id ) : null;
+	$cats      = get_the_category( $post->ID );
+	$cats      = is_array( $cats ) ? array_filter( $cats, function ( $t ) {
+		return $t instanceof WP_Term;
+	} ) : [];
 	return [
 		'id'              => (int) $post->ID,
 		'title'           => (string) $post->post_title,
@@ -726,6 +740,7 @@ function ots_connector_shape_post( WP_Post $post ): array {
 		'featuredMediaId' => $thumb_id ?: null,
 		'featuredMediaUrl'=> $thumb_url,
 		'authorWpId'      => (int) $post->post_author,
+		'categories'      => array_values( array_map( 'ots_connector_shape_category', $cats ) ),
 		'link'            => (string) get_permalink( $post->ID ),
 		'publishedAt'     => $post->post_status === 'publish' ? mysql_to_rfc3339( $post->post_date_gmt ) : null,
 		'createdAt'       => mysql_to_rfc3339( $post->post_date_gmt ),
@@ -807,10 +822,39 @@ function ots_connector_build_post_args( array $body, int $id = 0 ): array {
 			$args['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $ts );
 		}
 	}
+	// Categorii: setate DOAR dacă CRM-ul trimite id-uri valide. Listă goală sau
+	// integral invalidă = câmp ignorat (categoriile existente rămân neatinse) —
+	// altfel wp_insert_post ar reseta silențios la categoria default (Uncategorized).
+	if ( array_key_exists( 'categoryIds', $body ) && is_array( $body['categoryIds'] ) ) {
+		$cat_ids = [];
+		foreach ( $body['categoryIds'] as $c ) {
+			if ( is_numeric( $c ) && (int) $c > 0 ) {
+				$cat_ids[] = (int) $c;
+			}
+		}
+		if ( count( $cat_ids ) > 0 ) {
+			$args['post_category'] = array_values( array_unique( $cat_ids ) );
+		}
+	}
 	if ( $id > 0 ) {
 		$args['ID'] = $id;
 	}
 	return $args;
+}
+
+/** GET /categories — toate categoriile site-ului (inclusiv goale). */
+function ots_connector_route_list_categories( WP_REST_Request $request ) {
+	$terms = get_categories( [ 'hide_empty' => false ] );
+	$items = [];
+	foreach ( $terms as $t ) {
+		$items[] = [
+			'id'    => (int) $t->term_id,
+			'name'  => (string) $t->name,
+			'slug'  => (string) $t->slug,
+			'count' => (int) $t->count,
+		];
+	}
+	return rest_ensure_response( [ 'items' => $items, 'total' => count( $items ), 'timestamp' => time() ] );
 }
 
 /** POST /posts — create. Also sets featured image if `featuredMediaId` is provided. */
@@ -1603,6 +1647,12 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts/(?P<id>\d+)', [
 		'methods'             => WP_REST_Server::DELETABLE,
 		'callback'            => 'ots_connector_route_delete_post',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/categories', [
+		'methods'             => WP_REST_Server::READABLE,
+		'callback'            => 'ots_connector_route_list_categories',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 

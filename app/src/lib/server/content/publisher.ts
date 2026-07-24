@@ -1,8 +1,8 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
-import { WpClient } from '$lib/server/wordpress/client';
+import { WpClient, type WpPostCategory } from '$lib/server/wordpress/client';
 import { extractAndUploadInlineImages } from '$lib/server/wordpress/media';
 import { syncPosts } from '$lib/server/wordpress/sync';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
@@ -35,6 +35,76 @@ async function loadSiteAndClient(tenantId: string, siteId: string) {
 		secret = decrypt(fresh.tenantId, fresh.secretKey);
 	}
 	return { site, client: new WpClient(site.siteUrl, secret) };
+}
+
+/**
+ * Reîmprospătează `wp_categories` pentru articolele unui website din posturile
+ * de pe WP (necesită conector ≥0.7.0 pe site; versiunile vechi nu trimit
+ * câmpul `categories` și articolele rămân neschimbate).
+ */
+export async function refreshWebsiteWpCategories(
+	tenantId: string,
+	websiteId: string
+): Promise<{ updated: number; total: number }> {
+	const [ws] = await db
+		.select({ wpSiteId: table.clientWebsite.wpSiteId })
+		.from(table.clientWebsite)
+		.where(and(eq(table.clientWebsite.id, websiteId), eq(table.clientWebsite.tenantId, tenantId)))
+		.limit(1);
+	if (!ws?.wpSiteId) throw new Error('Website-ul nu e legat de un site WordPress.');
+	const { site, client } = await loadSiteAndClient(tenantId, ws.wpSiteId);
+
+	const articles = await db
+		.select({ id: table.contentArticle.id, wpPostId: table.contentArticle.wpPostId })
+		.from(table.contentArticle)
+		.where(
+			and(
+				eq(table.contentArticle.tenantId, tenantId),
+				eq(table.contentArticle.websiteId, websiteId),
+				isNotNull(table.contentArticle.wpPostId)
+			)
+		);
+	if (articles.length === 0) return { updated: 0, total: 0 };
+
+	const byWpId = new Map<number, WpPostCategory[]>();
+	// Distinge „conector vechi" (câmpul `categories` lipsește complet) de „post
+	// dispărut de pe WP": doar în al doilea caz golim wp_categories local.
+	let sawCategoriesField = false;
+	let page = 1;
+	for (;;) {
+		const res = await client.listPosts({ status: 'any', page, perPage: 100 }, { siteId: site.id });
+		for (const p of res.items) {
+			if (p.categories) {
+				sawCategoriesField = true;
+				byWpId.set(p.id, p.categories);
+			}
+		}
+		if (res.items.length === 0 || page >= res.totalPages) break;
+		page++;
+	}
+
+	let updated = 0;
+	for (const a of articles) {
+		const cats = a.wpPostId != null ? byWpId.get(a.wpPostId) : undefined;
+		if (cats) {
+			await db
+				.update(table.contentArticle)
+				.set({ wpCategories: JSON.stringify(cats), updatedAt: new Date() })
+				.where(eq(table.contentArticle.id, a.id));
+			updated++;
+		} else if (sawCategoriesField) {
+			// Conectorul trimite categorii, dar postul nu mai există în listă → curăță.
+			await db
+				.update(table.contentArticle)
+				.set({ wpCategories: null, updatedAt: new Date() })
+				.where(eq(table.contentArticle.id, a.id));
+		}
+	}
+	logInfo('content', `Categorii WP reîmprospătate pt website ${websiteId}: ${updated}/${articles.length}`, {
+		tenantId,
+		metadata: { websiteId, siteId: site.id, updated, total: articles.length }
+	});
+	return { updated, total: articles.length };
 }
 
 /**
@@ -95,6 +165,7 @@ export async function publishArticleToWordpress(
 			.update(table.contentArticle)
 			.set({
 				wpPostId: created.id,
+				wpCategories: created.categories ? JSON.stringify(created.categories) : null,
 				targetWpSiteId: article.targetWpSiteId ?? site.id, // păstrează ținta explicită dacă exista
 				publishStatus,
 				publishedAt: created.publishedAt ? new Date(created.publishedAt) : new Date(),

@@ -8,7 +8,8 @@
 		generateArticleFromBrief,
 		getWebsiteCalendar,
 		getTenantWordpressSites,
-		setWebsiteWpSite
+		setWebsiteWpSite,
+		refreshArticleWpCategories
 	} from '$lib/remotes/content-articles.remote';
 	import {
 		getWebsiteContentProfile,
@@ -25,6 +26,7 @@
 	import SaveIcon from '@lucide/svelte/icons/save';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 
 	// Route param is guaranteed by the [websiteId] segment; assert non-null so it
 	// stays `string` for the remote-function calls below.
@@ -35,6 +37,33 @@
 
 	// ---- Articole tab state ----
 	let statusFilter = $state('');
+
+	// Categoriile WP ale unui articol (coloana `wp_categories`, JSON [{id,name,slug}]).
+	function wpCats(raw: string | null): Array<{ id: number; name: string; slug: string }> {
+		if (!raw) return [];
+		try {
+			const v = JSON.parse(raw);
+			return Array.isArray(v) ? v : [];
+		} catch {
+			return [];
+		}
+	}
+
+	let refreshingCats = $state(false);
+	async function doRefreshCats() {
+		if (refreshingCats) return;
+		refreshingCats = true;
+		try {
+			const r = await refreshArticleWpCategories(websiteId).updates(
+				getWebsiteArticles({ websiteId, status: statusFilter || undefined })
+			);
+			toast.success(`Categorii actualizate: ${r.updated}/${r.total} articole`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Refresh categorii eșuat');
+		} finally {
+			refreshingCats = false;
+		}
+	}
 
 	function openArticle(id: string) {
 		goto(`/${page.params.tenant}/content/${websiteId}/${id}`);
@@ -357,6 +386,15 @@
 							<option value="drafting">În lucru</option>
 						</select>
 					</div>
+					<button
+						class="cl-btn-secondary"
+						onclick={doRefreshCats}
+						disabled={refreshingCats}
+						title="Preia categoriile articolelor publicate/programate de pe WordPress"
+					>
+						<RefreshCwIcon size={13} class={refreshingCats ? 'ct-spin' : ''} />
+						{refreshingCats ? 'Se actualizează…' : 'Categorii WP'}
+					</button>
 					<button class="cl-btn-primary" onclick={() => (showBrief = true)}>+ Articol nou</button>
 				</div>
 			{/if}
@@ -411,6 +449,7 @@
 								<tr>
 									<th>Titlu</th>
 									<th>Status</th>
+									<th>Categorii</th>
 									<th>Cuvinte</th>
 									<th>Data</th>
 									<th>Sursă</th>
@@ -419,6 +458,7 @@
 							<tbody>
 								{#each articles as a (a.id)}
 									{@const pill = statusPill(a)}
+									{@const cats = wpCats(a.wpCategories)}
 									<tr
 										role="button"
 										tabindex="0"
@@ -429,6 +469,17 @@
 										<td>{a.generatedTitle ?? a.title ?? '—'}</td>
 										<td>
 											<span class="ct-st {pill.cls}"><span class="dot"></span>{pill.label}</span>
+										</td>
+										<td>
+											{#if cats.length > 0}
+												<span class="ct-web-badges">
+													{#each cats as c (c.id)}
+														<span class="ct-badge off">{c.name}</span>
+													{/each}
+												</span>
+											{:else}
+												<span style="color:var(--cl-text-3)">—</span>
+											{/if}
 										</td>
 										<td style="font-variant-numeric:tabular-nums">{a.wordCount ?? '—'}</td>
 										<td>{formatDate(a.publishedAt)}</td>
@@ -463,6 +514,7 @@
 								<tr>
 									<th>Titlu</th>
 									<th>Status</th>
+									<th>Categorii</th>
 									<th>Cuvinte</th>
 									<th>Data</th>
 									<th>Sursă</th>
@@ -471,7 +523,7 @@
 							<tbody>
 								{#each skelRows as i (i)}
 									<tr>
-										<td colspan="5">
+										<td colspan="6">
 											<div class="ct-skel" style="height:16px; border-radius:6px"></div>
 										</td>
 									</tr>
@@ -829,6 +881,14 @@
 	.ct-skel {
 		background: var(--cl-border);
 		animation: ct-skel-pulse 1.4s ease-in-out infinite;
+	}
+	.cl-toolbar :global(.ct-spin) {
+		animation: ct-cats-spin 0.8s linear infinite;
+	}
+	@keyframes ct-cats-spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 	@keyframes ct-skel-pulse {
 		0%,
