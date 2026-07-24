@@ -1954,6 +1954,44 @@ export const clientWebsite = sqliteTable('client_website', {
 	name: text('name'), // ex: "Site principal", "Shop", "Blog"
 	url: text('url').notNull(), // ex: "https://brand-a.ro"
 	isDefault: boolean('is_default').notNull().default(false),
+	// Puntea către WordPress (F0): site-ul WP unde se publică (auto-match domeniu, override manual)
+	wpSiteId: text('wp_site_id').references(() => wordpressSite.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
+// Profil de conținut per website (F0): context brand (AI) + politică publicare. 1:1 cu clientWebsite.
+export const websiteContentProfile = sqliteTable('website_content_profile', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	websiteId: text('website_id')
+		.notNull()
+		.references(() => clientWebsite.id)
+		.unique(),
+	// Profil brand (context AI general)
+	tone: text('tone'),
+	audience: text('audience'),
+	language: text('language').notNull().default('ro'),
+	keywords: text('keywords'), // JSON string[]
+	topics: text('topics'), // JSON string[]
+	doList: text('do_list'),
+	dontList: text('dont_list'),
+	guardrails: text('guardrails'), // „Mesaje INTERZISE"
+	sampleUrls: text('sample_urls'), // JSON string[]
+	extraNotes: text('extra_notes'),
+	// Politică publicare
+	publishMode: text('publish_mode').notNull().default('manual'), // manual|scheduled|auto
+	cadencePerWeek: integer('cadence_per_week').notNull().default(3),
+	daysOfWeek: text('days_of_week'), // JSON number[]
+	publishTime: text('publish_time').notNull().default('10:00'),
+	defaultWpStatus: text('default_wp_status').notNull().default('draft'), // draft|publish
+	autoApprove: boolean('auto_approve').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -2009,7 +2047,11 @@ export const contentArticle = sqliteTable('content_article', {
 	tenantId: text('tenant_id')
 		.notNull()
 		.references(() => tenant.id),
-	brand: text('brand').notNull().default('unknown'), // heylux|luckystudio|preziosa|forumvideochat|vivadiva|unknown
+	brand: text('brand').notNull().default('unknown'), // heylux|luckystudio|preziosa|forumvideochat|vivadiva|unknown (legacy/provenance)
+	// Pivot multi-website (F0): websiteId e proprietarul real; brand rămâne pt provenance
+	websiteId: text('website_id').references(() => clientWebsite.id),
+	clientId: text('client_id').references(() => client.id),
+	origin: text('origin').notNull().default('scraped'), // scraped|rewrite|brief
 	sourceUrl: text('source_url').notNull(),
 	sourceDomain: text('source_domain').notNull(),
 	title: text('title'),
@@ -2026,7 +2068,12 @@ export const contentArticle = sqliteTable('content_article', {
 	usedPuppeteer: boolean('used_puppeteer').notNull().default(false),
 	extractedAt: timestamp('extracted_at', { withTimezone: true, mode: 'date' }),
 	// Phase 2-3 placeholders (inactive in phase 1):
-	rewriteStatus: text('rewrite_status').notNull().default('none'), // none|drafting|ready
+	rewriteStatus: text('rewrite_status').notNull().default('none'), // none|queued|drafting|ready|failed
+	// Output generat (separat de sursă title/bodyHtml):
+	generatedTitle: text('generated_title'),
+	generatedHtml: text('generated_html'),
+	generatedExcerpt: text('generated_excerpt'),
+	generatedAt: timestamp('generated_at', { withTimezone: true, mode: 'date' }),
 	targetWpSiteId: text('target_wp_site_id'),
 	wpPostId: integer('wp_post_id'),
 	scheduledAt: timestamp('scheduled_at', { withTimezone: true, mode: 'date' }),
