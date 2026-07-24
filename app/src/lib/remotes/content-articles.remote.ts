@@ -226,6 +226,11 @@ export const updateContentArticle = command(
 		generatedExcerpt: v.optional(v.string()),
 		generatedHtml: v.optional(v.string()),
 		articleDirection: v.optional(v.string()),
+		seoTitle: v.optional(v.string()),
+		metaDescription: v.optional(v.string()),
+		focusKeyword: v.optional(v.string()),
+		slug: v.optional(v.string()),
+		featuredImageUrl: v.optional(v.string()),
 		rewriteStatus: v.optional(v.picklist(['none', 'queued', 'drafting', 'ready', 'failed']))
 	}),
 	async (input) => {
@@ -238,6 +243,11 @@ export const updateContentArticle = command(
 			'generatedExcerpt',
 			'generatedHtml',
 			'articleDirection',
+			'seoTitle',
+			'metaDescription',
+			'focusKeyword',
+			'slug',
+			'featuredImageUrl',
 			'rewriteStatus'
 		] as const) {
 			if (input[k] !== undefined) patch[k] = input[k];

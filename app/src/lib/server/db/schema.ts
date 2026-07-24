@@ -2076,6 +2076,10 @@ export const contentArticle = sqliteTable('content_article', {
 	generatedExcerpt: text('generated_excerpt'),
 	generatedAt: timestamp('generated_at', { withTimezone: true, mode: 'date' }),
 	articleDirection: text('article_direction'), // direcție/context per articol (override profil general)
+	// SEO / AEO / GEO per articol:
+	seoTitle: text('seo_title'),
+	metaDescription: text('meta_description'),
+	focusKeyword: text('focus_keyword'),
 	targetWpSiteId: text('target_wp_site_id'),
 	wpPostId: integer('wp_post_id'),
 	scheduledAt: timestamp('scheduled_at', { withTimezone: true, mode: 'date' }),

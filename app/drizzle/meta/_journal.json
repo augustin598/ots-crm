@@ -2983,6 +2983,27 @@
       "when": 1779916800027538,
       "tag": "0428_content_article_brief",
       "breakpoints": true
+    },
+    {
+      "idx": 429,
+      "version": "6",
+      "when": 1779916800027539,
+      "tag": "0429_content_article_seo_title",
+      "breakpoints": true
+    },
+    {
+      "idx": 430,
+      "version": "6",
+      "when": 1779916800027540,
+      "tag": "0430_content_article_meta_description",
+      "breakpoints": true
+    },
+    {
+      "idx": 431,
+      "version": "6",
+      "when": 1779916800027541,
+      "tag": "0431_content_article_focus_keyword",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `content_article` ADD COLUMN `focus_keyword` text;
