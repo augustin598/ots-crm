@@ -6,7 +6,7 @@ rewrittenTitle: "Videochat Iași: 300–1.200 lei/zi la Heylux"
 rewrittenExcerpt: "Model videochat în Iași la Heylux: câștigi între 300 și 1.200 lei pe zi, plătiți zilnic, plus bonus. Studio exclusiv feminin. Sună la 0744.33.77.11."
 ---
 
-Ca model de videochat în Iași la Heylux poți câștiga, în medie, între 300 și 1.200 lei pe zi, iar banii îi primești chiar la finalul programului, cash sau pe card. Heylux este un studio de videochat din Iași, condus de aceeași echipă de management care se ocupă și de Lucky Studio. Mai jos ai motivele concrete pentru care merită să lucrezi cu noi.
+Ca model de videochat în Iași la Heylux poți câștiga, în medie, între 300 și 1.200 lei pe zi, iar banii îi primești chiar la finalul programului, cash sau pe card. Heylux este un studio de videochat din Iași, condus de o echipă de management cu ani de experiență în domeniu. Mai jos ai motivele concrete pentru care merită să lucrezi cu noi.
 
 ## Cât câștigi și cum ești plătită
 
@@ -23,7 +23,7 @@ Pe lângă câștigul zilnic, primești două bonusuri:
 
 ## Un studio exclusiv feminin
 
-Heylux este un studio exclusiv feminin, condus de aceeași echipă de management care administrează și Lucky Studio. Știm să-ți respectăm feminitatea, pentru că am construit deja unul dintre cele mai serioase studiouri din oraș.
+Heylux este un studio exclusiv feminin, condus de o echipă de management cu experiență. Știm să-ți respectăm feminitatea, pentru că am construit unul dintre cele mai serioase studiouri din oraș.
 
 Colegele tale au experiență reală în acest domeniu, iar seriozitatea e cel mai important lucru în jobul nostru. Vei lucra cât se poate de relaxată.
 
@@ -46,6 +46,6 @@ Toți banii câștigați într-o zi de muncă îi primești la sfârșitul progr
 600 lei bonus de angajare, transport gratuit cu Mercedes și machiaj profesionist gratuit în fiecare zi.
 
 **E un studio serios?**
-Da. Heylux e condus de aceeași echipă care administrează Lucky Studio, e exclusiv feminin, iar toate colegele au experiență în domeniu.
+Da. Heylux e condus de o echipă cu ani de experiență în industrie, e exclusiv feminin, iar toate colegele au experiență în domeniu.
 
 Dacă ești interesată de aceste beneficii, sună-ne oricând pentru detalii, cu multă răbdare și politețe îți oferim orice informație dorești. Dă-ne un telefon la **0744.33.77.11** sau intră pe **www.heylux.ro**.

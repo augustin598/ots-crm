@@ -10,7 +10,7 @@ Heylux este studioul de videochat din Iași cunoscut drept „studioul nr. 1", c
 
 ## De ce Heylux este cel mai căutat studio din Iași
 
-Heylux nu este un început de drum. În 2008 studioul se numea Lucky Studio — „fetele norocoase" — și de atunci a crescut odată cu întreaga industrie. În cei 12 ani a devenit cel mai bine promovat studio de videochat și și-a câștigat numele prin recordurile în bani înregistrate și prin modelele de top pe care le-a format.
+Heylux nu este un început de drum. Studioul există din 2008 și de atunci a crescut odată cu întreaga industrie. În cei 12 ani a devenit cel mai bine promovat studio de videochat și și-a câștigat numele prin recordurile în bani înregistrate și prin modelele de top pe care le-a format.
 
 Astăzi este căutat de două tipuri de oameni: fetele care vor stabilitate financiară și antreprenorii care vor să se alăture grupului. Pentru tine, ca model, asta înseamnă un studio care știe exact ce funcționează.
 
@@ -37,7 +37,7 @@ Heylux este studio certificat LiveJasmin, platforma pe care s-au înregistrat re
 ## Întrebări frecvente
 
 **Ce este Heylux Studio?**
-Este un studio de videochat din Iași, cunoscut drept studioul nr. 1, cu 12 ani de experiență în formarea modelelor de top. În 2008 se numea Lucky Studio.
+Este un studio de videochat din Iași, cunoscut drept studioul nr. 1, cu 12 ani de experiență în formarea modelelor de top, activ din 2008.
 
 **Ai nevoie de experiență ca să începi?**
 Heylux pune la dispoziție traininguri și proceduri pentru modele, plus îndrumare continuă pe toată colaborarea, așa că pornești cu sprijin de la echipă.

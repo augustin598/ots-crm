@@ -6,27 +6,27 @@ rewrittenTitle: "Videochat Iași: cât câștigi la Heylux"
 rewrittenExcerpt: "La studioul de videochat Heylux Iași câștigul mediu e între 200 și 2.715 lei pe zi, fără experiență. Vino la o vizită, îți plătim taxiul."
 ---
 
-La studioul de videochat Heylux din Iași câștigul mediu este între 200 și 2.715 lei pe zi, iar te angajăm chiar dacă nu ai făcut asta niciodată. Zeci de modele vin la noi în fiecare an fără experiență și reușesc să-și schimbe viața. Tot ce îți trebuie e dorința de a începe.
+Câștigul mediu din videochat la Heylux Iași este între 200 și 2.715 lei pe zi, și te angajăm chiar dacă n-ai făcut asta în viața ta. În fiecare an vin la noi zeci de modele fără nicio experiență și ajung să-și schimbe viața. Singurul lucru care contează e să vrei să începi.
 
 ## Cât se câștigă din videochat la Heylux Iași
 
-Media câștigurilor la studioul nostru este între 200 și 2.715 lei pe zi. Practic, vorbim de câteva mii de euro pe lună. Sunt bani cu care poți face lucruri care până acum păreau de domeniul viselor: să-ți iei ce vrei, să pleci în city-break-uri, să-ți investești banii cum crezi tu de cuviință.
+Media la studioul nostru este între 200 și 2.715 lei pe zi. Adică, la finalul lunii, câteva mii de euro. Cu banii ăștia poți în sfârșit să-ți iei ce vrei sau să pleci într-un city-break când ai chef, iar restul îi investești cum crezi tu.
 
-Nu e o promisiune abstractă. Când vii la studio poți vorbi direct cu celelalte modele și le poți întreba cât de bine le merge, ce vacanțe își fac, în ce își investesc câștigurile.
+Știm că sună a promisiune de reclamă, așa că nu-ți cerem să ne crezi pe cuvânt. Vino la studio și întreabă-le direct pe modelele noastre cât le merge de bine și ce își fac cu banii.
 
 ## Începi fără experiență
 
-Nu ai nevoie de experiență ca să începi. Modelele care vin la Heylux Iași sunt persoane exact ca tine: la primul lor job de acest fel, dar cu o dorință extraordinară de succes. Videochatul îți dă oportunitatea să faci bani din propria imagine, iar noi te ajutăm să pornești corect.
+N-ai nevoie de experiență ca să începi. Modelele care vin la Heylux Iași sunt persoane exact ca tine, la primul job de acest fel, care își doresc mult să reușească. Videochatul îți dă șansa să faci bani din propria imagine, iar noi te învățăm de la zero cum să pornești corect.
 
-## Sprijin real, ca să reușești
+## Cum te sprijinim să reușești
 
-La Heylux credem din toată inima în succesul tău, mai ales dacă până acum nu a existat cineva care să creadă în tine. De aceea te sprijinim prin 14 trainere care lucrează cu tine ca să ajungi departe.
+La Heylux credem în succesul tău, chiar dacă până acum poate n-a crezut nimeni în tine. Ai 14 trainere care lucrează cu tine ca să ajungi departe.
 
-Pe lângă bani, se întâmplă ceva important: devii mai încrezătoare în tine. Simți că poți realiza lucruri ieșite din comun. E jobul nostru să facem lucrurile să meargă pentru tine.
+Și pe lângă bani mai câștigi ceva: încredere în tine. Începi să simți că poți mai mult decât credeai. Treaba noastră e să facem lucrurile să meargă pentru tine.
 
 ## Vino la o vizită, fără nicio obligație
 
-Cel mai simplu mod să te convingi este să ne faci o vizită la studio. Ne întâlnim, vizitezi camerele în care ai putea lucra și cunoști celelalte modele. Fără vreo obligație.
+Cel mai simplu mod să te convingi este să treci pe la studio. Ne cunoaștem, vezi camerele în care ai putea lucra și stai de vorbă cu celelalte modele. Atât, fără să te oblige nimeni la nimic.
 
 - Vizitezi spațiul de lucru pe îndelete
 - Discuți direct cu modelele deja active
@@ -38,7 +38,7 @@ Cel mai simplu mod să te convingi este să ne faci o vizită la studio. Ne înt
 La Heylux Iași media câștigurilor este între 200 și 2.715 lei pe zi, adică până la câteva mii de euro pe lună.
 
 **Ai nevoie de experiență?**
-Nu. Angajăm modele fără experiență în fiecare an și le sprijinim cu 14 trainere ca să înceapă cum trebuie.
+Nu. Angajăm modele fără experiență în fiecare an, iar cele 14 trainere ale noastre te ajută să începi cum trebuie.
 
 **Ce se întâmplă dacă vin doar la o vizită?**
 Vizitezi studioul, vezi camerele și vorbești cu celelalte modele, fără nicio obligație. Îți plătim și taxiul până aici.

@@ -16,13 +16,9 @@ Concret, pe mașinile studioului scrie exact cifra: poți câștiga între 400 �
 
 ## Studioul de videochat cu BMW-uri aurii
 
-Dacă te-ai documentat deja, probabil știi că alegerea se face între aceleași trei studiouri din Iași: Heylux, Lucky Studio și Preziosa. Toate sunt mereu în topul căutărilor, iar echipa din spatele lor e aceeași.
+Dacă te-ai documentat deja, probabil știi că Heylux e mereu în topul căutărilor pentru videochat în Iași, iar în spatele lui stă o echipă cu ani de experiență în domeniu.
 
-Fiecare are un profil clar:
-
-- **Lucky Studio** — pentru fetele la început, fără experiență, care vor un mediu feminin și prietenos.
-- **Preziosa** — pentru cele care caută discreție maximă.
-- **Heylux** — pentru cele care vor eleganță și câștiguri maxime, studioul cu BMW-uri X6 aurii.
+Profilul Heylux e clar: studioul pentru fetele care vor eleganță, un mediu feminin și câștiguri maxime — studioul cu BMW-uri X6 aurii.
 
 ## Ce servicii premium primești
 

@@ -6,7 +6,8 @@
 
 ## Product Overview
 - **One-liner:** Heylux este un studio de videochat din Iași care angajează și formează femei ca modele online.
-- **What it does:** Recrutează femei (cu sau fără experiență), le oferă training, spațiu, program flexibil și sistem de plată zilnică, ca să câștige din videochat pe platforme premium. Studioul e condus de aceeași echipă care administrează Lucky Studio (cel mai mare studio de videochat din Iași) și La Preziosa.
+- **What it does:** Recrutează femei (cu sau fără experiență), le oferă training, spațiu, program flexibil și sistem de plată zilnică, ca să câștige din videochat pe platforme premium. Studioul e condus de o echipă de management cu ani de experiență în industria de videochat din Iași.
+- **INTERZIS:** NU menționa NICIODATĂ „Lucky Studio" (sau alte branduri ale grupului) în textele Heylux — nici ca referință de credibilitate, nici în comparații. Heylux stă pe propriile picioare.
 - **Product category:** Studio de videochat / job & carieră pentru femei în Iași (cum caută publicul: „job videochat Iași", „angajare model videochat", „studio videochat Iași").
 - **Product type:** Serviciu local (recrutare + studio), brand local Iași.
 - **Business model:** Model câștigă un procent din încasările de pe platforme; studioul oferă infrastructură, training și suport. ⚠ procent exact (ex. „70%") se citează DOAR dacă apare în sursă.
@@ -22,7 +23,7 @@
 - **Ce le costă:** amână apartamentul, mașina, vacanța, taxele la facultate; depind de părinți sau de chirie.
 
 ## Differentiation (proof points — CITEAZĂ doar dacă apar în sursă)
-- Experiența echipei **Lucky Studio** (cel mai mare studio de videochat din Iași) + **La Preziosa** — credibilitate.
+- Experiența echipei de management (ani de experiență în industria de videochat din Iași) — credibilitate, FĂRĂ a numi alte studiouri.
 - **Plată zilnică** („toți banii la zi"), cash sau pe card, la finalul zilei.
 - **Bonus de angajare** (ex. „400 lei la interviu" / „70% bonus") ⚠ doar cifra din sursă.
 - **Zero experiență necesară** + training.
