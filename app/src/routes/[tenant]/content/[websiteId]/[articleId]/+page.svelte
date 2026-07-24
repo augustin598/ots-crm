@@ -8,6 +8,7 @@
 		getWebsiteArticles,
 		regenerateArticle,
 		modifyArticle,
+		generateArticleSeo,
 		getContentWebsites
 	} from '$lib/remotes/content-articles.remote';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
@@ -47,6 +48,24 @@
 	let slug = $state('');
 	let featuredImageUrl = $state('');
 	let loadedKey = $state<string | null>(null);
+	let seoGenerating = $state(false);
+
+	async function doGenerateSeo() {
+		if (seoGenerating) return;
+		seoGenerating = true;
+		try {
+			const r = await generateArticleSeo(articleId).updates(getContentArticle(articleId));
+			focusKeyword = r.focusKeyword || focusKeyword;
+			seoTitle = r.seoTitle || seoTitle;
+			metaDescription = r.metaDescription || metaDescription;
+			slug = r.slug || slug;
+			toast.success('SEO generat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Generare SEO eșuată');
+		} finally {
+			seoGenerating = false;
+		}
+	}
 
 	$effect(() => {
 		if (article) {
@@ -254,7 +273,22 @@
 				</div>
 
 				<div class="ct-seo-card">
-					<h4>SEO</h4>
+					<h4 style="justify-content:space-between">
+						<span>SEO</span>
+						<button
+							class="cl-btn-ai cl-btn-sm"
+							onclick={doGenerateSeo}
+							disabled={seoGenerating}
+							title="Generează cuvânt-cheie, titlu SEO, meta și slug din conținut"
+						>
+							{#if seoGenerating}
+								<Loader2Icon size={13} class="ct-spin" />
+							{:else}
+								<Wand2Icon size={13} />
+							{/if}
+							{seoGenerating ? 'Se generează…' : 'Generează AI'}
+						</button>
+					</h4>
 					<div class="ct-seo-field">
 						<label for="seo-kw">Cuvânt-cheie focus</label>
 						<input
