@@ -17,3 +17,17 @@ ots-wp-connector*.zip
 
 # Root tooling cache (svelte2tsx language server, vite) — not the app deps
 node_modules/
+
+# /graphify knowledge-graph artifacts (graph.html, graph.json, GRAPH_REPORT.md +
+# per-file extraction cache). Regenerated on demand; the cache alone is hundreds
+# of hash-named files that flood Source Control. Lands both at the repo root and
+# under app/ because the scan root was `app` while the pipeline ran from here.
+graphify-out/
+
+# Saved-webpage artifacts (browser "Save Page As → Complete" drops a <name>_files/
+# folder with hundreds of JS/CSS assets — e.g. a Meta Ads Manager page, ~250MB).
+# Not part of the app; re-save from the browser if ever needed.
+*_files/
+
+# Local working data kept on disk but not versioned (Excel exports etc.)
+app/Evidenta interviuri*.xlsx
