@@ -21,12 +21,12 @@ export const POST: RequestHandler = async ({ locals }) => {
 
 	try {
 		const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-		let updated = 0, notFound = 0;
+		let updated = 0, notFound = 0, skipped = 0;
 		const missing: string[] = [];
 		for (const f of files) {
 			const md = readFileSync(join(dir, f), 'utf8');
 			const { data, body } = parseFrontmatter(md);
-			if (!data.id) continue;
+			if (!data.id) { skipped++; continue; } // fișier fără id în frontmatter (M4)
 			const html = renderMarkdown(body.trim());
 			const res = await db.update(table.contentArticle)
 				.set({
@@ -43,9 +43,9 @@ export const POST: RequestHandler = async ({ locals }) => {
 			if (res.length) updated++;
 			else { notFound++; missing.push(data.id); }
 		}
-		return json({ ok: true, files: files.length, updated, notFound, missing: missing.slice(0, 10) });
+		return json({ ok: true, files: files.length, updated, notFound, skipped, missing: missing.slice(0, 10) });
 	} catch (e) {
 		console.error('[import-content]', serializeError(e));
-		throw error(500, 'Import eșuat: ' + serializeError(e));
+		throw error(500, 'Import eșuat: ' + serializeError(e).message);
 	}
 };

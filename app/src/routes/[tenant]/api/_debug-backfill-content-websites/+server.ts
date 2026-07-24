@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { serializeError } from '$lib/server/logger';
@@ -27,17 +27,22 @@ export const POST: RequestHandler = async ({ locals }) => {
 			.where(eq(table.clientWebsite.tenantId, tenantId));
 
 		const articles = await db
-			.select({ id: table.contentArticle.id, brand: table.contentArticle.brand })
+			.select({
+				id: table.contentArticle.id,
+				brand: table.contentArticle.brand,
+				websiteId: table.contentArticle.websiteId
+			})
 			.from(table.contentArticle)
 			.where(eq(table.contentArticle.tenantId, tenantId));
 		let assigned = 0;
 		for (const a of articles) {
 			const wid = resolveWebsiteId(a.brand, websites);
 			if (!wid) continue;
+			if (a.websiteId === wid) continue; // deja setat — re-run ieftin (M3)
 			const w = websites.find((x) => x.id === wid)!;
 			await db.update(table.contentArticle)
 				.set({ websiteId: wid, clientId: w.clientId, updatedAt: now })
-				.where(eq(table.contentArticle.id, a.id));
+				.where(and(eq(table.contentArticle.id, a.id), eq(table.contentArticle.tenantId, tenantId)));
 			assigned++;
 		}
 
@@ -62,10 +67,17 @@ export const POST: RequestHandler = async ({ locals }) => {
 		try {
 			brandContext = readFileSync(join(process.cwd(), '..', 'content', 'heylux', 'brand-context.md'), 'utf8');
 		} catch { /* opțional */ }
+		// I1: nu crea profilul heylux cu context gol (citirea a eșuat / cwd greșit) —
+		// îl lăsăm nesetat ca re-run-ul să-l repare când brand-context.md e citibil.
+		let heyluxContextSkipped = false;
 		for (const w of websites) {
 			const dom = normalizeDomain(w.url);
 			const isActive = ['heylux.ro', 'luckystudio.ro', 'preziosa.ro'].includes(dom);
 			if (!isActive) continue;
+			if (dom === 'heylux.ro' && !brandContext.trim()) {
+				heyluxContextSkipped = true;
+				continue;
+			}
 			const existing = await db.select({ id: table.websiteContentProfile.id })
 				.from(table.websiteContentProfile)
 				.where(eq(table.websiteContentProfile.websiteId, w.id)).limit(1);
@@ -82,9 +94,19 @@ export const POST: RequestHandler = async ({ locals }) => {
 			profilesCreated++;
 		}
 
-		return json({ ok: true, assigned, wpLinked, wpClientSet, profilesCreated, websites: websites.length, articles: articles.length });
+		return json({
+			ok: true,
+			assigned,
+			wpLinked,
+			wpClientSet,
+			profilesCreated,
+			brandContextBytes: brandContext.length,
+			heyluxContextSkipped,
+			websites: websites.length,
+			articles: articles.length
+		});
 	} catch (e) {
 		console.error('[backfill-content-websites]', serializeError(e));
-		throw error(500, 'Backfill eșuat: ' + serializeError(e));
+		throw error(500, 'Backfill eșuat: ' + serializeError(e).message);
 	}
 };
