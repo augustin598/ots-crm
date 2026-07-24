@@ -26,6 +26,7 @@
 	} from '@lucide/svelte';
 	import ClientActivityFeed from '$lib/components/client/ClientActivityFeed.svelte';
 	import ClientOnboardingControl from '$lib/components/client/client-onboarding-control.svelte';
+	import ClientAiAccessPanel from '$lib/components/client/client-ai-access-panel.svelte';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
@@ -237,16 +238,7 @@
 				</CardContent>
 			</Card>
 
-			<Card>
-				<CardHeader>
-					<CardTitle>Notes</CardTitle>
-				</CardHeader>
-				<CardContent class="space-y-2">
-					<p class="text-muted-foreground leading-relaxed">
-						{client.notes || 'No notes available for this client.'}
-					</p>
-				</CardContent>
-			</Card>
+			<ClientAiAccessPanel {clientId} />
 
 			<!-- Onboarding Control -->
 			<ClientOnboardingControl {clientId} />

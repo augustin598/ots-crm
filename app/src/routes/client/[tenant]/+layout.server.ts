@@ -128,6 +128,35 @@ export const load: LayoutServerLoad = async (event) => {
 		accessFlags = { ...ALL_ACCESS_TRUE };
 	}
 
+	// Content AI: modulul e vizibil în portal doar dacă adminul a activat switch-ul
+	// „Acces AI" (websiteContentProfile.allowClientAi) pe ≥1 website al clientului CARE
+	// are și articole (aceeași condiție ca hub-ul getContentWebsites).
+	let contentEnabled = false;
+	if (event.locals.client) {
+		const [row] = await db
+			.select({ id: table.clientWebsite.id })
+			.from(table.clientWebsite)
+			.innerJoin(
+				table.websiteContentProfile,
+				and(
+					eq(table.websiteContentProfile.websiteId, table.clientWebsite.id),
+					eq(table.websiteContentProfile.allowClientAi, true)
+				)
+			)
+			.innerJoin(
+				table.contentArticle,
+				eq(table.contentArticle.websiteId, table.clientWebsite.id)
+			)
+			.where(
+				and(
+					eq(table.clientWebsite.tenantId, tenant.id),
+					eq(table.clientWebsite.clientId, event.locals.client.id)
+				)
+			)
+			.limit(1);
+		contentEnabled = !!row;
+	}
+
 	// Multi-company: list every company this user has access to in this tenant.
 	// Drives the company switcher in the header (shown when length > 1) and
 	// the /select-company page after login.
@@ -169,6 +198,7 @@ export const load: LayoutServerLoad = async (event) => {
 		defaultWebsiteUrl,
 		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null,
 		accessRestriction,
-		accessFlags
+		accessFlags,
+		contentEnabled
 	};
 };

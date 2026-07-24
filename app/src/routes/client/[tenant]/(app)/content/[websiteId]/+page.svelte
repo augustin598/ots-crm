@@ -5,4 +5,7 @@
 	const tenant = $derived(page.params.tenant as string);
 </script>
 
-<WebsiteContentView basePath={`/${tenant}/content`} homeHref={`/${tenant}`} />
+<WebsiteContentView
+	basePath={`/client/${tenant}/content`}
+	homeHref={`/client/${tenant}/dashboard`}
+/>

@@ -1,6 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
-import { error as svelteError } from '@sveltejs/kit';
-import { requireStaff } from '$lib/server/get-actor';
+import { contentAuth, assertWebsiteClientAccess } from '$lib/server/content/access-guard';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -9,15 +8,16 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 
 export const getWebsiteContentProfile = query(v.string(), async (websiteId) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
+	await assertWebsiteClientAccess(event, tenantId, websiteId);
 	const rows = await db
 		.select()
 		.from(table.websiteContentProfile)
 		.where(
 			and(
 				eq(table.websiteContentProfile.websiteId, websiteId),
-				eq(table.websiteContentProfile.tenantId, event.locals.tenant.id)
+				eq(table.websiteContentProfile.tenantId, tenantId)
 			)
 		)
 		.limit(1);
@@ -53,9 +53,9 @@ export const updateWebsiteContentProfile = command(
 	}),
 	async (input) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertWebsiteClientAccess(event, tenantId, input.websiteId);
 		const patch: Record<string, unknown> = { updatedAt: new Date() };
 		for (const k of PROFILE_FIELDS) if (input[k] !== undefined) patch[k] = input[k];
 		// Upsert: dacă website-ul n-are încă profil, îl creează (scalabil pt website-uri noi).
@@ -105,9 +105,9 @@ export const updateWebsitePublishPolicy = command(
 	}),
 	async (input) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertWebsiteClientAccess(event, tenantId, input.websiteId);
 		const patch: Record<string, unknown> = {
 			publishMode: input.publishMode,
 			cadencePerWeek: input.cadencePerWeek,

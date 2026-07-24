@@ -1,0 +1,1 @@
+ALTER TABLE `website_content_profile` ADD `allow_client_ai` integer DEFAULT false NOT NULL;

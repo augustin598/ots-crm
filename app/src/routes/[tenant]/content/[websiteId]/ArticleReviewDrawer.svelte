@@ -136,6 +136,12 @@
 			</button>
 		</div>
 
+		{#if !article}
+			<div class="ct-drawer-loading">
+				<XIcon size={22} />
+				<span>Articol negăsit.</span>
+			</div>
+		{:else}
 		<div class="ct-drawer-body">
 			<div class="ct-drawer-col">
 				<h4>Sursă</h4>
@@ -211,6 +217,7 @@
 				Aprobă
 			</button>
 		</div>
+		{/if}
 
 		{#snippet pending()}
 			<div class="ct-drawer-loading">

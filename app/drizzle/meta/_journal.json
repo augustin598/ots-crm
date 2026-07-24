@@ -3025,6 +3025,13 @@
 			"when": 1784908176176853,
 			"tag": "0434_content_article_wp_categories",
 			"breakpoints": true
+		},
+		{
+			"idx": 435,
+			"version": "6",
+			"when": 1784908176177853,
+			"tag": "0435_website_content_profile_allow_client_ai",
+			"breakpoints": true
 		}
 	]
 }

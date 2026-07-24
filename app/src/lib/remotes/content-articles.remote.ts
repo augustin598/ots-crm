@@ -1,6 +1,11 @@
 import { query, command, getRequestEvent } from '$app/server';
 import { error as svelteError } from '@sveltejs/kit';
 import { requireStaff } from '$lib/server/get-actor';
+import {
+	contentAuth,
+	assertWebsiteClientAccess,
+	assertArticleClientAccess
+} from '$lib/server/content/access-guard';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -146,9 +151,15 @@ export const startContentExtraction = command(async () => {
 /** Website-uri cu conținut (doar cele cu articole legate) + statistici pt overview. */
 export const getContentWebsites = query(async () => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
+	const { isClient, clientId } = await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
+
+	const conds = [eq(table.clientWebsite.tenantId, tenantId)];
+	if (isClient) {
+		// Portal: doar website-urile clientului din sesiune care au switch-ul AI pornit.
+		conds.push(eq(table.clientWebsite.clientId, clientId!));
+		conds.push(eq(table.websiteContentProfile.allowClientAi, true));
+	}
 
 	const rows = await db
 		.select({
@@ -159,6 +170,7 @@ export const getContentWebsites = query(async () => {
 			clientName: table.client.name,
 			wpSiteId: table.clientWebsite.wpSiteId,
 			profileId: table.websiteContentProfile.id,
+			allowClientAi: table.websiteContentProfile.allowClientAi,
 			total: sql<number>`count(${table.contentArticle.id})`,
 			ready: sql<number>`sum(case when ${table.contentArticle.rewriteStatus} = 'ready' then 1 else 0 end)`
 		})
@@ -169,7 +181,7 @@ export const getContentWebsites = query(async () => {
 			table.websiteContentProfile,
 			eq(table.websiteContentProfile.websiteId, table.clientWebsite.id)
 		)
-		.where(eq(table.clientWebsite.tenantId, tenantId))
+		.where(and(...conds))
 		.groupBy(table.clientWebsite.id);
 	return rows;
 });
@@ -179,10 +191,11 @@ export const getWebsiteArticles = query(
 	v.object({ websiteId: v.string(), status: v.optional(v.string()) }),
 	async ({ websiteId, status }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertWebsiteClientAccess(event, tenantId, websiteId);
 		const conds = [
-			eq(table.contentArticle.tenantId, event.locals.tenant.id),
+			eq(table.contentArticle.tenantId, tenantId),
 			eq(table.contentArticle.websiteId, websiteId)
 		];
 		if (status) conds.push(eq(table.contentArticle.rewriteStatus, status));
@@ -211,19 +224,16 @@ export const getWebsiteArticles = query(
 /** Un articol complet (sursă + generat + direcție) pt editor. */
 export const getContentArticle = query(v.string(), async (id) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
 	const rows = await db
 		.select()
 		.from(table.contentArticle)
-		.where(
-			and(
-				eq(table.contentArticle.id, id),
-				eq(table.contentArticle.tenantId, event.locals.tenant.id)
-			)
-		)
+		.where(and(eq(table.contentArticle.id, id), eq(table.contentArticle.tenantId, tenantId)))
 		.limit(1);
-	return rows[0] ?? null;
+	if (!rows[0]) return null;
+	await assertWebsiteClientAccess(event, tenantId, rows[0].websiteId);
+	return rows[0];
 });
 
 /** Salvează editările pe output-ul generat + direcția + status. */
@@ -243,8 +253,9 @@ export const updateContentArticle = command(
 	}),
 	async (input) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertArticleClientAccess(event, tenantId, input.id);
 		const patch: Record<string, unknown> = { updatedAt: new Date() };
 		for (const k of [
 			'generatedTitle',
@@ -264,10 +275,7 @@ export const updateContentArticle = command(
 			.update(table.contentArticle)
 			.set(patch)
 			.where(
-				and(
-					eq(table.contentArticle.id, input.id),
-					eq(table.contentArticle.tenantId, event.locals.tenant.id)
-				)
+				and(eq(table.contentArticle.id, input.id), eq(table.contentArticle.tenantId, tenantId))
 			);
 		return { ok: true };
 	}
@@ -350,9 +358,10 @@ export const rewriteArticle = command(v.string(), async (articleId) => {
 /** „Regenerează" — rerulează generarea cu direcția curentă din DB. */
 export const regenerateArticle = command(v.string(), async (articleId) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
-	return doRewrite(event.locals.tenant.id, articleId);
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
+	await assertArticleClientAccess(event, tenantId, articleId);
+	return doRewrite(tenantId, articleId);
 });
 
 /** Articol nou dintr-un brief (subiect/keyword) pt un website. */
@@ -360,9 +369,9 @@ export const generateArticleFromBrief = command(
 	v.object({ websiteId: v.string(), brief: v.pipe(v.string(), v.minLength(3)) }),
 	async ({ websiteId, brief }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertWebsiteClientAccess(event, tenantId, websiteId);
 
 		const ws = await db
 			.select({ id: table.clientWebsite.id, clientId: table.clientWebsite.clientId })
@@ -408,9 +417,8 @@ export const modifyArticle = command(
 	v.object({ articleId: v.string(), instruction: v.pipe(v.string(), v.minLength(2)) }),
 	async ({ articleId, instruction }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
 
 		const rows = await db
 			.select()
@@ -419,6 +427,7 @@ export const modifyArticle = command(
 			.limit(1);
 		const a = rows[0];
 		if (!a) svelteError(404, 'Articol negăsit');
+		await assertWebsiteClientAccess(event, tenantId, a.websiteId);
 		const current = a.generatedHtml || a.bodyHtml || '';
 		if (!current) svelteError(400, 'Nu există text de modificat — generează întâi articolul.');
 
@@ -460,9 +469,8 @@ export const modifyArticle = command(
 /** „Humanizer": pass secundar pe textul rescris curent — elimină tiparele de text AI, păstrând faptele. */
 export const humanizeArticle = command(v.string(), async (articleId) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
 
 	const rows = await db
 		.select()
@@ -471,6 +479,7 @@ export const humanizeArticle = command(v.string(), async (articleId) => {
 		.limit(1);
 	const a = rows[0];
 	if (!a) svelteError(404, 'Articol negăsit');
+	await assertWebsiteClientAccess(event, tenantId, a.websiteId);
 	const body = a.generatedHtml || a.bodyHtml || '';
 	if (!body) svelteError(400, 'Nu există text de umanizat — generează întâi articolul.');
 	const current = `Titlu: ${a.generatedTitle || a.title || ''}\nExcerpt: ${a.generatedExcerpt || ''}\n\n${body}`;
@@ -511,10 +520,11 @@ export const humanizeArticle = command(v.string(), async (articleId) => {
 /** Reîmprospătează categoriile WP pt articolele unui website (conector ≥0.7.0 pe site). */
 export const refreshArticleWpCategories = command(v.string(), async (websiteId) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
+	await assertWebsiteClientAccess(event, tenantId, websiteId);
 	try {
-		return await refreshWpCategoriesForWebsite(event.locals.tenant.id, websiteId);
+		return await refreshWpCategoriesForWebsite(tenantId, websiteId);
 	} catch (e) {
 		svelteError(500, e instanceof Error ? e.message : 'Refresh categorii eșuat');
 	}
@@ -523,9 +533,8 @@ export const refreshArticleWpCategories = command(v.string(), async (websiteId) 
 /** Generează DOAR metadatele SEO (focus keyword, titlu SEO, meta, slug) din conținutul curent. */
 export const generateArticleSeo = command(v.string(), async (articleId) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
 
 	const rows = await db
 		.select()
@@ -534,6 +543,7 @@ export const generateArticleSeo = command(v.string(), async (articleId) => {
 		.limit(1);
 	const a = rows[0];
 	if (!a) svelteError(404, 'Articol negăsit');
+	await assertWebsiteClientAccess(event, tenantId, a.websiteId);
 	const text = a.generatedHtml || a.bodyHtml || a.bodyText || '';
 	if (!text) svelteError(400, 'Nu există conținut pentru SEO — generează întâi articolul.');
 
@@ -600,8 +610,9 @@ export const getWebsiteCalendar = query(
 	v.object({ websiteId: v.string(), year: v.number(), month: v.number() }),
 	async ({ websiteId, year, month }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertWebsiteClientAccess(event, tenantId, websiteId);
 		const start = new Date(year, month, 1);
 		const end = new Date(year, month + 1, 1);
 		return db
@@ -616,7 +627,7 @@ export const getWebsiteCalendar = query(
 			.from(table.contentArticle)
 			.where(
 				and(
-					eq(table.contentArticle.tenantId, event.locals.tenant.id),
+					eq(table.contentArticle.tenantId, tenantId),
 					eq(table.contentArticle.websiteId, websiteId),
 					gte(table.contentArticle.scheduledAt, start),
 					lte(table.contentArticle.scheduledAt, end)
@@ -631,10 +642,11 @@ export const publishArticle = command(
 	v.object({ articleId: v.string(), mode: v.picklist(['draft', 'publish']) }),
 	async ({ articleId, mode }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertArticleClientAccess(event, tenantId, articleId);
 		try {
-			const res = await publishArticleToWordpress(event.locals.tenant.id, articleId, { status: mode });
+			const res = await publishArticleToWordpress(tenantId, articleId, { status: mode });
 			return { ok: true as const, wpPostId: res.wpPostId, link: res.link, publishStatus: res.publishStatus };
 		} catch (e) {
 			svelteError(500, e instanceof Error ? e.message : 'Publicare eșuată');
@@ -647,9 +659,9 @@ export const scheduleArticle = command(
 	v.object({ articleId: v.string(), scheduledAt: v.pipe(v.string(), v.isoTimestamp()) }),
 	async ({ articleId, scheduledAt }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
+		await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertArticleClientAccess(event, tenantId, articleId);
 		const rows = await db
 			.select({ rewriteStatus: table.contentArticle.rewriteStatus, publishStatus: table.contentArticle.publishStatus })
 			.from(table.contentArticle)
@@ -671,24 +683,44 @@ export const scheduleArticle = command(
 /** Anulează programarea — publish_status înapoi la 'none'. */
 export const unscheduleArticle = command(v.string(), async (articleId) => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
+	await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
+	await assertArticleClientAccess(event, tenantId, articleId);
 	await db
 		.update(table.contentArticle)
 		.set({ scheduledAt: null, publishStatus: 'none', updatedAt: new Date() })
-		.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, event.locals.tenant.id)));
+		.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)));
 	return { ok: true as const };
 });
 
 /** Site-urile WordPress ale tenantului (pt dropdown-ul de legare din Setări). */
 export const getTenantWordpressSites = query(async () => {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-	await requireStaff(event);
+	const { isClient, clientId } = await contentAuth(event);
+	const tenantId = event!.locals.tenant!.id;
+	if (isClient) {
+		// Portal: DOAR site-urile WP deja legate la website-urile clientului — nu expune
+		// site-urile WP ale altor clienți din același tenant.
+		return db
+			.selectDistinct({
+				id: table.wordpressSite.id,
+				siteUrl: table.wordpressSite.siteUrl,
+				status: table.wordpressSite.status
+			})
+			.from(table.wordpressSite)
+			.innerJoin(table.clientWebsite, eq(table.clientWebsite.wpSiteId, table.wordpressSite.id))
+			.where(
+				and(
+					eq(table.wordpressSite.tenantId, tenantId),
+					eq(table.clientWebsite.clientId, clientId!)
+				)
+			)
+			.orderBy(table.wordpressSite.siteUrl);
+	}
 	return db
 		.select({ id: table.wordpressSite.id, siteUrl: table.wordpressSite.siteUrl, status: table.wordpressSite.status })
 		.from(table.wordpressSite)
-		.where(eq(table.wordpressSite.tenantId, event.locals.tenant.id))
+		.where(eq(table.wordpressSite.tenantId, tenantId))
 		.orderBy(table.wordpressSite.siteUrl);
 });
 
@@ -697,9 +729,9 @@ export const setWebsiteWpSite = command(
 	v.object({ websiteId: v.string(), wpSiteId: v.nullable(v.string()) }),
 	async ({ websiteId, wpSiteId }) => {
 		const event = getRequestEvent();
-		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
-		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
+		const { isClient, clientId } = await contentAuth(event);
+		const tenantId = event!.locals.tenant!.id;
+		await assertWebsiteClientAccess(event, tenantId, websiteId);
 		// Securitate: dacă se leagă un site, verifică că e al ACELUIAȘI tenant (anti cross-tenant).
 		if (wpSiteId) {
 			const [valid] = await db
@@ -708,6 +740,22 @@ export const setWebsiteWpSite = command(
 				.where(and(eq(table.wordpressSite.id, wpSiteId), eq(table.wordpressSite.tenantId, tenantId)))
 				.limit(1);
 			if (!valid) svelteError(404, 'Site WordPress negăsit pentru acest tenant.');
+			// Portal: clientul poate lega DOAR un WP deja folosit de unul din site-urile lui
+			// (nu poate alege site-urile WP ale altor clienți).
+			if (isClient) {
+				const [own] = await db
+					.select({ id: table.clientWebsite.id })
+					.from(table.clientWebsite)
+					.where(
+						and(
+							eq(table.clientWebsite.tenantId, tenantId),
+							eq(table.clientWebsite.clientId, clientId!),
+							eq(table.clientWebsite.wpSiteId, wpSiteId)
+						)
+					)
+					.limit(1);
+				if (!own) svelteError(403, 'Nu poți lega acest site WordPress.');
+			}
 		}
 		await db
 			.update(table.clientWebsite)

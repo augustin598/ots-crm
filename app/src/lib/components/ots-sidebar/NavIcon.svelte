@@ -27,6 +27,7 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import UserPlusIcon from '@lucide/svelte/icons/user-plus';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import IconKeez from '$lib/components/marketing/icon-keez.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
@@ -67,6 +68,8 @@
 	<FileDownIcon class={className} />
 {:else if icon === 'seo-links'}
 	<LinkIcon class={className} />
+{:else if icon === 'content'}
+	<FileTextIcon class={className} />
 {:else if icon === 'wordpress'}
 	<GlobeIcon class={className} />
 {:else if icon === 'marketing'}

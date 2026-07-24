@@ -27,7 +27,7 @@
 	const currentPath = $derived(page.url.pathname);
 	const access = $derived(data.accessFlags);
 
-	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads'];
+	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content'];
 	const isRestrictedRoute = $derived(
 		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
 	);
@@ -190,6 +190,16 @@
 									label: 'Backlinks',
 									icon: 'seo-links' as const,
 									href: '/backlinks'
+								}
+							]
+						: []),
+					...(data.contentEnabled
+						? [
+								{
+									id: 'content',
+									label: 'Content',
+									icon: 'content' as const,
+									href: '/content'
 								}
 							]
 						: [])

@@ -18,6 +18,7 @@ export type IconKey =
 	| 'banking'
 	| 'supplier-invoices'
 	| 'seo-links'
+	| 'content'
 	| 'wordpress'
 	| 'marketing'
 	| 'campaigns-ads'
@@ -233,7 +234,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
 			},
 			{ id: 'interviuri', label: 'Interviuri', icon: 'interviuri', href: '/interviuri' },
 			{ id: 'seo-links', label: 'Linkuri SEO', icon: 'seo-links', href: '/seo-links' },
-			{ id: 'content', label: 'Content', icon: 'seo-links', href: '/content' },
+			{ id: 'content', label: 'Content', icon: 'content', href: '/content' },
 			{ id: 'wordpress', label: 'WordPress', icon: 'wordpress', href: '/wordpress' },
 			{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', href: '/whatsapp' }
 		]

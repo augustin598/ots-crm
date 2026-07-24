@@ -1992,6 +1992,8 @@ export const websiteContentProfile = sqliteTable('website_content_profile', {
 	publishTime: text('publish_time').notNull().default('10:00'),
 	defaultWpStatus: text('default_wp_status').notNull().default('draft'), // draft|publish
 	autoApprove: boolean('auto_approve').notNull().default(false),
+	// Switch admin: clientul poate folosi modulul Content (AI) pe acest website în portal
+	allowClientAi: boolean('allow_client_ai').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
