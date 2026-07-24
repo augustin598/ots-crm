@@ -64,6 +64,43 @@ export function normalizeStatus(
 	return 'in_evaluare';
 }
 
+const RO_MONTHS = [
+	'ianuarie',
+	'februarie',
+	'martie',
+	'aprilie',
+	'mai',
+	'iunie',
+	'iulie',
+	'august',
+	'septembrie',
+	'octombrie',
+	'noiembrie',
+	'decembrie'
+];
+
+/** Numele filei „Aprilie 2024" → { year, month(1-12) }, sau null. */
+export function sheetToYearMonth(sheetName: string): { year: number; month: number } | null {
+	const m = /^([A-Za-zăâîșţțĂÂÎȘŢȚ]+)\s+(\d{4})/.exec(sheetName.trim());
+	if (!m) return null;
+	const month = RO_MONTHS.indexOf(m[1].toLowerCase()) + 1;
+	if (!month) return null;
+	return { year: +m[2], month };
+}
+
+/**
+ * True dacă rândul NU e o candidată reală: antet secundar sau bloc de sumar
+ * lunar (rândurile colorate „orange/yellow/purple/white" cu numere agregate).
+ */
+export function isNonCandidateRow(
+	nume: string,
+	dateCell: string | Date | null | undefined
+): boolean {
+	if (/^(orange|yellow|purple|white)$/i.test(nume.trim())) return true;
+	const d = typeof dateCell === 'string' ? dateCell.trim().toLowerCase() : '';
+	return /^(data interviului|trainer position|active models|refused|other)$/i.test(d);
+}
+
 /** „dd.mm.yyyy" (sau Date din xlsx) → ISO „yyyy-mm-dd"; string gol dacă nu se poate. */
 export function toIsoDate(raw: string | Date | null | undefined): string {
 	if (!raw) return '';

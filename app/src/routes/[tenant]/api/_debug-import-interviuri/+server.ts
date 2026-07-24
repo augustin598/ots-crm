@@ -13,7 +13,9 @@ import {
 	classifySource,
 	normalizeStatus,
 	normalizeStudio,
-	toIsoDate
+	toIsoDate,
+	sheetToYearMonth,
+	isNonCandidateRow
 } from '$lib/server/interviuri/classify';
 import type { RequestHandler } from './$types';
 
@@ -93,11 +95,17 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 				defval: '',
 				raw: false
 			});
+			const period = sheetToYearMonth(sheetName);
 			let count = 0;
 			for (const row of rows) {
 				const nume = String(row[0] ?? '').trim();
 				if (!nume || /nume\s*\/?\s*prenume/i.test(nume)) continue; // header/gol
-				const dataInterviu = toIsoDate(row[1] as string);
+				if (isNonCandidateRow(nume, row[1] as string)) continue; // sumar lunar / antet colorat
+				// Dată exactă; dacă lipsește/e greșită, fallback la luna filei (ziua 01).
+				let dataInterviu = toIsoDate(row[1] as string);
+				if (!dataInterviu && period) {
+					dataInterviu = `${period.year}-${String(period.month).padStart(2, '0')}-01`;
+				}
 				if (!dataInterviu) {
 					skipped++;
 					continue;
