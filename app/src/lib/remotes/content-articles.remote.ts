@@ -4,7 +4,7 @@ import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
@@ -135,6 +135,124 @@ export const startContentExtraction = command(async () => {
 
 	return { jobId };
 });
+
+// ===== F1: multi-website UI =====
+
+/** Website-uri cu conținut (doar cele cu articole legate) + statistici pt overview. */
+export const getContentWebsites = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	const tenantId = event.locals.tenant.id;
+
+	const rows = await db
+		.select({
+			id: table.clientWebsite.id,
+			name: table.clientWebsite.name,
+			url: table.clientWebsite.url,
+			clientId: table.clientWebsite.clientId,
+			clientName: table.client.name,
+			wpSiteId: table.clientWebsite.wpSiteId,
+			profileId: table.websiteContentProfile.id,
+			total: sql<number>`count(${table.contentArticle.id})`,
+			ready: sql<number>`sum(case when ${table.contentArticle.rewriteStatus} = 'ready' then 1 else 0 end)`
+		})
+		.from(table.clientWebsite)
+		.innerJoin(table.contentArticle, eq(table.contentArticle.websiteId, table.clientWebsite.id))
+		.leftJoin(table.client, eq(table.client.id, table.clientWebsite.clientId))
+		.leftJoin(
+			table.websiteContentProfile,
+			eq(table.websiteContentProfile.websiteId, table.clientWebsite.id)
+		)
+		.where(eq(table.clientWebsite.tenantId, tenantId))
+		.groupBy(table.clientWebsite.id);
+	return rows;
+});
+
+/** Articolele unui website (cu output generat + status). */
+export const getWebsiteArticles = query(
+	v.object({ websiteId: v.string(), status: v.optional(v.string()) }),
+	async ({ websiteId, status }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const conds = [
+			eq(table.contentArticle.tenantId, event.locals.tenant.id),
+			eq(table.contentArticle.websiteId, websiteId)
+		];
+		if (status) conds.push(eq(table.contentArticle.rewriteStatus, status));
+		return db
+			.select({
+				id: table.contentArticle.id,
+				title: table.contentArticle.title,
+				generatedTitle: table.contentArticle.generatedTitle,
+				rewriteStatus: table.contentArticle.rewriteStatus,
+				origin: table.contentArticle.origin,
+				wordCount: table.contentArticle.wordCount,
+				publishedAt: table.contentArticle.publishedAt,
+				sourceUrl: table.contentArticle.sourceUrl
+			})
+			.from(table.contentArticle)
+			.where(and(...conds))
+			.orderBy(desc(table.contentArticle.updatedAt))
+			.limit(500);
+	}
+);
+
+/** Un articol complet (sursă + generat + direcție) pt editor. */
+export const getContentArticle = query(v.string(), async (id) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	const rows = await db
+		.select()
+		.from(table.contentArticle)
+		.where(
+			and(
+				eq(table.contentArticle.id, id),
+				eq(table.contentArticle.tenantId, event.locals.tenant.id)
+			)
+		)
+		.limit(1);
+	return rows[0] ?? null;
+});
+
+/** Salvează editările pe output-ul generat + direcția + status. */
+export const updateContentArticle = command(
+	v.object({
+		id: v.string(),
+		generatedTitle: v.optional(v.string()),
+		generatedExcerpt: v.optional(v.string()),
+		generatedHtml: v.optional(v.string()),
+		articleDirection: v.optional(v.string()),
+		rewriteStatus: v.optional(v.picklist(['none', 'queued', 'drafting', 'ready', 'failed']))
+	}),
+	async (input) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const patch: Record<string, unknown> = { updatedAt: new Date() };
+		for (const k of [
+			'generatedTitle',
+			'generatedExcerpt',
+			'generatedHtml',
+			'articleDirection',
+			'rewriteStatus'
+		] as const) {
+			if (input[k] !== undefined) patch[k] = input[k];
+		}
+		await db
+			.update(table.contentArticle)
+			.set(patch)
+			.where(
+				and(
+					eq(table.contentArticle.id, input.id),
+					eq(table.contentArticle.tenantId, event.locals.tenant.id)
+				)
+			);
+		return { ok: true };
+	}
+);
 
 /** Reset failed/thin rows back to pending, then relaunch. */
 export const retryFailedExtractions = command(async () => {
