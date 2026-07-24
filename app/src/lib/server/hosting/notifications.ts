@@ -726,8 +726,11 @@ export async function notifyHostingSuspended(
 			throw new Error(`tenant ${tenantId} not found`);
 		}
 
-		// 6. Build payUrl + render template.
-		const payUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/invoices/${invoiceId}/pay`;
+		// 6. Build payUrl + render template. Points at the client portal renew page
+		// (under /client/) which resolves this account's open invoice and offers
+		// card payment — NOT the bare /{slug}/... staff tree (missing /client/ +
+		// a nonexistent /pay route was why the old link 404'd).
+		const payUrl = `https://clients.onetopsolution.ro/client/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
 		// totalAmount stored in CENTS per schema (`integer('total_amount') // in cents`).
 		// Fall back to 0 when null — the template renders `0.00 RON`.
 		const amountDue = invoiceRow.totalAmount ?? 0;
@@ -1220,10 +1223,12 @@ export async function notifyHostingRenewalReminder(
 			throw new Error(`tenant ${tenantId} not found`);
 		}
 
-		// 4. Format Romanian date + build payUrl.
+		// 4. Format Romanian date + build payUrl. Under /client/ (portal route group)
+		// so it reaches the real renew page, not the staff tree (the missing /client/
+		// prefix was one of the two reasons the old link failed).
 		const dueDateIso = account.nextDueDate; // 'YYYY-MM-DD'
 		const dueDateRo = formatTextDateRo(dueDateIso);
-		const payUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
+		const payUrl = `https://clients.onetopsolution.ro/client/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
 
 		// 5. Resolve the billed amount from the recurring-invoice template — the
 		//    SAME source the scheduler bills from (recurring-invoices.ts →
@@ -1503,8 +1508,10 @@ export async function notifyHostingPaymentFailed(
 			throw new Error(`tenant ${tenantId} not found`);
 		}
 
-		// 5. Build URLs + currency normalization.
-		const manualPayUrl = `https://clients.onetopsolution.ro/${tenantRow.slug}/invoices/${invoiceId}/pay`;
+		// 5. Build URLs + currency normalization. manualPayUrl → client portal renew
+		// page (card payment for the account's open invoice); the old bare /{slug}/
+		// invoices/{id}/pay route never existed.
+		const manualPayUrl = `https://clients.onetopsolution.ro/client/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
 		// Stripe billing portal URL (caller passes invoice.hosted_invoice_url when
 		// available). Falls back to the same CRM pay URL when the caller has no
 		// portal URL — keeps the dual-CTA template happy.

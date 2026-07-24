@@ -36,7 +36,7 @@ describe('suspended template', () => {
 		invoiceDate: '15.05.2026',
 		amountDue: 9950, // in cents → 99.50
 		currency: 'RON' as const,
-		payUrl: 'https://clients.onetopsolution.ro/ots/invoices/inv-1/pay',
+		payUrl: 'https://clients.onetopsolution.ro/client/ots/hosting/accounts/acc-1/renew',
 		supportEmail: 'support@onetopsolution.ro'
 	};
 
@@ -53,7 +53,7 @@ describe('suspended template', () => {
 		expect(html).toContain('INV-2026-0123');
 		expect(html).toContain('99.50');
 		expect(html).toContain('RON');
-		expect(html).toContain('https://clients.onetopsolution.ro/ots/invoices/inv-1/pay');
+		expect(html).toContain('https://clients.onetopsolution.ro/client/ots/hosting/accounts/acc-1/renew');
 		// Red CTA color override (NOT brand themeColor)
 		expect(html).toContain('#dc2626');
 	});

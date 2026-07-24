@@ -10,16 +10,12 @@
 	import WifiIcon from '@lucide/svelte/icons/wifi';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 
 	const accountId = $derived(page.params.accountId);
 	const tenantSlug = $derived(page.params.tenant);
 
-	let accountQuery = $state<ReturnType<typeof getMyHostingAccount> | null>(null);
-	$effect(() => {
-		if (accountId) {
-			accountQuery = getMyHostingAccount(accountId);
-		}
-	});
+	const accountQuery = $derived(accountId ? getMyHostingAccount(accountId) : null);
 	const account = $derived(accountQuery?.current);
 	const loading = $derived(accountQuery?.loading && !account);
 	const error = $derived(accountQuery?.error);
@@ -129,7 +125,10 @@
 					<p class="font-medium text-destructive">Cont suspendat</p>
 					<p class="text-muted-foreground mt-1">
 						{#if account.suspendReason.startsWith('Overdue invoice')}
-							Factură restantă. Achită factura din lista de facturi pentru reactivare automată.
+							Factură restantă. <a
+								href="/client/{tenantSlug}/hosting/accounts/{accountId}/renew"
+								class="font-medium underline">Plătește cu cardul</a
+							> pentru reactivare automată.
 						{:else}
 							Motiv: {account.suspendReason}
 						{/if}
@@ -157,6 +156,14 @@
 					<p class="font-medium">{fmtDate(account.startDate)}</p>
 				</div>
 			</CardContent>
+			{#if account.status === 'active' || account.status === 'suspended'}
+				<CardContent class="pt-0">
+					<Button href="/client/{tenantSlug}/hosting/accounts/{accountId}/renew">
+						<CreditCardIcon class="h-4 w-4" />
+						Plătește cu cardul
+					</Button>
+				</CardContent>
+			{/if}
 		</Card>
 
 		<Card>
@@ -203,7 +210,7 @@
 				<CardHeader><CardTitle>Domenii adiționale</CardTitle></CardHeader>
 				<CardContent>
 					<ul class="list-disc pl-5 text-sm space-y-1">
-						{#each account.additionalDomains as domain}
+						{#each account.additionalDomains as domain (domain)}
 							<li>{domain}</li>
 						{/each}
 					</ul>

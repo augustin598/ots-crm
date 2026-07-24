@@ -818,7 +818,8 @@ describe('notifyHostingSuspended', () => {
 		expect(renderInput.invoiceNumber).toBe('INV-2026-0123');
 		expect(renderInput.amountDue).toBe(9950);
 		expect(renderInput.currency).toBe('RON');
-		expect(renderInput.payUrl).toContain('/ots/invoices/inv-1/pay');
+		expect(renderInput.payUrl).toContain('/client/ots/hosting/accounts/');
+		expect(renderInput.payUrl).toContain('/renew');
 
 		// One email_log row pre-created
 		expect(logEmailAttemptCalls.length).toBe(1);
@@ -1043,7 +1044,7 @@ describe('notifyHostingRenewalReminder', () => {
 		expect(renderInput.vatAmount).toBe(2090);
 		expect(renderInput.totalAmount).toBe(12040);
 		expect(renderInput.currency).toBe('RON');
-		expect(renderInput.payUrl).toContain('/ots/hosting/accounts/acc-1/renew');
+		expect(renderInput.payUrl).toContain('/client/ots/hosting/accounts/acc-1/renew');
 		// Romanian formatted due date 2026-06-01 → 01.06.2026
 		expect(renderInput.dueDate).toBe('01.06.2026');
 
@@ -1282,8 +1283,9 @@ describe('notifyHostingPaymentFailed', () => {
 		expect(renderInput.failureReason).toBe('Card expired');
 		// updateMethodUrl uses the Stripe hosted URL passed in
 		expect(renderInput.updateMethodUrl).toBe('https://invoice.stripe.com/i/acct/pi');
-		// manualPayUrl points to the CRM invoice pay page
-		expect(renderInput.manualPayUrl).toContain('/ots/invoices/inv-1/pay');
+		// manualPayUrl points to the client portal renew page (card payment)
+		expect(renderInput.manualPayUrl).toContain('/client/ots/hosting/accounts/');
+		expect(renderInput.manualPayUrl).toContain('/renew');
 		// 10-day suspension grace surfaced
 		expect(renderInput.daysUntilSuspend).toBe(10);
 

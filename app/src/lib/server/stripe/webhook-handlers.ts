@@ -7,6 +7,7 @@ import { logInfo, logError, logWarning, serializeError } from '$lib/server/logge
 import { runPostPaymentSteps } from './post-payment/dispatcher';
 import { emitKeezFiscalInvoice } from './post-payment/emit-keez-invoice';
 import { notifyHostingPaymentFailed } from '$lib/server/hosting/notifications';
+import { handleStripeInvoicePayment } from './invoice-payment';
 import { translateDeclineCode } from './decline-codes';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
@@ -88,6 +89,32 @@ async function resolveClientByStripeCustomer(
 
 export async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
 	const md = session.metadata ?? {};
+
+	// Pay-an-EXISTING-invoice flow (renewal / overdue), isolated from the new-order
+	// pipeline via `crmPurpose`. The CRM invoice + its Keez fiscal invoice already
+	// exist, so we ONLY mark the invoice paid — no DA provisioning, no Keez emit
+	// (both would double up). Hosted Checkout link path (admin pay-link endpoint).
+	if (md.crmPurpose === 'invoice_payment') {
+		if (!md.crmTenantId || !md.crmInvoiceId) {
+			logError('directadmin', 'checkout.session.completed invoice_payment fără crmTenantId/crmInvoiceId', {
+				metadata: { sessionId: session.id }
+			});
+			return;
+		}
+		const piId =
+			typeof session.payment_intent === 'string'
+				? session.payment_intent
+				: session.payment_intent?.id ?? null;
+		await handleStripeInvoicePayment({
+			tenantId: md.crmTenantId,
+			invoiceId: md.crmInvoiceId,
+			paymentIntentId: piId,
+			paidAmountCents: session.amount_total ?? null,
+			eventLabel: 'checkout.session.completed'
+		});
+		return;
+	}
+
 	const tenantId = md.crmTenantId;
 	const clientId = md.crmClientId;
 	const inquiryId = md.crmHostingInquiryId;
@@ -545,6 +572,27 @@ export async function handleCheckoutSessionExpired(session: Stripe.Checkout.Sess
  */
 export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent) {
 	const md = intent.metadata ?? {};
+
+	// Pay-an-EXISTING-invoice flow (embedded PaymentElement, portal renew page).
+	// Same isolation as the Checkout branch — mark invoice paid, skip provisioning
+	// + Keez emission (both already exist for a renewal/overdue invoice).
+	if (md.crmPurpose === 'invoice_payment') {
+		if (!md.crmTenantId || !md.crmInvoiceId) {
+			logError('directadmin', 'payment_intent.succeeded invoice_payment fără crmTenantId/crmInvoiceId', {
+				metadata: { intentId: intent.id }
+			});
+			return;
+		}
+		await handleStripeInvoicePayment({
+			tenantId: md.crmTenantId,
+			invoiceId: md.crmInvoiceId,
+			paymentIntentId: intent.id,
+			paidAmountCents: intent.amount ?? null,
+			eventLabel: 'payment_intent.succeeded'
+		});
+		return;
+	}
+
 	const tenantId = md.crmTenantId;
 	const clientId = md.crmClientId;
 	const inquiryId = md.crmHostingInquiryId;
