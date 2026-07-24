@@ -2,7 +2,9 @@
 	import {
 		getContentArticle,
 		updateContentArticle,
-		getWebsiteArticles
+		getWebsiteArticles,
+		rewriteArticle,
+		regenerateArticle
 	} from '$lib/remotes/content-articles.remote';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import { toast } from 'svelte-sonner';
@@ -19,24 +21,49 @@
 
 	const article = $derived(await getContentArticle(articleId));
 
-	// Editable local state, synced once per article via a guarded effect.
+	// Editable local state, synced whenever the article OR its generated output
+	// changes. Keyed on id + generatedAt so a regeneration (same id, new
+	// generatedAt) re-syncs gHtml/gTitle/… instead of keeping the old text.
 	let gTitle = $state('');
 	let gExcerpt = $state('');
 	let gHtml = $state('');
 	let direction = $state('');
-	let loadedId = $state<string | null>(null);
+	let loadedKey = $state<string | null>(null);
 
 	$effect(() => {
-		if (article && loadedId !== article.id) {
-			gTitle = article.generatedTitle ?? '';
-			gExcerpt = article.generatedExcerpt ?? '';
-			gHtml = article.generatedHtml ?? '';
-			direction = article.articleDirection ?? '';
-			loadedId = article.id;
+		if (article) {
+			const key = article.id + ':' + (article.generatedAt ?? '');
+			if (loadedKey !== key) {
+				gTitle = article.generatedTitle ?? '';
+				gExcerpt = article.generatedExcerpt ?? '';
+				gHtml = article.generatedHtml ?? '';
+				direction = article.articleDirection ?? '';
+				loadedKey = key;
+			}
 		}
 	});
 
 	let saving = $state(false);
+	let generating = $state(false);
+
+	async function doRewrite(regen: boolean) {
+		if (generating) return;
+		generating = true;
+		try {
+			// Save the current direction first so a regenerate uses it.
+			await updateContentArticle({ id: articleId, articleDirection: direction });
+			const fn = regen ? regenerateArticle : rewriteArticle;
+			await fn(articleId).updates(
+				getContentArticle(articleId),
+				getWebsiteArticles({ websiteId, status: status || undefined })
+			);
+			toast.success('Generat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Generare eșuată');
+		} finally {
+			generating = false;
+		}
+	}
 
 	async function save(approve: boolean) {
 		if (saving) return;
@@ -107,9 +134,11 @@
 
 			<div class="ct-drawer-col">
 				<h4>Rescris</h4>
-				{#if loadedId === article.id}
-					<RichEditor content={gHtml} onUpdate={(d) => (gHtml = d.html)} minHeight="320px" />
-				{/if}
+				{#key loadedKey}
+					{#if loadedKey === article.id + ':' + (article.generatedAt ?? '')}
+						<RichEditor content={gHtml} onUpdate={(d) => (gHtml = d.html)} minHeight="320px" />
+					{/if}
+				{/key}
 
 				<h4 style="margin-top:16px">Rezumat (excerpt)</h4>
 				<textarea
@@ -123,6 +152,12 @@
 
 		<div class="ct-drawer-foot">
 			<button class="cl-btn-secondary" onclick={onClose}>Închide</button>
+			<button class="cl-btn-secondary" disabled={generating} onclick={() => doRewrite(false)}>
+				{generating ? 'Se generează…' : 'Rescrie din sursă'}
+			</button>
+			<button class="cl-btn-secondary" disabled={generating} onclick={() => doRewrite(true)}>
+				{generating ? 'Se generează…' : 'Regenerează'}
+			</button>
 			<button class="cl-btn-secondary" disabled={saving} onclick={() => save(false)}>Salvează</button>
 			<button class="cl-btn-primary" disabled={saving} onclick={() => save(true)}>Aprobă</button>
 		</div>

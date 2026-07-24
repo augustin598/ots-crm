@@ -1,7 +1,11 @@
 <script lang="ts">
 	import '../content.css';
 	import { page } from '$app/state';
-	import { getWebsiteArticles, getContentWebsites } from '$lib/remotes/content-articles.remote';
+	import {
+		getWebsiteArticles,
+		getContentWebsites,
+		generateArticleFromBrief
+	} from '$lib/remotes/content-articles.remote';
 	import {
 		getWebsiteContentProfile,
 		updateWebsiteContentProfile
@@ -25,6 +29,11 @@
 	// ---- Articole tab state ----
 	let statusFilter = $state('');
 	let openArticleId = $state<string | null>(null);
+
+	// ---- Articol nou din brief ----
+	let showBrief = $state(false);
+	let brief = $state('');
+	let creatingBrief = $state(false);
 
 	// ---- Async data (read inside boundaries) ----
 	const websites = $derived(await getContentWebsites());
@@ -95,6 +104,25 @@
 		}
 	}
 
+	async function createFromBrief() {
+		if (creatingBrief || !brief.trim()) return;
+		creatingBrief = true;
+		try {
+			const r = await generateArticleFromBrief({ websiteId, brief }).updates(
+				getWebsiteArticles({ websiteId, status: statusFilter || undefined })
+			);
+			toast.success('Articol generat');
+			brief = '';
+			showBrief = false;
+			// Deschide drawer-ul pe articolul nou creat.
+			if (r?.id) openArticleId = r.id;
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Generare eșuată');
+		} finally {
+			creatingBrief = false;
+		}
+	}
+
 	async function saveProfile() {
 		if (savingProfile) return;
 		savingProfile = true;
@@ -151,17 +179,52 @@
 			</div>
 
 			{#if activeTab === 'articole'}
-				<div class="cl-select-wrap" style="margin-left:auto">
-					<span class="cl-select-lbl">Status</span>
-					<select class="cl-select" bind:value={statusFilter}>
-						<option value="">Toate</option>
-						<option value="ready">Ready</option>
-						<option value="none">Nerescris</option>
-						<option value="drafting">În lucru</option>
-					</select>
+				<div style="margin-left:auto; display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+					<div class="cl-select-wrap">
+						<span class="cl-select-lbl">Status</span>
+						<select class="cl-select" bind:value={statusFilter}>
+							<option value="">Toate</option>
+							<option value="ready">Ready</option>
+							<option value="none">Nerescris</option>
+							<option value="drafting">În lucru</option>
+						</select>
+					</div>
+					<button class="cl-btn-primary" onclick={() => (showBrief = true)}>+ Articol nou</button>
 				</div>
 			{/if}
 		</div>
+
+		{#if activeTab === 'articole' && showBrief}
+			<div style="margin:0 28px 14px">
+				<div class="cl-section">
+					<div class="cl-field">
+						<label for="brief-input">Articol nou din brief</label>
+						<textarea
+							id="brief-input"
+							class="cl-input cl-textarea"
+							bind:value={brief}
+							placeholder="Subiect / keyword pentru articolul nou…"
+						></textarea>
+					</div>
+					<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:12px">
+						<button
+							class="cl-btn-secondary"
+							disabled={creatingBrief}
+							onclick={() => (showBrief = false)}
+						>
+							Renunță
+						</button>
+						<button
+							class="cl-btn-primary"
+							disabled={!brief.trim() || creatingBrief}
+							onclick={createFromBrief}
+						>
+							{creatingBrief ? 'Se generează…' : 'Generează'}
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		{#if activeTab === 'articole'}
 			<svelte:boundary>
