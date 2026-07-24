@@ -258,7 +258,7 @@ git commit -m "feat(content): schema.ts — coloane pivot + tabel websiteContent
 
 `src/lib/server/content/__tests__/frontmatter.test.ts`:
 ```ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { parseFrontmatter } from '../frontmatter';
 
 describe('parseFrontmatter', () => {
@@ -283,7 +283,7 @@ describe('parseFrontmatter', () => {
 
 - [ ] **Step 2: Rulează testul — eșuează**
 
-Run: `cd app && npx vitest run src/lib/server/content/__tests__/frontmatter.test.ts`
+Run: `cd app && bun test src/lib/server/content/__tests__/frontmatter.test.ts`
 Expected: FAIL (`parseFrontmatter is not a function` / modul negăsit).
 
 - [ ] **Step 3: Implementează parser-ul**
@@ -314,7 +314,7 @@ export function parseFrontmatter(md: string): { data: Record<string, string>; bo
 
 - [ ] **Step 4: Rulează testul — trece**
 
-Run: `cd app && npx vitest run src/lib/server/content/__tests__/frontmatter.test.ts`
+Run: `cd app && bun test src/lib/server/content/__tests__/frontmatter.test.ts`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
@@ -336,7 +336,7 @@ git commit -m "feat(content): parser frontmatter MD + test"
 
 `src/lib/server/content/__tests__/website-resolver.test.ts`:
 ```ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { normalizeDomain, brandToDomain, resolveWebsiteId } from '../website-resolver';
 
 describe('normalizeDomain', () => {
@@ -380,7 +380,7 @@ describe('resolveWebsiteId', () => {
 
 - [ ] **Step 2: Rulează testul — eșuează**
 
-Run: `cd app && npx vitest run src/lib/server/content/__tests__/website-resolver.test.ts`
+Run: `cd app && bun test src/lib/server/content/__tests__/website-resolver.test.ts`
 Expected: FAIL (modul negăsit).
 
 - [ ] **Step 3: Implementează resolver-ul**
@@ -425,7 +425,7 @@ export function resolveWebsiteId(
 
 - [ ] **Step 4: Rulează testul — trece**
 
-Run: `cd app && npx vitest run src/lib/server/content/__tests__/website-resolver.test.ts`
+Run: `cd app && bun test src/lib/server/content/__tests__/website-resolver.test.ts`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
