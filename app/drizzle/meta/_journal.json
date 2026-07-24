@@ -2871,6 +2871,34 @@
       "when": 1779916800027522,
       "tag": "0412_interview_data_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 413,
+      "version": "6",
+      "when": 1779916800027523,
+      "tag": "0413_claude_second_key_encrypted",
+      "breakpoints": true
+    },
+    {
+      "idx": 414,
+      "version": "6",
+      "when": 1779916800027524,
+      "tag": "0414_claude_second_key_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 415,
+      "version": "6",
+      "when": 1779916800027525,
+      "tag": "0415_claude_second_key_hint",
+      "breakpoints": true
+    },
+    {
+      "idx": 416,
+      "version": "6",
+      "when": 1779916800027526,
+      "tag": "0416_claude_routes",
+      "breakpoints": true
     }
   ]
 }

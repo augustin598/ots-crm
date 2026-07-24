@@ -1356,13 +1356,20 @@ export const claudeIntegration = sqliteTable(
 			.notNull()
 			.references(() => tenant.id)
 			.unique(),
+		// Slot PRIMAR (coloane istorice). Poate ține 'api' SAU 'oat' — vezi keyType.
 		apiKeyEncrypted: text('api_key_encrypted').notNull(),
 		keyType: text('key_type').notNull(), // 'api' | 'oat'
 		keyHint: text('key_hint').notNull(), // ultimele 4 caractere
+		// Slot SECUNDAR (rutare pe 2 credențiale simultan). Toate nullable.
+		secondKeyEncrypted: text('second_key_encrypted'),
+		secondKeyType: text('second_key_type'), // 'api' | 'oat'
+		secondKeyHint: text('second_key_hint'),
 		defaultModel: text('default_model').notNull().default('claude-sonnet-5'),
 		isActive: boolean('is_active').notNull().default(true),
 		lastTestedAt: timestamp('last_tested_at', { withTimezone: true, mode: 'date' }),
 		lastError: text('last_error'),
+		// Override-uri de rutare per use-case: Record<useCaseId,{keyType,model}> (jsonb).
+		routes: jsonb('routes').$type<import('$lib/claude-usecases').ClaudeRoutes>(),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),
