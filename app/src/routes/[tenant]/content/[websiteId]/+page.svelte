@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../content.css';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import {
 		getWebsiteArticles,
 		getContentWebsites,
@@ -11,7 +12,6 @@
 		updateWebsiteContentProfile
 	} from '$lib/remotes/website-content-profile.remote';
 	import { toast } from 'svelte-sonner';
-	import ArticleReviewDrawer from './ArticleReviewDrawer.svelte';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
@@ -28,7 +28,10 @@
 
 	// ---- Articole tab state ----
 	let statusFilter = $state('');
-	let openArticleId = $state<string | null>(null);
+
+	function openArticle(id: string) {
+		goto(`/${page.params.tenant}/content/${websiteId}/${id}`);
+	}
 
 	// ---- Articol nou din brief ----
 	let showBrief = $state(false);
@@ -100,7 +103,7 @@
 	function onRowKey(e: KeyboardEvent, id: string) {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
-			openArticleId = id;
+			openArticle(id);
 		}
 	}
 
@@ -114,8 +117,8 @@
 			toast.success('Articol generat');
 			brief = '';
 			showBrief = false;
-			// Deschide drawer-ul pe articolul nou creat.
-			if (r?.id) openArticleId = r.id;
+			// Navighează la editorul articolului nou creat.
+			if (r?.id) await goto(`/${page.params.tenant}/content/${websiteId}/${r.id}`);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Generare eșuată');
 		} finally {
@@ -255,7 +258,7 @@
 										role="button"
 										tabindex="0"
 										aria-label={`Deschide ${a.generatedTitle ?? a.title ?? 'articol'}`}
-										onclick={() => (openArticleId = a.id)}
+										onclick={() => openArticle(a.id)}
 										onkeydown={(e) => onRowKey(e, a.id)}
 									>
 										<td>{a.generatedTitle ?? a.title ?? '—'}</td>
@@ -501,15 +504,6 @@
 			</div>
 		{/snippet}
 	</svelte:boundary>
-
-	{#if openArticleId}
-		<ArticleReviewDrawer
-			articleId={openArticleId}
-			{websiteId}
-			status={statusFilter}
-			onClose={() => (openArticleId = null)}
-		/>
-	{/if}
 </div>
 
 <style>
