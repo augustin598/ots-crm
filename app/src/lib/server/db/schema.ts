@@ -2083,6 +2083,7 @@ export const contentArticle = sqliteTable('content_article', {
 	targetWpSiteId: text('target_wp_site_id'),
 	wpPostId: integer('wp_post_id'),
 	scheduledAt: timestamp('scheduled_at', { withTimezone: true, mode: 'date' }),
+	publishStatus: text('publish_status').notNull().default('none'), // none|draft|scheduled|publishing|published|failed
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -2092,7 +2093,8 @@ export const contentArticle = sqliteTable('content_article', {
 }, (t) => [
 	uniqueIndex('content_article_tenant_source_idx').on(t.tenantId, t.sourceUrl),
 	index('content_article_tenant_status_idx').on(t.tenantId, t.extractStatus),
-	index('content_article_tenant_brand_idx').on(t.tenantId, t.brand)
+	index('content_article_tenant_brand_idx').on(t.tenantId, t.brand),
+	index('content_article_tenant_website_publish_idx').on(t.tenantId, t.websiteId, t.publishStatus)
 ]);
 
 export const contentImportJob = sqliteTable('content_import_job', {
