@@ -377,6 +377,60 @@ export const generateArticleFromBrief = command(
 	}
 );
 
+/** Modificare ȚINTITĂ: aplică o instrucțiune pe textul rescris CURENT (nu regenerează tot). */
+export const modifyArticle = command(
+	v.object({ articleId: v.string(), instruction: v.pipe(v.string(), v.minLength(2)) }),
+	async ({ articleId, instruction }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const tenantId = event.locals.tenant.id;
+
+		const rows = await db
+			.select()
+			.from(table.contentArticle)
+			.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)))
+			.limit(1);
+		const a = rows[0];
+		if (!a) svelteError(404, 'Articol negăsit');
+		const current = a.generatedHtml || a.bodyHtml || '';
+		if (!current) svelteError(400, 'Nu există text de modificat — generează întâi articolul.');
+
+		await db
+			.update(table.contentArticle)
+			.set({ rewriteStatus: 'drafting', updatedAt: new Date() })
+			.where(eq(table.contentArticle.id, articleId));
+		try {
+			const profile = a.websiteId ? await loadContentProfile(tenantId, a.websiteId) : null;
+			const gen = await generateArticle(tenantId, {
+				profile,
+				direction: a.articleDirection,
+				mode: 'modify',
+				currentText: current,
+				instruction
+			});
+			await db
+				.update(table.contentArticle)
+				.set({
+					generatedTitle: gen.title || a.generatedTitle,
+					generatedExcerpt: gen.excerpt || a.generatedExcerpt,
+					generatedHtml: gen.html,
+					rewriteStatus: 'ready',
+					generatedAt: new Date(),
+					updatedAt: new Date()
+				})
+				.where(eq(table.contentArticle.id, articleId));
+			return { ok: true };
+		} catch (e) {
+			await db
+				.update(table.contentArticle)
+				.set({ rewriteStatus: 'ready', updatedAt: new Date() })
+				.where(eq(table.contentArticle.id, articleId));
+			svelteError(500, e instanceof Error ? e.message : 'Modificare eșuată');
+		}
+	}
+);
+
 /** Reset failed/thin rows back to pending, then relaunch. */
 export const retryFailedExtractions = command(async () => {
 	const event = getRequestEvent();

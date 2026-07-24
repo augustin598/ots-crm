@@ -8,9 +8,11 @@ export { buildSystemPrompt, parseGeneration } from './article-prompt';
 export interface GenerateOpts {
 	profile: ContentProfileLike | null;
 	direction: string | null;
-	mode: 'rewrite' | 'brief';
-	sourceText?: string;
-	brief?: string;
+	mode: 'rewrite' | 'brief' | 'modify';
+	sourceText?: string; // pt rewrite
+	brief?: string; // pt brief
+	currentText?: string; // pt modify — articolul curent (HTML/text)
+	instruction?: string; // pt modify — ce anume să schimbe
 }
 
 export interface GenerateResult {
@@ -30,10 +32,15 @@ export async function generateArticle(
 		throw new Error('Pluginul Claude nu e configurat (adaugă o cheie în Settings → Claude).');
 
 	const system = buildSystemPrompt(opts.profile, opts.direction);
-	const userMsg =
-		opts.mode === 'rewrite'
-			? `Rescrie următorul advertorial ca articol de blog SEO/GEO on-brand, păstrând faptele. Material-sursă:\n\n${opts.sourceText ?? ''}`
-			: `Scrie un articol nou de blog SEO/GEO on-brand pe subiectul: ${opts.brief ?? ''}`;
+	let userMsg: string;
+	if (opts.mode === 'rewrite') {
+		userMsg = `Rescrie următorul advertorial ca articol de blog SEO/GEO on-brand, păstrând faptele. Material-sursă:\n\n${opts.sourceText ?? ''}`;
+	} else if (opts.mode === 'brief') {
+		userMsg = `Scrie un articol nou de blog SEO/GEO on-brand pe subiectul: ${opts.brief ?? ''}`;
+	} else {
+		// modify — editare ȚINTITĂ: aplică DOAR instrucțiunea, păstrează restul neschimbat.
+		userMsg = `Iată articolul curent. Aplică DOAR modificarea cerută mai jos și PĂSTREAZĂ neschimbat tot restul (structură, titluri, paragrafe nevizate).\n\n=== ARTICOL CURENT ===\n${opts.currentText ?? ''}\n\n=== MODIFICARE DE APLICAT ===\n${opts.instruction ?? ''}`;
+	}
 
 	const res = await client.createMessage({
 		model: client.defaultModel,
