@@ -2808,6 +2808,27 @@
       "when": 1779916800027513,
       "tag": "0403_content_import_job_table",
       "breakpoints": true
+    },
+    {
+      "idx": 404,
+      "version": "6",
+      "when": 1779916800027514,
+      "tag": "0404_claude_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 405,
+      "version": "6",
+      "when": 1779916800027515,
+      "tag": "0405_claude_integration_tenant_id_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 406,
+      "version": "6",
+      "when": 1779916800027516,
+      "tag": "0406_claude_integration_tenant_idx",
+      "breakpoints": true
     }
   ]
 }

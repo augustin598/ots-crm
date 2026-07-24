@@ -1340,6 +1340,39 @@ export const stripeIntegration = sqliteTable(
 	(t) => [index('stripe_integration_tenant_idx').on(t.tenantId)]
 );
 
+/**
+ * Per-tenant Claude (Anthropic) API credentials.
+ *
+ * Pattern aliniat cu `stripeIntegration`: cheia e criptată AES-256-GCM per-tenant
+ * (`plugins/claude/crypto.ts`). Un rând per tenant. `keyType` distinge Anthropic
+ * API key (`sk-ant-api…`, header x-api-key) de Claude Code OAuth token
+ * (`sk-ant-oat…`, header Authorization: Bearer).
+ */
+export const claudeIntegration = sqliteTable(
+	'claude_integration',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id)
+			.unique(),
+		apiKeyEncrypted: text('api_key_encrypted').notNull(),
+		keyType: text('key_type').notNull(), // 'api' | 'oat'
+		keyHint: text('key_hint').notNull(), // ultimele 4 caractere
+		defaultModel: text('default_model').notNull().default('claude-sonnet-5'),
+		isActive: boolean('is_active').notNull().default(true),
+		lastTestedAt: timestamp('last_tested_at', { withTimezone: true, mode: 'date' }),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => [index('claude_integration_tenant_idx').on(t.tenantId)]
+);
+
 export const daAuditLog = sqliteTable(
 	'da_audit_log',
 	{
