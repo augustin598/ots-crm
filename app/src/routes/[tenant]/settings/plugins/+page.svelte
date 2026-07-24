@@ -234,6 +234,23 @@
 							</div>
 						</CardContent>
 					{/if}
+					{#if plugin.name === 'claude'}
+						<CardContent>
+							<Separator class="mb-4" />
+							<div class="space-y-2">
+								<p class="text-sm font-medium">Claude (Anthropic)</p>
+								<p class="text-sm text-muted-foreground">
+									Salvează cheia ta Claude (API key sau Claude Code OAuth token) per-tenant,
+									criptată. Folosită de funcțiile AI din CRM.
+								</p>
+								{#if isEnabled}
+									<Button variant="outline" size="sm" href="/{tenantSlug}/settings/claude">
+										Configurează Claude
+									</Button>
+								{/if}
+							</div>
+						</CardContent>
+					{/if}
 
 				</Card>
 			{/each}
