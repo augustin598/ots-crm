@@ -8,7 +8,7 @@ import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
-import { generateArticle } from '$lib/server/content/article-generator';
+import { generateArticle, generateSeoMeta } from '$lib/server/content/article-generator';
 
 function genId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -311,6 +311,10 @@ async function doRewrite(tenantId: string, articleId: string) {
 				generatedTitle: gen.title || a.generatedTitle,
 				generatedExcerpt: gen.excerpt || a.generatedExcerpt,
 				generatedHtml: gen.html,
+				seoTitle: gen.seoTitle || a.seoTitle,
+				metaDescription: gen.metaDescription || a.metaDescription,
+				focusKeyword: gen.focusKeyword || a.focusKeyword,
+				slug: gen.slug || a.slug,
 				origin: 'rewrite',
 				rewriteStatus: 'ready',
 				generatedAt: new Date(),
@@ -377,6 +381,10 @@ export const generateArticleFromBrief = command(
 			generatedTitle: gen.title,
 			generatedExcerpt: gen.excerpt,
 			generatedHtml: gen.html,
+			seoTitle: gen.seoTitle,
+			metaDescription: gen.metaDescription,
+			focusKeyword: gen.focusKeyword,
+			slug: gen.slug,
 			rewriteStatus: 'ready',
 			extractStatus: 'ok',
 			generatedAt: now,
@@ -440,6 +448,42 @@ export const modifyArticle = command(
 		}
 	}
 );
+
+/** Generează DOAR metadatele SEO (focus keyword, titlu SEO, meta, slug) din conținutul curent. */
+export const generateArticleSeo = command(v.string(), async (articleId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	const tenantId = event.locals.tenant.id;
+
+	const rows = await db
+		.select()
+		.from(table.contentArticle)
+		.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)))
+		.limit(1);
+	const a = rows[0];
+	if (!a) svelteError(404, 'Articol negăsit');
+	const text = a.generatedHtml || a.bodyHtml || a.bodyText || '';
+	if (!text) svelteError(400, 'Nu există conținut pentru SEO — generează întâi articolul.');
+
+	const profile = a.websiteId ? await loadContentProfile(tenantId, a.websiteId) : null;
+	const seo = await generateSeoMeta(tenantId, {
+		profile,
+		title: a.generatedTitle || a.title || '',
+		text
+	});
+	await db
+		.update(table.contentArticle)
+		.set({
+			seoTitle: seo.seoTitle || a.seoTitle,
+			metaDescription: seo.metaDescription || a.metaDescription,
+			focusKeyword: seo.focusKeyword || a.focusKeyword,
+			slug: seo.slug || a.slug,
+			updatedAt: new Date()
+		})
+		.where(eq(table.contentArticle.id, articleId));
+	return { ok: true, ...seo };
+});
 
 /** Reset failed/thin rows back to pending, then relaunch. */
 export const retryFailedExtractions = command(async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { buildSystemPrompt, parseGeneration } from '../article-prompt';
+import { buildSystemPrompt, parseGeneration, parseSeoMeta, slugify } from '../article-prompt';
 
 describe('buildSystemPrompt', () => {
 	it('include profilul + guardrails + direcția', () => {
@@ -45,5 +45,33 @@ describe('parseGeneration', () => {
 		const r = parseGeneration('doar niște text fără json');
 		expect(r.bodyMarkdown).toContain('doar niște text');
 		expect(r.title).toBe('');
+	});
+	it('extrage și câmpurile SEO', () => {
+		const r = parseGeneration(
+			'{"title":"T","excerpt":"E","body_markdown":"B","focus_keyword":"job videochat","seo_title":"Job videochat","meta_description":"M","slug":"Job Videochat Iași"}'
+		);
+		expect(r.focusKeyword).toBe('job videochat');
+		expect(r.slug).toBe('job-videochat-iasi');
+	});
+});
+
+describe('slugify', () => {
+	it('kebab fără diacritice', () => {
+		expect(slugify('Job Videochat în Iași')).toBe('job-videochat-in-iasi');
+		expect(slugify('Cât câștigi? 300 lei/zi')).toBe('cat-castigi-300-lei-zi');
+	});
+});
+
+describe('parseSeoMeta', () => {
+	it('parsează metadatele + slugifică', () => {
+		const r = parseSeoMeta(
+			'```json\n{"focus_keyword":"job videochat iași","seo_title":"Job videochat Iași","meta_description":"desc","slug":"Job Videochat Iași"}\n```'
+		);
+		expect(r.focusKeyword).toBe('job videochat iași');
+		expect(r.slug).toBe('job-videochat-iasi');
+	});
+	it('slug din seo_title dacă lipsește', () => {
+		const r = parseSeoMeta('{"seo_title":"Titlu Nou","focus_keyword":"x","meta_description":"y"}');
+		expect(r.slug).toBe('titlu-nou');
 	});
 });

@@ -39,7 +39,20 @@ export function buildSystemPrompt(
 	if (direction && direction.trim())
 		lines.push(`Direcție specifică pentru ACEST articol: ${direction.trim()}.`);
 	lines.push(
-		'Răspunde DOAR cu un obiect JSON valid, fără text în plus, de forma: {"title": "...", "excerpt": "...", "body_markdown": "..."}. body_markdown folosește ## pentru subtitluri și poate include o secțiune de Întrebări frecvente.'
+		'Răspunde DOAR cu un obiect JSON valid, fără text în plus, de forma: {"title": "...", "excerpt": "...", "body_markdown": "...", "focus_keyword": "...", "seo_title": "... (≤60 caractere)", "meta_description": "... (120-160 caractere)", "slug": "kebab-case-fara-diacritice"}. body_markdown folosește ## pentru subtitluri și poate include o secțiune de Întrebări frecvente. focus_keyword = expresia principală de căutare; seo_title include focus_keyword; meta_description include focus_keyword.'
+	);
+	return lines.join('\n');
+}
+
+/** System prompt pt generarea DOAR a metadatelor SEO (butonul „Generează AI"). */
+export function buildSeoSystemPrompt(profile: ContentProfileLike | null): string {
+	const lines: string[] = [
+		'Ești specialist SEO/GEO. Pe baza articolului dat, generezi metadate SEO în limba română.'
+	];
+	if (profile?.keywords) lines.push(`Cuvinte-cheie de brand: ${profile.keywords}.`);
+	if (profile?.audience) lines.push(`Public-țintă: ${profile.audience}.`);
+	lines.push(
+		'Răspunde DOAR cu JSON: {"focus_keyword": "expresia principală de căutare", "seo_title": "titlu ≤60 caractere care conține focus_keyword", "meta_description": "120-160 caractere, conține focus_keyword", "slug": "kebab-case-fara-diacritice"}.'
 	);
 	return lines.join('\n');
 }
@@ -48,10 +61,14 @@ export interface Generated {
 	title: string;
 	excerpt: string;
 	bodyMarkdown: string;
+	focusKeyword: string;
+	seoTitle: string;
+	metaDescription: string;
+	slug: string;
 }
 
-/** Parsează răspunsul Claude — JSON fenced / brut / fallback text. */
-export function parseGeneration(text: string): Generated {
+/** Extrage primul obiect JSON dintr-un răspuns (fenced ```json / brut). null dacă nu găsește. */
+function extractJson(text: string): Record<string, unknown> | null {
 	const t = (text ?? '').trim();
 	const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(t);
 	const candidate = fenced ? fenced[1].trim() : t;
@@ -59,19 +76,74 @@ export function parseGeneration(text: string): Generated {
 		const start = candidate.indexOf('{');
 		const end = candidate.lastIndexOf('}');
 		if (start !== -1 && end > start) {
-			const obj = JSON.parse(candidate.slice(start, end + 1)) as {
-				title?: unknown;
-				excerpt?: unknown;
-				body_markdown?: unknown;
-			};
-			return {
-				title: typeof obj.title === 'string' ? obj.title : '',
-				excerpt: typeof obj.excerpt === 'string' ? obj.excerpt : '',
-				bodyMarkdown: typeof obj.body_markdown === 'string' ? obj.body_markdown : ''
-			};
+			return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
 		}
 	} catch {
 		/* fallthrough */
 	}
-	return { title: '', excerpt: '', bodyMarkdown: t };
+	return null;
+}
+
+/** slug kebab-case fără diacritice. */
+export function slugify(s: string): string {
+	return (s || '')
+		.normalize('NFD')
+		.replace(/[̀-ͯ]/g, '') // diacritice
+		.replace(/[ăâ]/gi, 'a')
+		.replace(/[îí]/gi, 'i')
+		.replace(/ș/gi, 's')
+		.replace(/ț/gi, 't')
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 80);
+}
+
+export interface SeoMeta {
+	focusKeyword: string;
+	seoTitle: string;
+	metaDescription: string;
+	slug: string;
+}
+
+/** Parsează metadatele SEO din răspunsul Claude ({focus_keyword, seo_title, meta_description, slug}). */
+export function parseSeoMeta(text: string): SeoMeta {
+	const obj = extractJson(text) ?? {};
+	const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+	const seoTitle = str(obj.seo_title);
+	const rawSlug = str(obj.slug);
+	return {
+		focusKeyword: str(obj.focus_keyword),
+		seoTitle,
+		metaDescription: str(obj.meta_description),
+		slug: slugify(rawSlug || seoTitle)
+	};
+}
+
+/** Parsează răspunsul Claude — JSON fenced / brut / fallback text (conținut + SEO). */
+export function parseGeneration(text: string): Generated {
+	const obj = extractJson(text);
+	const str = (v: unknown) => (typeof v === 'string' ? v : '');
+	if (!obj) {
+		return {
+			title: '',
+			excerpt: '',
+			bodyMarkdown: (text ?? '').trim(),
+			focusKeyword: '',
+			seoTitle: '',
+			metaDescription: '',
+			slug: ''
+		};
+	}
+	const seoTitle = str(obj.seo_title).trim();
+	const rawSlug = str(obj.slug).trim();
+	return {
+		title: str(obj.title),
+		excerpt: str(obj.excerpt),
+		bodyMarkdown: str(obj.body_markdown),
+		focusKeyword: str(obj.focus_keyword).trim(),
+		seoTitle,
+		metaDescription: str(obj.meta_description).trim(),
+		slug: slugify(rawSlug || seoTitle || str(obj.title))
+	};
 }

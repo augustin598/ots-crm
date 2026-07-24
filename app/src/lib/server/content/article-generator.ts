@@ -1,9 +1,16 @@
 import { getClaudeClientFor } from '$lib/server/plugins/claude';
 import { renderMarkdown } from '$lib/utils/markdown';
-import { buildSystemPrompt, parseGeneration, type ContentProfileLike } from './article-prompt';
+import {
+	buildSystemPrompt,
+	buildSeoSystemPrompt,
+	parseGeneration,
+	parseSeoMeta,
+	type ContentProfileLike,
+	type SeoMeta
+} from './article-prompt';
 
-export type { ContentProfileLike } from './article-prompt';
-export { buildSystemPrompt, parseGeneration } from './article-prompt';
+export type { ContentProfileLike, SeoMeta } from './article-prompt';
+export { buildSystemPrompt, parseGeneration, parseSeoMeta, slugify } from './article-prompt';
 
 export interface GenerateOpts {
 	profile: ContentProfileLike | null;
@@ -20,6 +27,10 @@ export interface GenerateResult {
 	html: string;
 	excerpt: string;
 	model: string;
+	focusKeyword: string;
+	seoTitle: string;
+	metaDescription: string;
+	slug: string;
 }
 
 /** Generează un articol (rescriere sau brief) prin ruta Claude 'copywriting'. */
@@ -59,6 +70,38 @@ export async function generateArticle(
 		title: parsed.title,
 		excerpt: parsed.excerpt,
 		html: renderMarkdown(parsed.bodyMarkdown),
-		model: client.defaultModel
+		model: client.defaultModel,
+		focusKeyword: parsed.focusKeyword,
+		seoTitle: parsed.seoTitle,
+		metaDescription: parsed.metaDescription,
+		slug: parsed.slug
 	};
+}
+
+/** Generează DOAR metadatele SEO pentru un articol existent (butonul „Generează AI"). */
+export async function generateSeoMeta(
+	tenantId: string,
+	opts: { profile: ContentProfileLike | null; title: string; text: string }
+): Promise<SeoMeta> {
+	const client = await getClaudeClientFor(tenantId, 'copywriting', 60_000);
+	if (!client)
+		throw new Error('Pluginul Claude nu e configurat (adaugă o cheie în Settings → Claude).');
+
+	const res = await client.createMessage({
+		model: client.defaultModel,
+		max_tokens: 700,
+		system: buildSeoSystemPrompt(opts.profile),
+		messages: [
+			{
+				role: 'user',
+				content: `Titlu: ${opts.title}\n\nConținut:\n${opts.text.slice(0, 6000)}`
+			}
+		]
+	});
+	if (!res.ok) {
+		const body = await res.text().catch(() => '');
+		throw new Error(`Claude ${res.status}: ${body.slice(0, 300)}`);
+	}
+	const json = (await res.json()) as { content?: Array<{ text?: string }> };
+	return parseSeoMeta(json.content?.[0]?.text ?? '');
 }
