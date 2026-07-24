@@ -2829,6 +2829,48 @@
       "when": 1779916800027516,
       "tag": "0406_claude_integration_tenant_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 407,
+      "version": "6",
+      "when": 1779916800027517,
+      "tag": "0407_interview_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 408,
+      "version": "6",
+      "when": 1779916800027518,
+      "tag": "0408_interview_channel_tenant_name_uniq",
+      "breakpoints": true
+    },
+    {
+      "idx": 409,
+      "version": "6",
+      "when": 1779916800027519,
+      "tag": "0409_interview",
+      "breakpoints": true
+    },
+    {
+      "idx": 410,
+      "version": "6",
+      "when": 1779916800027520,
+      "tag": "0410_interview_tenant_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 411,
+      "version": "6",
+      "when": 1779916800027521,
+      "tag": "0411_interview_channel_id_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 412,
+      "version": "6",
+      "when": 1779916800027522,
+      "tag": "0412_interview_data_idx",
+      "breakpoints": true
     }
   ]
 }

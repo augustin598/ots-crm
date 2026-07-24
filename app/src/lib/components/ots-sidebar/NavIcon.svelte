@@ -26,6 +26,7 @@
 	import PackageIcon from '@lucide/svelte/icons/package';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
+	import UserPlusIcon from '@lucide/svelte/icons/user-plus';
 	import IconKeez from '$lib/components/marketing/icon-keez.svelte';
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
@@ -74,6 +75,8 @@
 	<RocketIcon class={className} />
 {:else if icon === 'leads'}
 	<ContactIcon class={className} />
+{:else if icon === 'interviuri'}
+	<UserPlusIcon class={className} />
 {:else if icon === 'reports'}
 	<BarChart3Icon class={className} />
 {:else if icon === 'reports-schedule'}

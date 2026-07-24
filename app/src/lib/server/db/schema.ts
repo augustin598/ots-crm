@@ -5918,3 +5918,69 @@ export const paymentEmailEvent = sqliteTable(
 
 export type PaymentEmailEvent = typeof paymentEmailEvent.$inferSelect;
 export type NewPaymentEmailEvent = typeof paymentEmailEvent.$inferInsert;
+
+// ===== Interviuri (recrutare modele videochat — evidența candidatelor pe canale de marketing) =====
+
+// Canale de marketing normalizate (editabile din UI, seed-uite per tenant la prima folosire).
+export const interviewChannel = sqliteTable(
+	'interview_channel',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		name: text('name').notNull(),
+		color: text('color').notNull().default('#94a3b8'), // culoare hex
+		icon: text('icon').notNull().default('circle-help'), // cheie icon lucide
+		isSystem: boolean('is_system').notNull().default(false),
+		sortOrder: integer('sort_order').notNull().default(100),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		uniq: uniqueIndex('interview_channel_tenant_name_uniq').on(t.tenantId, t.name)
+	})
+);
+
+export type InterviewChannel = typeof interviewChannel.$inferSelect;
+export type NewInterviewChannel = typeof interviewChannel.$inferInsert;
+
+// Interviuri candidate. Datele sunt stocate ca text ISO 'YYYY-MM-DD' (comparabile lexicografic).
+export const interview = sqliteTable(
+	'interview',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		nume: text('nume').notNull(),
+		dataInterviu: text('data_interviu').notNull(), // ISO 'YYYY-MM-DD'
+		dataInceput: text('data_inceput'), // început colaborare, nullable
+		dataSfarsit: text('data_sfarsit'), // sfârșit colaborare, nullable
+		studio: text('studio').notNull().default('Heylux Studio'), // 'Heylux Studio','Lucky Studio', extensibil
+		sursa: text('sursa'), // descriere exactă (text liber)
+		channelId: text('channel_id')
+			.notNull()
+			.references(() => interviewChannel.id),
+		status: text('status').notNull().default('in_evaluare'), // 'admisa','respinsa','in_evaluare'
+		observatii: text('observatii'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantIdx: index('interview_tenant_idx').on(t.tenantId),
+		channelIdx: index('interview_channel_id_idx').on(t.channelId),
+		dataIdx: index('interview_data_idx').on(t.tenantId, t.dataInterviu)
+	})
+);
+
+export type Interview = typeof interview.$inferSelect;
+export type NewInterview = typeof interview.$inferInsert;

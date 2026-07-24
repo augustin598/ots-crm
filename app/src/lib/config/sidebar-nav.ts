@@ -22,6 +22,7 @@ export type IconKey =
 	| 'marketing'
 	| 'campaigns-ads'
 	| 'leads'
+	| 'interviuri'
 	| 'reports'
 	| 'reports-schedule'
 	| 'admin'
@@ -230,6 +231,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
 					{ id: 'leads-tiktok', label: 'TikTok Ads', icon: 'tiktok', href: '/leads/tiktok-ads' }
 				]
 			},
+			{ id: 'interviuri', label: 'Interviuri', icon: 'interviuri', href: '/interviuri' },
 			{ id: 'seo-links', label: 'Linkuri SEO', icon: 'seo-links', href: '/seo-links' },
 			{ id: 'content-heylux', label: 'Content Heylux', icon: 'seo-links', href: '/content/heylux' },
 			{ id: 'wordpress', label: 'WordPress', icon: 'wordpress', href: '/wordpress' },
