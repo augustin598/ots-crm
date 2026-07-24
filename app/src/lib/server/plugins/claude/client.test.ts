@@ -68,4 +68,32 @@ describe('createClaudeClient — testConnection', () => {
 		expect(r.via).toBe('messages');
 		expect(call).toBe(2);
 	});
+
+	test('200 la /v1/models cu body non-JSON → respinge, NU întoarce ok:true cu models goale', async () => {
+		const c = createClaudeClient({
+			apiKey: 'sk-ant-api03-KEY',
+			defaultModel: 'claude-sonnet-5',
+			fetchImpl: async () =>
+				new Response('<html>not json</html>', {
+					status: 200,
+					headers: { 'content-type': 'text/html' }
+				})
+		});
+		await expect(c.testConnection()).rejects.toThrow();
+	});
+});
+
+describe('createClaudeClient — listModels', () => {
+	test('200 la /v1/models cu body non-JSON → respinge', async () => {
+		const c = createClaudeClient({
+			apiKey: 'sk-ant-api03-KEY',
+			defaultModel: 'claude-sonnet-5',
+			fetchImpl: async () =>
+				new Response('<html>not json</html>', {
+					status: 200,
+					headers: { 'content-type': 'text/html' }
+				})
+		});
+		await expect(c.listModels()).rejects.toThrow();
+	});
 });

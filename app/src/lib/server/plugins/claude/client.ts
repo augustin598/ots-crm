@@ -31,17 +31,18 @@ export interface ClaudeClient {
 }
 
 export function createClaudeClient(opts: ClaudeClientOptions): ClaudeClient {
-	const keyType: ClaudeKeyType = opts.keyType ?? detectKeyType(opts.apiKey);
+	const apiKey = opts.apiKey.trim();
+	const keyType: ClaudeKeyType = opts.keyType ?? detectKeyType(apiKey);
 	const doFetch = opts.fetchImpl ?? fetch;
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
 	function buildHeaders(extra: Record<string, string> = {}): Record<string, string> {
 		const h: Record<string, string> = { 'anthropic-version': ANTHROPIC_VERSION, ...extra };
 		if (keyType === 'oat') {
-			h['authorization'] = `Bearer ${opts.apiKey}`;
+			h['authorization'] = `Bearer ${apiKey}`;
 			h['anthropic-beta'] = OAUTH_BETA;
 		} else {
-			h['x-api-key'] = opts.apiKey;
+			h['x-api-key'] = apiKey;
 		}
 		return h;
 	}
@@ -55,7 +56,12 @@ export function createClaudeClient(opts: ClaudeClientOptions): ClaudeClient {
 	}
 
 	async function parseModelIds(res: Response): Promise<string[]> {
-		const json = (await res.json().catch(() => ({ data: [] }))) as { data?: Array<{ id: string }> };
+		let json: { data?: Array<{ id: string }> };
+		try {
+			json = (await res.json()) as { data?: Array<{ id: string }> };
+		} catch (err) {
+			throw new Error(`Anthropic /v1/models: răspuns JSON invalid (${err instanceof Error ? err.message : String(err)})`);
+		}
 		return (json.data ?? []).map((m) => m.id);
 	}
 
