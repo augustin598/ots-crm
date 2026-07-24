@@ -4,11 +4,12 @@ import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
 import { generateArticle, generateSeoMeta } from '$lib/server/content/article-generator';
+import { publishArticleToWordpress } from '$lib/server/content/publisher';
 
 function genId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -191,7 +192,10 @@ export const getWebsiteArticles = query(
 				origin: table.contentArticle.origin,
 				wordCount: table.contentArticle.wordCount,
 				publishedAt: table.contentArticle.publishedAt,
-				sourceUrl: table.contentArticle.sourceUrl
+				sourceUrl: table.contentArticle.sourceUrl,
+				scheduledAt: table.contentArticle.scheduledAt,
+				publishStatus: table.contentArticle.publishStatus,
+				wpPostId: table.contentArticle.wpPostId
 			})
 			.from(table.contentArticle)
 			.where(and(...conds))
@@ -521,3 +525,127 @@ export const retryFailedExtractions = command(async () => {
 
 	return { jobId };
 });
+
+// ===== F3: publicare + calendar + setări =====
+
+/** Articolele programate/publicate ale unui website într-o lună (pt calendar). year, month 0-based. */
+export const getWebsiteCalendar = query(
+	v.object({ websiteId: v.string(), year: v.number(), month: v.number() }),
+	async ({ websiteId, year, month }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const start = new Date(year, month, 1);
+		const end = new Date(year, month + 1, 1);
+		return db
+			.select({
+				id: table.contentArticle.id,
+				title: table.contentArticle.title,
+				generatedTitle: table.contentArticle.generatedTitle,
+				scheduledAt: table.contentArticle.scheduledAt,
+				publishStatus: table.contentArticle.publishStatus,
+				rewriteStatus: table.contentArticle.rewriteStatus
+			})
+			.from(table.contentArticle)
+			.where(
+				and(
+					eq(table.contentArticle.tenantId, event.locals.tenant.id),
+					eq(table.contentArticle.websiteId, websiteId),
+					gte(table.contentArticle.scheduledAt, start),
+					lte(table.contentArticle.scheduledAt, end)
+				)
+			)
+			.limit(200);
+	}
+);
+
+/** Publică manual un articol pe WordPress (ciornă sau live). */
+export const publishArticle = command(
+	v.object({ articleId: v.string(), mode: v.picklist(['draft', 'publish']) }),
+	async ({ articleId, mode }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		try {
+			const res = await publishArticleToWordpress(event.locals.tenant.id, articleId, { status: mode });
+			return { ok: true as const, wpPostId: res.wpPostId, link: res.link, publishStatus: res.publishStatus };
+		} catch (e) {
+			svelteError(500, e instanceof Error ? e.message : 'Publicare eșuată');
+		}
+	}
+);
+
+/** Programează un articol (ready) la o dată — publish_status='scheduled'. */
+export const scheduleArticle = command(
+	v.object({ articleId: v.string(), scheduledAt: v.pipe(v.string(), v.isoTimestamp()) }),
+	async ({ articleId, scheduledAt }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const tenantId = event.locals.tenant.id;
+		const rows = await db
+			.select({ rewriteStatus: table.contentArticle.rewriteStatus, publishStatus: table.contentArticle.publishStatus })
+			.from(table.contentArticle)
+			.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)))
+			.limit(1);
+		if (!rows[0]) svelteError(404, 'Articol negăsit');
+		if (rows[0].rewriteStatus !== 'ready')
+			svelteError(400, 'Aprobă articolul (Ready) înainte de a-l programa.');
+		if (rows[0].publishStatus === 'published' || rows[0].publishStatus === 'publishing')
+			svelteError(400, 'Articolul e deja publicat — nu-l poți reprograma (ar crea o postare duplicată).');
+		await db
+			.update(table.contentArticle)
+			.set({ scheduledAt: new Date(scheduledAt), publishStatus: 'scheduled', updatedAt: new Date() })
+			.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)));
+		return { ok: true as const };
+	}
+);
+
+/** Anulează programarea — publish_status înapoi la 'none'. */
+export const unscheduleArticle = command(v.string(), async (articleId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	await db
+		.update(table.contentArticle)
+		.set({ scheduledAt: null, publishStatus: 'none', updatedAt: new Date() })
+		.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, event.locals.tenant.id)));
+	return { ok: true as const };
+});
+
+/** Site-urile WordPress ale tenantului (pt dropdown-ul de legare din Setări). */
+export const getTenantWordpressSites = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	return db
+		.select({ id: table.wordpressSite.id, siteUrl: table.wordpressSite.siteUrl, status: table.wordpressSite.status })
+		.from(table.wordpressSite)
+		.where(eq(table.wordpressSite.tenantId, event.locals.tenant.id))
+		.orderBy(table.wordpressSite.siteUrl);
+});
+
+/** Leagă/dezleagă un clientWebsite de un site WordPress (validează apartenența la tenant). */
+export const setWebsiteWpSite = command(
+	v.object({ websiteId: v.string(), wpSiteId: v.nullable(v.string()) }),
+	async ({ websiteId, wpSiteId }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const tenantId = event.locals.tenant.id;
+		// Securitate: dacă se leagă un site, verifică că e al ACELUIAȘI tenant (anti cross-tenant).
+		if (wpSiteId) {
+			const [valid] = await db
+				.select({ id: table.wordpressSite.id })
+				.from(table.wordpressSite)
+				.where(and(eq(table.wordpressSite.id, wpSiteId), eq(table.wordpressSite.tenantId, tenantId)))
+				.limit(1);
+			if (!valid) svelteError(404, 'Site WordPress negăsit pentru acest tenant.');
+		}
+		await db
+			.update(table.clientWebsite)
+			.set({ wpSiteId, updatedAt: new Date() })
+			.where(and(eq(table.clientWebsite.id, websiteId), eq(table.clientWebsite.tenantId, tenantId)));
+		return { ok: true as const };
+	}
+);
