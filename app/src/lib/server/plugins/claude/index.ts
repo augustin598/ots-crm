@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { decrypt, DecryptionError } from './crypto';
 import { createClaudeClient, type ClaudeClient } from './client';
 import { getPluginRegistry } from '../registry';
-import type { ClaudeKeyType } from './key-utils';
+import { logWarning } from '$lib/server/logger';
 
 export type { ClaudeClient } from './client';
 
@@ -36,6 +36,11 @@ export async function getClaudeClient(tenantId: string): Promise<ClaudeClient | 
 		key = decrypt(tenantId, row.apiKeyEncrypted);
 	} catch (e) {
 		if (e instanceof DecryptionError) {
+			logWarning(
+				'plugin',
+				'Claude API key decrypt failed — retrying with fresh DB read (possible Turso transient)',
+				{ tenantId }
+			);
 			row = await readRow(tenantId);
 			if (!row || !row.isActive) return null;
 			key = decrypt(tenantId, row.apiKeyEncrypted);
@@ -46,7 +51,7 @@ export async function getClaudeClient(tenantId: string): Promise<ClaudeClient | 
 
 	return createClaudeClient({
 		apiKey: key,
-		keyType: row.keyType as ClaudeKeyType,
+		keyType: row.keyType === 'oat' ? 'oat' : 'api',
 		defaultModel: row.defaultModel
 	});
 }
