@@ -6,12 +6,19 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const OAUTH_BETA = 'oauth-2025-04-20';
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+/**
+ * Semnătura minimă de fetch pe care o folosește clientul. Evită să cerem tot
+ * `typeof fetch` (care în Bun/Node cere și `preconnect`), ca mock-urile din teste
+ * să fie acceptate fără cast.
+ */
+type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
 export interface ClaudeClientOptions {
 	apiKey: string;
 	keyType?: ClaudeKeyType;
 	defaultModel: string;
 	/** Injectabil pentru teste; default = global fetch. */
-	fetchImpl?: typeof fetch;
+	fetchImpl?: FetchLike;
 	timeoutMs?: number;
 }
 
@@ -33,7 +40,7 @@ export interface ClaudeClient {
 export function createClaudeClient(opts: ClaudeClientOptions): ClaudeClient {
 	const apiKey = opts.apiKey.trim();
 	const keyType: ClaudeKeyType = opts.keyType ?? detectKeyType(apiKey);
-	const doFetch = opts.fetchImpl ?? fetch;
+	const doFetch: FetchLike = opts.fetchImpl ?? fetch;
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
 	function buildHeaders(extra: Record<string, string> = {}): Record<string, string> {
