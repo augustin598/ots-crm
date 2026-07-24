@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { WpClient, type WpUpdateItem } from './client';
 import { WpError } from './errors';
@@ -262,7 +262,12 @@ export async function syncPosts(
 		const [row] = await db
 			.select({ id: table.wordpressPost.id })
 			.from(table.wordpressPost)
-			.where(eq(table.wordpressPost.wpPostId, p.id))
+			.where(
+				and(
+					eq(table.wordpressPost.siteId, siteId),
+					eq(table.wordpressPost.wpPostId, p.id)
+				)
+			)
 			.limit(1);
 
 		const values = {
