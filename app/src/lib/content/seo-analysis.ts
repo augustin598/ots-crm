@@ -61,6 +61,20 @@ function has(html: string, re: RegExp): boolean {
 	return re.test(html || '');
 }
 
+/** kw „job videochat iași" → „job-videochat-iasi", forma în care apare într-un slug. */
+function slugifyPhrase(s: string): string {
+	return s
+		.normalize('NFD')
+		.replace(/[̀-ͯ]/g, '')
+		.replace(/[ăâ]/gi, 'a')
+		.replace(/[îí]/gi, 'i')
+		.replace(/ș/gi, 's')
+		.replace(/ț/gi, 't')
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+}
+
 function scoreOf(checks: SeoCheck[]): number {
 	if (!checks.length) return 0;
 	const sum = checks.reduce((s, c) => s + (c.status === 'good' ? 1 : c.status === 'warn' ? 0.5 : 0), 0);
@@ -112,7 +126,8 @@ export function analyzeSeo(input: SeoInput): SeoAnalysis {
 		{
 			id: 'kw-slug',
 			label: 'Cuvântul-cheie în slug (URL)',
-			status: kw && slug.includes(kw.replace(/\s+/g, '-')) ? 'good' : 'warn',
+			// slug-ul e fără diacritice — normalizăm și kw la aceeași formă înainte de comparație
+			status: kw && slug.includes(slugifyPhrase(kw)) ? 'good' : 'warn',
 			hint: 'URL-ul ar trebui să conțină cuvântul-cheie.'
 		},
 		{

@@ -65,6 +65,27 @@ export function buildSystemPrompt(
 	return lines.join('\n');
 }
 
+/**
+ * System prompt pt butonul „Humanizer”: pass secundar de EDITARE pe articolul
+ * generat curent — elimină tiparele de text AI fără a pierde sau adăuga fapte.
+ */
+export function buildHumanizeSystemPrompt(profile: ContentProfileLike | null): string {
+	const lines: string[] = [
+		'Ești editor de text. Primești un articol și îl rescrii ÎN ACEEAȘI LIMBĂ în care e scris, ca să sune natural, scris de un om, eliminând tiparele tipice de text generat de AI.',
+		'REGULĂ SUPREMĂ: păstrează TOATE faptele, cifrele, numele și afirmațiile din articol. Nu adăuga informații noi și nu elimina informații; schimbi doar formularea, ritmul și stilul.'
+	];
+	if (profile?.language) lines.push(`Limbă: ${profile.language}.`);
+	if (profile?.tone) lines.push(`Ton: ${profile.tone}.`);
+	if (profile?.audience) lines.push(`Public-țintă: ${profile.audience}.`);
+	if (profile?.dontList) lines.push(`De evitat: ${profile.dontList}.`);
+	if (profile?.guardrails) lines.push(`Mesaje INTERZISE / guardrails: ${profile.guardrails}.`);
+	lines.push(HUMANIZER_RULES);
+	lines.push(
+		'Răspunde DOAR cu un obiect JSON valid, fără text în plus, de forma: {"title": "...", "excerpt": "...", "body_markdown": "..."}. body_markdown păstrează subtitlurile existente ale articolului (indiferent de formatul de intrare, redate ca ##; reformulate doar dacă sună a AI).'
+	);
+	return lines.join('\n');
+}
+
 /** System prompt pt generarea DOAR a metadatelor SEO (butonul „Generează AI"). */
 export function buildSeoSystemPrompt(profile: ContentProfileLike | null): string {
 	const lines: string[] = [

@@ -453,6 +453,57 @@ export const modifyArticle = command(
 	}
 );
 
+/** „Humanizer": pass secundar pe textul rescris curent — elimină tiparele de text AI, păstrând faptele. */
+export const humanizeArticle = command(v.string(), async (articleId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	const tenantId = event.locals.tenant.id;
+
+	const rows = await db
+		.select()
+		.from(table.contentArticle)
+		.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)))
+		.limit(1);
+	const a = rows[0];
+	if (!a) svelteError(404, 'Articol negăsit');
+	const body = a.generatedHtml || a.bodyHtml || '';
+	if (!body) svelteError(400, 'Nu există text de umanizat — generează întâi articolul.');
+	const current = `Titlu: ${a.generatedTitle || a.title || ''}\nExcerpt: ${a.generatedExcerpt || ''}\n\n${body}`;
+
+	await db
+		.update(table.contentArticle)
+		.set({ rewriteStatus: 'drafting', updatedAt: new Date() })
+		.where(eq(table.contentArticle.id, articleId));
+	try {
+		const profile = a.websiteId ? await loadContentProfile(tenantId, a.websiteId) : null;
+		const gen = await generateArticle(tenantId, {
+			profile,
+			direction: null,
+			mode: 'humanize',
+			currentText: current
+		});
+		await db
+			.update(table.contentArticle)
+			.set({
+				generatedTitle: gen.title || a.generatedTitle,
+				generatedExcerpt: gen.excerpt || a.generatedExcerpt,
+				generatedHtml: gen.html,
+				rewriteStatus: 'ready',
+				generatedAt: new Date(),
+				updatedAt: new Date()
+			})
+			.where(eq(table.contentArticle.id, articleId));
+		return { ok: true };
+	} catch (e) {
+		await db
+			.update(table.contentArticle)
+			.set({ rewriteStatus: 'ready', updatedAt: new Date() })
+			.where(eq(table.contentArticle.id, articleId));
+		svelteError(500, e instanceof Error ? e.message : 'Umanizare eșuată');
+	}
+});
+
 /** Generează DOAR metadatele SEO (focus keyword, titlu SEO, meta, slug) din conținutul curent. */
 export const generateArticleSeo = command(v.string(), async (articleId) => {
 	const event = getRequestEvent();

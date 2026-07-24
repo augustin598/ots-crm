@@ -8,6 +8,7 @@
 		getWebsiteArticles,
 		regenerateArticle,
 		modifyArticle,
+		humanizeArticle,
 		generateArticleSeo,
 		getContentWebsites,
 		publishArticle,
@@ -22,6 +23,7 @@
 	import SaveIcon from '@lucide/svelte/icons/save';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import Wand2Icon from '@lucide/svelte/icons/wand-2';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 
@@ -105,10 +107,14 @@
 	let generating = $state(false);
 	let modifyInstruction = $state('');
 	let modifying = $state(false);
+	let humanizing = $state(false);
+	// O singură operație AI pe articol la un moment dat — altfel două generări
+	// concurente și-ar suprascrie una alteia rezultatul (last write wins).
+	const aiBusy = $derived(generating || modifying || humanizing);
 
 	// Regenerează ÎNTREGUL articol din sursă, folosind direcția salvată.
 	async function regenerate() {
-		if (generating) return;
+		if (aiBusy) return;
 		generating = true;
 		try {
 			// Save the current direction first so a regenerate uses it.
@@ -125,9 +131,26 @@
 		}
 	}
 
+	// Humanizer: pass secundar pe textul curent — elimină tiparele de text AI.
+	async function doHumanize() {
+		if (aiBusy) return;
+		humanizing = true;
+		try {
+			await humanizeArticle(articleId).updates(
+				getContentArticle(articleId),
+				getWebsiteArticles({ websiteId })
+			);
+			toast.success('Umanizat');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Umanizare eșuată');
+		} finally {
+			humanizing = false;
+		}
+	}
+
 	// Modificare ȚINTITĂ: aplică o singură instrucțiune pe textul curent.
 	async function doModify() {
-		if (modifying || !modifyInstruction.trim()) return;
+		if (aiBusy || !modifyInstruction.trim()) return;
 		modifying = true;
 		try {
 			await modifyArticle({ articleId, instruction: modifyInstruction }).updates(
@@ -226,7 +249,7 @@
 				/>
 			</div>
 			<div class="cl-hero-actions">
-				<button class="cl-btn-ai" onclick={regenerate} disabled={generating}>
+				<button class="cl-btn-ai" onclick={regenerate} disabled={aiBusy}>
 					<RefreshCwIcon size={15} class={generating ? 'ct-spin' : ''} />
 					{generating ? 'Se generează…' : 'Regenerează'}
 				</button>
@@ -284,10 +307,19 @@
 					<button
 						class="cl-btn-ai cl-btn-sm"
 						onclick={doModify}
-						disabled={modifying || !modifyInstruction.trim()}
+						disabled={aiBusy || !modifyInstruction.trim()}
 					>
 						<Wand2Icon size={14} />
 						{modifying ? 'Se modifică…' : 'Modifică'}
+					</button>
+					<button
+						class="cl-btn-ai cl-btn-sm"
+						onclick={doHumanize}
+						disabled={aiBusy}
+						title="Rescrie textul curent eliminând tiparele de text AI, fără a schimba faptele"
+					>
+						<SparklesIcon size={14} class={humanizing ? 'ct-spin' : ''} />
+						{humanizing ? 'Se umanizează…' : 'Humanizer'}
 					</button>
 				</div>
 
@@ -451,6 +483,7 @@
 		text-align: center;
 	}
 	.cl-hero-actions :global(.ct-spin),
+	.ct-modify :global(.ct-spin),
 	.ct-page-loading :global(.ct-spin) {
 		animation: ct-spin 0.8s linear infinite;
 	}

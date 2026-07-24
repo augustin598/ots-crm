@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import {
+	buildHumanizeSystemPrompt,
 	buildSeoSystemPrompt,
 	buildSystemPrompt,
 	HUMANIZER_RULES,
@@ -65,6 +66,31 @@ describe('buildSystemPrompt', () => {
 	});
 	it('promptul SEO primește regula anti-promoțională', () => {
 		expect(buildSeoSystemPrompt(null)).toContain('Fără limbaj promoțional gol');
+	});
+});
+
+describe('buildHumanizeSystemPrompt', () => {
+	it('conține regulile humanizer, regula de păstrare a faptelor și formatul JSON', () => {
+		const s = buildHumanizeSystemPrompt(null);
+		expect(s).toContain(HUMANIZER_RULES);
+		expect(s).toContain('Nu adăuga informații noi');
+		expect(s).toContain('body_markdown');
+	});
+	it('preia tonul și audiența din profil pentru voce', () => {
+		const s = buildHumanizeSystemPrompt({
+			tone: 'cald',
+			audience: 'femei 18+',
+			language: null,
+			keywords: null,
+			topics: null,
+			doList: null,
+			dontList: null,
+			guardrails: null,
+			sampleUrls: null,
+			extraNotes: null
+		});
+		expect(s).toContain('cald');
+		expect(s).toContain('femei 18+');
 	});
 });
 
