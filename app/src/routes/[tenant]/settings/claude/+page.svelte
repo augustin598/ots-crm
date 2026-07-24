@@ -89,6 +89,11 @@
 		routing = useCaseId;
 		try {
 			await setClaudeRoute({ useCaseId, keyType, model }).updates(integrationQuery);
+			const uc = CLAUDE_USE_CASES.find((u) => u.id === useCaseId);
+			const mdl = CLAUDE_MODELS.find((m) => m.id === model);
+			toast.success(
+				`${uc?.label ?? 'Rutare'} → ${keyType === 'oat' ? 'Abonament' : 'API'} · ${mdl?.label ?? model}`
+			);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la rutare');
 		} finally {
