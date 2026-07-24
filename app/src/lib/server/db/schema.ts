@@ -2052,6 +2052,7 @@ export const contentArticle = sqliteTable('content_article', {
 	websiteId: text('website_id').references(() => clientWebsite.id),
 	clientId: text('client_id').references(() => client.id),
 	origin: text('origin').notNull().default('scraped'), // scraped|rewrite|brief
+	brief: text('brief'), // subiect/keyword pt articolele origin='brief'
 	sourceUrl: text('source_url').notNull(),
 	sourceDomain: text('source_domain').notNull(),
 	title: text('title'),

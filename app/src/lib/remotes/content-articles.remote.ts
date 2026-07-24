@@ -8,6 +8,7 @@ import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
+import { generateArticle } from '$lib/server/content/article-generator';
 
 function genId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -251,6 +252,128 @@ export const updateContentArticle = command(
 				)
 			);
 		return { ok: true };
+	}
+);
+
+// ===== F2: generare AI =====
+
+/** Profilul de conținut al unui website (sau null). */
+async function loadContentProfile(tenantId: string, websiteId: string) {
+	const rows = await db
+		.select()
+		.from(table.websiteContentProfile)
+		.where(
+			and(
+				eq(table.websiteContentProfile.websiteId, websiteId),
+				eq(table.websiteContentProfile.tenantId, tenantId)
+			)
+		)
+		.limit(1);
+	return rows[0] ?? null;
+}
+
+/** Logica de rescriere a unui articol-sursă (partajată de rewrite + regenerate). */
+async function doRewrite(tenantId: string, articleId: string) {
+	const rows = await db
+		.select()
+		.from(table.contentArticle)
+		.where(and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId)))
+		.limit(1);
+	const a = rows[0];
+	if (!a) svelteError(404, 'Articol negăsit');
+	if (!a.websiteId) svelteError(400, 'Articolul nu e legat de un website');
+
+	await db
+		.update(table.contentArticle)
+		.set({ rewriteStatus: 'drafting', updatedAt: new Date() })
+		.where(eq(table.contentArticle.id, articleId));
+	try {
+		const profile = await loadContentProfile(tenantId, a.websiteId);
+		const gen = await generateArticle(tenantId, {
+			profile,
+			direction: a.articleDirection,
+			mode: 'rewrite',
+			sourceText: a.bodyText || a.bodyHtml || a.title || ''
+		});
+		await db
+			.update(table.contentArticle)
+			.set({
+				generatedTitle: gen.title || a.generatedTitle,
+				generatedExcerpt: gen.excerpt || a.generatedExcerpt,
+				generatedHtml: gen.html,
+				origin: 'rewrite',
+				rewriteStatus: 'ready',
+				generatedAt: new Date(),
+				updatedAt: new Date()
+			})
+			.where(eq(table.contentArticle.id, articleId));
+		return { ok: true };
+	} catch (e) {
+		await db
+			.update(table.contentArticle)
+			.set({ rewriteStatus: 'failed', updatedAt: new Date() })
+			.where(eq(table.contentArticle.id, articleId));
+		svelteError(500, e instanceof Error ? e.message : 'Generare eșuată');
+	}
+}
+
+/** Rescrie un articol-sursă cu AI (folosește direcția per articol dacă e setată). */
+export const rewriteArticle = command(v.string(), async (articleId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	return doRewrite(event.locals.tenant.id, articleId);
+});
+
+/** „Regenerează" — rerulează generarea cu direcția curentă din DB. */
+export const regenerateArticle = command(v.string(), async (articleId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	return doRewrite(event.locals.tenant.id, articleId);
+});
+
+/** Articol nou dintr-un brief (subiect/keyword) pt un website. */
+export const generateArticleFromBrief = command(
+	v.object({ websiteId: v.string(), brief: v.pipe(v.string(), v.minLength(3)) }),
+	async ({ websiteId, brief }) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+		await requireStaff(event);
+		const tenantId = event.locals.tenant.id;
+
+		const ws = await db
+			.select({ id: table.clientWebsite.id, clientId: table.clientWebsite.clientId })
+			.from(table.clientWebsite)
+			.where(and(eq(table.clientWebsite.id, websiteId), eq(table.clientWebsite.tenantId, tenantId)))
+			.limit(1);
+		if (!ws[0]) svelteError(404, 'Website negăsit');
+
+		const profile = await loadContentProfile(tenantId, websiteId);
+		const gen = await generateArticle(tenantId, { profile, direction: null, mode: 'brief', brief });
+
+		const id = genId();
+		const now = new Date();
+		await db.insert(table.contentArticle).values({
+			id,
+			tenantId,
+			websiteId,
+			clientId: ws[0].clientId,
+			brand: 'unknown',
+			origin: 'brief',
+			sourceUrl: `brief:${id}`,
+			sourceDomain: 'brief',
+			brief,
+			generatedTitle: gen.title,
+			generatedExcerpt: gen.excerpt,
+			generatedHtml: gen.html,
+			rewriteStatus: 'ready',
+			extractStatus: 'ok',
+			generatedAt: now,
+			createdAt: now,
+			updatedAt: now
+		});
+		return { ok: true, id };
 	}
 );
 

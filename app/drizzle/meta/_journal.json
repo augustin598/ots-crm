@@ -2976,6 +2976,13 @@
       "when": 1779916800027537,
       "tag": "0427_content_article_article_direction",
       "breakpoints": true
+    },
+    {
+      "idx": 428,
+      "version": "6",
+      "when": 1779916800027538,
+      "tag": "0428_content_article_brief",
+      "breakpoints": true
     }
   ]
 }
