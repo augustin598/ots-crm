@@ -24,12 +24,28 @@
 	const integrationQuery = getClaudeIntegration();
 	const current = $derived(integrationQuery.current ?? null);
 	const loading = $derived(integrationQuery.loading);
+	const queryError = $derived(integrationQuery.error ?? null);
+
+	function errMsg(e: unknown): string {
+		if (!e) return 'Eroare necunoscută';
+		const body = (e as { body?: { message?: string } }).body;
+		if (body?.message) return body.message;
+		return e instanceof Error ? e.message : String(e);
+	}
+
+	const dateFmt = new Intl.DateTimeFormat('ro-RO', { dateStyle: 'medium', timeStyle: 'short' });
+	function fmtDate(v: Date | string | null): string {
+		if (!v) return '';
+		const d = v instanceof Date ? v : new Date(v);
+		return Number.isNaN(d.getTime()) ? '' : dateFmt.format(d);
+	}
 
 	let pasteKey = $state('');
 	let saving = $state(false);
 	let testing = $state<KeyType | null>(null);
 	let deleting = $state<KeyType | null>(null);
 	let routing = $state<string | null>(null); // useCaseId în curs de salvare
+	let routeResetNonce = $state(0); // incrementat la eșec setRoute → re-randează select-urile (revert vizual)
 
 	const keyPreview = $derived(
 		!pasteKey.trim()
@@ -95,6 +111,7 @@
 				`${uc?.label ?? 'Rutare'} → ${keyType === 'oat' ? 'Abonament' : 'API'} · ${mdl?.label ?? model}`
 			);
 		} catch (e) {
+			routeResetNonce++;
 			toast.error(e instanceof Error ? e.message : 'Eroare la rutare');
 		} finally {
 			routing = null;
@@ -113,6 +130,24 @@
 			</p>
 		</div>
 	</header>
+
+	{#if queryError}
+		<div class="cc-query-error" role="alert">
+			<AlertCircleIcon class="h-4 w-4" />
+			<div>
+				<strong>Nu s-a putut încărca configurarea Claude.</strong>
+				<span>{errMsg(queryError)}</span>
+			</div>
+			<button
+				class="cc-btn ghost sm"
+				disabled={loading}
+				onclick={() => integrationQuery.refresh().catch(() => {})}
+			>
+				<span class="cc-tico" class:cc-spin={loading}><RefreshIcon class="h-3.5 w-3.5" /></span>
+				Reîncearcă
+			</button>
+		</div>
+	{:else}
 
 	<!-- Cele două sloturi de credențiale -->
 	<div class="cc-slots">
@@ -173,6 +208,16 @@
 		</div>
 	</div>
 
+	{#if current?.lastTestedAt}
+		<p class="cc-lasttest" class:err={!!current.lastError}>
+			{#if current.lastError}
+				<AlertCircleIcon class="h-3.5 w-3.5" /> Ultimul test ({fmtDate(current.lastTestedAt)}): {current.lastError}
+			{:else}
+				<CheckCircleIcon class="h-3.5 w-3.5" /> Ultimul test reușit: {fmtDate(current.lastTestedAt)}
+			{/if}
+		</p>
+	{/if}
+
 	<!-- Adaugă / actualizează o cheie -->
 	<div class="cc-form">
 		<div class="cc-field">
@@ -221,10 +266,25 @@
 			<div class="cc-route-list">
 				{#each CLAUDE_USE_CASES as uc (uc.id)}
 					{@const route = current.routes[uc.id]}
+					{@const targetConnected =
+						route.keyType === 'api' ? current.api.connected : current.oat.connected}
+					{@const fallbackLabel =
+						route.keyType === 'api'
+							? current.oat.connected
+								? 'Abonamentul'
+								: null
+							: current.api.connected
+								? 'cheia API'
+								: null}
 					<div class="cc-route-row" class:busy={routing === uc.id}>
 						<div class="cc-route-name">
 							<span class="cc-route-label">{uc.label}</span>
 							<span class="cc-route-hint">{uc.hint}</span>
+							{#if !targetConnected && fallbackLabel}
+								<span class="cc-route-fallback">
+									<AlertCircleIcon class="h-3 w-3" /> slotul rutat e gol — folosește {fallbackLabel} (fallback)
+								</span>
+							{/if}
 						</div>
 
 						<div class="cc-seg" role="group" aria-label="Cheie pentru {uc.label}">
@@ -248,16 +308,19 @@
 							</button>
 						</div>
 
-						<select
-							class="cc-select cc-route-model"
-							value={route.model}
-							disabled={routing === uc.id}
-							onchange={(e) => setRoute(uc.id, route.keyType, e.currentTarget.value)}
-						>
-							{#each CLAUDE_MODELS as m (m.id)}
-								<option value={m.id}>{m.label}</option>
-							{/each}
-						</select>
+						{#key routeResetNonce}
+							<select
+								class="cc-select cc-route-model"
+								aria-label="Model pentru {uc.label}"
+								value={route.model}
+								disabled={routing === uc.id}
+								onchange={(e) => setRoute(uc.id, route.keyType, e.currentTarget.value)}
+							>
+								{#each CLAUDE_MODELS as m (m.id)}
+									<option value={m.id}>{m.label}</option>
+								{/each}
+							</select>
+						{/key}
 					</div>
 				{/each}
 			</div>
@@ -277,6 +340,8 @@
 			<p class="cc-hint">Se încarcă…</p>
 		{/if}
 	</div>
+
+	{/if}
 </div>
 
 <style>
@@ -675,6 +740,53 @@
 		background: var(--cl-warn-50);
 		border-radius: 8px;
 		padding: 8px 11px;
+	}
+	.cc-route-fallback {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 10.5px;
+		font-weight: 600;
+		color: var(--cl-warn);
+	}
+
+	/* Query error banner */
+	.cc-query-error {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		font-size: 12.5px;
+		color: var(--cl-danger);
+		background: var(--cl-danger-50);
+		border: 1px solid color-mix(in srgb, var(--cl-danger) 25%, transparent);
+		border-radius: 10px;
+		padding: 12px 14px;
+	}
+	.cc-query-error div {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+		flex: 1;
+	}
+	.cc-query-error span {
+		color: var(--cl-text-2);
+		font-size: 11.5px;
+		overflow-wrap: anywhere;
+	}
+
+	/* Ultimul test */
+	.cc-lasttest {
+		margin: -6px 0 0;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11.5px;
+		color: var(--cl-text-3);
+	}
+	.cc-lasttest.err {
+		color: var(--cl-warn);
+		overflow-wrap: anywhere;
 	}
 
 	/* Buttons */

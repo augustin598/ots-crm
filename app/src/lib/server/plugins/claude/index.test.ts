@@ -74,9 +74,13 @@ mock.module('./crypto', () => ({
 	DecryptionError: FakeDecryptionError
 }));
 
-// --- logger: no-op -------------------------------------------------------
+// --- logger: colectează logWarning (pentru asertări pe fallback) ---------
+let warningCalls: Array<{ message: string; metadata: Record<string, unknown> | undefined }> = [];
+
 mock.module('$lib/server/logger', () => ({
-	logWarning: () => {},
+	logWarning: (_cat: string, message: string, ctx?: { metadata?: Record<string, unknown> }) => {
+		warningCalls.push({ message, metadata: ctx?.metadata });
+	},
 	logInfo: () => {},
 	logError: () => {},
 	serializeError: (e: unknown) => ({
@@ -85,7 +89,7 @@ mock.module('$lib/server/logger', () => ({
 	})
 }));
 
-const { getClaudeClient } = await import('./index');
+const { getClaudeClient, getClaudeClientFor } = await import('./index');
 
 function makeRow(overrides: Row = {}): Row {
 	return {
@@ -173,5 +177,44 @@ describe('getClaudeClient', () => {
 		await expect(getClaudeClient('tenant-1')).rejects.toThrow(/decrypt failed/);
 		expect(selectInvocations).toBe(2);
 		expect(decryptInvocations).toBe(2);
+	});
+});
+
+describe('getClaudeClientFor — fallback logging (selectLenient)', () => {
+	beforeEach(() => {
+		pluginActive = true;
+		selectQueue = [];
+		selectInvocations = 0;
+		decryptQueue = [];
+		decryptInvocations = 0;
+		warningCalls = [];
+	});
+
+	test('rută spre slot gol (default oat, doar api stocat) → folosește api ȘI loghează fallback-ul', async () => {
+		// copywriting are default oat în catalog; rândul are DOAR cheia api (primar).
+		selectQueue = [[makeRow({ keyType: 'api', routes: null })]];
+
+		const client = await getClaudeClientFor('tenant-1', 'copywriting');
+
+		expect(client).not.toBeNull();
+		expect(client?.keyType).toBe('api'); // fallback-ul lenient a ales cheia stocată
+		const fallbackLog = warningCalls.find((w) => /fallback/i.test(w.message));
+		expect(fallbackLog).toBeDefined();
+		expect(fallbackLog?.metadata).toMatchObject({
+			useCaseId: 'copywriting',
+			routedKeyType: 'oat',
+			usedKeyType: 'api'
+		});
+	});
+
+	test('slotul rutat există → NICIUN log de fallback', async () => {
+		// rândul are cheia oat în slotul primar; copywriting default oat → match direct.
+		selectQueue = [[makeRow({ keyType: 'oat', routes: null })]];
+
+		const client = await getClaudeClientFor('tenant-1', 'copywriting');
+
+		expect(client).not.toBeNull();
+		expect(client?.keyType).toBe('oat');
+		expect(warningCalls.filter((w) => /fallback/i.test(w.message))).toHaveLength(0);
 	});
 });

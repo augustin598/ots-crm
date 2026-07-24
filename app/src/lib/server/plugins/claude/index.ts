@@ -156,6 +156,13 @@ export async function getClaudeClientFor(
 	const resolved = await decryptSlot(tenantId, row, selectLenient(route.keyType));
 	if (!resolved) return null;
 
+	if (resolved.slot.keyType !== route.keyType) {
+		logWarning('plugin', 'Claude route fallback — routed key slot is empty, using the other stored key', {
+			tenantId,
+			metadata: { useCaseId: id, routedKeyType: route.keyType, usedKeyType: resolved.slot.keyType }
+		});
+	}
+
 	return createClaudeClient({
 		apiKey: resolved.plaintext,
 		keyType: resolved.slot.keyType,
