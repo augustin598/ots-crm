@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS `website_content_profile_website_idx` ON `website_content_profile` (`website_id`);

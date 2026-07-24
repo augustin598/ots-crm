@@ -1,0 +1,1 @@
+ALTER TABLE `client_website` ADD COLUMN `wp_site_id` text;

@@ -2899,6 +2899,76 @@
       "when": 1779916800027526,
       "tag": "0416_claude_routes",
       "breakpoints": true
+    },
+    {
+      "idx": 417,
+      "version": "6",
+      "when": 1779916800027527,
+      "tag": "0417_content_article_website_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 418,
+      "version": "6",
+      "when": 1779916800027528,
+      "tag": "0418_content_article_client_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 419,
+      "version": "6",
+      "when": 1779916800027529,
+      "tag": "0419_content_article_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 420,
+      "version": "6",
+      "when": 1779916800027530,
+      "tag": "0420_content_article_generated_title",
+      "breakpoints": true
+    },
+    {
+      "idx": 421,
+      "version": "6",
+      "when": 1779916800027531,
+      "tag": "0421_content_article_generated_html",
+      "breakpoints": true
+    },
+    {
+      "idx": 422,
+      "version": "6",
+      "when": 1779916800027532,
+      "tag": "0422_content_article_generated_excerpt",
+      "breakpoints": true
+    },
+    {
+      "idx": 423,
+      "version": "6",
+      "when": 1779916800027533,
+      "tag": "0423_content_article_generated_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 424,
+      "version": "6",
+      "when": 1779916800027534,
+      "tag": "0424_client_website_wp_site_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 425,
+      "version": "6",
+      "when": 1779916800027535,
+      "tag": "0425_website_content_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 426,
+      "version": "6",
+      "when": 1779916800027536,
+      "tag": "0426_content_article_website_idx",
+      "breakpoints": true
     }
   ]
 }
