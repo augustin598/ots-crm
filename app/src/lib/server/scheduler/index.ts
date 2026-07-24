@@ -44,6 +44,8 @@ import { processDirectAdminSyncAccounts } from './tasks/directadmin-sync-account
 import { processDirectAdminSyncPackages } from './tasks/directadmin-sync-packages';
 import { processHostingRenewalReminder } from './tasks/hosting-renewal-reminder';
 import { processHostingExpiryGuard } from './tasks/hosting-expiry-guard';
+import { processContentAutoPublish } from './tasks/content-auto-publish';
+import { processContentAutoGenerate } from './tasks/content-auto-generate';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -197,7 +199,9 @@ const taskHandlers: Record<string, TaskHandler> = {
 	directadmin_sync_accounts: processDirectAdminSyncAccounts,
 	directadmin_sync_packages: processDirectAdminSyncPackages,
 	hosting_renewal_reminder: processHostingRenewalReminder,
-	hosting_expiry_guard: processHostingExpiryGuard
+	hosting_expiry_guard: processHostingExpiryGuard,
+	content_auto_publish: processContentAutoPublish,
+	content_auto_generate: processContentAutoGenerate
 };
 
 /**
@@ -346,7 +350,8 @@ export const startScheduler = async () => {
 		'ads-optimizer-outcome-evaluator',
 		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor',
 		'directadmin-sync-accounts', 'directadmin-sync-packages',
-		'hosting-renewal-reminder', 'hosting-expiry-guard'
+		'hosting-renewal-reminder', 'hosting-expiry-guard',
+		'content-auto-publish', 'content-auto-generate'
 	]);
 
 	try {
@@ -1068,6 +1073,22 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] hosting-expiry-guard registered (0 9 * * * Europe/Bucharest, LIVE)');
 
+	// Content auto-generate — zilnic 06:30. Umple calendarul website-urilor 'auto' pe cadență.
+	await schedulerQueue.add(
+		'content-auto-generate',
+		{ type: 'content_auto_generate', params: { dryRun: false } },
+		{ repeat: { pattern: '30 6 * * *', tz: 'Europe/Bucharest' }, jobId: 'content-auto-generate' }
+	);
+	logInfo('scheduler', '[scheduler] content-auto-generate registered (30 6 * * * Europe/Bucharest, LIVE)');
+
+	// Content auto-publish — orar. Publică articolele programate scadente pe WordPress.
+	await schedulerQueue.add(
+		'content-auto-publish',
+		{ type: 'content_auto_publish', params: { dryRun: false } },
+		{ repeat: { pattern: '0 * * * *', tz: 'Europe/Bucharest' }, jobId: 'content-auto-publish' }
+	);
+	logInfo('scheduler', '[scheduler] content-auto-publish registered (0 * * * * Europe/Bucharest, LIVE)');
+
 	const registeredJobs = await schedulerQueue.getRepeatableJobs();
 	logInfo('scheduler', `Scheduler started: ${Object.keys(taskHandlers).length} task types, ${registeredJobs.length} jobs registered`, { metadata: { taskTypes: Object.keys(taskHandlers), jobCount: registeredJobs.length } });
 
@@ -1118,7 +1139,9 @@ export const JOB_LABELS: Record<string, string> = {
 	personalops_heartbeat_monitor: 'Monitor Heartbeat PersonalOPS (alertă instanțe tăcute)',
 	meta_token_expiration_monitor: 'Monitor Expirare Token Meta Ads (alertă <14z)',
 	hosting_renewal_reminder: 'Reminder Reînnoire Hosting (14/7/1z înainte)',
-	hosting_expiry_guard: 'Auto-suspendare Hosting (proforme neplătite, grație 10z)'
+	hosting_expiry_guard: 'Auto-suspendare Hosting (proforme neplătite, grație 10z)',
+	content_auto_publish: 'Auto-publicare Conținut Programat (WordPress)',
+	content_auto_generate: 'Auto-generare Conținut (mod auto)'
 };
 
 /** Default params for jobs that need specific parameters */

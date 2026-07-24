@@ -28,7 +28,7 @@ mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
 mock.module('$lib/server/logger', () => ({ logInfo: () => {}, logWarning: () => {}, logError: () => {}, serializeError: (e: unknown) => ({ message: String(e), stack: '' }) }));
 mock.module('$lib/server/db/schema', () => ({ contentArticle: { id: {}, tenantId: {}, websiteId: {} }, clientWebsite: { id: {}, wpSiteId: {} }, wordpressSite: { id: {} } }));
-mock.module('drizzle-orm', () => ({ eq: () => ({}), and: () => ({}) }));
+// NU mock-uim drizzle-orm (convenție repo: operatorii reali sunt puri, iar db mock ignoră .where).
 mock.module('$lib/server/plugins/smartbill/crypto', () => ({ decrypt: () => 'secret', DecryptionError: class extends Error {} }));
 mock.module('$lib/server/wordpress/media', () => ({ extractAndUploadInlineImages: async (_c: unknown, html: string) => ({ html, attachmentIds: [], firstUrl: null }) }));
 mock.module('$lib/server/wordpress/sync', () => ({ syncPosts: async () => undefined }));

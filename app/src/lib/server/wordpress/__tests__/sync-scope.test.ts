@@ -1,9 +1,24 @@
 import { describe, test, expect, mock } from 'bun:test';
 
-// Predicate inspectabile din drizzle.
+// Predicate inspectabile din drizzle. Restul operatorilor = stub-uri (mock.module e
+// GLOBAL în bun și poate „scurge" în alte fișiere de test → oferim setul complet,
+// ca nimic co-rulat să nu pice pe un export lipsă).
+const passthrough = () => ({});
 mock.module('drizzle-orm', () => ({
 	eq: (col: unknown, val: unknown) => ({ kind: 'eq', col, val }),
-	and: (...conds: unknown[]) => ({ kind: 'and', conds })
+	and: (...conds: unknown[]) => ({ kind: 'and', conds }),
+	lte: passthrough,
+	gte: passthrough,
+	lt: passthrough,
+	gt: passthrough,
+	or: passthrough,
+	ne: passthrough,
+	isNull: passthrough,
+	isNotNull: passthrough,
+	inArray: passthrough,
+	desc: passthrough,
+	asc: passthrough,
+	sql: passthrough
 }));
 
 // Schema stub: coloanele referite de syncPosts (obiecte-identitate pt comparare).
