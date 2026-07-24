@@ -3,14 +3,18 @@
 		getContentArticle,
 		updateContentArticle,
 		getWebsiteArticles,
-		rewriteArticle,
-		regenerateArticle
+		regenerateArticle,
+		modifyArticle
 	} from '$lib/remotes/content-articles.remote';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import { toast } from 'svelte-sonner';
 	import XIcon from '@lucide/svelte/icons/x';
 	import Loader2Icon from '@lucide/svelte/icons/loader-2';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import SaveIcon from '@lucide/svelte/icons/save';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import Wand2Icon from '@lucide/svelte/icons/wand-2';
 
 	let {
 		articleId,
@@ -45,15 +49,17 @@
 
 	let saving = $state(false);
 	let generating = $state(false);
+	let modifyInstruction = $state('');
+	let modifying = $state(false);
 
-	async function doRewrite(regen: boolean) {
+	// Regenerează ÎNTREGUL articol din sursă, folosind direcția salvată.
+	async function regenerate() {
 		if (generating) return;
 		generating = true;
 		try {
 			// Save the current direction first so a regenerate uses it.
 			await updateContentArticle({ id: articleId, articleDirection: direction });
-			const fn = regen ? regenerateArticle : rewriteArticle;
-			await fn(articleId).updates(
+			await regenerateArticle(articleId).updates(
 				getContentArticle(articleId),
 				getWebsiteArticles({ websiteId, status: status || undefined })
 			);
@@ -62,6 +68,24 @@
 			toast.error(e instanceof Error ? e.message : 'Generare eșuată');
 		} finally {
 			generating = false;
+		}
+	}
+
+	// Modificare ȚINTITĂ: aplică o singură instrucțiune pe textul curent.
+	async function doModify() {
+		if (modifying || !modifyInstruction.trim()) return;
+		modifying = true;
+		try {
+			await modifyArticle({ articleId, instruction: modifyInstruction }).updates(
+				getContentArticle(articleId),
+				getWebsiteArticles({ websiteId, status: status || undefined })
+			);
+			toast.success('Modificat');
+			modifyInstruction = '';
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Modificare eșuată');
+		} finally {
+			modifying = false;
 		}
 	}
 
@@ -123,17 +147,36 @@
 					{/if}
 				</div>
 
-				<h4 style="margin-top:16px">Direcție articol</h4>
+				<h4 style="margin-top:16px">Direcție articol (pentru Regenerează)</h4>
 				<textarea
 					class="cl-input cl-textarea"
 					bind:value={direction}
-					placeholder="Context/direcție specifică pt acest articol…"
+					placeholder="Context/direcție permanentă folosită la regenerarea întregului articol…"
 					aria-label="Direcție articol"
 				></textarea>
 			</div>
 
 			<div class="ct-drawer-col">
 				<h4>Rescris</h4>
+				<div class="ct-modify">
+					<input
+						type="text"
+						bind:value={modifyInstruction}
+						placeholder={'Modifică țintit: ex. „fă introducerea mai scurtă", „adaugă un paragraf despre program"…'}
+						disabled={modifying}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') doModify();
+						}}
+					/>
+					<button
+						class="cl-btn-ai cl-btn-sm"
+						onclick={doModify}
+						disabled={modifying || !modifyInstruction.trim()}
+					>
+						<Wand2Icon size={14} />
+						{modifying ? 'Se modifică…' : 'Modifică'}
+					</button>
+				</div>
 				{#key loadedKey}
 					{#if loadedKey === article.id + ':' + (article.generatedAt ?? '')}
 						<RichEditor content={gHtml} onUpdate={(d) => (gHtml = d.html)} minHeight="320px" />
@@ -151,15 +194,22 @@
 		</div>
 
 		<div class="ct-drawer-foot">
-			<button class="cl-btn-secondary" onclick={onClose}>Închide</button>
-			<button class="cl-btn-secondary" disabled={generating} onclick={() => doRewrite(false)}>
-				{generating ? 'Se generează…' : 'Rescrie din sursă'}
+			<button class="cl-btn-secondary" onclick={onClose}>
+				<XIcon size={15} />
+				Închide
 			</button>
-			<button class="cl-btn-secondary" disabled={generating} onclick={() => doRewrite(true)}>
+			<button class="cl-btn-ai" disabled={generating} onclick={regenerate}>
+				<RefreshCwIcon size={15} class={generating ? 'ct-spin' : ''} />
 				{generating ? 'Se generează…' : 'Regenerează'}
 			</button>
-			<button class="cl-btn-secondary" disabled={saving} onclick={() => save(false)}>Salvează</button>
-			<button class="cl-btn-primary" disabled={saving} onclick={() => save(true)}>Aprobă</button>
+			<button class="cl-btn-secondary" disabled={saving} onclick={() => save(false)}>
+				<SaveIcon size={15} />
+				Salvează
+			</button>
+			<button class="cl-btn-success" disabled={saving} onclick={() => save(true)}>
+				<CheckIcon size={15} />
+				Aprobă
+			</button>
 		</div>
 
 		{#snippet pending()}
@@ -198,6 +248,9 @@
 	}
 	.ct-drawer-loading :global(.ct-spin) {
 		animation: ct-spin 0.9s linear infinite;
+	}
+	.ct-drawer-foot :global(.ct-spin) {
+		animation: ct-spin 0.8s linear infinite;
 	}
 	@keyframes ct-spin {
 		to {
