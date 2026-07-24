@@ -12,6 +12,42 @@ import {
 export type { ContentProfileLike, SeoMeta } from './article-prompt';
 export { buildSystemPrompt, parseGeneration, parseSeoMeta, slugify } from './article-prompt';
 
+interface ClaudeLike {
+	defaultModel: string;
+	createMessage(body: Record<string, unknown>): Promise<Response>;
+}
+
+/**
+ * createMessage cu retry pe 429 (rate limit) / 529 (overloaded). Respectă `retry-after`
+ * dacă e prezent, altfel backoff exponențial. Aruncă un mesaj RO clar la eșec final.
+ */
+async function createMessageWithRetry(
+	client: ClaudeLike,
+	body: Record<string, unknown>,
+	retries = 3
+): Promise<Response> {
+	let attempt = 0;
+	// eslint-disable-next-line no-constant-condition
+	while (true) {
+		const res = await client.createMessage(body);
+		if (res.ok) return res;
+		const transient = res.status === 429 || res.status === 529;
+		if (!transient || attempt >= retries) {
+			const errBody = await res.text().catch(() => '');
+			if (transient) {
+				throw new Error(
+					`Claude a răspuns ${res.status} (limită de rată pe minut / supraîncărcare temporară — NU quota ta). Am reîncercat de ${retries} ori. Reîncearcă imediat; dacă persistă, rutează „Copywriting" pe cheia API în Settings → Claude (OAuth/Abonamentul are limite de burst mai stricte pt apeluri API).`
+				);
+			}
+			throw new Error(`Claude ${res.status}: ${errBody.slice(0, 300)}`);
+		}
+		const ra = Number(res.headers.get('retry-after'));
+		const waitMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 20_000) : 1500 * 2 ** attempt;
+		await new Promise((r) => setTimeout(r, waitMs));
+		attempt++;
+	}
+}
+
 export interface GenerateOpts {
 	profile: ContentProfileLike | null;
 	direction: string | null;
@@ -53,16 +89,12 @@ export async function generateArticle(
 		userMsg = `Iată articolul curent. Aplică DOAR modificarea cerută mai jos și PĂSTREAZĂ neschimbat tot restul (structură, titluri, paragrafe nevizate).\n\n=== ARTICOL CURENT ===\n${opts.currentText ?? ''}\n\n=== MODIFICARE DE APLICAT ===\n${opts.instruction ?? ''}`;
 	}
 
-	const res = await client.createMessage({
+	const res = await createMessageWithRetry(client, {
 		model: client.defaultModel,
 		max_tokens: 4000,
 		system,
 		messages: [{ role: 'user', content: userMsg }]
 	});
-	if (!res.ok) {
-		const body = await res.text().catch(() => '');
-		throw new Error(`Claude ${res.status}: ${body.slice(0, 300)}`);
-	}
 	const json = (await res.json()) as { content?: Array<{ text?: string }> };
 	const text = json.content?.[0]?.text ?? '';
 	const parsed = parseGeneration(text);
@@ -87,7 +119,7 @@ export async function generateSeoMeta(
 	if (!client)
 		throw new Error('Pluginul Claude nu e configurat (adaugă o cheie în Settings → Claude).');
 
-	const res = await client.createMessage({
+	const res = await createMessageWithRetry(client, {
 		model: client.defaultModel,
 		max_tokens: 700,
 		system: buildSeoSystemPrompt(opts.profile),
@@ -98,10 +130,6 @@ export async function generateSeoMeta(
 			}
 		]
 	});
-	if (!res.ok) {
-		const body = await res.text().catch(() => '');
-		throw new Error(`Claude ${res.status}: ${body.slice(0, 300)}`);
-	}
 	const json = (await res.json()) as { content?: Array<{ text?: string }> };
 	return parseSeoMeta(json.content?.[0]?.text ?? '');
 }
