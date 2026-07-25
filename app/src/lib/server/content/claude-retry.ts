@@ -127,7 +127,16 @@ export async function createMessageWithRetry(
 	if (alt) {
 		opts.onFallback?.(client.keyType, alt.keyType);
 		discardBody(res);
-		res = await attemptOn(alt, body, opts.fallbackRetries ?? 2, sleep, budget);
+		try {
+			res = await attemptOn(alt, body, opts.fallbackRetries ?? 2, sleep, budget);
+		} catch (e) {
+			// Fără context, toast-ul ar arăta doar eroarea cheii de rezervă (ex. „credit
+			// balance too low") și ar ascunde că primară era de fapt rate-limited.
+			const detail = e instanceof Error ? e.message : String(e);
+			throw new Error(
+				`Cheia ${keyLabel(client.keyType)} e rate-limited (limită pe minut, NU quota ta), iar cheia de rezervă (${keyLabel(alt.keyType)}) a eșuat: ${detail}`
+			);
+		}
 		if (res.ok) return res;
 		discardBody(res);
 		throw new Error(

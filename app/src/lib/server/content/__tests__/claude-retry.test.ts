@@ -155,13 +155,13 @@ describe('createMessageWithRetry', () => {
 		expect(alt.calls).toBe(3);
 	});
 
-	it('fallback cu eroare non-transient → aruncă eroarea aceea (nu mesajul de rate limit)', async () => {
+	it('fallback cu eroare non-transient → eroarea aceea, cu contextul failover-ului prepandat', async () => {
 		const { sleep } = sleepSpy();
 		const primary = fakeClient('oat', [rate(429)]);
-		const alt = fakeClient('api', [new Response('invalid key', { status: 401 })]);
+		const alt = fakeClient('api', [new Response('credit balance too low', { status: 400 })]);
 		await expect(
 			createMessageWithRetry(primary, {}, { retries: 0, sleep, fallback: async () => alt })
-		).rejects.toThrow('Claude 401');
+		).rejects.toThrow(/Abonament.*rate-limited[\s\S]*rezervă.*API[\s\S]*Claude 400/);
 	});
 
 	it('bugetul total de așteptare oprește retry-urile (nu blocăm requestul minute în șir)', async () => {
