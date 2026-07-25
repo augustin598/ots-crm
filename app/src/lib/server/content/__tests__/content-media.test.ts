@@ -54,7 +54,7 @@ describe('resolveFeaturedImage', () => {
 			new Response(new Uint8Array([1, 2, 3]), {
 				status: 200,
 				headers: { 'content-type': 'image/jpeg' }
-			})) as typeof fetch;
+			})) as unknown as typeof fetch;
 		try {
 			const r = await resolveFeaturedImage('https://cdn.x/y.jpg');
 			expect(r?.mimeType).toBe('image/jpeg');
@@ -66,7 +66,7 @@ describe('resolveFeaturedImage', () => {
 	test('external non-image -> null', async () => {
 		const orig = globalThis.fetch;
 		globalThis.fetch = (async () =>
-			new Response('x', { status: 200, headers: { 'content-type': 'text/html' } })) as typeof fetch;
+			new Response('x', { status: 200, headers: { 'content-type': 'text/html' } })) as unknown as typeof fetch;
 		try {
 			expect(await resolveFeaturedImage('https://x/p')).toBeNull();
 		} finally {
