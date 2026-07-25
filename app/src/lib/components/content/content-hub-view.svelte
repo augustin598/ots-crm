@@ -79,7 +79,7 @@
 		</div>
 
 		{#if websiteCount > 0}
-			<div class="cl-hero" style="padding-top:0; padding-bottom:0">
+			<div class="ct-kpis-row">
 				<div class="cl-kpis" style="width:100%; grid-template-columns:repeat(3, 1fr)">
 					<div class="cl-kpi">
 						<div class="cl-kpi-ic" style="background:rgba(24,119,242,.08); color:#1877F2">
@@ -173,7 +173,7 @@
 					<div class="ct-skel" style="width:250px; height:13px; margin-top:12px; border-radius:6px"></div>
 				</div>
 			</div>
-			<div class="cl-hero" style="padding-top:0; padding-bottom:0">
+			<div class="ct-kpis-row">
 				<div class="cl-kpis" style="width:100%; grid-template-columns:repeat(3, 1fr)">
 					{#each kpiSkel as i (i)}
 						<div class="cl-kpi ct-skel" style="height:66px"></div>

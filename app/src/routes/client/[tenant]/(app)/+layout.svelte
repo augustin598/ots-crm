@@ -29,9 +29,9 @@
 
 	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content'];
 
-	// Modulul Content e un layout „breakout" cu breadcrumb propriu (Content › Website ›
-	// Editor); ascunde topbar-ul shell pe rutele /content ca să nu apară dublu.
-	const isContentRoute = $derived(currentPath.startsWith(`/client/${tenantSlug}/content`));
+	// Modulul Content e un layout edge-to-edge cu breadcrumb propriu (Content › Website ›
+	// Editor); ascunde topbar-ul shell + scoate p-6 din <main> ca să stea flush.
+	const isContentRoute = $derived(/^\/client\/[^/]+\/content(\/|$)/.test(currentPath));
 	const isRestrictedRoute = $derived(
 		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
 	);

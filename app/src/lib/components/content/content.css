@@ -137,6 +137,9 @@
 .cl-select:focus { outline: 0; border-color: var(--cl-accent); }
 
 /* ============ KPI ============ */
+/* Rândul de KPI pe hub — spațiere explicită (nu mai reutilizează .cl-hero, care avea
+   align-items/gap moștenite și dădea un gap neregulat față de cardurile de website). */
+.ct-kpis-row { padding: 0 28px 16px; }
 .cl-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 .cl-kpi { background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
 .cl-kpi-ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; }

@@ -16,11 +16,10 @@
 			: 245
 	);
 
-	// Modulul Content e un layout „breakout" edge-to-edge cu breadcrumb propriu
-	// (Content › Website › Editor); ascunde topbar-ul shell ca să nu apară dublu.
-	const isContentRoute = $derived(
-		page.url.pathname.startsWith(`/${page.params.tenant}/content`)
-	);
+	// Modulul Content e un layout edge-to-edge cu breadcrumb propriu (Content › Website ›
+	// Editor); ascunde topbar-ul shell + scoate p-6 din <main> ca să stea flush.
+	// Regex (nu page.params.tenant, care poate fi momentan gol) → match robust /:tenant/content.
+	const isContentRoute = $derived(/^\/[^/]+\/content(\/|$)/.test(page.url.pathname));
 
 	// Update favicon dynamically per-tenant
 	$effect(() => {
