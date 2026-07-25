@@ -1,5 +1,7 @@
-import { getClaudeClientFor } from '$lib/server/plugins/claude';
+import { getClaudeClient, getClaudeClientFor, type ClaudeClient } from '$lib/server/plugins/claude';
+import { logWarning } from '$lib/server/logger';
 import { renderMarkdown } from '$lib/utils/markdown';
+import { createMessageWithRetry, type RetryOptions } from './claude-retry';
 import {
 	buildHumanizeSystemPrompt,
 	buildSystemPrompt,
@@ -13,40 +15,26 @@ import {
 export type { ContentProfileLike, SeoMeta } from './article-prompt';
 export { buildSystemPrompt, parseGeneration, parseSeoMeta, slugify } from './article-prompt';
 
-interface ClaudeLike {
-	defaultModel: string;
-	createMessage(body: Record<string, unknown>): Promise<Response>;
-}
-
 /**
- * createMessage cu retry pe 429 (rate limit) / 529 (overloaded). Respectă `retry-after`
- * dacă e prezent, altfel backoff exponențial. Aruncă un mesaj RO clar la eșec final.
+ * Failover: dacă cheia rutată dă 429/529 și după reîncercări, comută pe CEALALTĂ cheie
+ * stocată (abonament ↔ API). getClaudeClient cu keyType explicit e strict — null dacă
+ * tenantul nu are al doilea slot, caz în care rămâne doar mesajul de eroare.
  */
-async function createMessageWithRetry(
-	client: ClaudeLike,
-	body: Record<string, unknown>,
-	retries = 3
-): Promise<Response> {
-	let attempt = 0;
-	// eslint-disable-next-line no-constant-condition
-	while (true) {
-		const res = await client.createMessage(body);
-		if (res.ok) return res;
-		const transient = res.status === 429 || res.status === 529;
-		if (!transient || attempt >= retries) {
-			const errBody = await res.text().catch(() => '');
-			if (transient) {
-				throw new Error(
-					`Claude a răspuns ${res.status} (limită de rată pe minut / supraîncărcare temporară — NU quota ta). Am reîncercat de ${retries} ori. Reîncearcă imediat; dacă persistă, rutează „Copywriting" pe cheia API în Settings → Claude (OAuth/Abonamentul are limite de burst mai stricte pt apeluri API).`
-				);
-			}
-			throw new Error(`Claude ${res.status}: ${errBody.slice(0, 300)}`);
-		}
-		const ra = Number(res.headers.get('retry-after'));
-		const waitMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 20_000) : 1500 * 2 ** attempt;
-		await new Promise((r) => setTimeout(r, waitMs));
-		attempt++;
-	}
+function altKeyRetryOpts(tenantId: string, client: ClaudeClient, timeoutMs: number): RetryOptions {
+	const altType = client.keyType === 'oat' ? 'api' : 'oat';
+	return {
+		fallback: () => getClaudeClient(tenantId, altType, timeoutMs),
+		onFallback: (from, to) =>
+			logWarning('plugin', 'Claude rate-limited pe cheia rutată — failover pe cheia de rezervă', {
+				tenantId,
+				metadata: { from, to }
+			}),
+		onFallbackError: (err) =>
+			logWarning('plugin', 'Claude fallback indisponibil (eroare la citirea cheii de rezervă)', {
+				tenantId,
+				metadata: { error: err instanceof Error ? err.message : String(err) }
+			})
+	};
 }
 
 export interface GenerateOpts {
@@ -95,12 +83,16 @@ export async function generateArticle(
 		userMsg = `Iată articolul curent. Aplică DOAR modificarea cerută mai jos și PĂSTREAZĂ neschimbat tot restul (structură, titluri, paragrafe nevizate).\n\n=== ARTICOL CURENT ===\n${opts.currentText ?? ''}\n\n=== MODIFICARE DE APLICAT ===\n${opts.instruction ?? ''}`;
 	}
 
-	const res = await createMessageWithRetry(client, {
-		model: client.defaultModel,
-		max_tokens: 6000,
-		system,
-		messages: [{ role: 'user', content: userMsg }]
-	});
+	const res = await createMessageWithRetry(
+		client,
+		{
+			model: client.defaultModel,
+			max_tokens: 6000,
+			system,
+			messages: [{ role: 'user', content: userMsg }]
+		},
+		altKeyRetryOpts(tenantId, client, 120_000)
+	);
 	const json = (await res.json()) as { content?: Array<{ text?: string }> };
 	const text = json.content?.[0]?.text ?? '';
 	const parsed = parseGeneration(text);
@@ -130,17 +122,21 @@ export async function generateSeoMeta(
 	if (!client)
 		throw new Error('Pluginul Claude nu e configurat (adaugă o cheie în Settings → Claude).');
 
-	const res = await createMessageWithRetry(client, {
-		model: client.defaultModel,
-		max_tokens: 700,
-		system: buildSeoSystemPrompt(opts.profile),
-		messages: [
-			{
-				role: 'user',
-				content: `Titlu: ${opts.title}\n\nConținut:\n${opts.text.slice(0, 6000)}`
-			}
-		]
-	});
+	const res = await createMessageWithRetry(
+		client,
+		{
+			model: client.defaultModel,
+			max_tokens: 700,
+			system: buildSeoSystemPrompt(opts.profile),
+			messages: [
+				{
+					role: 'user',
+					content: `Titlu: ${opts.title}\n\nConținut:\n${opts.text.slice(0, 6000)}`
+				}
+			]
+		},
+		altKeyRetryOpts(tenantId, client, 60_000)
+	);
 	const json = (await res.json()) as { content?: Array<{ text?: string }> };
 	return parseSeoMeta(json.content?.[0]?.text ?? '');
 }

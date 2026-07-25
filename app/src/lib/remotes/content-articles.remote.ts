@@ -13,7 +13,12 @@ import { eq, and, desc, inArray, sql, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
-import { generateArticle, generateSeoMeta } from '$lib/server/content/article-generator';
+import {
+	generateArticle,
+	generateSeoMeta,
+	type GenerateResult,
+	type SeoMeta
+} from '$lib/server/content/article-generator';
 import {
 	publishArticleToWordpress,
 	refreshWebsiteWpCategories as refreshWpCategoriesForWebsite
@@ -381,7 +386,14 @@ export const generateArticleFromBrief = command(
 		if (!ws[0]) svelteError(404, 'Website negăsit');
 
 		const profile = await loadContentProfile(tenantId, websiteId);
-		const gen = await generateArticle(tenantId, { profile, direction: null, mode: 'brief', brief });
+		// Erorile generatorului sunt mesaje RO acționabile — fără svelteError, SvelteKit
+		// maschează Error-ul ca 500 generic („Failed to execute remote function").
+		let gen: GenerateResult;
+		try {
+			gen = await generateArticle(tenantId, { profile, direction: null, mode: 'brief', brief });
+		} catch (e) {
+			svelteError(500, e instanceof Error ? e.message : 'Generare eșuată');
+		}
 
 		const id = genId();
 		const now = new Date();
@@ -548,11 +560,18 @@ export const generateArticleSeo = command(v.string(), async (articleId) => {
 	if (!text) svelteError(400, 'Nu există conținut pentru SEO — generează întâi articolul.');
 
 	const profile = a.websiteId ? await loadContentProfile(tenantId, a.websiteId) : null;
-	const seo = await generateSeoMeta(tenantId, {
-		profile,
-		title: a.generatedTitle || a.title || '',
-		text
-	});
+	// Erorile generatorului sunt mesaje RO acționabile — fără svelteError, SvelteKit
+	// maschează Error-ul ca 500 generic („Failed to execute remote function").
+	let seo: SeoMeta;
+	try {
+		seo = await generateSeoMeta(tenantId, {
+			profile,
+			title: a.generatedTitle || a.title || '',
+			text
+		});
+	} catch (e) {
+		svelteError(500, e instanceof Error ? e.message : 'Generare SEO eșuată');
+	}
 	await db
 		.update(table.contentArticle)
 		.set({
