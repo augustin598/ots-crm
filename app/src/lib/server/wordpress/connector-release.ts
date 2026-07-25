@@ -11,7 +11,7 @@ import { logError, logInfo, serializeError } from '$lib/server/logger';
  *
  *   ots-connector/releases/v0.6.4/ots-wp-connector.zip
  *   ots-connector/releases/v0.6.4/metadata.json
- *   ots-connector/latest.json              ← rolling pointer to newest version
+ *   ots-connector/latest-v2.json           ← rolling pointer to newest version
  *
  * The `latest.json` pointer is a separate object so the "current latest"
  * can be rolled forward atomically (a single PUT) without touching the
@@ -24,7 +24,11 @@ import { logError, logInfo, serializeError } from '$lib/server/logger';
  */
 
 const CONNECTOR_PREFIX = 'ots-connector/releases';
-const LATEST_POINTER = 'ots-connector/latest.json';
+// NU reveni la 'ots-connector/latest.json': S3Wrapper-ul navitech servește pe
+// GET o copie veche a acelei chei care supraviețuiește la PUT și DELETE
+// (HEAD vede obiectul nou, GET întoarce conținutul vechi). Cheia a fost
+// mutată pe 2026-07-24 ca să ocolim copia blocată.
+const LATEST_POINTER = 'ots-connector/latest-v2.json';
 
 export interface ConnectorReleaseMetadata {
 	/** Semantic version, without the "v" prefix. */

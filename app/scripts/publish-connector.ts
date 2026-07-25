@@ -27,7 +27,9 @@ import { Client as MinioClient } from 'minio';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const CONNECTOR_PREFIX = 'ots-connector/releases';
-const LATEST_POINTER = 'ots-connector/latest.json';
+// Aceeași cheie ca în src/lib/server/wordpress/connector-release.ts — NU
+// reveni la 'latest.json' (S3Wrapper navitech servește o copie veche pe GET).
+const LATEST_POINTER = 'ots-connector/latest-v2.json';
 
 interface ConnectorReleaseMetadata {
 	version: string;
