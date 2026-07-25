@@ -48,8 +48,9 @@
 	import AssignClientModal from './AssignClientModal.svelte';
 
 	// isClient = view-ul rulează în portalul clientului: serverul scopează datele
-	// pe clientul din sesiune, iar UI-ul devine read-only (fără creare/editare,
-	// fără filtrul/coloana Client, fără asociere în masă).
+	// pe clientul din sesiune (citire ȘI scriere). Clientul își gestionează
+	// propriile interviuri, dar nu vede filtrul/coloana Client, nu asociază în
+	// masă și nu creează canale (canalele sunt partajate pe tenant).
 	let {
 		homeHref,
 		embedded = false,
@@ -399,11 +400,9 @@
 			<button class="cl-btn-secondary" onclick={exportCsv}>
 				<DownloadIcon size={13} /> Export
 			</button>
-			{#if !isClient}
-				<button class="cl-btn-primary" onclick={() => (showModal = true)}>
-					<PlusIcon size={13} /> Interviu nou
-				</button>
-			{/if}
+			<button class="cl-btn-primary" onclick={() => (showModal = true)}>
+				<PlusIcon size={13} /> Interviu nou
+			</button>
 		</div>
 	</div>
 
@@ -615,14 +614,12 @@
 						{@render th('start', 'Început')}
 						<th>Sfârșit</th>
 						<th>Observații</th>
-						{#if !isClient}
-							<th style="width:44px"></th>
-						{/if}
+						<th style="width:44px"></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each tableRows as r (r.id)}
-						<tr onclick={() => { if (!isClient) editRec = r; }}>
+						<tr onclick={() => (editRec = r)}>
 							<td>
 								<div class="iv-name">{r.nume}</div>
 								{#if r.sursa}<div class="iv-src" title={r.sursa}>{r.sursa}</div>{/if}
@@ -645,13 +642,11 @@
 							<td class="iv-obs">
 								{#if r.observatii}{r.observatii}{:else}<span class="iv-muted">—</span>{/if}
 							</td>
-							{#if !isClient}
-								<td onclick={(e) => e.stopPropagation()}>
-									<button class="cl-icon-btn" title="Editează" onclick={() => (editRec = r)}>
-										<PencilIcon size={14} />
-									</button>
-								</td>
-							{/if}
+							<td onclick={(e) => e.stopPropagation()}>
+								<button class="cl-icon-btn" title="Editează" onclick={() => (editRec = r)}>
+									<PencilIcon size={14} />
+								</button>
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -676,6 +671,7 @@
 		<InterviewModal
 			{channels}
 			{clients}
+			allowChannelCreate={!isClient}
 			onClose={() => (showModal = false)}
 			onSave={saveNew}
 			onDelete={del}
@@ -687,6 +683,7 @@
 			record={editRec}
 			{channels}
 			{clients}
+			allowChannelCreate={!isClient}
 			onClose={() => (editRec = null)}
 			onSave={saveEdit}
 			onDelete={del}

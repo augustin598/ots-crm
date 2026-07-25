@@ -40,7 +40,24 @@ mock.module('$lib/server/get-actor', () => ({
 
 const selectQueue: Array<unknown[]> = [];
 const insertedValues: unknown[] = [];
-const updateCalls: Array<{ set: unknown }> = [];
+const updateCalls: Array<{ set: unknown; where: unknown }> = [];
+const deleteCalls: Array<{ where: unknown }> = [];
+// Rândurile pe care le „prinde" WHERE-ul; [] = niciunul (rând al altui client).
+let updateReturns: unknown[] = [{ id: 'i1' }, { id: 'i2' }];
+let deleteReturns: unknown[] = [{ id: 'i1' }];
+
+/**
+ * Extrage valorile parametrilor dintr-un obiect SQL drizzle, ca să putem
+ * verifica CE filtrează clauza WHERE (ex: client_id-ul din sesiune).
+ */
+function paramValues(node: unknown, out: unknown[] = []): unknown[] {
+	if (!node || typeof node !== 'object') return out;
+	const n = node as Record<string, unknown>;
+	if (Array.isArray(n.queryChunks)) n.queryChunks.forEach((c) => paramValues(c, out));
+	// Param.value = valoarea legată; StringChunk.value = string[] (SQL brut) → ignorat.
+	else if ('value' in n && !Array.isArray(n.value)) out.push(n.value);
+	return out;
+}
 
 function makeChain(rows: unknown[]): any {
 	const p = Promise.resolve(rows);
@@ -66,17 +83,23 @@ mock.module('$lib/server/db', () => ({
 			}
 		}),
 		update: () => ({
-			set: (patch: unknown) => {
-				updateCalls.push({ set: patch });
-				return {
-					where: () =>
-						Object.assign(Promise.resolve([]), {
-							returning: () => Promise.resolve([{ id: 'i1' }, { id: 'i2' }])
-						})
-				};
-			}
+			set: (patch: unknown) => ({
+				where: (w: unknown) => {
+					updateCalls.push({ set: patch, where: w });
+					return Object.assign(Promise.resolve([]), {
+						returning: () => Promise.resolve(updateReturns)
+					});
+				}
+			})
 		}),
-		delete: () => ({ where: () => Promise.resolve() })
+		delete: () => ({
+			where: (w: unknown) => {
+				deleteCalls.push({ where: w });
+				return Object.assign(Promise.resolve([]), {
+					returning: () => Promise.resolve(deleteReturns)
+				});
+			}
+		})
 	}
 }));
 
@@ -86,7 +109,8 @@ const {
 	getInterviews,
 	getInterviewChannels,
 	updateInterview,
-	deleteInterview
+	deleteInterview,
+	createInterviewChannel
 } = await import('../interviuri.remote');
 
 const CHANNELS = [
@@ -97,6 +121,9 @@ beforeEach(() => {
 	selectQueue.length = 0;
 	insertedValues.length = 0;
 	updateCalls.length = 0;
+	deleteCalls.length = 0;
+	updateReturns = [{ id: 'i1' }, { id: 'i2' }];
+	deleteReturns = [{ id: 'i1' }];
 	currentEvent = { locals: { user: { id: 'u1' }, tenant: { id: 't1' } } };
 });
 
@@ -176,25 +203,73 @@ describe('acces portal client (isClientUser)', () => {
 		expect(Array.isArray(channels)).toBe(true);
 	});
 
-	test('createInterview e respins pentru userul de portal', async () => {
+	// Portalul are CRUD pe PROPRIILE interviuri. Delimitarea între clienți NU se
+	// face în UI: create forțează client_id-ul din sesiune, iar update/delete
+	// primesc client_id în WHERE, deci nu pot atinge rândurile altui client.
+	test('createInterview din portal ignoră clientId-ul din payload', async () => {
 		currentEvent = clientEvent();
-		await expect(
-			createInterview({ nume: 'X', dataInterviu: '2026-07-01', channelId: 'ch1' } as any)
-		).rejects.toThrow(/unauthorized/i);
-		expect(insertedValues.length).toBe(0);
+		selectQueue.push([{ id: 'ch1' }]); // ensureChannelsSeeded
+		selectQueue.push(CHANNELS); // channelsForTenant
+		await createInterview({
+			nume: 'X',
+			dataInterviu: '2026-07-01',
+			clientId: 'alt-client', // încearcă să agațe interviul de alt client
+			channelId: 'ch1'
+		} as any);
+		expect(insertedValues.length).toBe(1);
+		expect((insertedValues[0] as any).clientId).toBe('lucky1'); // clientul din sesiune
 	});
 
-	test('updateInterview e respins pentru userul de portal', async () => {
+	test('updateInterview din portal filtrează WHERE pe clientul din sesiune', async () => {
 		currentEvent = clientEvent();
-		await expect(
-			updateInterview({ id: 'i1', nume: 'X', dataInterviu: '2026-07-01', channelId: 'ch1' } as any)
-		).rejects.toThrow(/unauthorized/i);
-		expect(updateCalls.length).toBe(0);
+		selectQueue.push([{ id: 'ch1' }]);
+		selectQueue.push(CHANNELS);
+		await updateInterview({
+			id: 'i1',
+			nume: 'X',
+			dataInterviu: '2026-07-01',
+			clientId: 'alt-client',
+			channelId: 'ch1'
+		} as any);
+		expect(updateCalls.length).toBe(1);
+		expect((updateCalls[0].set as any).clientId).toBe('lucky1'); // nu poate fi mutat
+		expect(paramValues(updateCalls[0].where)).toContain('lucky1'); // WHERE ... client_id = 'lucky1'
 	});
 
-	test('deleteInterview e respins pentru userul de portal', async () => {
+	test('updateInterview pe rândul altui client aruncă (0 rânduri atinse)', async () => {
 		currentEvent = clientEvent();
-		await expect(deleteInterview('i1')).rejects.toThrow(/unauthorized/i);
+		selectQueue.push([{ id: 'ch1' }]);
+		selectQueue.push(CHANNELS);
+		updateReturns = []; // WHERE-ul cu client_id nu prinde rândul
+		await expect(
+			updateInterview({ id: 'i-altul', nume: 'X', dataInterviu: '2026-07-01', channelId: 'ch1' } as any)
+		).rejects.toThrow(/nu a fost găsit/i);
+	});
+
+	test('deleteInterview din portal filtrează WHERE pe clientul din sesiune', async () => {
+		currentEvent = clientEvent();
+		await deleteInterview('i1');
+		expect(deleteCalls.length).toBe(1);
+		expect(paramValues(deleteCalls[0].where)).toContain('lucky1');
+	});
+
+	test('deleteInterview pe rândul altui client aruncă (0 rânduri atinse)', async () => {
+		currentEvent = clientEvent();
+		deleteReturns = [];
+		await expect(deleteInterview('i-altul')).rejects.toThrow(/nu a fost găsit/i);
+	});
+
+	test('staff nu primește filtru pe client în WHERE (vede tot tenantul)', async () => {
+		currentEvent = { locals: { user: { id: 'u1' }, tenant: { id: 't1' } } };
+		await deleteInterview('i1');
+		expect(paramValues(deleteCalls[0].where)).toEqual(['i1', 't1']);
+	});
+
+	test('createInterviewChannel e respins pentru userul de portal', async () => {
+		currentEvent = clientEvent();
+		await expect(createInterviewChannel({ name: 'Canal Portal' } as any)).rejects.toThrow(
+			/unauthorized/i
+		);
 	});
 
 	test('assignInterviewsClient e respins pentru userul de portal', async () => {

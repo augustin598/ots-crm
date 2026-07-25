@@ -26,6 +26,7 @@
 		record = null,
 		channels,
 		clients = [],
+		allowChannelCreate = true,
 		onClose,
 		onSave,
 		onDelete,
@@ -34,6 +35,8 @@
 		record?: IvRow | null;
 		channels: ChannelMeta[];
 		clients?: { id: string; name: string }[];
+		/** Canalele sunt partajate pe tenant → doar staff le poate crea. */
+		allowChannelCreate?: boolean;
 		onClose: () => void;
 		onSave: (p: SavePayload) => Promise<void>;
 		onDelete: (id: string) => Promise<void>;
@@ -207,7 +210,7 @@
 							{c.name}
 						</button>
 					{/each}
-					{#if !addingCh}
+					{#if allowChannelCreate && !addingCh}
 						<button type="button" class="iv-ch-opt iv-ch-add" onclick={() => (addingCh = true)}>
 							<PlusIcon size={13} /> Canal nou
 						</button>

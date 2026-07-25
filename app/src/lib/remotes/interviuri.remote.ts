@@ -32,6 +32,22 @@ function requireCtx() {
 	return event;
 }
 
+/**
+ * Context de scriere. În portalul clientului, clientScopeId e clientul din
+ * sesiune: interviurile create primesc FORȚAT acel client_id, iar update/delete
+ * ating doar rândurile care îi aparțin deja. Un clientId venit din UI e ignorat
+ * — delimitarea între clienți nu depinde niciodată de payload.
+ */
+async function requireWriteCtx() {
+	const event = requireCtx();
+	const tenantId = event.locals.tenant!.id;
+	if (event.locals.isClientUser && event.locals.client) {
+		return { event, tenantId, clientScopeId: event.locals.client.id as string };
+	}
+	await requireStaff(event);
+	return { event, tenantId, clientScopeId: null as string | null };
+}
+
 /** Seed-uiește canalele-sistem pentru tenant la prima folosire (idempotent). */
 async function ensureChannelsSeeded(tenantId: string) {
 	const existing = await db
@@ -189,12 +205,10 @@ function validateDates(dataInterviu: string, dataInceput?: string) {
 }
 
 export const createInterview = command(interviewSchema, async (data) => {
-	const event = requireCtx();
-	await requireStaff(event);
-	const tenantId = event.locals.tenant!.id;
+	const { tenantId, clientScopeId } = await requireWriteCtx();
 
 	validateDates(data.dataInterviu, data.dataInceput);
-	const clientId = await resolveClientId(tenantId, data.clientId);
+	const clientId = clientScopeId ?? (await resolveClientId(tenantId, data.clientId));
 	const channelId = await resolveChannelId(tenantId, data.channelId, data.sursa);
 
 	const id = generateId();
@@ -221,15 +235,19 @@ export const createInterview = command(interviewSchema, async (data) => {
 const updateSchema = v.object({ ...interviewSchema.entries, id: v.pipe(v.string(), v.minLength(1)) });
 
 export const updateInterview = command(updateSchema, async (data) => {
-	const event = requireCtx();
-	await requireStaff(event);
-	const tenantId = event.locals.tenant!.id;
+	const { tenantId, clientScopeId } = await requireWriteCtx();
 
 	validateDates(data.dataInterviu, data.dataInceput);
-	const clientId = await resolveClientId(tenantId, data.clientId);
+	const clientId = clientScopeId ?? (await resolveClientId(tenantId, data.clientId));
 	const channelId = await resolveChannelId(tenantId, data.channelId, data.sursa);
 
-	await db
+	// Portalul poate atinge doar rândurile propriului client.
+	let where = and(eq(table.interview.id, data.id), eq(table.interview.tenantId, tenantId));
+	if (clientScopeId) {
+		where = and(where, eq(table.interview.clientId, clientScopeId));
+	}
+
+	const updated = await db
 		.update(table.interview)
 		.set({
 			clientId,
@@ -244,7 +262,9 @@ export const updateInterview = command(updateSchema, async (data) => {
 			observatii: data.observatii?.trim() || null,
 			updatedAt: new Date()
 		})
-		.where(and(eq(table.interview.id, data.id), eq(table.interview.tenantId, tenantId)));
+		.where(where)
+		.returning({ id: table.interview.id });
+	if (updated.length === 0) throw new Error('Interviul nu a fost găsit');
 	return { success: true };
 });
 
@@ -278,12 +298,15 @@ export const assignInterviewsClient = command(
 );
 
 export const deleteInterview = command(v.pipe(v.string(), v.minLength(1)), async (id) => {
-	const event = requireCtx();
-	await requireStaff(event);
-	const tenantId = event.locals.tenant!.id;
-	await db
-		.delete(table.interview)
-		.where(and(eq(table.interview.id, id), eq(table.interview.tenantId, tenantId)));
+	const { tenantId, clientScopeId } = await requireWriteCtx();
+
+	let where = and(eq(table.interview.id, id), eq(table.interview.tenantId, tenantId));
+	if (clientScopeId) {
+		where = and(where, eq(table.interview.clientId, clientScopeId));
+	}
+
+	const deleted = await db.delete(table.interview).where(where).returning({ id: table.interview.id });
+	if (deleted.length === 0) throw new Error('Interviul nu a fost găsit');
 	return { success: true };
 });
 
