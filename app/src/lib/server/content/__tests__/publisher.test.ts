@@ -31,10 +31,12 @@ mock.module('$lib/server/db/schema', () => ({ contentArticle: { id: {}, tenantId
 // NU mock-uim drizzle-orm (convenție repo: operatorii reali sunt puri, iar db mock ignoră .where).
 mock.module('$lib/server/plugins/smartbill/crypto', () => ({ decrypt: () => 'secret', DecryptionError: class extends Error {} }));
 mock.module('$lib/server/wordpress/media', () => ({ extractAndUploadInlineImages: async (_c: unknown, html: string) => ({ html, attachmentIds: [], firstUrl: null }) }));
+mock.module('$lib/server/content/content-media', () => ({ resolveFeaturedImage: async (url: string) => (url ? { dataBase64: 'AAA', mimeType: 'image/png', filename: 'f.png' } : null) }));
 mock.module('$lib/server/wordpress/sync', () => ({ syncPosts: async () => undefined }));
 mock.module('$lib/server/wordpress/client', () => ({
 	WpClient: class {
 		constructor(_u: string, _s: string) {}
+		async uploadMedia() { return { id: 999, url: 'https://x.ro/wp/999.png' }; }
 		async createPost(payload: Record<string, unknown>) { created.push(payload); return { id: 777, link: 'https://x.ro/p', status: payload.status, title: payload.title, slug: payload.slug, contentHtml: '', excerpt: '', featuredMediaId: null, featuredMediaUrl: null, authorWpId: 1, publishedAt: null, createdAt: '', updatedAt: '' }; }
 	}
 }));
@@ -58,6 +60,24 @@ describe('publishArticleToWordpress', () => {
 		const patch = updates.at(-1)!;
 		expect(patch.wpPostId).toBe(777);
 		expect(patch.publishStatus).toBe('published');
+	});
+
+	test('featuredImageUrl setat → sideload pe WP, featured_media = id-ul uploadat', async () => {
+		created.length = 0; updates.length = 0;
+		const article = { id: 'a1', tenantId: 'tn', websiteId: 'w1', generatedHtml: '<p>x</p>', generatedTitle: 'T', slug: 's', targetWpSiteId: null, featuredImageUrl: '/content-media/tn/a.png' };
+		const site = { id: 'wp1', tenantId: 'tn', siteUrl: 'https://x.ro', secretKey: 'enc' };
+		const { publishArticleToWordpress } = await loadSUT([[article], [{ wpSiteId: 'wp1' }], [site]]);
+		await publishArticleToWordpress('tn', 'a1', { status: 'publish' });
+		expect(created[0].featuredMediaId).toBe(999);
+	});
+
+	test('fără featuredImageUrl → featured_media rămâne undefined (fallback inline gol)', async () => {
+		created.length = 0;
+		const article = { id: 'a1', tenantId: 'tn', websiteId: 'w1', generatedHtml: '<p>x</p>', targetWpSiteId: null };
+		const site = { id: 'wp1', tenantId: 'tn', siteUrl: 'https://x.ro', secretKey: 'enc' };
+		const { publishArticleToWordpress } = await loadSUT([[article], [{ wpSiteId: 'wp1' }], [site]]);
+		await publishArticleToWordpress('tn', 'a1', { status: 'publish' });
+		expect(created[0].featuredMediaId).toBeUndefined();
 	});
 
 	test('fără wpSiteId → aruncă (cere legare WP)', async () => {

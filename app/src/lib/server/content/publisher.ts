@@ -5,6 +5,7 @@ import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { WpClient, type WpPostCategory } from '$lib/server/wordpress/client';
 import { extractAndUploadInlineImages } from '$lib/server/wordpress/media';
 import { syncPosts } from '$lib/server/wordpress/sync';
+import { resolveFeaturedImage } from './content-media';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 
 export type PublishWpStatus = 'draft' | 'publish' | 'future';
@@ -147,6 +148,29 @@ export async function publishArticleToWordpress(
 			filenamePrefix: 'content'
 		});
 
+		// Featured image: prefer the one chosen in the editor (article.featuredImageUrl),
+		// sideloaded into the WP media library. Fall back to the first inline body image
+		// only when the chosen image is missing or fails to sideload.
+		let featuredMediaId: number | undefined = attachmentIds.length > 0 ? attachmentIds[0] : undefined;
+		if (article.featuredImageUrl) {
+			try {
+				const resolved = await resolveFeaturedImage(article.featuredImageUrl);
+				if (resolved) {
+					const media = await client.uploadMedia(
+						{ filename: resolved.filename, mimeType: resolved.mimeType, dataBase64: resolved.dataBase64 },
+						{ siteId: site.id }
+					);
+					featuredMediaId = media.id;
+				}
+			} catch (mediaErr) {
+				const { message } = serializeError(mediaErr);
+				logWarning('content', `[publish] sideload imagine featured a eșuat (${article.featuredImageUrl}): ${message} — folosesc fallback`, {
+					tenantId,
+					metadata: { articleId, siteId: site.id }
+				});
+			}
+		}
+
 		const created = await client.createPost(
 			{
 				title: article.generatedTitle || article.title || 'Fără titlu',
@@ -155,7 +179,7 @@ export async function publishArticleToWordpress(
 				slug: article.slug ?? undefined,
 				status: opts.status,
 				publishedAt: opts.status === 'future' ? opts.publishedAt?.toISOString() : undefined,
-				featuredMediaId: attachmentIds.length > 0 ? attachmentIds[0] : undefined
+				featuredMediaId
 			},
 			{ siteId: site.id }
 		);
