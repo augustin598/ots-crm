@@ -1,5 +1,6 @@
 #!/bin/bash
 export PATH="$HOME/.bun/bin:$PATH"
+cd "$(dirname "$0")" || exit 1
 echo "Killing dev server..."
 lsof -ti :5173 | xargs kill -9 2>/dev/null
 sleep 1
