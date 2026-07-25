@@ -125,6 +125,36 @@ export async function uploadBuffer(
 }
 
 /**
+ * Upload a content-article image to a PUBLIC-read prefix (`content-media/`).
+ * These images end up on public WordPress posts, so they are served without
+ * auth from /content-media/<key>; the uuid key makes them unguessable and the
+ * fixed prefix keeps the public route from ever reaching private tenant files.
+ */
+export async function uploadContentImage(
+	tenantId: string,
+	buffer: Buffer,
+	ext: string,
+	mimeType: string
+): Promise<{ key: string; size: number }> {
+	try {
+		await ensureBucket();
+
+		const client = getMinioClient();
+		const key = `content-media/${tenantId}/${crypto.randomUUID()}.${ext}`;
+
+		await client.putObject(getBucketName(), key, buffer, buffer.length, {
+			'Content-Type': mimeType
+		});
+
+		return { key, size: buffer.length };
+	} catch (error) {
+		const { message, stack } = serializeError(error);
+		logError('storage', `Failed to upload content image: ${message}`, { tenantId, stackTrace: stack });
+		throw error;
+	}
+}
+
+/**
  * Get file contents as a Buffer from MinIO
  */
 export async function getFileBuffer(filePath: string): Promise<Buffer> {
