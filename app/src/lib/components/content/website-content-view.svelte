@@ -18,7 +18,7 @@
 	} from '$lib/remotes/website-content-profile.remote';
 	import { buildMonthGrid } from '$lib/content/calendar';
 	import { toast } from 'svelte-sonner';
-	import FolderIcon from '@lucide/svelte/icons/folder';
+	import HomeIcon from '@lucide/svelte/icons/home';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
@@ -334,7 +334,7 @@
 <div class="cl-wrap cl-wrap--fullbleed">
 	<svelte:boundary>
 		<div class="cl-crumbs">
-			<a href={homeHref} aria-label="Acasă"><FolderIcon size={12} /></a>
+			<a href={homeHref} aria-label="Acasă"><HomeIcon size={15} /></a>
 			<span class="sep">›</span>
 			<a href={basePath}>Content</a>
 			<span class="sep">›</span>
@@ -847,7 +847,7 @@
 
 		{#snippet pending()}
 			<div class="cl-crumbs">
-				<a href={homeHref} aria-label="Acasă"><FolderIcon size={12} /></a>
+				<a href={homeHref} aria-label="Acasă"><HomeIcon size={15} /></a>
 				<span class="sep">›</span>
 				<a href={basePath}>Content</a>
 				<span class="sep">›</span>

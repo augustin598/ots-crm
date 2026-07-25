@@ -67,6 +67,32 @@
 .cl-crumbs .sep { color: var(--cl-text-3); }
 .cl-crumbs strong { color: var(--cl-text); font-weight: 600; }
 
+/* Pe content (topbar shell ascuns) breadcrumb-ul devine bară tip topbar: fundal alb,
+   bordură jos, sticky, home-icon-ul ca buton — la fel ca OtsTopbar de pe restul aplicației. */
+.cl-wrap--fullbleed .cl-crumbs {
+	padding: 0 22px;
+	min-height: 52px;
+	gap: 6px;
+	font-size: 13px;
+	background: var(--cl-surface);
+	border-bottom: 1px solid var(--cl-border);
+	position: sticky;
+	top: 0;
+	z-index: 20;
+}
+.cl-wrap--fullbleed .cl-crumbs a[aria-label='Acasă'] {
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
+	display: grid;
+	place-items: center;
+	color: var(--cl-text-2);
+}
+.cl-wrap--fullbleed .cl-crumbs a[aria-label='Acasă']:hover {
+	background: var(--cl-surface-2);
+	color: var(--cl-text);
+}
+
 /* ============ Hero ============ */
 .cl-hero { padding: 18px 28px 14px; display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; }
 .cl-hero h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -.02em; }

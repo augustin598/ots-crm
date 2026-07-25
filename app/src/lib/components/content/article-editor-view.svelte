@@ -26,9 +26,10 @@
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
+	import HomeIcon from '@lucide/svelte/icons/home';
 
-	// basePath = rădăcina modulului („/ots/content" în admin, „/client/ots/content" în portal).
-	let { basePath }: { basePath: string } = $props();
+	// basePath = rădăcina modulului; homeHref = link-ul „acasă" din breadcrumb (dashboard).
+	let { basePath, homeHref }: { basePath: string; homeHref: string } = $props();
 
 	// Route params (guaranteed by the [websiteId]/[articleId] segments).
 	const websiteId = $derived(page.params.websiteId!);
@@ -233,6 +234,8 @@
 <div class="cl-wrap cl-wrap--fullbleed">
 	<svelte:boundary>
 		<div class="cl-crumbs">
+			<a href={homeHref} aria-label="Acasă"><HomeIcon size={15} /></a>
+			<span class="sep">›</span>
 			<a href={basePath}>Content</a>
 			<span class="sep">›</span>
 			<a href={`${basePath}/${websiteId}`}>{websiteName}</a>

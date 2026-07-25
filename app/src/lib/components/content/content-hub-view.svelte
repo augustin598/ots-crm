@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { getContentWebsites } from '$lib/remotes/content-articles.remote';
 	import { getFaviconUrl } from '$lib/utils';
-	import FolderIcon from '@lucide/svelte/icons/folder';
+	import HomeIcon from '@lucide/svelte/icons/home';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
@@ -60,7 +60,7 @@
 
 <div class="cl-wrap cl-wrap--fullbleed">
 	<div class="cl-crumbs">
-		<a href={homeHref} aria-label="Acasă"><FolderIcon size={12} /></a>
+		<a href={homeHref} aria-label="Acasă"><HomeIcon size={15} /></a>
 		<span class="sep">›</span>
 		<strong>Content</strong>
 	</div>

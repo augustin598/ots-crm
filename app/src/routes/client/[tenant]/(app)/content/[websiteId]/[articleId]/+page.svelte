@@ -5,4 +5,7 @@
 	const tenant = $derived(page.params.tenant as string);
 </script>
 
-<ArticleEditorView basePath={`/client/${tenant}/content`} />
+<ArticleEditorView
+	basePath={`/client/${tenant}/content`}
+	homeHref={`/client/${tenant}/dashboard`}
+/>
