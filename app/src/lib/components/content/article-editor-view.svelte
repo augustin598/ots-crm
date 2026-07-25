@@ -17,6 +17,7 @@
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import { analyzeSeo } from '$lib/content/seo-analysis';
 	import { toast } from 'svelte-sonner';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import Loader2Icon from '@lucide/svelte/icons/loader-2';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -91,7 +92,7 @@
 			featuredImageUrl = url;
 			toast.success('Imagine încărcată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Upload eșuat');
+			toast.error(remoteErrorMessage(e, 'Upload eșuat'));
 		} finally {
 			uploadingImage = false;
 		}
@@ -119,7 +120,7 @@
 			slug = r.slug || slug;
 			toast.success('SEO generat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Generare SEO eșuată');
+			toast.error(remoteErrorMessage(e, 'Generare SEO eșuată'));
 		} finally {
 			seoGenerating = false;
 		}
@@ -177,7 +178,7 @@
 			);
 			toast.success('Generat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Generare eșuată');
+			toast.error(remoteErrorMessage(e, 'Generare eșuată'));
 		} finally {
 			generating = false;
 		}
@@ -194,7 +195,7 @@
 			);
 			toast.success('Umanizat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Umanizare eșuată');
+			toast.error(remoteErrorMessage(e, 'Umanizare eșuată'));
 		} finally {
 			humanizing = false;
 		}
@@ -212,7 +213,7 @@
 			toast.success('Modificat');
 			modifyInstruction = '';
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Modificare eșuată');
+			toast.error(remoteErrorMessage(e, 'Modificare eșuată'));
 		} finally {
 			modifying = false;
 		}
@@ -238,7 +239,7 @@
 			toast.success(approve ? 'Aprobat' : 'Salvat');
 			if (approve) await goto(`${basePath}/${websiteId}`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			toast.error(remoteErrorMessage(e, 'Eroare la salvare'));
 		} finally {
 			saving = false;
 		}
@@ -257,7 +258,7 @@
 			toast.success(mode === 'publish' ? 'Publicat pe WordPress' : 'Trimis ca ciornă în WordPress');
 			if (r?.link) window.open(r.link, '_blank', 'noopener');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Publicare eșuată');
+			toast.error(remoteErrorMessage(e, 'Publicare eșuată'));
 		} finally {
 			publishing = false;
 		}
@@ -270,7 +271,7 @@
 			toast.success('Articol programat');
 			scheduleOpen = false;
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Programare eșuată');
+			toast.error(remoteErrorMessage(e, 'Programare eșuată'));
 		}
 	}
 

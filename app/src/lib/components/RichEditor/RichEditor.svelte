@@ -125,11 +125,20 @@
 			extensions.push(CharacterCount);
 		}
 
+		function syncCounts(e: Editor) {
+			const storage = e.storage.characterCount;
+			wordCount = storage?.words?.() ?? 0;
+			charCount = storage?.characters?.() ?? 0;
+		}
+
 		editor = new Editor({
 			element: editorElement,
 			extensions,
 			content,
 			editable,
+			// Conținutul inițial NU emite onTransaction — fără onCreate contorul rămâne 0
+			// până la prima tastare.
+			onCreate: ({ editor: e }) => syncCounts(e),
 			editorProps: {
 				handlePaste: (view, event) => {
 					if (!onPasteImage) return false;
@@ -149,11 +158,7 @@
 			onTransaction: () => {
 				// Force Svelte reactivity
 				editorRevision++;
-				if (editor) {
-					const storage = editor.storage.characterCount;
-					wordCount = storage?.words?.() ?? 0;
-					charCount = storage?.characters?.() ?? 0;
-				}
+				if (editor) syncCounts(editor);
 			},
 			onUpdate: ({ editor: e }) => {
 				if (onUpdate) {

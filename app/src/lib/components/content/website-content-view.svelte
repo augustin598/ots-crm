@@ -18,6 +18,7 @@
 	} from '$lib/remotes/website-content-profile.remote';
 	import { buildMonthGrid } from '$lib/content/calendar';
 	import { toast } from 'svelte-sonner';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import HomeIcon from '@lucide/svelte/icons/home';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
@@ -64,7 +65,7 @@
 			);
 			toast.success(`Categorii actualizate: ${r.updated}/${r.total} articole`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Refresh categorii eșuat');
+			toast.error(remoteErrorMessage(e, 'Refresh categorii eșuat'));
 		} finally {
 			refreshingCats = false;
 		}
@@ -256,7 +257,7 @@
 			}).updates(getWebsiteContentProfile(websiteId));
 			toast.success('Politică salvată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
+			toast.error(remoteErrorMessage(e, 'Eroare'));
 		} finally {
 			savingPolicy = false;
 		}
@@ -268,7 +269,7 @@
 			);
 			toast.success('Legătură WordPress salvată');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare');
+			toast.error(remoteErrorMessage(e, 'Eroare'));
 		}
 	}
 
@@ -305,7 +306,7 @@
 			// Navighează la editorul articolului nou creat.
 			if (r?.id) await goto(`${basePath}/${websiteId}/${r.id}`);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Generare eșuată');
+			toast.error(remoteErrorMessage(e, 'Generare eșuată'));
 		} finally {
 			creatingBrief = false;
 		}
@@ -320,7 +321,7 @@
 			);
 			toast.success('Profil salvat');
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
+			toast.error(remoteErrorMessage(e, 'Eroare la salvare'));
 		} finally {
 			savingProfile = false;
 		}
