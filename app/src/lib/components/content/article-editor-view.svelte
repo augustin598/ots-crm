@@ -27,6 +27,9 @@
 	import SendIcon from '@lucide/svelte/icons/send';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import HomeIcon from '@lucide/svelte/icons/home';
+	import UploadIcon from '@lucide/svelte/icons/upload';
+	import ImagePlusIcon from '@lucide/svelte/icons/image-plus';
+	import XIcon from '@lucide/svelte/icons/x';
 
 	// basePath = rădăcina modulului; homeHref = link-ul „acasă" din breadcrumb (dashboard).
 	let { basePath, homeHref }: { basePath: string; homeHref: string } = $props();
@@ -58,6 +61,52 @@
 	let featuredImageUrl = $state('');
 	let loadedKey = $state<string | null>(null);
 	let seoGenerating = $state(false);
+
+	// ---- Upload imagine featured ----
+	let uploadingImage = $state(false);
+	let imageDragOver = $state(false);
+	const uploadImageUrl = $derived(`${basePath}/upload-image`);
+	const featInputId = 'ct-featured-file';
+
+	async function uploadFeaturedFile(file: File) {
+		if (uploadingImage) return;
+		if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+			toast.error('Tip neacceptat (JPG, PNG, WebP, GIF)');
+			return;
+		}
+		if (file.size > 8 * 1024 * 1024) {
+			toast.error('Imaginea depășește 8MB');
+			return;
+		}
+		uploadingImage = true;
+		try {
+			const fd = new FormData();
+			fd.append('file', file);
+			const res = await fetch(uploadImageUrl, { method: 'POST', body: fd });
+			if (!res.ok) {
+				const e = await res.json().catch(() => ({ message: 'Upload eșuat' }));
+				throw new Error(e.message || `HTTP ${res.status}`);
+			}
+			const { url } = await res.json();
+			featuredImageUrl = url;
+			toast.success('Imagine încărcată');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Upload eșuat');
+		} finally {
+			uploadingImage = false;
+		}
+	}
+
+	function onFeaturedInput(e: Event) {
+		const input = e.target as HTMLInputElement;
+		if (input.files?.[0]) uploadFeaturedFile(input.files[0]);
+		input.value = '';
+	}
+	function onFeaturedDrop(e: DragEvent) {
+		e.preventDefault();
+		imageDragOver = false;
+		if (e.dataTransfer?.files?.[0]) uploadFeaturedFile(e.dataTransfer.files[0]);
+	}
 
 	async function doGenerateSeo() {
 		if (seoGenerating) return;
@@ -376,17 +425,71 @@
 				<div class="ct-seo-card">
 					<h4>Imagine featured</h4>
 					{#if featuredImageUrl}
-						<img class="ct-fav-preview" src={featuredImageUrl} alt="" />
+						<div class="ct-fav-wrap">
+							<img class="ct-fav-preview" src={featuredImageUrl} alt="" />
+							<button
+								type="button"
+								class="ct-fav-clear"
+								title="Elimină imaginea"
+								aria-label="Elimină imaginea"
+								onclick={() => (featuredImageUrl = '')}
+							>
+								<XIcon size={14} />
+							</button>
+						</div>
 					{:else}
-						<div class="ct-fav-empty">Fără imagine</div>
+						<div
+							class="ct-fav-drop {imageDragOver ? 'over' : ''}"
+							role="button"
+							tabindex="0"
+							onclick={() => document.getElementById(featInputId)?.click()}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									document.getElementById(featInputId)?.click();
+								}
+							}}
+							ondragover={(e) => {
+								e.preventDefault();
+								imageDragOver = true;
+							}}
+							ondragleave={() => (imageDragOver = false)}
+							ondrop={onFeaturedDrop}
+						>
+							{#if uploadingImage}
+								<Loader2Icon size={18} class="ct-spin" />
+								<span>Se încarcă…</span>
+							{:else}
+								<ImagePlusIcon size={18} />
+								<span>Trage o imagine sau <b>click pentru upload</b></span>
+								<small>JPG, PNG, WebP, GIF — max 8MB</small>
+							{/if}
+						</div>
 					{/if}
 					<input
-						class="ct-seo-input"
-						style="width:100%"
-						bind:value={featuredImageUrl}
-						placeholder="URL imagine…"
-						aria-label="URL imagine featured"
+						id={featInputId}
+						type="file"
+						accept="image/jpeg,image/png,image/webp,image/gif"
+						class="ct-fav-file"
+						onchange={onFeaturedInput}
 					/>
+					<div class="ct-fav-orurl">
+						<button
+							type="button"
+							class="cl-btn-secondary cl-btn-sm"
+							onclick={() => document.getElementById(featInputId)?.click()}
+							disabled={uploadingImage}
+						>
+							<UploadIcon size={13} /> Încarcă
+						</button>
+						<input
+							class="ct-seo-input"
+							style="flex:1"
+							bind:value={featuredImageUrl}
+							placeholder="sau lipește URL…"
+							aria-label="URL imagine featured"
+						/>
+					</div>
 				</div>
 
 				<div class="ct-seo-card">
@@ -517,6 +620,7 @@
 	}
 	.cl-hero-actions :global(.ct-spin),
 	.ct-modify :global(.ct-spin),
+	.ct-seo :global(.ct-spin),
 	.ct-page-loading :global(.ct-spin) {
 		animation: ct-spin 0.8s linear infinite;
 	}

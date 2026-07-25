@@ -290,3 +290,18 @@
 .cl-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--cl-text-2); }
 .cl-lbl { display: block; font-size: 13px; color: var(--cl-text-2); margin-bottom: 6px; }
 .cl-schedule-row { display: flex; gap: 10px; align-items: center; margin: 0 28px 14px; }
+
+/* ===== editor = foaie albă pe canvas (surface theme-aware + umbră discretă) ===== */
+.ct-editor-main .rich-editor { background: var(--cl-surface); border-color: var(--cl-border); box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 6px 16px rgba(15,23,42,.06); }
+:global(.dark) .ct-editor-main .rich-editor { box-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 16px rgba(0,0,0,.4); }
+
+/* ===== upload imagine featured ===== */
+.ct-fav-wrap { position: relative; }
+.ct-fav-clear { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 6px; border: 0; background: rgba(15,23,42,.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.ct-fav-clear:hover { background: rgba(15,23,42,.82); }
+.ct-fav-drop { width: 100%; aspect-ratio: 16/9; border-radius: 8px; background: var(--cl-surface-2); border: 1px dashed var(--cl-border-strong); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--cl-text-3); font-size: 12px; text-align: center; cursor: pointer; margin-bottom: 8px; padding: 8px; transition: all .12s; }
+.ct-fav-drop:hover, .ct-fav-drop.over { border-color: var(--cl-accent); background: var(--cl-accent-50); color: var(--cl-text-2); }
+.ct-fav-drop b { color: var(--cl-accent); font-weight: 600; }
+.ct-fav-drop small { font-size: 10.5px; color: var(--cl-text-3); }
+.ct-fav-file { display: none; }
+.ct-fav-orurl { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
