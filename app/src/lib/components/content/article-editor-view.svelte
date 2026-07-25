@@ -424,48 +424,52 @@
 				{/if}
 				<div class="ct-seo-card">
 					<h4>Imagine featured</h4>
-					{#if featuredImageUrl}
-						<div class="ct-fav-wrap">
+					<div
+						class="ct-fav-drop {imageDragOver ? 'over' : ''} {featuredImageUrl ? 'has-image' : ''}"
+						role="button"
+						tabindex="0"
+						aria-label="Trage sau alege imaginea featured"
+						onclick={() => document.getElementById(featInputId)?.click()}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								document.getElementById(featInputId)?.click();
+							}
+						}}
+						ondragover={(e) => {
+							e.preventDefault();
+							imageDragOver = true;
+						}}
+						ondragleave={() => (imageDragOver = false)}
+						ondrop={onFeaturedDrop}
+					>
+						{#if uploadingImage}
+							<Loader2Icon size={20} class="ct-spin" />
+							<span>Se încarcă…</span>
+						{:else if featuredImageUrl}
 							<img class="ct-fav-preview" src={featuredImageUrl} alt="" />
+							<div class="ct-fav-overlay">
+								<UploadIcon size={16} />
+								<span>Trage sau click pentru a înlocui</span>
+							</div>
 							<button
 								type="button"
 								class="ct-fav-clear"
 								title="Elimină imaginea"
 								aria-label="Elimină imaginea"
-								onclick={() => (featuredImageUrl = '')}
+								onclick={(e) => {
+									e.stopPropagation();
+									featuredImageUrl = '';
+								}}
 							>
 								<XIcon size={14} />
 							</button>
-						</div>
-					{:else}
-						<div
-							class="ct-fav-drop {imageDragOver ? 'over' : ''}"
-							role="button"
-							tabindex="0"
-							onclick={() => document.getElementById(featInputId)?.click()}
-							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									document.getElementById(featInputId)?.click();
-								}
-							}}
-							ondragover={(e) => {
-								e.preventDefault();
-								imageDragOver = true;
-							}}
-							ondragleave={() => (imageDragOver = false)}
-							ondrop={onFeaturedDrop}
-						>
-							{#if uploadingImage}
-								<Loader2Icon size={18} class="ct-spin" />
-								<span>Se încarcă…</span>
-							{:else}
-								<ImagePlusIcon size={18} />
-								<span>Trage o imagine sau <b>click pentru upload</b></span>
-								<small>JPG, PNG, WebP, GIF — max 8MB</small>
-							{/if}
-						</div>
-					{/if}
+						{:else}
+							<ImagePlusIcon size={22} />
+							<span>Trage o imagine aici<br />sau <b>click pentru a alege</b></span>
+							<small>JPG, PNG, WebP, GIF — max 8MB</small>
+						{/if}
+					</div>
 					<input
 						id={featInputId}
 						type="file"
@@ -473,23 +477,12 @@
 						class="ct-fav-file"
 						onchange={onFeaturedInput}
 					/>
-					<div class="ct-fav-orurl">
-						<button
-							type="button"
-							class="cl-btn-secondary cl-btn-sm"
-							onclick={() => document.getElementById(featInputId)?.click()}
-							disabled={uploadingImage}
-						>
-							<UploadIcon size={13} /> Încarcă
-						</button>
-						<input
-							class="ct-seo-input"
-							style="flex:1"
-							bind:value={featuredImageUrl}
-							placeholder="sau lipește URL…"
-							aria-label="URL imagine featured"
-						/>
-					</div>
+					<input
+						class="ct-seo-input ct-fav-url"
+						bind:value={featuredImageUrl}
+						placeholder="sau lipește un URL…"
+						aria-label="URL imagine featured"
+					/>
 				</div>
 
 				<div class="ct-seo-card">

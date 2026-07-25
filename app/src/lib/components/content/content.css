@@ -295,13 +295,17 @@
 .ct-editor-main .rich-editor { background: var(--cl-surface); border-color: var(--cl-border); box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 6px 16px rgba(15,23,42,.06); }
 :global(.dark) .ct-editor-main .rich-editor { box-shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 16px rgba(0,0,0,.4); }
 
-/* ===== upload imagine featured ===== */
-.ct-fav-wrap { position: relative; }
-.ct-fav-clear { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 6px; border: 0; background: rgba(15,23,42,.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
-.ct-fav-clear:hover { background: rgba(15,23,42,.82); }
-.ct-fav-drop { width: 100%; aspect-ratio: 16/9; border-radius: 8px; background: var(--cl-surface-2); border: 1px dashed var(--cl-border-strong); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--cl-text-3); font-size: 12px; text-align: center; cursor: pointer; margin-bottom: 8px; padding: 8px; transition: all .12s; }
+/* ===== upload imagine featured — zonă unică drag & drop (goală SAU cu imagine) ===== */
+.ct-fav-drop { position: relative; overflow: hidden; width: 100%; aspect-ratio: 16/9; border-radius: 8px; background: var(--cl-surface-2); border: 1px dashed var(--cl-border-strong); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--cl-text-3); font-size: 12px; line-height: 1.35; text-align: center; cursor: pointer; margin-bottom: 8px; padding: 8px; transition: all .12s; }
 .ct-fav-drop:hover, .ct-fav-drop.over { border-color: var(--cl-accent); background: var(--cl-accent-50); color: var(--cl-text-2); }
+.ct-fav-drop.over { box-shadow: 0 0 0 3px var(--cl-accent-50) inset; }
 .ct-fav-drop b { color: var(--cl-accent); font-weight: 600; }
 .ct-fav-drop small { font-size: 10.5px; color: var(--cl-text-3); }
+.ct-fav-drop.has-image { padding: 0; border-style: solid; border-color: var(--cl-border); }
+.ct-fav-drop.has-image .ct-fav-preview { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 0; object-fit: cover; }
+.ct-fav-overlay { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; background: rgba(15,23,42,.55); color: #fff; font-size: 11.5px; font-weight: 600; opacity: 0; transition: opacity .12s; }
+.ct-fav-drop.has-image:hover .ct-fav-overlay, .ct-fav-drop.has-image.over .ct-fav-overlay { opacity: 1; }
+.ct-fav-clear { position: absolute; top: 6px; right: 6px; z-index: 2; width: 24px; height: 24px; border-radius: 6px; border: 0; background: rgba(15,23,42,.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.ct-fav-clear:hover { background: rgba(15,23,42,.85); }
 .ct-fav-file { display: none; }
-.ct-fav-orurl { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.ct-fav-url { width: 100%; }
