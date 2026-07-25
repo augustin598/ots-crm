@@ -137,12 +137,20 @@ describe('createMessageWithRetry', () => {
 		expect(fallbackNotified).toEqual(['oat->api']);
 	});
 
-	it('epuizare fără fallback stocat → mesaj RO cu sugestia cheii API', async () => {
+	it('epuizare pe oat fără fallback → explică blocarea Anthropic + sugestia cheii API', async () => {
 		const { sleep } = sleepSpy();
 		const client = fakeClient('oat', [rate(429), rate(429)]);
 		await expect(
 			createMessageWithRetry(client, {}, { retries: 1, sleep, fallback: async () => null })
-		).rejects.toThrow(/429[\s\S]*cheie API/);
+		).rejects.toThrow(/429[\s\S]*Anthropic nu mai acceptă[\s\S]*cheie API/);
+	});
+
+	it('epuizare pe cheia API fără fallback → mesaj de rate limit clasic', async () => {
+		const { sleep } = sleepSpy();
+		const client = fakeClient('api', [rate(429), rate(429)]);
+		await expect(
+			createMessageWithRetry(client, {}, { retries: 1, sleep, fallback: async () => null })
+		).rejects.toThrow(/rate-limited[\s\S]*NU quota ta/);
 	});
 
 	it('epuizare și pe fallback → mesaj RO menționează cheia de rezervă', async () => {
@@ -161,7 +169,7 @@ describe('createMessageWithRetry', () => {
 		const alt = fakeClient('api', [new Response('credit balance too low', { status: 400 })]);
 		await expect(
 			createMessageWithRetry(primary, {}, { retries: 0, sleep, fallback: async () => alt })
-		).rejects.toThrow(/Abonament.*rate-limited[\s\S]*rezervă.*API[\s\S]*Claude 400/);
+		).rejects.toThrow(/Abonament[\s\S]*Anthropic nu mai acceptă[\s\S]*rezervă \(API\)[\s\S]*Claude 400/);
 	});
 
 	it('bugetul total de așteptare oprește retry-urile (nu blocăm requestul minute în șir)', async () => {
@@ -192,7 +200,7 @@ describe('createMessageWithRetry', () => {
 		expect(alt.calls).toBe(1);
 	});
 
-	it('factory-ul de fallback care aruncă (ex. DecryptionError) NU maschează mesajul de rate limit', async () => {
+	it('factory-ul de fallback care aruncă (ex. DecryptionError) NU maschează mesajul cheii primare', async () => {
 		const { sleep } = sleepSpy();
 		const primary = fakeClient('oat', [rate(429)]);
 		const seen: unknown[] = [];
@@ -205,7 +213,7 @@ describe('createMessageWithRetry', () => {
 				},
 				onFallbackError: (e) => void seen.push(e)
 			})
-		).rejects.toThrow(/limită de rată/);
+		).rejects.toThrow(/Anthropic nu mai acceptă/);
 		expect(seen.length).toBe(1);
 	});
 

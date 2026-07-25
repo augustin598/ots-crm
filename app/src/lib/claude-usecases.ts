@@ -28,64 +28,69 @@ export interface ClaudeUseCase {
 /**
  * Catalogul inițial (extensibil — adaugă rânduri fără migrare; harta de rute e
  * normalizată la citire, deci id-uri noi capătă default automat, iar cele scoase
- * sunt ignorate). Ordinea = ordinea de afișare. Toate default pe Abonament (oat);
- * comuți pe API din switch, per rând.
+ * sunt ignorate). Ordinea = ordinea de afișare.
+ *
+ * Toate default pe cheia API: din ~feb 2026 Anthropic NU mai acceptă tokenurile
+ * de abonament (sk-ant-oat01) pe Messages API — răspund 429 indiferent de trafic
+ * (verificat 2026-07-25 cu _debug-claude-key-health; vezi și
+ * github.com/anthropics/claude-code/issues/28091). Switch-ul pe Abonament rămâne
+ * în UI pentru ziua în care Anthropic reactivează suportul.
  */
 export const CLAUDE_USE_CASES = [
 	{
 		id: 'copywriting',
 		label: 'Copywriting / conținut',
 		hint: 'Rescriere advertoriale Heylux, texte marketing, descrieri',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-sonnet-5'
 	},
 	{
 		id: 'ads-analysis',
 		label: 'Analiză campanii Ads',
 		hint: 'Interpretare performanță Meta/Google/TikTok, anomalii, wasted spend',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-opus-4-8'
 	},
 	{
 		id: 'ads-monitoring',
 		label: 'Monitorizare Ads / alerte',
 		hint: 'Explicații pe semnale (no-delivery, buget, status cont)',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-fable-5'
 	},
 	{
 		id: 'ads-recommendations',
 		label: 'Recomandări optimizare',
 		hint: 'Sugestii buget / targetare / creative pe campanii',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-opus-4-8'
 	},
 	{
 		id: 'client-reports',
 		label: 'Rapoarte clienți',
 		hint: 'Narațiuni & rezumate pe rapoartele de campanie',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-sonnet-5'
 	},
 	{
 		id: 'email-drafting',
 		label: 'Email & răspunsuri',
 		hint: 'Drafturi emailuri clienți, follow-up leads',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-haiku-4-5-20251001'
 	},
 	{
 		id: 'lead-classification',
 		label: 'Clasificare leads / interviuri',
 		hint: 'Sursă→canal, calificare candidați',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-haiku-4-5-20251001'
 	},
 	{
 		id: 'general',
 		label: 'Uz general (fallback)',
 		hint: 'Orice utilizare AI neconfigurată explicit',
-		defaultKeyType: 'oat',
+		defaultKeyType: 'api',
 		defaultModel: 'claude-sonnet-5'
 	}
 ] as const satisfies readonly ClaudeUseCase[];

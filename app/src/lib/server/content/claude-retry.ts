@@ -51,6 +51,18 @@ function waitMsFor(res: Response, attempt: number): number {
 
 const keyLabel = (k: ClaudeLike['keyType']) => (k === 'oat' ? 'Abonament' : 'API');
 
+/**
+ * De ce a picat cheia primară, pe limba tipului ei. Din ~feb 2026 Anthropic NU mai
+ * acceptă tokenurile de abonament (sk-ant-oat01) pe Messages API — 429 indiferent
+ * de trafic (github.com/anthropics/claude-code/issues/28091; probat cu
+ * _debug-claude-key-health pe 2026-07-25). Pe cheia API, 429/529 e rate limit real.
+ */
+function primaryFailureNote(k: ClaudeLike['keyType'], status: number): string {
+	return k === 'oat'
+		? `Cheia Abonament a răspuns ${status}: Anthropic nu mai acceptă cheile de abonament pentru apeluri API (din feb 2026)`
+		: `Cheia API e rate-limited (${status} — limită pe minut / supraîncărcare temporară, NU quota ta)`;
+}
+
 const discardBody = (res: Response) => void res.body?.cancel().catch(() => {});
 
 /** Buget partajat între clientul primar și cel de rezervă + contor real de reîncercări. */
@@ -124,6 +136,7 @@ export async function createMessageWithRetry(
 			opts.onFallbackError?.(e);
 		}
 	}
+	const primaryNote = primaryFailureNote(client.keyType, res.status);
 	if (alt) {
 		opts.onFallback?.(client.keyType, alt.keyType);
 		discardBody(res);
@@ -131,21 +144,24 @@ export async function createMessageWithRetry(
 			res = await attemptOn(alt, body, opts.fallbackRetries ?? 2, sleep, budget);
 		} catch (e) {
 			// Fără context, toast-ul ar arăta doar eroarea cheii de rezervă (ex. „credit
-			// balance too low") și ar ascunde că primară era de fapt rate-limited.
+			// balance too low") și ar ascunde de ce a picat primară.
 			const detail = e instanceof Error ? e.message : String(e);
-			throw new Error(
-				`Cheia ${keyLabel(client.keyType)} e rate-limited (limită pe minut, NU quota ta), iar cheia de rezervă (${keyLabel(alt.keyType)}) a eșuat: ${detail}`
-			);
+			throw new Error(`${primaryNote}, iar cheia de rezervă (${keyLabel(alt.keyType)}) a eșuat: ${detail}`);
 		}
 		if (res.ok) return res;
 		discardBody(res);
 		throw new Error(
-			`Claude a răspuns ${res.status} și pe cheia de rezervă (${keyLabel(alt.keyType)}) — limită de rată pe minut / supraîncărcare temporară, NU quota ta. Așteaptă un minut și reîncearcă.`
+			`${primaryNote}; cheia de rezervă (${keyLabel(alt.keyType)}) a răspuns ${res.status} (limită de rată / supraîncărcare). Așteaptă un minut și reîncearcă.`
 		);
 	}
 
 	discardBody(res);
+	if (client.keyType === 'oat') {
+		throw new Error(
+			`${primaryNote}. Adaugă o cheie API cu credit în Settings → Claude (console.anthropic.com → Plans & Billing) și rutează use-case-urile pe ea — failover-ul o folosește automat.`
+		);
+	}
 	throw new Error(
-		`Claude a răspuns ${res.status} (limită de rată pe minut — NU quota ta; abonamentul partajează limita cu sesiunile Claude Code active pe același cont). Am reîncercat de ${budget.retriesDone} ori cu pauze progresive. Așteaptă un minut și reîncearcă; poți adăuga și o cheie API în Settings → Claude ca rezervă automată.`
+		`${primaryNote}. Am reîncercat de ${budget.retriesDone} ori cu pauze progresive. Așteaptă un minut și reîncearcă.`
 	);
 }

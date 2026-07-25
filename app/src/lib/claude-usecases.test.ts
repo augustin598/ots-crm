@@ -10,9 +10,9 @@ import {
 } from './claude-usecases';
 
 describe('claude-usecases catalog', () => {
-	test('toate use-case-urile au default valid (oat) + model din catalog', () => {
+	test('toate use-case-urile au default valid (api — oat e blocat de Anthropic pe API din feb 2026) + model din catalog', () => {
 		for (const uc of CLAUDE_USE_CASES) {
-			expect(uc.defaultKeyType).toBe('oat');
+			expect(uc.defaultKeyType).toBe('api');
 			expect(uc.defaultModel.startsWith('claude-')).toBe(true);
 		}
 		expect(CLAUDE_USE_CASE_IDS).toContain('general');
@@ -67,7 +67,7 @@ describe('resolveUseCaseRoute (fallback: use-case → general → catalog defaul
 
 	test('fără nimic stocat → default din catalog', () => {
 		expect(resolveUseCaseRoute('ads-analysis', null)).toEqual(defaultRoute('ads-analysis'));
-		expect(defaultRoute('ads-analysis')).toEqual({ keyType: 'oat', model: 'claude-opus-4-8' });
+		expect(defaultRoute('ads-analysis')).toEqual({ keyType: 'api', model: 'claude-opus-4-8' });
 	});
 });
 

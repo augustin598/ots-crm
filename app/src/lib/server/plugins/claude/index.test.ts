@@ -190,31 +190,32 @@ describe('getClaudeClientFor — fallback logging (selectLenient)', () => {
 		warningCalls = [];
 	});
 
-	test('rută spre slot gol (default oat, doar api stocat) → folosește api ȘI loghează fallback-ul', async () => {
-		// copywriting are default oat în catalog; rândul are DOAR cheia api (primar).
-		selectQueue = [[makeRow({ keyType: 'api', routes: null })]];
-
-		const client = await getClaudeClientFor('tenant-1', 'copywriting');
-
-		expect(client).not.toBeNull();
-		expect(client?.keyType).toBe('api'); // fallback-ul lenient a ales cheia stocată
-		const fallbackLog = warningCalls.find((w) => /fallback/i.test(w.message));
-		expect(fallbackLog).toBeDefined();
-		expect(fallbackLog?.metadata).toMatchObject({
-			useCaseId: 'copywriting',
-			routedKeyType: 'oat',
-			usedKeyType: 'api'
-		});
-	});
-
-	test('slotul rutat există → NICIUN log de fallback', async () => {
-		// rândul are cheia oat în slotul primar; copywriting default oat → match direct.
+	test('rută spre slot gol (default api, doar oat stocat) → folosește oat ȘI loghează fallback-ul', async () => {
+		// copywriting are default api în catalog (oat e blocat de Anthropic pe Messages API
+		// din feb 2026); rândul are DOAR cheia oat (primar).
 		selectQueue = [[makeRow({ keyType: 'oat', routes: null })]];
 
 		const client = await getClaudeClientFor('tenant-1', 'copywriting');
 
 		expect(client).not.toBeNull();
-		expect(client?.keyType).toBe('oat');
+		expect(client?.keyType).toBe('oat'); // fallback-ul lenient a ales cheia stocată
+		const fallbackLog = warningCalls.find((w) => /fallback/i.test(w.message));
+		expect(fallbackLog).toBeDefined();
+		expect(fallbackLog?.metadata).toMatchObject({
+			useCaseId: 'copywriting',
+			routedKeyType: 'api',
+			usedKeyType: 'oat'
+		});
+	});
+
+	test('slotul rutat există → NICIUN log de fallback', async () => {
+		// rândul are cheia api în slotul primar; copywriting default api → match direct.
+		selectQueue = [[makeRow({ keyType: 'api', routes: null })]];
+
+		const client = await getClaudeClientFor('tenant-1', 'copywriting');
+
+		expect(client).not.toBeNull();
+		expect(client?.keyType).toBe('api');
 		expect(warningCalls.filter((w) => /fallback/i.test(w.message))).toHaveLength(0);
 	});
 });
