@@ -31,9 +31,12 @@
 	color: var(--cl-text);
 }
 
-/* Modulul Content ascunde topbar-ul shell (breadcrumb propriu) → umple tot viewportul,
-   fără banda goală de sub conținutul scurt. Interviuri păstrează topbar-ul (min-height de bază). */
+/* Modulul Content ascunde topbar-ul shell și randează cu <main> FĂRĂ p-6 → NU mai are
+   nevoie de hack-ul de breakout (margin negativ). Stă flush: crumb-ul la top:0, umple tot
+   viewportul, iar spațiul de jos vine din marginile conținutului. Interviuri păstrează
+   topbar-ul + main-ul cu p-6, deci rămâne pe breakout-ul de bază. */
 .cl-wrap.cl-wrap--fullbleed {
+	margin: 0;
 	min-height: 100dvh;
 }
 

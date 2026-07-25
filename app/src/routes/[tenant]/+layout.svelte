@@ -54,7 +54,7 @@
 		{#if !isContentRoute}
 			<OtsTopbar />
 		{/if}
-		<main class="min-w-0 flex-1 overflow-x-hidden p-6">
+		<main class="min-w-0 flex-1 overflow-x-hidden {isContentRoute ? '' : 'p-6'}">
 			{@render children()}
 		</main>
 	</SidebarInset>

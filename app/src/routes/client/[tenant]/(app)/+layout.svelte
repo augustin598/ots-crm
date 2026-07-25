@@ -308,7 +308,7 @@
 				/>
 			</header>
 		{/if}
-		<main class="flex-1 p-6">
+		<main class="flex-1 {isContentRoute ? '' : 'p-6'}">
 			{#if data.accessRestriction?.isRestricted && isRestrictedRoute}
 				<div class="relative min-h-[60vh]">
 					<div class="blur-sm pointer-events-none select-none" aria-hidden="true">
