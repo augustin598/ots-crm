@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { requireStaff } from '$lib/server/get-actor';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, isNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { DEFAULT_CHANNELS, NESPECIFICAT, classifySource } from '$lib/server/interviuri/classify';
 
@@ -66,6 +66,25 @@ async function channelsForTenant(tenantId: string) {
 		.orderBy(asc(table.interviewChannel.sortOrder), asc(table.interviewChannel.name));
 }
 
+/**
+ * Validează că clientul aparține tenantului curent. Întoarce null pentru
+ * '' / undefined (interviu fără client). Fără această validare, un clientId
+ * venit din UI ar putea agăța interviul de clientul altui tenant.
+ */
+async function resolveClientId(
+	tenantId: string,
+	clientId: string | undefined
+): Promise<string | null> {
+	if (!clientId) return null;
+	const found = await db
+		.select({ id: table.client.id })
+		.from(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+		.limit(1);
+	if (found.length === 0) throw new Error('Clientul selectat nu există');
+	return clientId;
+}
+
 /** Rezolvă channelId: explicit (validat pe tenant) sau prin clasificarea sursei. */
 async function resolveChannelId(
 	tenantId: string,
@@ -92,39 +111,54 @@ export const getInterviewChannels = query(async () => {
 	return channelsForTenant(event.locals.tenant!.id);
 });
 
-export const getInterviews = query(async () => {
-	const event = requireCtx();
-	await requireStaff(event);
-	const tenantId = event.locals.tenant!.id;
-	await ensureChannelsSeeded(tenantId);
+export const getInterviews = query(
+	v.optional(v.object({ clientId: v.optional(v.pipe(v.string(), v.minLength(1))) })),
+	async (filters) => {
+		const event = requireCtx();
+		await requireStaff(event);
+		const tenantId = event.locals.tenant!.id;
+		await ensureChannelsSeeded(tenantId);
 
-	const rows = await db
-		.select({
-			id: table.interview.id,
-			nume: table.interview.nume,
-			dataInterviu: table.interview.dataInterviu,
-			dataInceput: table.interview.dataInceput,
-			dataSfarsit: table.interview.dataSfarsit,
-			studio: table.interview.studio,
-			sursa: table.interview.sursa,
-			status: table.interview.status,
-			observatii: table.interview.observatii,
-			channelId: table.interview.channelId,
-			channelName: table.interviewChannel.name,
-			channelColor: table.interviewChannel.color,
-			channelIcon: table.interviewChannel.icon
-		})
-		.from(table.interview)
-		.leftJoin(table.interviewChannel, eq(table.interview.channelId, table.interviewChannel.id))
-		.where(eq(table.interview.tenantId, tenantId));
+		let conditions = eq(table.interview.tenantId, tenantId);
+		if (filters?.clientId) {
+			conditions = and(conditions, eq(table.interview.clientId, filters.clientId)) as typeof conditions;
+		}
 
-	return rows;
-});
+		const rows = await db
+			.select({
+				id: table.interview.id,
+				nume: table.interview.nume,
+				dataInterviu: table.interview.dataInterviu,
+				dataInceput: table.interview.dataInceput,
+				dataSfarsit: table.interview.dataSfarsit,
+				studio: table.interview.studio,
+				sursa: table.interview.sursa,
+				status: table.interview.status,
+				observatii: table.interview.observatii,
+				channelId: table.interview.channelId,
+				channelName: table.interviewChannel.name,
+				channelColor: table.interviewChannel.color,
+				channelIcon: table.interviewChannel.icon,
+				clientId: table.interview.clientId,
+				clientName: table.client.name
+			})
+			.from(table.interview)
+			.leftJoin(table.interviewChannel, eq(table.interview.channelId, table.interviewChannel.id))
+			.leftJoin(
+				table.client,
+				and(eq(table.interview.clientId, table.client.id), eq(table.client.tenantId, tenantId))
+			)
+			.where(conditions);
+
+		return rows;
+	}
+);
 
 // ===================== Commands =====================
 
 const interviewSchema = v.object({
 	nume: v.pipe(v.string(), v.minLength(1, 'Numele este obligatoriu'), v.maxLength(255)),
+	clientId: v.optional(v.pipe(v.string(), v.maxLength(64))),
 	dataInterviu: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/, 'Dată invalidă')),
 	dataInceput: v.optional(v.pipe(v.string(), v.maxLength(10))),
 	dataSfarsit: v.optional(v.pipe(v.string(), v.maxLength(10))),
@@ -147,6 +181,7 @@ export const createInterview = command(interviewSchema, async (data) => {
 	const tenantId = event.locals.tenant!.id;
 
 	validateDates(data.dataInterviu, data.dataInceput);
+	const clientId = await resolveClientId(tenantId, data.clientId);
 	const channelId = await resolveChannelId(tenantId, data.channelId, data.sursa);
 
 	const id = generateId();
@@ -154,6 +189,7 @@ export const createInterview = command(interviewSchema, async (data) => {
 	await db.insert(table.interview).values({
 		id,
 		tenantId,
+		clientId,
 		nume: data.nume.trim(),
 		dataInterviu: data.dataInterviu,
 		dataInceput: data.dataInceput || null,
@@ -177,11 +213,13 @@ export const updateInterview = command(updateSchema, async (data) => {
 	const tenantId = event.locals.tenant!.id;
 
 	validateDates(data.dataInterviu, data.dataInceput);
+	const clientId = await resolveClientId(tenantId, data.clientId);
 	const channelId = await resolveChannelId(tenantId, data.channelId, data.sursa);
 
 	await db
 		.update(table.interview)
 		.set({
+			clientId,
 			nume: data.nume.trim(),
 			dataInterviu: data.dataInterviu,
 			dataInceput: data.dataInceput || null,
@@ -196,6 +234,35 @@ export const updateInterview = command(updateSchema, async (data) => {
 		.where(and(eq(table.interview.id, data.id), eq(table.interview.tenantId, tenantId)));
 	return { success: true };
 });
+
+/**
+ * Asociază în masă interviurile tenantului cu un client (mecanismul folosit
+ * pentru datele importate istoric, fără client). Cu onlyUnassigned=true
+ * atinge doar rândurile cu client_id NULL.
+ */
+export const assignInterviewsClient = command(
+	v.object({
+		clientId: v.pipe(v.string(), v.minLength(1, 'Clientul este obligatoriu')),
+		onlyUnassigned: v.boolean()
+	}),
+	async ({ clientId, onlyUnassigned }) => {
+		const event = requireCtx();
+		await requireStaff(event);
+		const tenantId = event.locals.tenant!.id;
+		await resolveClientId(tenantId, clientId);
+
+		let conditions = eq(table.interview.tenantId, tenantId);
+		if (onlyUnassigned) {
+			conditions = and(conditions, isNull(table.interview.clientId)) as typeof conditions;
+		}
+		const updated = await db
+			.update(table.interview)
+			.set({ clientId, updatedAt: new Date() })
+			.where(conditions)
+			.returning({ id: table.interview.id });
+		return { success: true, count: updated.length };
+	}
+);
 
 export const deleteInterview = command(v.pipe(v.string(), v.minLength(1)), async (id) => {
 	const event = requireCtx();

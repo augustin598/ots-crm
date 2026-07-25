@@ -6022,6 +6022,7 @@ export const interview = sqliteTable(
 		tenantId: text('tenant_id')
 			.notNull()
 			.references(() => tenant.id),
+		clientId: text('client_id').references(() => client.id), // asociere opțională cu un client (mecanismul seoLink)
 		nume: text('nume').notNull(),
 		dataInterviu: text('data_interviu').notNull(), // ISO 'YYYY-MM-DD'
 		dataInceput: text('data_inceput'), // început colaborare, nullable
@@ -6043,7 +6044,8 @@ export const interview = sqliteTable(
 	(t) => ({
 		tenantIdx: index('interview_tenant_idx').on(t.tenantId),
 		channelIdx: index('interview_channel_id_idx').on(t.channelId),
-		dataIdx: index('interview_data_idx').on(t.tenantId, t.dataInterviu)
+		dataIdx: index('interview_data_idx').on(t.tenantId, t.dataInterviu),
+		clientIdx: index('interview_client_idx').on(t.clientId)
 	})
 );
 
