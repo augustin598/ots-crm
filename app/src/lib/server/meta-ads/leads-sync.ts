@@ -11,28 +11,106 @@ import { getHooksManager } from '$lib/server/plugins/hooks';
 /** Concurrency limit for parallel form fetching (respects Meta API rate limits). */
 const FORM_BATCH_SIZE = 5;
 
-/** Known field name variants for standard contact fields (English + Romanian). */
-const FULL_NAME_ALIASES = ['full_name', 'nume_complet', 'nume_și_prenume', 'nume_si_prenume', 'name', 'nume'];
-const EMAIL_ALIASES = ['email', 'e-mail', 'adresă_de_e-mail', 'adresa_de_e-mail', 'adresa_de_email'];
-const PHONE_ALIASES = ['phone_number', 'număr_de_telefon', 'numar_de_telefon', 'telefon', 'phone', 'nr_telefon'];
+/** Known field name variants for standard contact fields (English + Romanian + German). */
+const FULL_NAME_ALIASES = [
+	'full_name',
+	'nume_complet',
+	'nume_și_prenume',
+	'nume_si_prenume',
+	'name',
+	'nume',
+	'vollständiger_name',
+	'vollstandiger_name',
+	'voller_name'
+];
+const FIRST_NAME_ALIASES = ['first_name', 'prenume', 'vorname', 'given_name'];
+const LAST_NAME_ALIASES = [
+	'last_name',
+	'nume_de_familie',
+	'nume_familie',
+	'nachname',
+	'familienname',
+	'surname'
+];
+const EMAIL_ALIASES = [
+	'email',
+	'e-mail',
+	'e-mail-adresse',
+	'e-mail_adresse',
+	'email_address',
+	'e-mail_address',
+	'adresă_de_e-mail',
+	'adresa_de_e-mail',
+	'adresa_de_email'
+];
+const PHONE_ALIASES = [
+	'phone_number',
+	'telefonnummer',
+	'număr_de_telefon',
+	'numar_de_telefon',
+	'telefon',
+	'phone',
+	'nr_telefon',
+	'handynummer',
+	'mobil',
+	'mobile'
+];
+
+/** Distinctive substring tokens — last-resort fallback for localized custom field keys. */
+const EMAIL_TOKENS = ['mail'];
+const PHONE_TOKENS = ['telefon', 'phone'];
 
 /**
  * Extract a structured field value from Facebook's field_data array.
- * Tries multiple field name aliases (case-insensitive) to handle localized forms.
+ * Tries multiple field name aliases (case-insensitive) to handle localized forms,
+ * then falls back to distinctive substring tokens for custom-keyed localized fields.
  */
-function getFieldValue(fieldData: Array<{ name: string; values: string[] }>, fieldNames: string[]): string | null {
-	for (const name of fieldNames) {
-		const field = fieldData.find((f) => f.name.toLowerCase() === name.toLowerCase());
-		if (field?.values?.[0]) return field.values[0];
+/** Canonicalize a field key for comparison: lowercase, trim, collapse whitespace to "_".
+ *  Meta keeps the raw question label (spaces/case preserved), so "Nume și prenume"
+ *  must match the "nume_și_prenume" alias. */
+const normalizeFieldKey = (s: string): string => s.toLowerCase().trim().replace(/\s+/g, '_');
+
+function getFieldValue(
+	fieldData: Array<{ name: string; values: string[] }>,
+	fieldNames: string[],
+	tokens?: string[]
+): string | null {
+	// 1) Exact alias match (whitespace/case-insensitive)
+	const aliases = new Set(fieldNames.map(normalizeFieldKey));
+	for (const field of fieldData) {
+		if (aliases.has(normalizeFieldKey(field.name)) && field.values?.[0]) return field.values[0];
+	}
+	// 2) Distinctive substring fallback (only for unambiguous tokens like "mail"/"telefon")
+	if (tokens) {
+		for (const field of fieldData) {
+			const n = field.name.toLowerCase();
+			if (tokens.some((t) => n.includes(t)) && field.values?.[0]) return field.values[0];
+		}
 	}
 	return null;
+}
+
+/**
+ * Resolve a lead's full name from field_data. Prefers an explicit full-name field,
+ * then combines first + last name (handles German "Vorname"/"Nachname" forms).
+ */
+function resolveFullName(fieldData: Array<{ name: string; values: string[] }>): string | null {
+	const full = getFieldValue(fieldData, FULL_NAME_ALIASES);
+	if (full) return full;
+	const first = getFieldValue(fieldData, FIRST_NAME_ALIASES);
+	const last = getFieldValue(fieldData, LAST_NAME_ALIASES);
+	const combined = [first, last].filter(Boolean).join(' ').trim();
+	return combined || null;
 }
 
 /**
  * Sync Facebook Lead Ads for a specific tenant.
  * Iterates over ALL active integrations → monitored pages → forms → leads.
  */
-export async function syncMetaAdsLeadsForTenant(tenantId: string, source: 'manual' | 'scheduled' = 'manual') {
+export async function syncMetaAdsLeadsForTenant(
+	tenantId: string,
+	source: 'manual' | 'scheduled' = 'manual'
+) {
 	logInfo('meta-ads-leads', 'Starting lead sync for tenant', { tenantId, metadata: { source } });
 
 	const integrations = await db
@@ -100,10 +178,7 @@ export async function syncMetaAdsLeadsForTenant(tenantId: string, source: 'manua
 /**
  * Sync leads for a single integration (Business Manager).
  */
-async function syncLeadsForIntegration(
-	tenantId: string,
-	integration: table.MetaAdsIntegration
-) {
+async function syncLeadsForIntegration(tenantId: string, integration: table.MetaAdsIntegration) {
 	const appSecret = env.META_APP_SECRET!;
 	let imported = 0;
 	let skipped = 0;
@@ -175,7 +250,10 @@ async function syncLeadsForIntegration(
 		} catch (err) {
 			logError('meta-ads-leads', `Failed to sync page ${page.pageName}`, {
 				tenantId,
-				metadata: { pageId: page.metaPageId, error: err instanceof Error ? err.message : String(err) }
+				metadata: {
+					pageId: page.metaPageId,
+					error: err instanceof Error ? err.message : String(err)
+				}
 			});
 			errors++;
 		}
@@ -212,9 +290,7 @@ async function syncLeadsForPage(
 	}
 
 	// Calculate "since" timestamp — only fetch leads newer than last sync
-	const since = page.lastLeadSyncAt
-		? Math.floor(page.lastLeadSyncAt.getTime() / 1000)
-		: undefined;
+	const since = page.lastLeadSyncAt ? Math.floor(page.lastLeadSyncAt.getTime() / 1000) : undefined;
 
 	// Process forms in parallel batches of FORM_BATCH_SIZE
 	for (let i = 0; i < forms.length; i += FORM_BATCH_SIZE) {
@@ -302,33 +378,36 @@ async function syncSingleForm(
 			}
 
 			try {
-				const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
-				const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
-				const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
-				const adName = lead.adId ? adNameCache.get(lead.adId) ?? null : null;
+				const fullName = resolveFullName(lead.fieldData);
+				const email = getFieldValue(lead.fieldData, EMAIL_ALIASES, EMAIL_TOKENS);
+				const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES, PHONE_TOKENS);
+				const adName = lead.adId ? (adNameCache.get(lead.adId) ?? null) : null;
 
-				await db.insert(table.lead).values({
-					id: crypto.randomUUID(),
-					tenantId,
-					platform: 'facebook',
-					externalLeadId: lead.leadId,
-					externalFormId: lead.formId,
-					externalAdId: lead.adId,
-					adName,
-					formName: form.formName,
-					fullName,
-					email,
-					phoneNumber,
-					fieldData: lead.fieldData,
-					status: 'new',
-					clientId: page.clientId || undefined,
-					integrationId,
-					pageId: page.id,
-					externalCreatedAt: lead.createdTime ? new Date(lead.createdTime) : new Date(),
-					importedAt: new Date(),
-					createdAt: new Date(),
-					updatedAt: new Date()
-				}).onConflictDoNothing();
+				await db
+					.insert(table.lead)
+					.values({
+						id: crypto.randomUUID(),
+						tenantId,
+						platform: 'facebook',
+						externalLeadId: lead.leadId,
+						externalFormId: lead.formId,
+						externalAdId: lead.adId,
+						adName,
+						formName: form.formName,
+						fullName,
+						email,
+						phoneNumber,
+						fieldData: lead.fieldData,
+						status: 'new',
+						clientId: page.clientId || undefined,
+						integrationId,
+						pageId: page.id,
+						externalCreatedAt: lead.createdTime ? new Date(lead.createdTime) : new Date(),
+						importedAt: new Date(),
+						createdAt: new Date(),
+						updatedAt: new Date()
+					})
+					.onConflictDoNothing();
 
 				imported++;
 			} catch (err) {
@@ -366,12 +445,7 @@ export async function backfillLeadContactFields(tenantId: string) {
 			fieldData: table.lead.fieldData
 		})
 		.from(table.lead)
-		.where(
-			and(
-				eq(table.lead.tenantId, tenantId),
-				eq(table.lead.platform, 'facebook')
-			)
-		);
+		.where(and(eq(table.lead.tenantId, tenantId), eq(table.lead.platform, 'facebook')));
 
 	// Resolve ad names in bulk: one API call per unique ad ID
 	const adNameCache = new Map<string, string | null>();
@@ -395,10 +469,12 @@ export async function backfillLeadContactFields(tenantId: string) {
 			if (!auth) continue;
 
 			await Promise.all(
-				uniqueAdIds.filter((id) => !adNameCache.has(id)).map(async (adId) => {
-					const name = await getAdName(adId, auth.accessToken, appSecret);
-					adNameCache.set(adId, name);
-				})
+				uniqueAdIds
+					.filter((id) => !adNameCache.has(id))
+					.map(async (adId) => {
+						const name = await getAdName(adId, auth.accessToken, appSecret);
+						adNameCache.set(adId, name);
+					})
 			);
 			if (adNameCache.size >= uniqueAdIds.length) break;
 		}
@@ -411,9 +487,9 @@ export async function backfillLeadContactFields(tenantId: string) {
 
 		// Re-extract contact fields from fieldData
 		if (lead.fieldData && lead.fieldData.length > 0) {
-			const fullName = getFieldValue(lead.fieldData, FULL_NAME_ALIASES);
-			const email = getFieldValue(lead.fieldData, EMAIL_ALIASES);
-			const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES);
+			const fullName = resolveFullName(lead.fieldData);
+			const email = getFieldValue(lead.fieldData, EMAIL_ALIASES, EMAIL_TOKENS);
+			const phoneNumber = getFieldValue(lead.fieldData, PHONE_ALIASES, PHONE_TOKENS);
 
 			if (!lead.fullName && fullName) updates.fullName = fullName;
 			if (!lead.email && email) updates.email = email;
@@ -435,6 +511,9 @@ export async function backfillLeadContactFields(tenantId: string) {
 		}
 	}
 
-	logInfo('meta-ads-leads', 'Backfill completed', { tenantId, metadata: { total: leads.length, updated } });
+	logInfo('meta-ads-leads', 'Backfill completed', {
+		tenantId,
+		metadata: { total: leads.length, updated }
+	});
 	return { total: leads.length, updated };
 }
