@@ -27,7 +27,7 @@
 	const currentPath = $derived(page.url.pathname);
 	const access = $derived(data.accessFlags);
 
-	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content'];
+	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content', '/interviuri'];
 
 	// Modulul Content e un layout edge-to-edge cu breadcrumb propriu (Content › Website ›
 	// Editor); ascunde topbar-ul shell + scoate p-6 din <main> ca să stea flush.
@@ -204,6 +204,16 @@
 									label: 'Content',
 									icon: 'content' as const,
 									href: '/content'
+								}
+							]
+						: []),
+					...(data.interviuriEnabled
+						? [
+								{
+									id: 'interviuri',
+									label: 'Interviuri',
+									icon: 'interviuri' as const,
+									href: '/interviuri'
 								}
 							]
 						: [])

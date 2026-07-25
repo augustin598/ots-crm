@@ -107,7 +107,11 @@ async function resolveChannelId(
 
 export const getInterviewChannels = query(async () => {
 	const event = requireCtx();
-	await requireStaff(event);
+	// Portal: userii de tip client pot citi canalele (doar metadate de afișare);
+	// orice alt user trece prin requireStaff.
+	if (!(event.locals.isClientUser && event.locals.client)) {
+		await requireStaff(event);
+	}
 	return channelsForTenant(event.locals.tenant!.id);
 });
 
@@ -115,14 +119,23 @@ export const getInterviews = query(
 	v.optional(v.object({ clientId: v.optional(v.pipe(v.string(), v.minLength(1))) })),
 	async (filters) => {
 		const event = requireCtx();
-		await requireStaff(event);
 		const tenantId = event.locals.tenant!.id;
-		await ensureChannelsSeeded(tenantId);
 
 		let conditions = eq(table.interview.tenantId, tenantId);
-		if (filters?.clientId) {
-			conditions = and(conditions, eq(table.interview.clientId, filters.clientId)) as typeof conditions;
+		if (event.locals.isClientUser && event.locals.client) {
+			// Portal: fiecare client își vede DOAR interviurile lui — scoping forțat
+			// din sesiune, filtrul din UI e ignorat (pattern getSeoLinks).
+			conditions = and(
+				conditions,
+				eq(table.interview.clientId, event.locals.client.id)
+			) as typeof conditions;
+		} else {
+			await requireStaff(event);
+			if (filters?.clientId) {
+				conditions = and(conditions, eq(table.interview.clientId, filters.clientId)) as typeof conditions;
+			}
 		}
+		await ensureChannelsSeeded(tenantId);
 
 		const rows = await db
 			.select({

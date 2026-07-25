@@ -26,7 +26,6 @@
 		record = null,
 		channels,
 		clients = [],
-		defaultClientId = undefined,
 		onClose,
 		onSave,
 		onDelete,
@@ -35,7 +34,6 @@
 		record?: IvRow | null;
 		channels: ChannelMeta[];
 		clients?: { id: string; name: string }[];
-		defaultClientId?: string;
 		onClose: () => void;
 		onSave: (p: SavePayload) => Promise<void>;
 		onDelete: (id: string) => Promise<void>;
@@ -60,7 +58,7 @@
 			end: record?.dataSfarsit ?? '',
 			obs: record?.observatii ?? '',
 			sursa: record?.sursa ?? '',
-			clientId: record?.clientId ?? defaultClientId ?? ''
+			clientId: record?.clientId ?? ''
 		}))
 	);
 

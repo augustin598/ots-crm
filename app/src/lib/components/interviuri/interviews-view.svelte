@@ -47,21 +47,23 @@
 	import ComparisonModal from './ComparisonModal.svelte';
 	import AssignClientModal from './AssignClientModal.svelte';
 
-	// clientId setat = view „legat" de un client (tab-ul din pagina clientului):
-	// datele vin filtrate din server, iar UI-ul de asociere/filtrare client dispare.
+	// isClient = view-ul rulează în portalul clientului: serverul scopează datele
+	// pe clientul din sesiune, iar UI-ul devine read-only (fără creare/editare,
+	// fără filtrul/coloana Client, fără asociere în masă).
 	let {
-		clientId = undefined,
 		homeHref,
-		embedded = false
+		embedded = false,
+		isClient = false
 	}: {
-		clientId?: string;
 		homeHref: string;
 		embedded?: boolean;
+		isClient?: boolean;
 	} = $props();
 
-	const interviewsQuery = $derived(getInterviews(clientId ? { clientId } : undefined));
+	const interviewsQuery = getInterviews(undefined);
 	const channelsQuery = getInterviewChannels();
-	const clientsQuery = getClients();
+	// getClients e staff-only — în portal nu instanțiem query-ul deloc.
+	const clientsQuery = $derived(isClient ? null : getClients());
 
 	const rows = $derived((interviewsQuery.current ?? []).map(enrich));
 	const channels = $derived((channelsQuery.current ?? []) as ChannelMeta[]);
@@ -70,7 +72,7 @@
 	);
 	const channelOrder = $derived(channels.map((c) => c.name));
 	const clients = $derived(
-		((clientsQuery.current ?? []) as { id: string; name: string }[]).map((c) => ({
+		((clientsQuery?.current ?? []) as { id: string; name: string }[]).map((c) => ({
 			id: c.id,
 			name: c.name
 		}))
@@ -104,9 +106,9 @@
 	let showAssign = $state(false);
 	let editRec = $state<IvRow | null>(null);
 
-	// Init din URL (?clientId=X) — doar pe pagina principală (pattern seo-links).
+	// Init din URL (?clientId=X) — doar în staff (pattern seo-links).
 	$effect(() => {
-		if (clientId) return;
+		if (isClient) return;
 		const qClient = page.url.searchParams.get('clientId');
 		if (qClient && clientFilter === 'all') clientFilter = qClient;
 	});
@@ -124,7 +126,7 @@
 	const scoped = $derived.by(() => {
 		let arr = monthFilter === 'all' ? yearRecords : yearRecords.filter((r) => r.month === monthFilter);
 		if (studioFilter !== 'all') arr = arr.filter((r) => r.studio === studioFilter);
-		if (!clientId && clientFilter !== 'all') {
+		if (!isClient && clientFilter !== 'all') {
 			arr = arr.filter((r) => (clientFilter === 'none' ? !r.clientId : r.clientId === clientFilter));
 		}
 		return arr;
@@ -386,7 +388,7 @@
 					</button>
 				{/if}
 			</div>
-			{#if !clientId && unassignedCount > 0}
+			{#if !isClient && unassignedCount > 0}
 				<button class="cl-btn-secondary" onclick={() => (showAssign = true)}>
 					<Link2Icon size={13} /> Asociază cu client ({unassignedCount})
 				</button>
@@ -397,9 +399,11 @@
 			<button class="cl-btn-secondary" onclick={exportCsv}>
 				<DownloadIcon size={13} /> Export
 			</button>
-			<button class="cl-btn-primary" onclick={() => (showModal = true)}>
-				<PlusIcon size={13} /> Interviu nou
-			</button>
+			{#if !isClient}
+				<button class="cl-btn-primary" onclick={() => (showModal = true)}>
+					<PlusIcon size={13} /> Interviu nou
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -422,7 +426,7 @@
 				<option value="in_evaluare">În evaluare</option>
 			</select>
 		</div>
-		{#if !clientId && clients.length > 0}
+		{#if !isClient && clients.length > 0}
 			<div class="cl-select-wrap">
 				<span class="cl-select-lbl">Client:</span>
 				<select class="cl-select" bind:value={clientFilter}>
@@ -604,19 +608,21 @@
 						{@render th('data', 'Data interviu')}
 						{@render th('channel', 'Canal / sursă')}
 						{@render th('studio', 'Studio')}
-						{#if !clientId}
+						{#if !isClient}
 							{@render th('client', 'Client')}
 						{/if}
 						{@render th('status', 'Status')}
 						{@render th('start', 'Început')}
 						<th>Sfârșit</th>
 						<th>Observații</th>
-						<th style="width:44px"></th>
+						{#if !isClient}
+							<th style="width:44px"></th>
+						{/if}
 					</tr>
 				</thead>
 				<tbody>
 					{#each tableRows as r (r.id)}
-						<tr onclick={() => (editRec = r)}>
+						<tr onclick={() => { if (!isClient) editRec = r; }}>
 							<td>
 								<div class="iv-name">{r.nume}</div>
 								{#if r.sursa}<div class="iv-src" title={r.sursa}>{r.sursa}</div>{/if}
@@ -624,7 +630,7 @@
 							<td class="iv-date">{dash(isoToRo(r.dataInterviu))}</td>
 							<td><ChannelChip name={r.channel} color={r.channelColor} icon={r.channelIcon} /></td>
 							<td class="iv-studio">{dash(r.studio)}</td>
-							{#if !clientId}
+							{#if !isClient}
 								<td class="iv-studio">
 									{#if r.clientName}{r.clientName}{:else}<span class="iv-muted">—</span>{/if}
 								</td>
@@ -639,11 +645,13 @@
 							<td class="iv-obs">
 								{#if r.observatii}{r.observatii}{:else}<span class="iv-muted">—</span>{/if}
 							</td>
-							<td onclick={(e) => e.stopPropagation()}>
-								<button class="cl-icon-btn" title="Editează" onclick={() => (editRec = r)}>
-									<PencilIcon size={14} />
-								</button>
-							</td>
+							{#if !isClient}
+								<td onclick={(e) => e.stopPropagation()}>
+									<button class="cl-icon-btn" title="Editează" onclick={() => (editRec = r)}>
+										<PencilIcon size={14} />
+									</button>
+								</td>
+							{/if}
 						</tr>
 					{/each}
 				</tbody>
@@ -653,9 +661,8 @@
 					<SearchIcon size={32} />
 					<h3>Niciun interviu găsit</h3>
 					<p>
-						{#if clientId && rows.length === 0}
-							Acest client nu are încă interviuri asociate. Adaugă unul cu „Interviu nou" sau
-							asociază-le din pagina Interviuri.
+						{#if isClient && rows.length === 0}
+							Nu există încă interviuri înregistrate pentru contul tău.
 						{:else}
 							Modifică filtrele sau caută alt termen.
 						{/if}
@@ -669,7 +676,6 @@
 		<InterviewModal
 			{channels}
 			{clients}
-			defaultClientId={clientId}
 			onClose={() => (showModal = false)}
 			onSave={saveNew}
 			onDelete={del}
@@ -681,7 +687,6 @@
 			record={editRec}
 			{channels}
 			{clients}
-			defaultClientId={clientId}
 			onClose={() => (editRec = null)}
 			onSave={saveEdit}
 			onDelete={del}

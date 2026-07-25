@@ -51,7 +51,6 @@
 		{ id: 'contracts', label: `Contracts (${contracts.length})`, href: `/${tenantSlug}/clients/${clientId}/contracts` },
 		{ id: 'invoices', label: `Invoices (${invoices.length})`, href: `/${tenantSlug}/clients/${clientId}/invoices` },
 		{ id: 'budget', label: 'Buget', href: `/${tenantSlug}/clients/${clientId}/budget` },
-		{ id: 'interviuri', label: 'Interviuri', href: `/${tenantSlug}/clients/${clientId}/interviuri` },
 		{ id: 'access-data', label: 'Date client', href: `/${tenantSlug}/clients/${clientId}/access-data` }
 	]);
 
@@ -131,14 +130,13 @@
 		}
 	}
 
-	const activeTab = $derived.by(() => {
+	const activeTab = $derived(() => {
 		if (currentPath === `/${tenantSlug}/clients/${clientId}`) return 'overview';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/activity`)) return 'activity';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/projects`)) return 'projects';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/contracts`)) return 'contracts';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/invoices`)) return 'invoices';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/budget`)) return 'budget';
-		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/interviuri`)) return 'interviuri';
 		if (currentPath.startsWith(`/${tenantSlug}/clients/${clientId}/access-data`)) return 'access-data';
 		return 'overview';
 	});
@@ -249,15 +247,15 @@
 		</Dialog.Content>
 	</Dialog.Root>
 
-	<Tabs value={activeTab} class="w-full">
-		<TabsList class="grid w-full grid-cols-8">
+	<Tabs value={activeTab()} class="w-full">
+		<TabsList class="grid w-full grid-cols-7">
 			{#each tabs as tab (tab.id)}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					{tab.label}
 				</TabsTrigger>
 			{/each}
 		</TabsList>
-		<TabsContent value={activeTab} class="mt-6">
+		<TabsContent value={activeTab()} class="mt-6">
 			{@render children()}
 		</TabsContent>
 	</Tabs>

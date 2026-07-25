@@ -157,6 +157,23 @@ export const load: LayoutServerLoad = async (event) => {
 		contentEnabled = !!row;
 	}
 
+	// Interviuri: fiecare client își are pagina lui de interviuri în portal —
+	// vizibilă doar dacă are cel puțin un interviu asociat (pattern contentEnabled).
+	let interviuriEnabled = false;
+	if (event.locals.client) {
+		const [ivRow] = await db
+			.select({ id: table.interview.id })
+			.from(table.interview)
+			.where(
+				and(
+					eq(table.interview.tenantId, tenant.id),
+					eq(table.interview.clientId, event.locals.client.id)
+				)
+			)
+			.limit(1);
+		interviuriEnabled = !!ivRow;
+	}
+
 	// Multi-company: list every company this user has access to in this tenant.
 	// Drives the company switcher in the header (shown when length > 1) and
 	// the /select-company page after login.
@@ -199,6 +216,7 @@ export const load: LayoutServerLoad = async (event) => {
 		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null,
 		accessRestriction,
 		accessFlags,
-		contentEnabled
+		contentEnabled,
+		interviuriEnabled
 	};
 };

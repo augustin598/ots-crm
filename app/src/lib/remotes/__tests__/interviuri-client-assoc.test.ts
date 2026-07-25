@@ -28,8 +28,12 @@ mock.module('$app/server', () => ({
 	getRequestEvent: () => currentEvent
 }));
 
+// Ca în producție: requireStaff respinge userii de portal (isClientUser).
 mock.module('$lib/server/get-actor', () => ({
-	requireStaff: async () => ({ type: 'staff', user: { id: 'u1' } })
+	requireStaff: async () => {
+		if (currentEvent?.locals?.isClientUser) throw new Error('Unauthorized');
+		return { type: 'staff', user: { id: 'u1' } };
+	}
 }));
 
 // ─── Fake DB ──────────────────────────────────────────────────────────────────
@@ -76,7 +80,14 @@ mock.module('$lib/server/db', () => ({
 	}
 }));
 
-const { createInterview, assignInterviewsClient } = await import('../interviuri.remote');
+const {
+	createInterview,
+	assignInterviewsClient,
+	getInterviews,
+	getInterviewChannels,
+	updateInterview,
+	deleteInterview
+} = await import('../interviuri.remote');
 
 const CHANNELS = [
 	{ id: 'ch1', tenantId: 't1', name: 'TikTok', color: '#000', icon: 'x', isSystem: true, sortOrder: 1 }
@@ -136,5 +147,61 @@ describe('assignInterviewsClient', () => {
 		expect(updateCalls.length).toBe(1);
 		expect((updateCalls[0].set as any).clientId).toBe('lucky1');
 		expect(res.count).toBe(2);
+	});
+});
+
+describe('acces portal client (isClientUser)', () => {
+	const clientEvent = () => ({
+		locals: {
+			user: { id: 'cu1' },
+			tenant: { id: 't1' },
+			isClientUser: true,
+			client: { id: 'lucky1' }
+		}
+	});
+
+	test('getInterviews e permis pentru userul de portal (scopat pe clientul lui)', async () => {
+		currentEvent = clientEvent();
+		selectQueue.push([{ id: 'ch1' }]); // ensureChannelsSeeded: există canale
+		selectQueue.push([]); // rândurile interviurilor
+		const rows = await getInterviews(undefined as any);
+		expect(Array.isArray(rows)).toBe(true);
+	});
+
+	test('getInterviewChannels e permis pentru userul de portal', async () => {
+		currentEvent = clientEvent();
+		selectQueue.push([{ id: 'ch1' }]); // ensureChannelsSeeded: există canale
+		selectQueue.push(CHANNELS); // channelsForTenant
+		const channels = await getInterviewChannels(undefined as any);
+		expect(Array.isArray(channels)).toBe(true);
+	});
+
+	test('createInterview e respins pentru userul de portal', async () => {
+		currentEvent = clientEvent();
+		await expect(
+			createInterview({ nume: 'X', dataInterviu: '2026-07-01', channelId: 'ch1' } as any)
+		).rejects.toThrow(/unauthorized/i);
+		expect(insertedValues.length).toBe(0);
+	});
+
+	test('updateInterview e respins pentru userul de portal', async () => {
+		currentEvent = clientEvent();
+		await expect(
+			updateInterview({ id: 'i1', nume: 'X', dataInterviu: '2026-07-01', channelId: 'ch1' } as any)
+		).rejects.toThrow(/unauthorized/i);
+		expect(updateCalls.length).toBe(0);
+	});
+
+	test('deleteInterview e respins pentru userul de portal', async () => {
+		currentEvent = clientEvent();
+		await expect(deleteInterview('i1')).rejects.toThrow(/unauthorized/i);
+	});
+
+	test('assignInterviewsClient e respins pentru userul de portal', async () => {
+		currentEvent = clientEvent();
+		await expect(
+			assignInterviewsClient({ clientId: 'lucky1', onlyUnassigned: true })
+		).rejects.toThrow(/unauthorized/i);
+		expect(updateCalls.length).toBe(0);
 	});
 });
