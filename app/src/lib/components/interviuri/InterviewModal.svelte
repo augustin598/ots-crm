@@ -19,11 +19,14 @@
 		channelId: string;
 		status: StatusSlug;
 		observatii?: string;
+		clientId?: string;
 	}
 
 	let {
 		record = null,
 		channels,
+		clients = [],
+		defaultClientId = undefined,
 		onClose,
 		onSave,
 		onDelete,
@@ -31,6 +34,8 @@
 	}: {
 		record?: IvRow | null;
 		channels: ChannelMeta[];
+		clients?: { id: string; name: string }[];
+		defaultClientId?: string;
 		onClose: () => void;
 		onSave: (p: SavePayload) => Promise<void>;
 		onDelete: (id: string) => Promise<void>;
@@ -54,7 +59,8 @@
 			start: record?.dataInceput ?? '',
 			end: record?.dataSfarsit ?? '',
 			obs: record?.observatii ?? '',
-			sursa: record?.sursa ?? ''
+			sursa: record?.sursa ?? '',
+			clientId: record?.clientId ?? defaultClientId ?? ''
 		}))
 	);
 
@@ -84,7 +90,8 @@
 				sursa: f.sursa.trim() || undefined,
 				channelId: f.channelId,
 				status: f.status,
-				observatii: f.obs.trim() || undefined
+				observatii: f.obs.trim() || undefined,
+				clientId: f.clientId || undefined
 			});
 		} finally {
 			saving = false;
@@ -176,6 +183,16 @@
 					</select>
 				</div>
 			</div>
+
+			{#if clients.length > 0}
+				<div class="cl-field">
+					<label for="iv-client">Client <span class="iv-opt">(opțional)</span></label>
+					<select id="iv-client" class="cl-select" style="width:100%" bind:value={f.clientId}>
+						<option value="">— Fără client —</option>
+						{#each clients as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+					</select>
+				</div>
+			{/if}
 
 			<div class="cl-field">
 				<span class="cl-field-lbl" style="font-size:12px;font-weight:600">Canal</span>

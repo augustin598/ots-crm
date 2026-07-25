@@ -38,7 +38,7 @@ export interface ChannelMeta {
 	sortOrder: number;
 }
 
-/** Rândul brut întors de getInterviews (canal denormalizat). */
+/** Rândul brut întors de getInterviews (canal + client denormalizate). */
 export interface RawInterview {
 	id: string;
 	nume: string;
@@ -53,6 +53,8 @@ export interface RawInterview {
 	channelName: string | null;
 	channelColor: string | null;
 	channelIcon: string | null;
+	clientId: string | null;
+	clientName: string | null;
 }
 
 /** Rând îmbogățit cu an/lună derivate + status validat. */
