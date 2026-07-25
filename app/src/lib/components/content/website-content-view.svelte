@@ -331,7 +331,7 @@
 
 <svelte:head><title>{pageTitle}</title></svelte:head>
 
-<div class="cl-wrap">
+<div class="cl-wrap cl-wrap--fullbleed">
 	<svelte:boundary>
 		<div class="cl-crumbs">
 			<a href={homeHref} aria-label="Acasă"><FolderIcon size={12} /></a>

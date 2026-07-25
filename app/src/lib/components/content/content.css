@@ -31,6 +31,12 @@
 	color: var(--cl-text);
 }
 
+/* Modulul Content ascunde topbar-ul shell (breadcrumb propriu) → umple tot viewportul,
+   fără banda goală de sub conținutul scurt. Interviuri păstrează topbar-ul (min-height de bază). */
+.cl-wrap.cl-wrap--fullbleed {
+	min-height: 100dvh;
+}
+
 /* ---- dark mode ---- */
 :global(.dark) .cl-wrap {
 	--cl-bg: #0b1120;

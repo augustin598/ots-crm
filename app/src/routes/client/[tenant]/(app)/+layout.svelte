@@ -28,6 +28,10 @@
 	const access = $derived(data.accessFlags);
 
 	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content'];
+
+	// Modulul Content e un layout „breakout" cu breadcrumb propriu (Content › Website ›
+	// Editor); ascunde topbar-ul shell pe rutele /content ca să nu apară dublu.
+	const isContentRoute = $derived(currentPath.startsWith(`/client/${tenantSlug}/content`));
 	const isRestrictedRoute = $derived(
 		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
 	);
@@ -292,7 +296,9 @@
 		/>
 	</Sidebar>
 	<SidebarInset>
-		<OtsTopbar groups={clientGroups} {pathPrefix} />
+		{#if !isContentRoute}
+			<OtsTopbar groups={clientGroups} {pathPrefix} />
+		{/if}
 		{#if (data.userCompanies?.length ?? 0) > 1}
 			<header class="flex items-center justify-end gap-2 border-b px-6 py-3">
 				<ClientSwitcher

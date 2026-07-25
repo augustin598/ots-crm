@@ -58,7 +58,7 @@
 
 <svelte:head><title>Content · CRM</title></svelte:head>
 
-<div class="cl-wrap">
+<div class="cl-wrap cl-wrap--fullbleed">
 	<div class="cl-crumbs">
 		<a href={homeHref} aria-label="Acasă"><FolderIcon size={12} /></a>
 		<span class="sep">›</span>

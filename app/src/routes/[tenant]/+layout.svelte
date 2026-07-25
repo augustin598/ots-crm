@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import { page } from '$app/state';
 	import { SidebarProvider, SidebarInset, Sidebar } from '$lib/components/ui/sidebar';
 	import { browser } from '$app/environment';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -13,6 +14,12 @@
 		data.tenant?.themeColor && isValidHex(data.tenant.themeColor)
 			? hexToOklchHue(data.tenant.themeColor)
 			: 245
+	);
+
+	// Modulul Content e un layout „breakout" edge-to-edge cu breadcrumb propriu
+	// (Content › Website › Editor); ascunde topbar-ul shell ca să nu apară dublu.
+	const isContentRoute = $derived(
+		page.url.pathname.startsWith(`/${page.params.tenant}/content`)
 	);
 
 	// Update favicon dynamically per-tenant
@@ -44,7 +51,9 @@
 		/>
 	</Sidebar>
 	<SidebarInset>
-		<OtsTopbar />
+		{#if !isContentRoute}
+			<OtsTopbar />
+		{/if}
 		<main class="min-w-0 flex-1 overflow-x-hidden p-6">
 			{@render children()}
 		</main>

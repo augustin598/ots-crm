@@ -230,7 +230,7 @@
 
 <svelte:head><title>{gTitle || 'Articol'} · Content</title></svelte:head>
 
-<div class="cl-wrap">
+<div class="cl-wrap cl-wrap--fullbleed">
 	<svelte:boundary>
 		<div class="cl-crumbs">
 			<a href={basePath}>Content</a>
