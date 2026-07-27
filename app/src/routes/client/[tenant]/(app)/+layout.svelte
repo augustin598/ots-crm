@@ -197,7 +197,7 @@
 								}
 							]
 						: []),
-					...(data.contentEnabled
+					...(data.contentEnabled && access.content
 						? [
 								{
 									id: 'content',
@@ -207,7 +207,7 @@
 								}
 							]
 						: []),
-					...(data.interviuriEnabled
+					...(data.interviuriEnabled && access.interviuri
 						? [
 								{
 									id: 'interviuri',

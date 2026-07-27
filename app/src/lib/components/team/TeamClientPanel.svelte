@@ -16,6 +16,8 @@
 		avatarColor,
 		avatarInitials,
 		ACCESS_CATEGORIES,
+		ACCESS_CATEGORY_LABELS,
+		emptyAccessFlags,
 		type ClientRolePresetId,
 		type AccessFlags
 	} from '$lib/config/team';
@@ -49,34 +51,10 @@
 	// Per-row expansion (granular flags editor)
 	let expandedRowId = $state<string | null>(null);
 
-	const CATEGORY_LABELS: Record<string, string> = {
-		invoices: 'Facturi',
-		contracts: 'Contracte',
-		tasks: 'Taskuri',
-		marketing: 'Marketing',
-		reports: 'Rapoarte',
-		leads: 'Leads',
-		accessData: 'Date acces',
-		backlinks: 'Backlinks',
-		budgets: 'Bugete',
-		hosting: 'Hosting'
-	};
+	const CATEGORY_LABELS: Record<string, string> = ACCESS_CATEGORY_LABELS;
 
 	function flagsFromRow(row: { accessFlagsResolved?: AccessFlags }): AccessFlags {
-		return (
-			row.accessFlagsResolved ?? {
-				invoices: false,
-				contracts: false,
-				tasks: false,
-				marketing: false,
-				reports: false,
-				leads: false,
-				accessData: false,
-				backlinks: false,
-				budgets: false,
-				hosting: false
-			}
-		);
+		return row.accessFlagsResolved ?? emptyAccessFlags();
 	}
 
 	function detectRoleForRow(row: { accessFlagsResolved?: AccessFlags }): {

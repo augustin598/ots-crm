@@ -69,7 +69,9 @@ export const getClientSecondaryEmails = query(
 				accessData: false,
 				backlinks: false,
 				budgets: false,
-				hosting: false
+				hosting: false,
+				content: false,
+				interviuri: false
 			};
 			return { ...r, accessFlagsResolved: flags };
 		});
@@ -141,7 +143,9 @@ const accessFlagsSchema = v.object({
 	accessData: v.boolean(),
 	backlinks: v.boolean(),
 	budgets: v.boolean(),
-	hosting: v.boolean()
+	hosting: v.boolean(),
+	content: v.boolean(),
+	interviuri: v.boolean()
 });
 
 /**
