@@ -37,7 +37,7 @@ const loginUrl = `${baseUrl}/client/${fixture.tenantSlug}/verify?token=${encodeU
 const tenantName = escapeHtml(fixture.tenantName);
 const clientName = escapeHtml(fixture.clientName);
 const inviterName = escapeHtml(fixture.inviterName);
-const subject = `${fixture.inviterName} te-a invitat în portalul ${fixture.clientName}`;
+const subject = `Invitație în portalul ${fixture.clientName} de la ${fixture.inviterName}`;
 
 // Body identical to sendClientTeamInviteEmail's bodyHtml.
 const bodyHtml = `

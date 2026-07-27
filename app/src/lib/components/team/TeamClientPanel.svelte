@@ -51,8 +51,6 @@
 	// Per-row expansion (granular flags editor)
 	let expandedRowId = $state<string | null>(null);
 
-	const CATEGORY_LABELS: Record<string, string> = ACCESS_CATEGORY_LABELS;
-
 	function flagsFromRow(row: { accessFlagsResolved?: AccessFlags }): AccessFlags {
 		return row.accessFlagsResolved ?? emptyAccessFlags();
 	}
@@ -323,7 +321,7 @@
 												checked={flags[cat]}
 												onchange={() => toggleFlag(se.id, flags, cat)}
 											/>
-											<span>{CATEGORY_LABELS[cat] ?? cat}</span>
+											<span>{ACCESS_CATEGORY_LABELS[cat]}</span>
 										</label>
 									{/each}
 								</div>

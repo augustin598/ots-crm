@@ -6,6 +6,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, asc, isNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { DEFAULT_CHANNELS, NESPECIFICAT, classifySource } from '$lib/server/interviuri/classify';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -33,6 +34,21 @@ function requireCtx() {
 }
 
 /**
+ * Portal: contactele secundare au nevoie de flag-ul per-user `interviuri`
+ * (contactul primar îl are mereu). Layout-ul gate-uiește doar navigarea —
+ * remote-urile trebuie să verifice singure, altfel flag-ul e cosmetic.
+ */
+async function assertClientInterviuriAccess(event: NonNullable<ReturnType<typeof getRequestEvent>>) {
+	const flags = await getRequestAccessFlags({
+		tenantId: event.locals.tenant!.id,
+		clientId: event.locals.client!.id,
+		userEmail: event.locals.user!.email,
+		isPrimary: event.locals.clientUser?.isPrimary ?? false
+	});
+	if (!flags.interviuri) throw new Error('Nu ai acces la interviuri');
+}
+
+/**
  * Context de scriere. În portalul clientului, clientScopeId e clientul din
  * sesiune: interviurile create primesc FORȚAT acel client_id, iar update/delete
  * ating doar rândurile care îi aparțin deja. Un clientId venit din UI e ignorat
@@ -42,6 +58,7 @@ async function requireWriteCtx() {
 	const event = requireCtx();
 	const tenantId = event.locals.tenant!.id;
 	if (event.locals.isClientUser && event.locals.client) {
+		await assertClientInterviuriAccess(event);
 		return { event, tenantId, clientScopeId: event.locals.client.id as string };
 	}
 	await requireStaff(event);
@@ -123,9 +140,11 @@ async function resolveChannelId(
 
 export const getInterviewChannels = query(async () => {
 	const event = requireCtx();
-	// Portal: userii de tip client pot citi canalele (doar metadate de afișare);
-	// orice alt user trece prin requireStaff.
-	if (!(event.locals.isClientUser && event.locals.client)) {
+	// Portal: userii de tip client pot citi canalele (doar metadate de afișare)
+	// dacă au flag-ul `interviuri`; orice alt user trece prin requireStaff.
+	if (event.locals.isClientUser && event.locals.client) {
+		await assertClientInterviuriAccess(event);
+	} else {
 		await requireStaff(event);
 	}
 	return channelsForTenant(event.locals.tenant!.id);
@@ -141,6 +160,7 @@ export const getInterviews = query(
 		if (event.locals.isClientUser && event.locals.client) {
 			// Portal: fiecare client își vede DOAR interviurile lui — scoping forțat
 			// din sesiune, filtrul din UI e ignorat (pattern getSeoLinks).
+			await assertClientInterviuriAccess(event);
 			conditions = and(
 				conditions,
 				eq(table.interview.clientId, event.locals.client.id)

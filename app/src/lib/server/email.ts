@@ -1365,11 +1365,14 @@ export async function sendClientTeamInviteEmail(
 		throw new Error('Tenant not found');
 	}
 
-	const tenantName = escapeHtml(tenant.name || 'CRM');
-	clientName = escapeHtml(clientName);
-	inviterName = escapeHtml(inviterName);
+	const rawTenantName = tenant.name || 'CRM';
+	const tenantName = escapeHtml(rawTenantName);
+	const safeClientName = escapeHtml(clientName);
+	const safeInviterName = escapeHtml(inviterName);
 	const loginUrl = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(token)}`;
-	const subject = `${inviterName} te-a invitat în portalul ${clientName}`;
+	// Subiect/text/metadata folosesc numele BRUTE (fără entități HTML);
+	// variantele escapate intră doar în bodyHtml/title.
+	const subject = `Invitație în portalul ${clientName} de la ${inviterName}`;
 
 	await sendWithPersistence(
 		{
@@ -1394,7 +1397,7 @@ export async function sendClientTeamInviteEmail(
 
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;"><strong>${inviterName}</strong> v-a invitat în portalul de client <strong>${clientName}</strong>, găzduit de ${tenantName}.</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;"><strong>${safeInviterName}</strong> v-a invitat în portalul de client <strong>${safeClientName}</strong>, găzduit de ${tenantName}.</p>
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 4px 0;">Apăsați butonul de mai jos pentru a intra în portal. Linkul expiră în 24 de ore; ulterior vă puteți autentifica oricând cu adresa aceasta de email.</p>
 				${renderCtaButton(loginUrl, 'Accesează portalul', brand.themeColor)}
 				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
@@ -1412,9 +1415,9 @@ export async function sendClientTeamInviteEmail(
 				html: renderBrandedEmail({
 					themeColor: brand.themeColor,
 					headerLogoHtml: brand.headerLogoHtml,
-					title: `Invitație în portalul ${clientName}`,
+					title: `Invitație în portalul ${safeClientName}`,
 					bodyHtml,
-					previewTitle: `Invitație portal ${clientName}`
+					previewTitle: `Invitație portal ${safeClientName}`
 				}),
 				text: trimPlainText(`
 			Invitatie in portalul ${clientName}

@@ -13,6 +13,7 @@ import { requireStaff } from '$lib/server/get-actor';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 
 /**
  * Auth de bază pt content: 401 dacă lipsește user/tenant. Utilizatorii de portal
@@ -25,6 +26,16 @@ export async function contentAuth(
 ): Promise<{ isClient: boolean; clientId: string | null }> {
 	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
 	if (event.locals.isClientUser && event.locals.client) {
+		// Per-user gate: contactele secundare au nevoie de flag-ul `content`
+		// (primarul îl are mereu). Gate-ul per-website (allowClientAi) se
+		// verifică separat cu assertWebsiteClientAccess.
+		const flags = await getRequestAccessFlags({
+			tenantId: event.locals.tenant.id,
+			clientId: event.locals.client.id,
+			userEmail: event.locals.user.email,
+			isPrimary: event.locals.clientUser?.isPrimary ?? false
+		});
+		if (!flags.content) svelteError(403, 'Nu ai acces la modulul Content.');
 		return { isClient: true, clientId: event.locals.client.id };
 	}
 	await requireStaff(event);

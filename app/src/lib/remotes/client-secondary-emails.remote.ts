@@ -3,11 +3,13 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
-import { sha256 } from '@oslojs/crypto/sha2';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendClientTeamInviteEmail } from '$lib/server/email';
 import { logError } from '$lib/server/logger';
 import { serializeError } from '$lib/server/error-serializer';
+import { requireStaff } from '$lib/server/get-actor';
+import { checkAuthRateLimit } from '$lib/server/rate-limiter';
+import { generateMagicLinkToken, hashToken } from '$lib/server/client-auth';
 import {
 	ACCESS_CATEGORIES,
 	parseAccessFlags,
@@ -21,15 +23,6 @@ function generateId() {
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
 
-function generateMagicLinkToken(): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(32));
-	return encodeBase64url(bytes);
-}
-
-function hashToken(token: string): string {
-	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
-}
-
 /** Only persist known categories, coerced to boolean. */
 function sanitizeFlags(flags: AccessFlags): AccessFlags {
 	return Object.fromEntries(ACCESS_CATEGORIES.map((c) => [c, !!flags[c]])) as AccessFlags;
@@ -38,14 +31,16 @@ function sanitizeFlags(flags: AccessFlags): AccessFlags {
 /**
  * Authorize secondary-email management for a given clientId.
  * Allowed actors:
- *  - tenant users (admin staff, any role)
+ *  - tenant users (admin staff) — verificat cu requireStaff, NU doar cu
+ *    prezența locals.tenant: pe rutele /client/<slug>/* tenant-ul e setat și
+ *    pentru useri fără tenantUser, iar pathname-ul e controlabil de client (F8)
  *  - primary client users — only for THEIR own client
  * Returns the tenantId so callers can scope their writes.
  */
-function authorizeSecondaryEmailAccess(
+async function authorizeSecondaryEmailAccess(
 	event: ReturnType<typeof getRequestEvent>,
 	clientId: string
-): string {
+): Promise<string> {
 	if (!event?.locals.user) throw new Error('Unauthorized');
 	if (event.locals.isClientUser) {
 		if (!event.locals.clientUser?.isPrimary) throw new Error('Unauthorized');
@@ -55,6 +50,7 @@ function authorizeSecondaryEmailAccess(
 		return event.locals.client.tenantId;
 	}
 	if (!event.locals.tenant) throw new Error('Unauthorized');
+	await requireStaff(event);
 	return event.locals.tenant.id;
 }
 
@@ -63,7 +59,7 @@ export const getClientSecondaryEmails = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (clientId) => {
 		const event = getRequestEvent();
-		const tenantId = authorizeSecondaryEmailAccess(event, clientId);
+		const tenantId = await authorizeSecondaryEmailAccess(event, clientId);
 
 		const rows = await db
 			.select()
@@ -98,20 +94,14 @@ export const getClientSecondaryEmails = query(
 	}
 );
 
-const accessFlagsSchema = v.object({
-	invoices: v.boolean(),
-	contracts: v.boolean(),
-	tasks: v.boolean(),
-	marketing: v.boolean(),
-	reports: v.boolean(),
-	leads: v.boolean(),
-	accessData: v.boolean(),
-	backlinks: v.boolean(),
-	budgets: v.boolean(),
-	hosting: v.boolean(),
-	content: v.boolean(),
-	interviuri: v.boolean()
-});
+// Generată din ACCESS_CATEGORIES — o singură sursă de adevăr; o categorie
+// nouă adăugată în portal-access.ts intră automat și în schema de validare.
+const accessFlagsSchema = v.object(
+	Object.fromEntries(ACCESS_CATEGORIES.map((c) => [c, v.boolean()])) as Record<
+		(typeof ACCESS_CATEGORIES)[number],
+		ReturnType<typeof v.boolean>
+	>
+);
 
 const createSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1)),
@@ -126,7 +116,7 @@ const createSchema = v.object({
 /** Add a secondary email to a client */
 export const createClientSecondaryEmail = command(createSchema, async (data) => {
 	const event = getRequestEvent();
-	const tenantId = authorizeSecondaryEmailAccess(event, data.clientId);
+	const tenantId = await authorizeSecondaryEmailAccess(event, data.clientId);
 
 	// Validate clientId belongs to tenant
 	const [client] = await db
@@ -184,6 +174,14 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 	// inviteSent=false and can surface a retry hint.
 	let inviteSent = false;
 	if (data.sendInvite) {
+		// Rate limit pe adresa invitată (același limiter ca requestMagicLink) —
+		// altfel un contact primar poate face email bombing prin invitații.
+		const clientIp = event ? event.getClientAddress() : null;
+		const rateLimitError = checkAuthRateLimit(data.email.toLowerCase(), clientIp);
+		if (rateLimitError) {
+			return { success: true, id, inviteSent: false };
+		}
+		let tokenId: string | null = null;
 		try {
 			const [tenant] = await db
 				.select({ slug: table.tenant.slug })
@@ -198,10 +196,24 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 				.where(and(eq(table.client.id, data.clientId), eq(table.client.tenantId, tenantId)))
 				.limit(1);
 
+			// Invalidate any existing unused tokens for this email+tenant (same
+			// policy as requestMagicLink) — no accumulation of live tokens.
+			await db
+				.update(table.magicLinkToken)
+				.set({ used: true, usedAt: new Date() })
+				.where(
+					and(
+						eq(table.magicLinkToken.email, data.email.toLowerCase()),
+						eq(table.magicLinkToken.tenantId, tenantId),
+						eq(table.magicLinkToken.used, false)
+					)
+				);
+
 			const plainToken = generateMagicLinkToken();
 			const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+			tokenId = generateId();
 			await db.insert(table.magicLinkToken).values({
-				id: generateId(),
+				id: tokenId,
 				token: hashToken(plainToken),
 				email: data.email.toLowerCase(),
 				clientId: data.clientId,
@@ -223,6 +235,13 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 			);
 			inviteSent = true;
 		} catch (err) {
+			// Emailul n-a plecat → tokenul nelivrat nu are de ce să rămână valid.
+			if (tokenId) {
+				await db
+					.delete(table.magicLinkToken)
+					.where(and(eq(table.magicLinkToken.id, tokenId), eq(table.magicLinkToken.tenantId, tenantId)))
+					.catch(() => {});
+			}
 			logError('email', 'Failed to send client team invite email', {
 				tenantId,
 				stackTrace: serializeError(err).stack,
@@ -260,7 +279,7 @@ export const updateClientSecondaryEmailAccess = command(
 			)
 			.limit(1);
 		if (!record) throw new Error('Email secundar negăsit');
-		authorizeSecondaryEmailAccess(event, record.clientId);
+		await authorizeSecondaryEmailAccess(event, record.clientId);
 
 		const flags: AccessFlags = data.accessFlags;
 		// Sanity: only persist known categories.
@@ -301,7 +320,7 @@ export const deleteClientSecondaryEmail = command(
 			)
 			.limit(1);
 		if (!record) throw new Error('Email secundar negăsit');
-		authorizeSecondaryEmailAccess(event, record.clientId);
+		await authorizeSecondaryEmailAccess(event, record.clientId);
 
 		await db
 			.delete(table.clientSecondaryEmail)

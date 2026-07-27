@@ -4,7 +4,7 @@ import * as table from './db/schema';
 import * as auth from './auth';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { sha256 } from '@oslojs/crypto/sha2';
-import { encodeHexLowerCase, encodeBase32LowerCase } from '@oslojs/encoding';
+import { encodeHexLowerCase, encodeBase32LowerCase, encodeBase64url } from '@oslojs/encoding';
 import { hash } from '@node-rs/argon2';
 
 function generateUserId(): string {
@@ -12,8 +12,14 @@ function generateUserId(): string {
 	return encodeBase32LowerCase(bytes);
 }
 
-function hashToken(token: string): string {
+export function hashToken(token: string): string {
 	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
+}
+
+/** Generate a plaintext magic-link token (store only its hashToken() in DB). */
+export function generateMagicLinkToken(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(32));
+	return encodeBase64url(bytes);
 }
 
 /**
