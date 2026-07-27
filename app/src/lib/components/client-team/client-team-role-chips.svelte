@@ -1,6 +1,8 @@
 <!-- src/lib/components/client-team/client-team-role-chips.svelte -->
 <script lang="ts">
-	export type RoleId = 'all' | 'owner' | 'admin' | 'member' | 'viewer';
+	import type { ClientRolePresetId } from '$lib/config/team';
+
+	export type RoleId = 'all' | ClientRolePresetId | 'custom';
 
 	type RoleDef = { id: RoleId; label: string; color: string; count: number };
 
