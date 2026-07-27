@@ -24,6 +24,11 @@ ARG CACHE_BUST=1
 ARG BUILD_MARKER=keez-always-create-fresh-item-2026-04-25-08
 RUN echo "cache-bust: ${GIT_REF:-$CACHE_BUST}-${BUILD_MARKER}"
 COPY app ./
+# Podul de build de pe Hosted are limită hard de 4Gi (OOMKill exit 137).
+# Forțăm JSC să creadă că are ~3Gi RAM → GC agresiv înainte de limită;
+# NODE_OPTIONS acoperă orice tool care rulează sub Node.
+ENV BUN_JSC_forceRAMSize=3221225472
+ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN bun run build
 
 # ---- Final production stage ----
