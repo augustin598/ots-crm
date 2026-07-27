@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import StarterKit from '@tiptap/starter-kit';
 	import Placeholder from '@tiptap/extension-placeholder';
@@ -84,8 +83,12 @@
 		editor?.commands.setContent(newContent);
 	}
 
-	onMount(() => {
-		if (!editorElement) return;
+	// Inițializare ca acțiune pe element (nu onMount): cu experimental.async, în
+	// build-ul de producție onMount poate rula ÎNAINTE ca bind:this să lege
+	// elementul (svelte#16582) → early-return silențios și editor gol. Acțiunea
+	// primește nodul direct, deci nu depinde de ordinea bind:this/onMount.
+	function initEditor(node: HTMLDivElement) {
+		editorElement = node;
 
 		const extensions: any[] = [
 			StarterKit.configure({
@@ -132,7 +135,7 @@
 		}
 
 		editor = new Editor({
-			element: editorElement,
+			element: node,
 			extensions,
 			content,
 			editable,
@@ -170,11 +173,15 @@
 				}
 			},
 		});
-	});
 
-	onDestroy(() => {
-		editor?.destroy();
-	});
+		return {
+			destroy() {
+				editor?.destroy();
+				editor = null;
+				editorElement = null;
+			},
+		};
+	}
 </script>
 
 <div class={cn('rich-editor overflow-visible rounded-lg border', className)} style="--editor-min-height: {minHeight};">
@@ -184,7 +191,7 @@
 		{/key}
 	{/if}
 
-	<div bind:this={editorElement}></div>
+	<div use:initEditor></div>
 
 	{#if editor && showFooter}
 		<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-3 py-1 text-xs text-muted-foreground">

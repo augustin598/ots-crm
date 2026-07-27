@@ -36,6 +36,19 @@ function domainOf(url: string): string {
 	}
 }
 
+/**
+ * Cuvintele conținutului CURENT (generat). Coloana `wordCount` era scrisă doar la
+ * extracția sursei — articolele din brief (fără sursă) rămâneau pe 0 în lista
+ * „Cuvinte", deși aveau conținut generat.
+ */
+function htmlWordCount(html: string | null | undefined): number {
+	const text = (html ?? '')
+		.replace(/<[^>]*>/g, ' ')
+		.replace(/&[a-z#0-9]+;/gi, ' ')
+		.trim();
+	return text ? text.split(/\s+/).length : 0;
+}
+
 export const getContentArticles = query(
 	v.optional(
 		v.object({
@@ -276,6 +289,7 @@ export const updateContentArticle = command(
 		] as const) {
 			if (input[k] !== undefined) patch[k] = input[k];
 		}
+		if (input.generatedHtml !== undefined) patch.wordCount = htmlWordCount(input.generatedHtml);
 		await db
 			.update(table.contentArticle)
 			.set(patch)
@@ -332,6 +346,7 @@ async function doRewrite(tenantId: string, articleId: string) {
 				generatedTitle: gen.title || a.generatedTitle,
 				generatedExcerpt: gen.excerpt || a.generatedExcerpt,
 				generatedHtml: gen.html,
+				wordCount: htmlWordCount(gen.html),
 				seoTitle: gen.seoTitle || a.seoTitle,
 				metaDescription: gen.metaDescription || a.metaDescription,
 				focusKeyword: gen.focusKeyword || a.focusKeyword,
@@ -410,6 +425,7 @@ export const generateArticleFromBrief = command(
 			generatedTitle: gen.title,
 			generatedExcerpt: gen.excerpt,
 			generatedHtml: gen.html,
+			wordCount: htmlWordCount(gen.html),
 			seoTitle: gen.seoTitle,
 			metaDescription: gen.metaDescription,
 			focusKeyword: gen.focusKeyword,
@@ -462,6 +478,7 @@ export const modifyArticle = command(
 					generatedTitle: gen.title || a.generatedTitle,
 					generatedExcerpt: gen.excerpt || a.generatedExcerpt,
 					generatedHtml: gen.html,
+					wordCount: htmlWordCount(gen.html),
 					rewriteStatus: 'ready',
 					generatedAt: new Date(),
 					updatedAt: new Date()
@@ -514,6 +531,7 @@ export const humanizeArticle = command(v.string(), async (articleId) => {
 				generatedTitle: gen.title || a.generatedTitle,
 				generatedExcerpt: gen.excerpt || a.generatedExcerpt,
 				generatedHtml: gen.html,
+				wordCount: htmlWordCount(gen.html),
 				rewriteStatus: 'ready',
 				generatedAt: new Date(),
 				updatedAt: new Date()
