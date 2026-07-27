@@ -356,6 +356,21 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		description: 'Vezi conturile de hosting și pachetele disponibile.'
 	},
 	{
+		id: 'portal.content.view',
+		domain: 'portal',
+		groupLabel: 'Campanii & Marketing',
+		label: 'Content',
+		description:
+			'Modulul Content AI — articole, brief-uri, publicare (dacă adminul a activat Acces AI).'
+	},
+	{
+		id: 'portal.interviuri.view',
+		domain: 'portal',
+		groupLabel: 'Cont companie',
+		label: 'Interviuri',
+		description: 'Vezi și gestionează interviurile programate ale companiei.'
+	},
+	{
 		id: 'portal.team.manage',
 		domain: 'portal',
 		groupLabel: 'Cont companie',
@@ -521,7 +536,9 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.accessData.view',
 		'portal.backlinks.view',
 		'portal.budgets.view',
-		'portal.hosting.view'
+		'portal.hosting.view',
+		'portal.content.view',
+		'portal.interviuri.view'
 	],
 	manager: [
 		'portal.invoices.view',
@@ -532,14 +549,17 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.leads.view',
 		'portal.backlinks.view',
 		'portal.budgets.view',
-		'portal.hosting.view'
+		'portal.hosting.view',
+		'portal.content.view',
+		'portal.interviuri.view'
 		// no accessData
 	],
 	marketing: [
 		'portal.tasks.view',
 		'portal.marketing.view',
 		'portal.reports.view',
-		'portal.backlinks.view'
+		'portal.backlinks.view',
+		'portal.content.view'
 	],
 	viewer: ['portal.reports.view']
 };
@@ -558,7 +578,9 @@ const LEGACY_FLAG_TO_CAP: Record<string, Capability> = {
 	accessData: 'portal.accessData.view',
 	backlinks: 'portal.backlinks.view',
 	budgets: 'portal.budgets.view',
-	hosting: 'portal.hosting.view'
+	hosting: 'portal.hosting.view',
+	content: 'portal.content.view',
+	interviuri: 'portal.interviuri.view'
 };
 
 export function legacyFlagsToCapabilities(
@@ -602,6 +624,8 @@ export function routeRequiresCapability(
 	if (rest.startsWith('/backlinks')) return 'portal.backlinks.view';
 	if (rest.startsWith('/budgets')) return 'portal.budgets.view';
 	if (rest.startsWith('/hosting')) return 'portal.hosting.view';
+	if (rest.startsWith('/content')) return 'portal.content.view';
+	if (rest.startsWith('/interviuri')) return 'portal.interviuri.view';
 	if (rest.startsWith('/team')) return 'portal.team.manage';
 	return null;
 }

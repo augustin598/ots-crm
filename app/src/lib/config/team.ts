@@ -10,7 +10,9 @@ export const ACCESS_CATEGORIES = [
 	'accessData',
 	'backlinks',
 	'budgets',
-	'hosting'
+	'hosting',
+	'content',
+	'interviuri'
 ] as const;
 
 export type AccessCategory = (typeof ACCESS_CATEGORIES)[number];
@@ -26,7 +28,9 @@ const ALL_ACCESS_TRUE: AccessFlags = {
 	accessData: true,
 	backlinks: true,
 	budgets: true,
-	hosting: true
+	hosting: true,
+	content: true,
+	interviuri: true
 };
 
 const NO_ACCESS: AccessFlags = {
@@ -39,8 +43,34 @@ const NO_ACCESS: AccessFlags = {
 	accessData: false,
 	backlinks: false,
 	budgets: false,
-	hosting: false
+	hosting: false,
+	content: false,
+	interviuri: false
 };
+
+/**
+ * Etichete RO pentru categoriile de acces — sursa unică pentru toate
+ * editoarele de permisiuni (admin TeamClientPanel + modalul din portal).
+ */
+export const ACCESS_CATEGORY_LABELS: Record<AccessCategory, string> = {
+	invoices: 'Facturi',
+	contracts: 'Contracte',
+	tasks: 'Taskuri',
+	marketing: 'Marketing',
+	reports: 'Rapoarte',
+	leads: 'Leads',
+	accessData: 'Date acces',
+	backlinks: 'Backlinks',
+	budgets: 'Bugete',
+	hosting: 'Hosting',
+	content: 'Content',
+	interviuri: 'Interviuri'
+};
+
+/** Copie fresh a flag-urilor „totul oprit" — pt fallback-uri în UI. */
+export function emptyAccessFlags(): AccessFlags {
+	return { ...NO_ACCESS };
+}
 
 // =============================================================================
 // Admin (tenant) roles
@@ -183,7 +213,9 @@ export const CLIENT_ROLE_PRESETS: ReadonlyArray<ClientRolePresetDef> = [
 			reports: true,
 			leads: true,
 			backlinks: true,
-			budgets: true
+			budgets: true,
+			content: true,
+			interviuri: true
 			// accessData rămâne false
 		})
 	},
@@ -197,7 +229,8 @@ export const CLIENT_ROLE_PRESETS: ReadonlyArray<ClientRolePresetDef> = [
 			tasks: true,
 			marketing: true,
 			reports: true,
-			backlinks: true
+			backlinks: true,
+			content: true
 		})
 	},
 	{
