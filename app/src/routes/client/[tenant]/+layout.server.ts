@@ -157,22 +157,12 @@ export const load: LayoutServerLoad = async (event) => {
 		contentEnabled = !!row;
 	}
 
-	// Interviuri: fiecare client își are pagina lui de interviuri în portal —
-	// vizibilă doar dacă are cel puțin un interviu asociat (pattern contentEnabled).
-	let interviuriEnabled = false;
-	if (event.locals.client) {
-		const [ivRow] = await db
-			.select({ id: table.interview.id })
-			.from(table.interview)
-			.where(
-				and(
-					eq(table.interview.tenantId, tenant.id),
-					eq(table.interview.clientId, event.locals.client.id)
-				)
-			)
-			.limit(1);
-		interviuriEnabled = !!ivRow;
-	}
+	// Interviuri: fiecare client își are pagina lui de interviuri în portal.
+	// Tab-ul e vizibil pentru orice client logat (nu doar cei cu interviuri deja
+	// asociate) — portalul are CRUD, deci un client fără interviuri trebuie să
+	// poată ajunge pe pagină ca să-și creeze primul. Scoping-ul pe client.id
+	// rămâne forțat în interviuri.remote.ts.
+	const interviuriEnabled = !!event.locals.client;
 
 	// Multi-company: list every company this user has access to in this tenant.
 	// Drives the company switcher in the header (shown when length > 1) and
