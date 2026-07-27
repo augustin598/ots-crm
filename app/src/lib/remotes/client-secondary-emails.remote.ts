@@ -3,7 +3,11 @@ import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { encodeBase32LowerCase, encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
+import { sha256 } from '@oslojs/crypto/sha2';
+import { sendClientTeamInviteEmail } from '$lib/server/email';
+import { logError } from '$lib/server/logger';
+import { serializeError } from '$lib/server/error-serializer';
 import {
 	ACCESS_CATEGORIES,
 	parseAccessFlags,
@@ -13,6 +17,22 @@ import {
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
+}
+
+const MAGIC_LINK_EXPIRY_HOURS = 24;
+
+function generateMagicLinkToken(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(32));
+	return encodeBase64url(bytes);
+}
+
+function hashToken(token: string): string {
+	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
+}
+
+/** Only persist known categories, coerced to boolean. */
+function sanitizeFlags(flags: AccessFlags): AccessFlags {
+	return Object.fromEntries(ACCESS_CATEGORIES.map((c) => [c, !!flags[c]])) as AccessFlags;
 }
 
 /**
@@ -78,10 +98,29 @@ export const getClientSecondaryEmails = query(
 	}
 );
 
+const accessFlagsSchema = v.object({
+	invoices: v.boolean(),
+	contracts: v.boolean(),
+	tasks: v.boolean(),
+	marketing: v.boolean(),
+	reports: v.boolean(),
+	leads: v.boolean(),
+	accessData: v.boolean(),
+	backlinks: v.boolean(),
+	budgets: v.boolean(),
+	hosting: v.boolean(),
+	content: v.boolean(),
+	interviuri: v.boolean()
+});
+
 const createSchema = v.object({
 	clientId: v.pipe(v.string(), v.minLength(1)),
 	email: v.pipe(v.string(), v.email('Email invalid')),
-	label: v.optional(v.string())
+	label: v.optional(v.string()),
+	/** Set the portal access flags atomically at creation (no two-step race). */
+	accessFlags: v.optional(accessFlagsSchema),
+	/** Send the colleague a portal invite email with a single-use magic link. */
+	sendInvite: v.optional(v.boolean())
 });
 
 /** Add a secondary email to a client */
@@ -120,32 +159,79 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 
 	const now = new Date();
 	const id = generateId();
+	const sanitized = data.accessFlags ? sanitizeFlags(data.accessFlags) : null;
 	await db.insert(table.clientSecondaryEmail).values({
 		id,
 		tenantId,
 		clientId: data.clientId,
 		email: data.email,
 		label: data.label || null,
+		...(sanitized
+			? {
+					accessFlags: JSON.stringify(sanitized),
+					// Dual-write legacy notify* columns until email-sending callers migrate.
+					notifyInvoices: sanitized.invoices,
+					notifyTasks: sanitized.tasks,
+					notifyContracts: sanitized.contracts
+				}
+			: {}),
 		createdAt: now,
 		updatedAt: now
 	});
 
-	return { success: true, id };
-});
+	// Optional invite email: single-use magic link so the colleague lands straight
+	// in the portal. Email failure does NOT roll back the row — the caller gets
+	// inviteSent=false and can surface a retry hint.
+	let inviteSent = false;
+	if (data.sendInvite) {
+		try {
+			const [tenant] = await db
+				.select({ slug: table.tenant.slug })
+				.from(table.tenant)
+				.where(eq(table.tenant.id, tenantId))
+				.limit(1);
+			if (!tenant) throw new Error('Tenant not found');
 
-const accessFlagsSchema = v.object({
-	invoices: v.boolean(),
-	contracts: v.boolean(),
-	tasks: v.boolean(),
-	marketing: v.boolean(),
-	reports: v.boolean(),
-	leads: v.boolean(),
-	accessData: v.boolean(),
-	backlinks: v.boolean(),
-	budgets: v.boolean(),
-	hosting: v.boolean(),
-	content: v.boolean(),
-	interviuri: v.boolean()
+			const [clientRow] = await db
+				.select({ name: table.client.name })
+				.from(table.client)
+				.where(and(eq(table.client.id, data.clientId), eq(table.client.tenantId, tenantId)))
+				.limit(1);
+
+			const plainToken = generateMagicLinkToken();
+			const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+			await db.insert(table.magicLinkToken).values({
+				id: generateId(),
+				token: hashToken(plainToken),
+				email: data.email.toLowerCase(),
+				clientId: data.clientId,
+				matchedClientIds: JSON.stringify([data.clientId]),
+				tenantId,
+				expiresAt,
+				used: false
+			});
+
+			const inviter = event!.locals.user!;
+			const inviterName =
+				`${inviter.firstName ?? ''} ${inviter.lastName ?? ''}`.trim() || inviter.email || 'Un coleg';
+			await sendClientTeamInviteEmail(
+				data.email,
+				plainToken,
+				tenant.slug,
+				clientRow?.name ?? 'portal',
+				inviterName
+			);
+			inviteSent = true;
+		} catch (err) {
+			logError('email', 'Failed to send client team invite email', {
+				tenantId,
+				stackTrace: serializeError(err).stack,
+				metadata: { clientId: data.clientId, email: data.email }
+			});
+		}
+	}
+
+	return { success: true, id, inviteSent };
 });
 
 /**

@@ -8,6 +8,7 @@ export const EMAIL_TYPES = [
 	'invitation',
 	'invoice',
 	'magic-link',
+	'client-team-invite',
 	'admin-magic-link',
 	'password-reset',
 	'task-assignment',

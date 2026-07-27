@@ -5,95 +5,32 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import {
 		createClientSecondaryEmail,
-		updateClientSecondaryEmailAccess,
 		getClientSecondaryEmails
 	} from '$lib/remotes/client-secondary-emails.remote';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
-
-	type RoleOption = { id: string; label: string; description: string; color: string };
+	import {
+		CLIENT_ROLE_PRESETS,
+		getClientRolePreset,
+		type ClientRolePresetId
+	} from '$lib/config/team';
 
 	type Props = {
 		open: boolean;
 		clientId: string;
-		roles: RoleOption[];
 		onClose: () => void;
 	};
 
-	let { open, clientId, roles, onClose }: Props = $props();
+	let { open, clientId, onClose }: Props = $props();
 
 	let email = $state('');
-	let selectedRole = $state<string>('member');
+	let selectedRole = $state<ClientRolePresetId>('marketing');
 	let saving = $state(false);
-
-	type AccessFlags = {
-		invoices: boolean;
-		contracts: boolean;
-		tasks: boolean;
-		marketing: boolean;
-		reports: boolean;
-		leads: boolean;
-		accessData: boolean;
-		backlinks: boolean;
-		budgets: boolean;
-		hosting: boolean;
-	};
-
-	const ROLE_FLAGS: Record<string, AccessFlags> = {
-		owner: {
-			invoices: true,
-			contracts: true,
-			tasks: true,
-			marketing: true,
-			reports: true,
-			leads: true,
-			accessData: true,
-			backlinks: true,
-			budgets: true,
-			hosting: true
-		},
-		admin: {
-			invoices: true,
-			contracts: true,
-			tasks: true,
-			marketing: true,
-			reports: true,
-			leads: true,
-			accessData: true,
-			backlinks: true,
-			budgets: true,
-			hosting: true
-		},
-		member: {
-			invoices: true,
-			contracts: true,
-			tasks: true,
-			marketing: false,
-			reports: true,
-			leads: false,
-			accessData: false,
-			backlinks: false,
-			budgets: false,
-			hosting: false
-		},
-		viewer: {
-			invoices: true,
-			contracts: true,
-			tasks: false,
-			marketing: false,
-			reports: true,
-			leads: false,
-			accessData: false,
-			backlinks: false,
-			budgets: false,
-			hosting: false
-		}
-	};
 
 	$effect(() => {
 		if (open) {
 			email = '';
-			selectedRole = roles[0]?.id ?? 'member';
+			selectedRole = 'marketing';
 			// $effect is the correct place here: we reset transient UI state
 			// in response to a prop change, not derive a computed value.
 		}
@@ -101,29 +38,24 @@
 
 	async function handleInvite() {
 		const trimmed = email.trim();
-		if (!trimmed || !selectedRole) return;
+		const preset = getClientRolePreset(selectedRole);
+		if (!trimmed || !preset) return;
 		saving = true;
 		try {
-			// Step 1: create the secondary email
-			const result = await createClientSecondaryEmail({ clientId, email: trimmed }).updates(
-				getClientSecondaryEmails(clientId)
-			);
+			const result = await createClientSecondaryEmail({
+				clientId,
+				email: trimmed,
+				accessFlags: { ...preset.flags },
+				sendInvite: true
+			}).updates(getClientSecondaryEmails(clientId));
 
-			// Step 2: apply role-based access flags (best-effort; failure does not roll back)
-			const flags = ROLE_FLAGS[selectedRole];
-			if (flags && result?.id) {
-				try {
-					await updateClientSecondaryEmailAccess({
-						secondaryEmailId: result.id,
-						accessFlags: flags
-					}).updates(getClientSecondaryEmails(clientId));
-				} catch (accessErr) {
-					clientLogger.apiError('client_secondary_access_apply', accessErr);
-					toast.warning('Email creat, dar permisiunile rolului nu au putut fi setate');
-				}
+			if (result?.inviteSent) {
+				toast.success(`Invitație trimisă la ${trimmed}`);
+			} else {
+				toast.warning(
+					`${trimmed} a fost adăugat, dar emailul de invitație nu a putut fi trimis. Colegul se poate autentifica din pagina de login a portalului cu această adresă.`
+				);
 			}
-
-			toast.success(`Invitație trimisă la ${trimmed}`);
 			onClose();
 		} catch (e) {
 			clientLogger.apiError('client_secondary_invite', e);
@@ -196,7 +128,7 @@
 						role="group"
 						aria-labelledby="invite-role-label"
 					>
-						{#each roles as r (r.id)}
+						{#each CLIENT_ROLE_PRESETS as r (r.id)}
 							<button
 								type="button"
 								class={[
@@ -212,7 +144,7 @@
 									<span class="h-1.5 w-1.5 rounded-full" style:background-color={r.color}></span>
 									{r.label}
 								</span>
-								<span class="text-[11px] text-[#64748b]">{r.description}</span>
+								<span class="text-[11px] text-[#64748b]">{r.desc}</span>
 							</button>
 						{/each}
 					</div>

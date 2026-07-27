@@ -884,7 +884,7 @@ export async function sendWithPersistence(
 	// STEP 3a: Add RFC 8058 List-Unsubscribe headers for non-transactional emails.
 	// Required by Gmail/Yahoo since Feb 2024 for bulk/notification-style mail.
 	const TRANSACTIONAL_TYPES: EmailType[] = [
-		'magic-link', 'admin-magic-link', 'password-reset',
+		'magic-link', 'admin-magic-link', 'password-reset', 'client-team-invite',
 		'invitation', 'invoice', 'invoice-paid', 'contract-signing'
 	];
 	if (!TRANSACTIONAL_TYPES.includes(ctx.emailType)) {
@@ -905,7 +905,12 @@ export async function sendWithPersistence(
 
 	// STEP 3b: Persist HTML body for preview if not already saved.
 	// Skip for sensitive email types that contain auth tokens in their HTML.
-	const SENSITIVE_EMAIL_TYPES: EmailType[] = ['magic-link', 'admin-magic-link', 'password-reset'];
+	const SENSITIVE_EMAIL_TYPES: EmailType[] = [
+		'magic-link',
+		'admin-magic-link',
+		'password-reset',
+		'client-team-invite'
+	];
 	const isSensitive = SENSITIVE_EMAIL_TYPES.includes(ctx.emailType);
 	if (!isSensitive && !ctx.htmlBody && typeof mailOptions.html === 'string' && mailOptions.html) {
 		try {
@@ -1329,6 +1334,101 @@ export async function sendMagicLinkEmail(
 			${loginUrl}
 
 			Daca nu ati solicitat acest email, ignorati-l.
+		`)
+			};
+		}
+	);
+}
+
+/**
+ * Send client portal team invitation email — sent when a primary contact (or
+ * an admin) invites a colleague into the client portal. Carries a single-use
+ * magic-link token, so it is SENSITIVE (no htmlBody persistence, no retry
+ * payload — same policy as magic-link).
+ */
+export async function sendClientTeamInviteEmail(
+	email: string,
+	token: string,
+	tenantSlug: string,
+	clientName: string,
+	inviterName: string
+): Promise<void> {
+	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+
+	const [tenant] = await db
+		.select()
+		.from(table.tenant)
+		.where(eq(table.tenant.slug, tenantSlug))
+		.limit(1);
+
+	if (!tenant) {
+		throw new Error('Tenant not found');
+	}
+
+	const tenantName = escapeHtml(tenant.name || 'CRM');
+	clientName = escapeHtml(clientName);
+	inviterName = escapeHtml(inviterName);
+	const loginUrl = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(token)}`;
+	const subject = `${inviterName} te-a invitat în portalul ${clientName}`;
+
+	await sendWithPersistence(
+		{
+			tenantId: tenant.id,
+			toEmail: email,
+			subject,
+			emailType: 'client-team-invite',
+			metadata: { tenantSlug, clientName, inviterName },
+			htmlBody: '',
+			// SECURITY: payload intentionally null — token is single-use and must not
+			// be persisted in email_log (plaintext leak risk). Not retriable by design.
+			payload: null
+		},
+		async () => {
+			const brand = await fetchTenantBrand(tenant.id);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenant.id))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;"><strong>${inviterName}</strong> v-a invitat în portalul de client <strong>${clientName}</strong>, găzduit de ${tenantName}.</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 4px 0;">Apăsați butonul de mai jos pentru a intra în portal. Linkul expiră în 24 de ore; ulterior vă puteți autentifica oricând cu adresa aceasta de email.</p>
+				${renderCtaButton(loginUrl, 'Accesează portalul', brand.themeColor)}
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 4px 0;">Sau copiați acest link în browser:</p>
+				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 18px 0; word-break: break-all;">${loginUrl}</p>
+				<div style="background-color: #fffbeb; border-left: 3px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin: 0 0 20px 0;">
+					<p style="color: #92400e; font-size: 13px; line-height: 1.5; margin: 0;"><strong>Securitate</strong> · Linkul este personal, valabil 24 de ore și poate fi folosit o singură dată. Dacă nu așteptați această invitație, ignorați emailul.</p>
+				</div>
+			`;
+
+			return {
+				from: `"${tenantName}" <${fromEmail}>`,
+				to: email,
+				subject,
+				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
+				html: renderBrandedEmail({
+					themeColor: brand.themeColor,
+					headerLogoHtml: brand.headerLogoHtml,
+					title: `Invitație în portalul ${clientName}`,
+					bodyHtml,
+					previewTitle: `Invitație portal ${clientName}`
+				}),
+				text: trimPlainText(`
+			Invitatie in portalul ${clientName}
+
+			Buna ziua,
+
+			${inviterName} v-a invitat in portalul de client ${clientName}, gazduit de ${tenantName}.
+
+			Accesati acest link pentru a intra in portal (valabil 24h, o singura utilizare):
+			${loginUrl}
+
+			Ulterior va puteti autentifica oricand cu aceasta adresa de email.
+
+			Daca nu asteptati aceasta invitatie, ignorati emailul.
 		`)
 			};
 		}
