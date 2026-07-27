@@ -37,8 +37,13 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 31 types (30 + hosting-provisioning-in-progress, audit H4 2026-05-31)', () => {
-		expect(EMAIL_TYPES.length).toBe(31);
+	test('has exactly 32 types (31 + client-team-invite, portal team parity 2026-07-27)', () => {
+		expect(EMAIL_TYPES.length).toBe(32);
+	});
+
+	test('includes the client portal team invite type', () => {
+		expect(EMAIL_TYPES).toContain('client-team-invite');
+		expect(isEmailType('client-team-invite')).toBe(true);
 	});
 
 	test('includes the manual + admin status-change hosting variants', () => {
