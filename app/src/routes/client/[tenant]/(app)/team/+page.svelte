@@ -10,8 +10,15 @@
 	} from '$lib/components/client-team/client-team-role-chips.svelte';
 	import ClientTeamMemberCard from '$lib/components/client-team/client-team-member-card.svelte';
 	import ClientTeamInviteModal from '$lib/components/client-team/client-team-invite-modal.svelte';
+	import ClientTeamPermissionsModal from '$lib/components/client-team/client-team-permissions-modal.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import { toast } from 'svelte-sonner';
+	import {
+		CLIENT_ROLE_PRESETS,
+		CLIENT_CUSTOM_PILL,
+		detectClientRolePreset,
+		emptyAccessFlags,
+		type AccessFlags
+	} from '$lib/config/team';
 
 	let { data }: { data: { clientId: string; clientName: string; currentEmail: string } } = $props();
 
@@ -29,13 +36,11 @@
 	let search = $state('');
 	let roleFilter = $state<RoleId>('all');
 	let inviteOpen = $state(false);
+	let permissionsOpen = $state(false);
 
-	const ROLE_DEFS = [
-		{ id: 'owner', label: 'Owner', color: '#dc2626', bg: '#fef2f2', description: 'Acces total' },
-		{ id: 'admin', label: 'Admin', color: '#1877F2', bg: '#dbeafe', description: 'Gestionează membri și taskuri' },
-		{ id: 'member', label: 'Member', color: '#10b981', bg: '#d1fae5', description: 'Vede + creează taskuri proprii' },
-		{ id: 'viewer', label: 'Viewer', color: '#94a3b8', bg: '#f1f5f9', description: 'Doar citire' }
-	] as const;
+	// Rolurile portalului = presetele partajate cu adminul ($lib/config/team).
+	// Rolul unui membru NU e o coloană — se detectează din access flags.
+	const ROLE_PILLS = [...CLIENT_ROLE_PRESETS, CLIENT_CUSTOM_PILL];
 
 	type Member = {
 		id: string;
@@ -49,16 +54,19 @@
 	};
 
 	const members = $derived<Member[]>(
-		secondaries.map((s: any) => ({
-			id: s.userId ?? s.id,
-			firstName: s.firstName ?? null,
-			lastName: s.lastName ?? null,
-			email: s.email ?? null,
-			phone: s.phone ?? null,
-			title: s.title ?? null,
-			role: s.role ?? 'member',
-			addedAt: s.createdAt ?? null
-		}))
+		secondaries.map((s: any) => {
+			const flags: AccessFlags = s.accessFlagsResolved ?? emptyAccessFlags();
+			return {
+				id: s.id,
+				firstName: s.firstName ?? null,
+				lastName: s.lastName ?? null,
+				email: s.email ?? null,
+				phone: s.phone ?? null,
+				title: s.label ?? null,
+				role: detectClientRolePreset(flags),
+				addedAt: s.createdAt ?? null
+			};
+		})
 	);
 
 	const filteredMembers = $derived.by(() => {
@@ -78,7 +86,7 @@
 
 	const roleCounts = $derived.by(() => {
 		const counts: Record<string, number> = { all: members.length };
-		for (const r of ROLE_DEFS) {
+		for (const r of ROLE_PILLS) {
 			counts[r.id] = members.filter((m) => m.role === r.id).length;
 		}
 		return counts;
@@ -86,7 +94,7 @@
 
 	const roleChips = $derived([
 		{ id: 'all' as const, label: 'Toți', color: '#94a3b8', count: roleCounts.all ?? members.length },
-		...ROLE_DEFS.map((r) => ({
+		...ROLE_PILLS.map((r) => ({
 			id: r.id as RoleId,
 			label: r.label,
 			color: r.color,
@@ -112,7 +120,7 @@
 		{stats}
 		{search}
 		onSearchChange={(v) => (search = v)}
-		onPermissionsClick={() => toast.info('Setarea permisiunilor va fi disponibilă în curând')}
+		onPermissionsClick={() => (permissionsOpen = true)}
 		onInviteClick={() => (inviteOpen = true)}
 	/>
 
@@ -130,7 +138,7 @@
 	<div class="cteam-body px-7 py-6">
 		<div class="cteam-grid grid gap-3" style:grid-template-columns="repeat(auto-fill, minmax(300px, 1fr))">
 			{#each filteredMembers as m (m.id)}
-				{@const roleDef = ROLE_DEFS.find((r) => r.id === m.role) ?? ROLE_DEFS[2]}
+				{@const roleDef = ROLE_PILLS.find((r) => r.id === m.role) ?? CLIENT_CUSTOM_PILL}
 				<ClientTeamMemberCard
 					id={m.id}
 					firstName={m.firstName}
@@ -163,9 +171,10 @@
 	</div>
 </div>
 
-<ClientTeamInviteModal
-	open={inviteOpen}
+<ClientTeamInviteModal open={inviteOpen} {clientId} onClose={() => (inviteOpen = false)} />
+
+<ClientTeamPermissionsModal
+	open={permissionsOpen}
 	{clientId}
-	roles={ROLE_DEFS.map((r) => ({ id: r.id, label: r.label, description: r.description, color: r.color }))}
-	onClose={() => (inviteOpen = false)}
+	onClose={() => (permissionsOpen = false)}
 />
