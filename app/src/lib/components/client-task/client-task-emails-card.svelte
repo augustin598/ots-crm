@@ -29,7 +29,7 @@
 				<MailIcon class="h-[14px] w-[14px] text-[#4f46e5]" />
 			</span>
 			<span class="text-[13px] font-bold uppercase tracking-[0.04em] text-[#64748b]">
-				Emailuri asociate
+				Emailuri asociate cu acest task
 			</span>
 			{#if emails.length > 1}
 				<span class="text-[12px] font-semibold text-[#94a3b8]">({emails.length})</span>

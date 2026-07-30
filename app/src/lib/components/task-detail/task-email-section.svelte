@@ -75,14 +75,21 @@
 	let searchText = $state('');
 	let searching = $state(false);
 	let linking = $state<string | null>(null);
+	// Mesajele deja asociate în sesiunea curentă de căutare — dialogul rămâne
+	// deschis ca să poți lega mai multe emailuri la rând, nu doar unul.
+	let linkedIds = $state<Set<string>>(new Set());
 	let results = $state.raw<SearchResult[]>([]);
 	let searchDone = $state(false);
 	let searchError = $state<string | null>(null);
+
+	// ID-urile deja asociate task-ului (din DB) — marcate „Asociat" în rezultate.
+	const alreadyLinked = $derived(new Set(emails.map((e) => e.gmailMessageId)));
 
 	function openAssociate() {
 		// Smart default: corespondența clientului task-ului.
 		searchText = clientEmail ? `from:${clientEmail} OR to:${clientEmail}` : '';
 		results = [];
+		linkedIds = new Set();
 		searchDone = false;
 		searchError = null;
 		associateOpen = true;
@@ -108,7 +115,8 @@
 		searchError = null;
 		try {
 			await linkTaskEmail({ taskId, gmailMessageId: messageId }).updates(getTaskEmails(taskId));
-			associateOpen = false;
+			// Dialogul rămâne deschis — marcăm rezultatul și poți lega următorul.
+			linkedIds = new Set([...linkedIds, messageId]);
 		} catch (e) {
 			searchError =
 				e instanceof Error && /unique/i.test(e.message)
@@ -301,17 +309,26 @@
 		{#if results.length > 0}
 			<ul class="space-y-2">
 				{#each results as r (r.gmailMessageId)}
+					{@const isLinked = linkedIds.has(r.gmailMessageId) || alreadyLinked.has(r.gmailMessageId)}
 					<li>
 						<button
 							type="button"
-							class="w-full rounded-lg border border-[#eef1f6] bg-white px-3 py-2 text-left transition-colors hover:border-[#1877F2] hover:bg-[#f7faff] disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-							disabled={linking !== null}
+							class="w-full rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-70 dark:bg-zinc-900 {isLinked
+								? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900'
+								: 'border-[#eef1f6] bg-white hover:border-[#1877F2] hover:bg-[#f7faff] dark:border-zinc-700 dark:hover:bg-zinc-800'}"
+							disabled={linking !== null || isLinked}
 							onclick={() => link(r.gmailMessageId)}
 						>
 							<div class="flex items-center justify-between gap-2">
 								<span class="truncate text-sm font-semibold">{r.subject || '(fără subiect)'}</span>
 								{#if linking === r.gmailMessageId}
 									<LoaderIcon class="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+								{:else if isLinked}
+									<span
+										class="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
+									>
+										✓ Asociat
+									</span>
 								{/if}
 							</div>
 							<p class="mt-0.5 truncate text-xs text-muted-foreground">
@@ -324,6 +341,12 @@
 					</li>
 				{/each}
 			</ul>
+			<p class="text-xs text-muted-foreground">
+				Poți asocia mai multe emailuri la rând — dialogul rămâne deschis.
+			</p>
+			<div class="flex justify-end">
+				<Button variant="outline" size="sm" onclick={() => (associateOpen = false)}>Gata</Button>
+			</div>
 		{:else if searchDone && !searching}
 			<p class="text-sm text-muted-foreground">Niciun rezultat pentru căutarea asta.</p>
 		{/if}
