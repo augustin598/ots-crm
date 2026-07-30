@@ -16,6 +16,7 @@
 	import { CalendarDate, type DateValue } from '@internationalized/date';
 	import { page } from '$app/state';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { getTaskLiveQueries } from '$lib/components/task-live-queries-context';
 	import { browser } from '$app/environment';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -60,6 +61,9 @@
 	}: Props = $props();
 
 	const filterParams = getTaskFilters();
+	// Instanțele live ale paginii gazdă (undefined pe paginile care nu le
+	// publică — atunci cădem pe vechea reconstrucție de argumente).
+	const liveTaskQueries = getTaskLiveQueries();
 
 	const clientsQuery = $derived(getClients());
 	const clients = $derived(clientsQuery.current || []);
@@ -454,7 +458,9 @@
 				subtasks: draft.subtasks.length ? draft.subtasks : undefined,
 				tagNames: tagNames.length ? tagNames : undefined
 			}).updates(
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				...(liveTaskQueries?.() ?? [
+					getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })
+				]),
 				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
 				...additionalQueriesToUpdate
 			);

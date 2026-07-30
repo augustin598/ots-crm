@@ -31,6 +31,7 @@
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { getTaskComments } from '$lib/remotes/task-comments.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { getTaskLiveQueries } from '$lib/components/task-live-queries-context';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -103,6 +104,15 @@
 	}: Props = $props();
 
 	const filterParams = getTaskFilters();
+	const liveTaskQueries = getTaskLiveQueries();
+
+	// Țintele de refresh pentru lista/statisticile paginii gazdă. Fallback pe
+	// vechea reconstrucție de argumente când pagina nu publică instanțele live.
+	function listRefreshTargets(): any[] {
+		return (
+			liveTaskQueries?.() ?? [getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })]
+		);
+	}
 
 	// Optimistic local overrides — reset only when task identity changes
 	let localOverrides = $state<Partial<Task>>({});
@@ -380,7 +390,7 @@
 				if (v !== undefined) payload[field] = v;
 			}
 			await updateTask(payload).updates(
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				...listRefreshTargets(),
 				getTask(task.id),
 				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
 				...additionalQueriesToUpdate
@@ -403,7 +413,7 @@
 		approvalLoading = true;
 		try {
 			await approveTask({ taskId: task.id }).updates(
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				...listRefreshTargets(),
 				getTask(task.id),
 				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
 				...additionalQueriesToUpdate
@@ -422,7 +432,7 @@
 		approvalLoading = true;
 		try {
 			await rejectTask(task.id).updates(
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				...listRefreshTargets(),
 				getTask(task.id),
 				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
 				...additionalQueriesToUpdate
@@ -441,7 +451,7 @@
 		approvalLoading = true;
 		try {
 			await reopenTask({ taskId: task.id }).updates(
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				...listRefreshTargets(),
 				getTask(task.id),
 				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
 				...additionalQueriesToUpdate

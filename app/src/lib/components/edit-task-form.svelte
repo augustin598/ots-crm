@@ -16,6 +16,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import type { Task } from '$lib/server/db/schema';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { getTaskLiveQueries } from '$lib/components/task-live-queries-context';
 	import { getPriorityDotColor, getStatusDotColor } from '$lib/components/task-kanban-utils';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
@@ -32,6 +33,9 @@
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
+	// Instanțele live ale paginii gazdă (undefined pe paginile care nu le
+	// publică — atunci cădem pe vechea reconstrucție de argumente).
+	const liveTaskQueries = getTaskLiveQueries();
 
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
@@ -203,7 +207,9 @@
 				recurringInterval: isRecurring ? recurringInterval : undefined,
 				recurringEndDate: isRecurring && recurringEndDate ? recurringEndDate : undefined
 			}).updates(
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true }),
+				...(liveTaskQueries?.() ?? [
+					getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })
+				]),
 				getTask(task.id),
 				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
 				...additionalQueriesToUpdate

@@ -8,6 +8,7 @@
 	import { updateTaskPosition, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
 	import { formatStatus } from './task-kanban-utils';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { getTaskLiveQueries } from '$lib/components/task-live-queries-context';
 	import { toast } from 'svelte-sonner';
 	import { tick } from 'svelte';
 	import TaskCard, { type AssigneeInfo, type TagInfo, type SubtaskProgress } from './task-card.svelte';
@@ -55,6 +56,9 @@
 
 	// Get filterParams from context (set by parent page) or use empty object as fallback
 	const filterParams = getTaskFilters();
+	// Instanțele live ale paginii gazdă (undefined pe paginile care nu le
+	// publică — atunci cădem pe vechea reconstrucție de argumente).
+	const liveTaskQueries = getTaskLiveQueries();
 
 	// Column order per design 1:1 (tasks-data.jsx STATUSES order):
 	// pending → todo → in-progress → review → done → blocked
@@ -280,7 +284,7 @@
 	// Build the full .updates() list for position changes
 	function buildPositionUpdates(involvesDone: boolean) {
 		const updates: any[] = [
-			getTasks({ ...(filterParams as any || {}), excludeCompleted: true })
+			...(liveTaskQueries?.() ?? [getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })])
 		];
 		if (involvesDone) {
 			for (let p = 1; p <= doneLoadedPages; p++) {
