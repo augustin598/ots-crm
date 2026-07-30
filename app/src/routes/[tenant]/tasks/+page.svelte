@@ -40,6 +40,7 @@
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
+	import { setTaskLiveQueries } from '$lib/components/task-live-queries-context';
 
 	const tenantSlug = $derived(page.params.tenant || '');
 
@@ -113,6 +114,12 @@
 	// Stats query — separate (no excludeCompleted) so live counts stay accurate even in kanban view.
 	const statsTasksQuery = $derived(getTasks({ ...filterParams }));
 	const statsTasks = $derived(statsTasksQuery.current || []);
+
+	// Instanțele live pe care orice mutație (dialog, kanban, panel) trebuie să
+	// le reîmprospăteze. Getter — citește $derived-urile la momentul apelului,
+	// deci reflectă mereu filtrele/view-ul curent.
+	const liveTaskQueries = () => [tasksQuery, statsTasksQuery];
+	setTaskLiveQueries(liveTaskQueries);
 
 	function isDueToday(d: Date | string | null | undefined): boolean {
 		if (!d) return false;
@@ -291,25 +298,13 @@
 		}).length
 	);
 
-	function getStatsRefreshQueries() {
-		return [
-			getTasks({
-				...filterParams,
-				excludeCompleted:
-					view.current === 'kanban' && !filterParams.status ? true : undefined,
-				include: { subtasks: true, tags: true, assignees: true }
-			}),
-			getTasks({ ...filterParams })
-		];
-	}
-
 	async function handleBulkPause() {
 		if (selectedIds.size === 0 || bulkBusy) return;
 		const ids = [...selectedIds];
 		bulkBusy = true;
 		try {
 			const res = await bulkUpdateTaskStatus({ taskIds: ids, newStatus: 'blocked' }).updates(
-				...getStatsRefreshQueries()
+				...liveTaskQueries()
 			);
 			toast.success(
 				res.changed > 0
@@ -330,7 +325,7 @@
 		const ids = [...selectedIds];
 		bulkBusy = true;
 		try {
-			const res = await bulkDuplicateTasks(ids).updates(...getStatsRefreshQueries());
+			const res = await bulkDuplicateTasks(ids).updates(...liveTaskQueries());
 			toast.success(`${res.duplicated} task-uri duplicate`);
 			clearSelection();
 		} catch (e) {
@@ -354,7 +349,7 @@
 		}
 		bulkBusy = true;
 		try {
-			const res = await bulkDeleteTasks(ids).updates(...getStatsRefreshQueries());
+			const res = await bulkDeleteTasks(ids).updates(...liveTaskQueries());
 			toast.success(`${res.deleted} task-uri șterse`);
 			// Close detail panel if it was for one of the deleted tasks
 			if (taskIdPanel.current && ids.includes(taskIdPanel.current)) {
@@ -392,7 +387,7 @@
 
 		try {
 			await deleteTask(taskId).updates(
-				getTasks({ ...filterParams, excludeCompleted: view.current === 'kanban' && !filterParams.status ? true : undefined }),
+				...liveTaskQueries(),
 				getCompletedTasks({ ...(filterParams as any), page: 1, pageSize: 20 })
 			);
 			if (taskIdPanel.current === taskId) {
