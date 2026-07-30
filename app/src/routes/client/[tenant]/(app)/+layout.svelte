@@ -32,6 +32,10 @@
 	// Modulul Content e un layout edge-to-edge cu breadcrumb propriu (Content › Website ›
 	// Editor); ascunde topbar-ul shell + scoate p-6 din <main> ca să stea flush.
 	const isContentRoute = $derived(/^\/client\/[^/]+\/content(\/|$)/.test(currentPath));
+	// La fel și detaliul de task: are breadcrumb propriu (⚙ › Tasks › titlu) în
+	// client-task-detail-body — fără topbar-ul shell (dubla breadcrumb-ul) și fără p-6.
+	const isTaskDetailRoute = $derived(/^\/client\/[^/]+\/tasks\/[^/]+(\/|$)/.test(currentPath));
+	const isBareRoute = $derived(isContentRoute || isTaskDetailRoute);
 	const isRestrictedRoute = $derived(
 		restrictedPrefixes.some((prefix) => currentPath.startsWith(`/client/${tenantSlug}${prefix}`))
 	);
@@ -306,7 +310,7 @@
 		/>
 	</Sidebar>
 	<SidebarInset>
-		{#if !isContentRoute}
+		{#if !isBareRoute}
 			<OtsTopbar groups={clientGroups} {pathPrefix} />
 		{/if}
 		{#if (data.userCompanies?.length ?? 0) > 1}
@@ -318,7 +322,7 @@
 				/>
 			</header>
 		{/if}
-		<main class="flex-1 {isContentRoute ? '' : 'p-6'}">
+		<main class="flex-1 {isBareRoute ? '' : 'p-6'}">
 			{#if data.accessRestriction?.isRestricted && isRestrictedRoute}
 				<div class="relative min-h-[60vh]">
 					<div class="blur-sm pointer-events-none select-none" aria-hidden="true">
