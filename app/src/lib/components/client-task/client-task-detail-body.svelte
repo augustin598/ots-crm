@@ -3,6 +3,7 @@
 	import type { Task } from '$lib/server/db/schema';
 	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
+	import { getTaskEmails } from '$lib/remotes/task-emails.remote';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ClientTaskPageHead from './client-task-page-head.svelte';
@@ -38,6 +39,10 @@
 
 	const clientQuery = $derived(task?.clientId ? getClient(task.clientId) : null);
 	const client = $derived(clientQuery?.current);
+
+	// Pur informativ: serverul întoarce pentru portal doar {id, subject, emailDate}.
+	const taskEmailsQuery = $derived(task?.id ? getTaskEmails(task.id) : null);
+	const taskEmails = $derived(taskEmailsQuery?.current ?? []);
 
 	const createdByName = $derived.by(() => {
 		if (!task?.createdByUserId) return null;
@@ -141,7 +146,7 @@
 							{task.title}
 						</h1>
 
-						<ClientTaskPills {task} tags={task.tags ?? []} />
+						<ClientTaskPills {task} tags={task.tags ?? []} emails={taskEmails} />
 
 						<ClientTaskDescription description={task.description} />
 

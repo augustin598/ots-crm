@@ -2,17 +2,22 @@
 <script lang="ts">
 	import type { Task } from '$lib/server/db/schema';
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
+	import MailIcon from '@lucide/svelte/icons/mail';
 	import { formatPriority, formatStatus } from '$lib/components/task-kanban-utils';
 	import { isTaskOverdue } from '$lib/utils/task-filters';
 
 	type TagInfo = { id?: string; name: string; color?: string | null };
+	// Pur informativ („se lucrează pe task din emailul X"): serverul trimite
+	// în portal doar subiect + dată — fără snippet/expeditor/corp.
+	type EmailInfo = { id: string; subject: string | null; emailDate: Date | string | null };
 
 	type Props = {
 		task: Task;
 		tags: TagInfo[];
+		emails?: EmailInfo[];
 	};
 
-	let { task, tags }: Props = $props();
+	let { task, tags, emails = [] }: Props = $props();
 
 	function statusPill(s: string | null) {
 		switch (s) {
@@ -91,6 +96,20 @@
 			class="ct-pill inline-flex items-center rounded-full bg-[#f1f5f9] px-3 py-1.5 text-[12px] font-bold text-[#64748b]"
 		>
 			#{t.name}
+		</span>
+	{/each}
+	{#each emails as e (e.id)}
+		<span
+			class="ct-pill inline-flex max-w-[320px] items-center gap-1.5 rounded-full bg-[#eef2ff] px-3 py-1.5 text-[12px] font-bold text-[#4f46e5]"
+			title={e.subject ?? 'Email asociat'}
+		>
+			<MailIcon class="h-[11px] w-[11px] shrink-0" />
+			<span class="truncate">Din email: {e.subject || 'fără subiect'}</span>
+			{#if e.emailDate}
+				<span class="shrink-0 font-semibold opacity-70">
+					{new Date(e.emailDate).toLocaleDateString('ro-RO')}
+				</span>
+			{/if}
 		</span>
 	{/each}
 </div>

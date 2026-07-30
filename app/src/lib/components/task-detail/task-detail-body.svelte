@@ -80,6 +80,7 @@
 	import TaskDetailHeader from './task-detail-header.svelte';
 	import TaskCommentThread from './task-comment-thread.svelte';
 	import TaskActivityTimeline from './task-activity-timeline.svelte';
+	import TaskEmailSection from './task-email-section.svelte';
 
 	interface Props {
 		task: (Task & { subtasks?: any[]; tags?: any[]; assignees?: any[] }) | null;
@@ -635,6 +636,11 @@
 				<!-- MAIN COLUMN -->
 				<div class="w-full min-w-0 p-6 md:flex-1">
 					<div class="space-y-6">
+
+						<!-- Emailuri asociate (doar admin app; nu se montează în portal) -->
+						{#if !isClient}
+							<TaskEmailSection taskId={currentTask.id} clientId={currentTask.clientId} />
+						{/if}
 
 						<!-- Metadata row -->
 						<div
@@ -1397,6 +1403,11 @@
 					</div>
 				</div>
 			</div>
+
+			<!-- Emailuri asociate (doar admin app; nu se montează în portal) -->
+			{#if !isClient}
+				<TaskEmailSection taskId={currentTask.id} clientId={currentTask.clientId} />
+			{/if}
 
 			<!-- Metadata grid -->
 			<div class="grid gap-4 md:grid-cols-2">

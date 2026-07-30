@@ -51,29 +51,13 @@ mock.module('$lib/server/db', () => ({
 	}
 }));
 
-// ─── Schema mock ──────────────────────────────────────────────────────────────
-// CRITICAL: eagerly load the REAL schema module BEFORE mocking — vezi
-// comentariul din tasks.remote.test.ts (registry-ul global de mock-uri Bun
-// partajat între fișierele de test din același proces).
+// ─── Schema ───────────────────────────────────────────────────────────────────
+// Folosim schema REALĂ, fără mock.module: registry-ul global de mock-uri Bun e
+// partajat între fișierele de test din același proces, iar un mock parțial de
+// aici ar suprascrie schema pentru fișierele vecine (vezi comentariul CRITICAL
+// din tasks.remote.test.ts). Fake-ul de DB de mai sus ignoră oricum argumentele
+// din where/orderBy, deci coloanele reale drizzle funcționează nemodificate.
 await import('$lib/server/db/schema');
-
-const col = (n: string) => n;
-
-mock.module('$lib/server/db/schema', () => ({
-	task: {
-		id: col('id'), tenantId: col('tenantId'), clientId: col('clientId'),
-		title: col('title'), status: col('status'), createdAt: col('createdAt')
-	},
-	taskEmail: {
-		id: col('id'), tenantId: col('tenantId'), taskId: col('taskId'),
-		gmailMessageId: col('gmailMessageId'), gmailThreadId: col('gmailThreadId'),
-		subject: col('subject'), fromEmail: col('fromEmail'), snippet: col('snippet'),
-		emailDate: col('emailDate'), linkedByUserId: col('linkedByUserId'), createdAt: col('createdAt')
-	},
-	client: { id: col('id'), tenantId: col('tenantId'), name: col('name'), email: col('email') },
-	user: { id: col('id'), email: col('email') },
-	tenantUser: { tenantId: col('tenantId'), userId: col('userId'), role: col('role') }
-}));
 
 // ─── Gmail client mock ────────────────────────────────────────────────────────
 
