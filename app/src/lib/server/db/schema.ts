@@ -336,6 +336,32 @@ export const task = sqliteTable('task', {
 	index('task_client_idx').on(t.clientId)
 ]);
 
+// Emailuri Gmail asociate unui task. Metadatele (subiect/expeditor/dată/snippet)
+// se copiază la momentul asocierii ca să nu apelăm Gmail API la fiecare render;
+// corpul complet se încarcă on-demand (doar owner/admin — inboxul e personal).
+export const taskEmail = sqliteTable('task_email', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	taskId: text('task_id')
+		.notNull()
+		.references(() => task.id),
+	gmailMessageId: text('gmail_message_id').notNull(),
+	gmailThreadId: text('gmail_thread_id'),
+	subject: text('subject'),
+	fromEmail: text('from_email'),
+	snippet: text('snippet'),
+	emailDate: timestamp('email_date', { withTimezone: true, mode: 'date' }),
+	linkedByUserId: text('linked_by_user_id').references(() => user.id),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+}, (t) => [
+	index('task_email_tenant_task_idx').on(t.tenantId, t.taskId),
+	uniqueIndex('task_email_task_message_uq').on(t.taskId, t.gmailMessageId)
+]);
+
 export const contractTemplate = sqliteTable('contract_template', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
@@ -1056,6 +1082,18 @@ export const hostingAccount = sqliteTable(
 		 * Editable from the "Plată & Factură" tab in the account edit dialog.
 		 */
 		paymentMethod: text('payment_method').notNull().default('op'),
+		/**
+		 * Referința plății asociate metodei de mai sus. Semnificația depinde de metodă:
+		 *  - 'op'   → nr. ordinului de plată / extrasului de cont
+		 *  - 'cash' → nr. chitanței emise offline
+		 *  - 'card' → id-ul tranzacției (Stripe `pi_...` / `txn_...`), completat AUTOMAT
+		 *             din ultima factură încasată cu cardul; manual doar pentru POS offline
+		 *             (cod de autorizare), când nu există tranzacție Stripe.
+		 * Editabilă din tab-ul „Plată & Factură" al dialogului de editare cont.
+		 */
+		paymentReference: text('payment_reference'),
+		/** Comentariu liber pe plată (vizibil doar staff-ului), lângă `paymentReference`. */
+		paymentNote: text('payment_note'),
 		lastSyncedAt: text('last_synced_at'),
 		/**
 		 * DA reconcile status — set by `reconcileHostingWithDA` command on the
@@ -3277,7 +3315,23 @@ export const taskRelations = relations(task, ({ one, many }) => ({
 	materials: many(taskMarketingMaterial),
 	subtasks: many(subtask),
 	taskToTags: many(taskToTag),
-	assignees: many(taskAssignee)
+	assignees: many(taskAssignee),
+	emails: many(taskEmail)
+}));
+
+export const taskEmailRelations = relations(taskEmail, ({ one }) => ({
+	task: one(task, {
+		fields: [taskEmail.taskId],
+		references: [task.id]
+	}),
+	tenant: one(tenant, {
+		fields: [taskEmail.tenantId],
+		references: [tenant.id]
+	}),
+	linkedBy: one(user, {
+		fields: [taskEmail.linkedByUserId],
+		references: [user.id]
+	})
 }));
 
 export const taskCommentRelations = relations(taskComment, ({ one, many }) => ({
@@ -4339,6 +4393,8 @@ export type Milestone = typeof milestone.$inferSelect;
 export type NewMilestone = typeof milestone.$inferInsert;
 export type Task = typeof task.$inferSelect;
 export type NewTask = typeof task.$inferInsert;
+export type TaskEmail = typeof taskEmail.$inferSelect;
+export type NewTaskEmail = typeof taskEmail.$inferInsert;
 export type TaskComment = typeof taskComment.$inferSelect;
 export type NewTaskComment = typeof taskComment.$inferInsert;
 export type TaskCommentAttachment = typeof taskCommentAttachment.$inferSelect;
