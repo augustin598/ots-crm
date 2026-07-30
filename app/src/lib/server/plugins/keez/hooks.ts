@@ -4,6 +4,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from './factory';
 import { mapInvoiceToKeez, generateNextInvoiceNumber } from './mapper';
+import { keezUpdateSkipReason } from './update-guard';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
@@ -700,6 +701,24 @@ export const onInvoiceUpdated: HookHandler<InvoiceUpdatedEvent> = async (event) 
 
 	// Only push updates if the invoice was previously synced to Keez
 	if (!invoice.keezExternalId) {
+		return;
+	}
+
+	// Nu trimite update-uri pe care Keez nu le poate accepta: documente deja
+	// validate (imutabile — se corectează prin storno) sau schimbări pur interne
+	// de încasare. Fără guard, orice „marchează ca plătită" pe o factură care nu
+	// mai e ultima din serie pica cu 400 ERROR_DOCUMENT_DATE_GRATER_THEN_LAST_INVOICE_DATE.
+	const skipReason = keezUpdateSkipReason(invoice, event.previousInvoice);
+	if (skipReason) {
+		logInfo('keez', `Skipping Keez update push for invoice ${invoice.id} (${skipReason})`, {
+			tenantId,
+			metadata: {
+				invoiceId: invoice.id,
+				keezExternalId: invoice.keezExternalId,
+				keezStatus: invoice.keezStatus,
+				reason: skipReason
+			}
+		});
 		return;
 	}
 
