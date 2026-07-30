@@ -17,6 +17,10 @@
 		additionalDomains: string[] | null;
 		autoRenew: boolean;
 		paymentMethod: 'card' | 'op' | 'cash';
+		/** Nr. OP / nr. chitanță / id tranzacție card (auto pentru card). */
+		paymentReference: string | null;
+		/** Comentariu liber pe plată. */
+		paymentNote: string | null;
 		notes: string | null;
 		tags: string[] | null;
 	};
@@ -74,6 +78,8 @@
 		additionalDomains: string[];
 		autoRenew: boolean;
 		paymentMethod: 'card' | 'op' | 'cash';
+		paymentReference: string;
+		paymentNote: string;
 		notes: string;
 		tags: string[];
 	};
@@ -93,6 +99,8 @@
 			additionalDomains: a.additionalDomains ?? [],
 			autoRenew: a.autoRenew,
 			paymentMethod: a.paymentMethod ?? 'op',
+			paymentReference: a.paymentReference ?? '',
+			paymentNote: a.paymentNote ?? '',
 			notes: a.notes ?? '',
 			tags: a.tags ?? []
 		};
@@ -112,6 +120,13 @@
 			initializedFor = account.id;
 			draft = buildDraft(account);
 			currentStatus = account.status;
+			referenceCache = buildReferenceCache(account);
+			lastPaymentMethod = account.paymentMethod ?? 'op';
+			// Istoricul e per cont — altfel tranzacția detectată automat pentru card
+			// ar rămâne cea a contului precedent.
+			paymentHistory = null;
+			paymentError = null;
+			if (activeTab === 'payment') void loadPaymentHistory();
 		}
 	});
 
@@ -147,6 +162,100 @@
 		activeTab = t;
 		if (t === 'payment') void loadPaymentHistory();
 	}
+
+	// ---------- Referință & comentariu pe plată ----------
+	// Referința aparține metodei (nr. OP ≠ nr. chitanță ≠ id tranzacție card), deci
+	// o ținem separat per metodă: dacă staff-ul comută dus-întors nu pierde ce a tastat.
+	function buildReferenceCache(a: EditableAccount): Record<'card' | 'op' | 'cash', string> {
+		const cache: Record<'card' | 'op' | 'cash', string> = { card: '', op: '', cash: '' };
+		cache[a.paymentMethod ?? 'op'] = a.paymentReference ?? '';
+		return cache;
+	}
+
+	// svelte-ignore state_referenced_locally
+	let referenceCache = $state(buildReferenceCache(account));
+	// svelte-ignore state_referenced_locally
+	let lastPaymentMethod = $state<'card' | 'op' | 'cash'>(account.paymentMethod ?? 'op');
+
+	function onPaymentMethodChange(next: 'card' | 'op' | 'cash'): void {
+		if (next === lastPaymentMethod) return;
+		referenceCache[lastPaymentMethod] = draft.paymentReference;
+		lastPaymentMethod = next;
+		draft.paymentReference = referenceCache[next];
+	}
+
+	/**
+	 * Tranzacția cu cardul detectată din istoricul de facturi ale contului: primul
+	 * `stripePaymentIntentId` (sau `externalTransactionId`) găsit. Asocierea se face
+	 * automat — plățile prin Stripe nu se tastează de mână.
+	 */
+	const detectedCardTxn = $derived.by(() => {
+		for (const row of paymentHistory ?? []) {
+			const txn = row.stripePaymentIntentId ?? row.externalTransactionId;
+			if (txn) return { txn, invoiceNumber: row.invoiceNumber };
+		}
+		return null;
+	});
+
+	// Auto-completare: la „card", dacă nu există deja o referință tastată manual
+	// (ex: cod de autorizare POS), o legăm de tranzacția detectată.
+	$effect(() => {
+		if (draft.paymentMethod !== 'card') return;
+		const detected = detectedCardTxn;
+		if (detected && !draft.paymentReference.trim()) {
+			draft.paymentReference = detected.txn;
+		}
+	});
+
+	const cardTxnLinked = $derived(
+		draft.paymentMethod === 'card' &&
+			!!detectedCardTxn &&
+			draft.paymentReference.trim() === detectedCardTxn.txn
+	);
+
+	function linkDetectedCardTxn(): void {
+		if (detectedCardTxn) draft.paymentReference = detectedCardTxn.txn;
+	}
+
+	type ReferenceField = {
+		label: string;
+		placeholder: string;
+		hint: string;
+		readonly: boolean;
+	};
+
+	const referenceField = $derived.by((): ReferenceField => {
+		if (draft.paymentMethod === 'op') {
+			return {
+				label: 'Referință plată (OP / extras)',
+				placeholder: 'ex: OP 4471 din 12.07.2026',
+				hint: 'Numărul ordinului de plată sau al extrasului pe care a venit încasarea.',
+				readonly: false
+			};
+		}
+		if (draft.paymentMethod === 'cash') {
+			return {
+				label: 'Nr. chitanță',
+				placeholder: 'ex: chitanța 0034',
+				hint: 'Chitanța emisă offline — pentru cash Keez nu generează factură fiscală.',
+				readonly: false
+			};
+		}
+		if (cardTxnLinked && detectedCardTxn) {
+			return {
+				label: 'Tranzacție card asociată',
+				placeholder: '',
+				hint: `Asociată automat cu factura ${detectedCardTxn.invoiceNumber}.`,
+				readonly: true
+			};
+		}
+		return {
+			label: 'Tranzacție card asociată',
+			placeholder: 'ex: cod autorizare POS',
+			hint: 'Se completează automat la prima încasare prin Stripe. Pentru POS offline, treci codul de autorizare.',
+			readonly: false
+		};
+	});
 
 	// ---------- Cycle / total math ----------
 	const CYCLE_LABEL: Record<string, string> = {
@@ -324,6 +433,8 @@
 			additionalDomains: draft.additionalDomains.length > 0 ? draft.additionalDomains : null,
 			tags: draft.tags.length > 0 ? draft.tags : null,
 			notes: draft.notes || null,
+			paymentReference: draft.paymentReference.trim() || null,
+			paymentNote: draft.paymentNote.trim() || null,
 			startDate: draft.startDate || null,
 			nextDueDate: draft.nextDueDate || null
 		});
@@ -357,6 +468,8 @@
 				additionalDomains: draft.additionalDomains,
 				autoRenew: draft.autoRenew,
 				paymentMethod: draft.paymentMethod,
+				paymentReference: draft.paymentReference.trim() || null,
+				paymentNote: draft.paymentNote.trim() || null,
 				notes: draft.notes || null,
 				tags: draft.tags
 			});
@@ -754,7 +867,72 @@
 					Stabilește cum se procesează facturile recurente pentru acest cont.
 					<strong>Cash</strong> = chitanță emisă offline, Keez nu generează factură fiscală.
 				</p>
-				<PaymentMethodPicker bind:value={draft.paymentMethod} size="sm" />
+				<PaymentMethodPicker
+					bind:value={draft.paymentMethod}
+					size="sm"
+					onchange={onPaymentMethodChange}
+				/>
+
+				<!-- Rând contextual: referința plății (adaptată metodei) + comentariu liber -->
+				<div class="grid gap-3 pt-1 sm:grid-cols-2">
+					<div class="space-y-1">
+						<div class="flex items-center gap-2">
+							<label
+								for="payment-reference"
+								class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400"
+							>
+								{referenceField.label}
+							</label>
+							{#if cardTxnLinked}
+								<span
+									class="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+								>
+									<CreditCardIcon class="size-3" /> automat
+								</span>
+							{/if}
+						</div>
+						<input
+							id="payment-reference"
+							type="text"
+							bind:value={draft.paymentReference}
+							placeholder={referenceField.placeholder}
+							readonly={referenceField.readonly}
+							class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-[13px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 read-only:bg-slate-50 read-only:text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:read-only:bg-slate-900"
+						/>
+						<p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+							{referenceField.hint}
+						</p>
+						{#if draft.paymentMethod === 'card' && detectedCardTxn && !cardTxnLinked}
+							<button
+								type="button"
+								onclick={linkDetectedCardTxn}
+								class="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+							>
+								<CreditCardIcon class="size-3 shrink-0" />
+								<span class="shrink-0">Asociază tranzacția</span>
+								<span class="truncate font-mono">{detectedCardTxn.txn}</span>
+							</button>
+						{/if}
+					</div>
+					<div class="space-y-1">
+						<label
+							for="payment-comment"
+							class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400"
+						>
+							Comentariu
+						</label>
+						<input
+							id="payment-comment"
+							type="text"
+							bind:value={draft.paymentNote}
+							placeholder="ex: plătit de contabilitate, restul la următoarea factură"
+							class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800"
+						/>
+						<p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+							Notă liberă pe încasare, vizibilă doar staff-ului.
+						</p>
+					</div>
+				</div>
 			</section>
 			<section class="space-y-2 pt-3">
 				<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ultimele facturi pentru acest cont</div>
@@ -829,7 +1007,8 @@
 						</table>
 					</div>
 					<p class="text-[11px] text-slate-500">
-						Tab-ul este informativ. Metoda de plată și ID-urile de tranzacție sunt gestionate prin Stripe / modulul Facturare.
+						Lista de facturi este informativă — se generează din modulul Facturare. Metoda, referința
+						și comentariul de mai sus se salvează pe cont.
 					</p>
 				{:else if paymentHistory}
 					<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800">

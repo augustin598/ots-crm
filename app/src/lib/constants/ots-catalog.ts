@@ -403,7 +403,7 @@ export const CATEGORIES: Category[] = [
 			{ id: 'web-13', label: 'SSL + banner GDPR', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'web-14', label: 'PageSpeed 80+ (Core Web Vitals)', values: { bronze: false, silver: true, gold: true, platinum: true } },
 			{ id: 'web-15', label: 'Revizii incluse (rounds)', values: { bronze: 1, silver: 3, gold: 5, platinum: '8+' } },
-			{ id: 'web-16', label: 'Durată livrare', values: { bronze: '2-3 săpt', silver: '3-4 săpt', gold: '4-6 săpt', platinum: '6-10 săpt' } }
+			{ id: 'web-16', label: 'Durată livrare', values: { bronze: '1-2 săpt', silver: '2-3 săpt', gold: '3-4 săpt', platinum: '4-6 săpt' } }
 		]
 	},
 	{
@@ -584,10 +584,10 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 // Tarife orare pentru muncă peste scope-ul pachetelor fixed-price
 // (afișate în dialog pe serviciile din grupul `web-dev-apps`).
 export const HOURLY_RATES: { label: string; rate: number }[] = [
-	{ label: 'Development', rate: 35 },
-	{ label: 'Design UI/UX', rate: 40 },
-	{ label: 'Project Management', rate: 45 },
-	{ label: 'DevOps / API', rate: 50 }
+	{ label: 'Development', rate: 80 },
+	{ label: 'Design UI/UX', rate: 85 },
+	{ label: 'Project Management', rate: 90 },
+	{ label: 'DevOps / API', rate: 100 }
 ];
 
 // Sluguri pentru care `PackageComparisonDialog` afișează

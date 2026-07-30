@@ -66,7 +66,7 @@
 					<div
 						class="relative rounded-xl border {isRecommended
 							? 'border-primary ring-2 ring-primary/30'
-							: colors.border} {colors.metallic} p-5 flex flex-col shadow-md overflow-hidden"
+							: colors.border} {colors.metallic} p-5 flex flex-col shadow-md"
 					>
 						{#if isRecommended}
 							<span
@@ -77,7 +77,7 @@
 							</span>
 						{/if}
 						<div
-							class="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/50 to-transparent dark:from-white/10"
+							class="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-xl bg-gradient-to-b from-white/50 to-transparent dark:from-white/10"
 						></div>
 						<div class="relative">
 						<div class="flex items-center gap-2 mb-3">

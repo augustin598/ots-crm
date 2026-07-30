@@ -783,6 +783,10 @@ const UpdateAccountSchema = v.object({
 	additionalDomains: v.optional(v.nullable(v.array(v.string()))),
 	autoRenew: v.optional(v.boolean()),
 	paymentMethod: v.optional(v.picklist(['card', 'op', 'cash'])),
+	// Referință + comentariu pe plată (nr. OP / nr. chitanță / id tranzacție card).
+	// Trimise mereu împreună cu `paymentMethod` din tab-ul „Plată & Factură".
+	paymentReference: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(120)))),
+	paymentNote: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(500)))),
 	notes: v.optional(v.nullable(v.string())),
 	tags: v.optional(v.nullable(v.array(v.string())))
 });
@@ -873,6 +877,9 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 	if (data.additionalDomains !== undefined) updates.additionalDomains = data.additionalDomains;
 	if (data.autoRenew !== undefined) updates.autoRenew = data.autoRenew;
 	if (data.paymentMethod !== undefined) updates.paymentMethod = data.paymentMethod;
+	if (data.paymentReference !== undefined)
+		updates.paymentReference = data.paymentReference?.trim() || null;
+	if (data.paymentNote !== undefined) updates.paymentNote = data.paymentNote?.trim() || null;
 	if (data.notes !== undefined) updates.notes = data.notes;
 	if (data.tags !== undefined) updates.tags = data.tags;
 
