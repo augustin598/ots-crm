@@ -10,6 +10,12 @@ import { getAttachment, getEmail } from '$lib/server/gmail/client';
  * Descarcă un atașament dintr-un email asociat unui task.
  * Gmail LIVE → doar owner/admin (inboxul e emailul personal al adminului;
  * staff vede doar metadatele salvate, clientul din portal doar subiect+dată).
+ *
+ * Atașamentul e identificat prin INDEX, nu prin attachmentId: ID-urile de
+ * atașamente Gmail sunt efemere (se schimbă la fiecare messages.get), deci un
+ * id obținut de client dintr-un fetch anterior nu s-ar mai potrivi aici.
+ * Indexul e stabil în payload-ul mesajului; id-ul proaspăt vine din propriul
+ * nostru getEmail de mai jos.
  */
 export const GET: RequestHandler = async (event) => {
 	const { params, locals } = event;
@@ -19,6 +25,9 @@ export const GET: RequestHandler = async (event) => {
 	if (role !== 'owner' && role !== 'admin') {
 		throw error(403, 'Doar administratorii pot descărca atașamente din email.');
 	}
+
+	const index = Number.parseInt(params.index, 10);
+	if (!Number.isInteger(index) || index < 0) throw error(400, 'Index atașament invalid');
 
 	const [row] = await db
 		.select({
@@ -38,10 +47,10 @@ export const GET: RequestHandler = async (event) => {
 	// Numele/mime-ul vin din mesajul Gmail, nu din query params (nu avem
 	// încredere în client pentru Content-Disposition).
 	const email = await getEmail(locals.tenant.id, row.gmailMessageId);
-	const meta = email.attachments.find((a) => a.id === params.attachmentId);
+	const meta = email.attachments[index];
 	if (!meta) throw error(404, 'Atașament negăsit');
 
-	const buf = await getAttachment(locals.tenant.id, row.gmailMessageId, params.attachmentId);
+	const buf = await getAttachment(locals.tenant.id, row.gmailMessageId, meta.id);
 	return new Response(new Uint8Array(buf), {
 		headers: {
 			'Content-Type': meta.mimeType,

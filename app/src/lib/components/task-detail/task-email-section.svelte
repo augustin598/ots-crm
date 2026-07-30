@@ -30,6 +30,14 @@
 	} from '$lib/remotes/task-emails.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 
+	type TaskEmailRow = {
+		id: string;
+		subject: string | null;
+		fromEmail: string | null;
+		snippet: string | null;
+		emailDate: Date | null;
+		gmailMessageId: string;
+	};
 	type SearchResult = {
 		gmailMessageId: string;
 		gmailThreadId: string;
@@ -55,7 +63,9 @@
 	);
 
 	const emailsQuery = $derived(getTaskEmails(taskId));
-	const emails = $derived(emailsQuery.current ?? []);
+	// Componenta se montează DOAR în admin app (staff), unde serverul întoarce
+	// mereu rândurile complete — shape-ul redus e doar pentru portalul clientului.
+	const emails = $derived((emailsQuery.current ?? []) as TaskEmailRow[]);
 
 	const clientQuery = $derived(clientId ? getClient(clientId) : null);
 	const clientEmail = $derived(clientQuery?.current?.email ?? null);
@@ -198,7 +208,7 @@
 									<button
 										type="button"
 										class="block max-w-full truncate text-left text-sm font-semibold hover:underline"
-										title={'subject' in e ? (e.subject ?? '') : ''}
+										title={e.subject ?? ''}
 										onclick={() => openBody(e.id)}
 									>
 										{e.subject || '(fără subiect)'}
@@ -207,9 +217,9 @@
 									<p class="truncate text-sm font-semibold">{e.subject || '(fără subiect)'}</p>
 								{/if}
 								<p class="mt-0.5 truncate text-xs text-muted-foreground">
-									{'fromEmail' in e && e.fromEmail ? `${e.fromEmail} · ` : ''}{fmtDate(e.emailDate)}
+									{e.fromEmail ? `${e.fromEmail} · ` : ''}{fmtDate(e.emailDate)}
 								</p>
-								{#if 'snippet' in e && e.snippet}
+								{#if e.snippet}
 									<p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{e.snippet}</p>
 								{/if}
 							</div>
@@ -217,18 +227,16 @@
 								<div
 									class="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100"
 								>
-									{#if 'gmailMessageId' in e}
-										<a
-											href={gmailUrl(e.gmailMessageId)}
-											target="_blank"
-											rel="noopener noreferrer"
-											class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-											title="Deschide în Gmail"
-											aria-label="Deschide în Gmail"
-										>
-											<ExternalLinkIcon class="h-3.5 w-3.5" />
-										</a>
-									{/if}
+									<a
+										href={gmailUrl(e.gmailMessageId)}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+										title="Deschide în Gmail"
+										aria-label="Deschide în Gmail"
+									>
+										<ExternalLinkIcon class="h-3.5 w-3.5" />
+									</a>
 									<button
 										type="button"
 										class="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
@@ -349,10 +357,13 @@
 				<div>
 					<p class="mb-1.5 text-xs font-semibold text-muted-foreground">Atașamente</p>
 					<ul class="space-y-1">
-						{#each bodyData.attachments as att (att.id)}
+						<!-- Link pe INDEX, nu pe att.id: ID-urile de atașamente Gmail sunt
+						     efemere (se schimbă la fiecare messages.get) — endpointul își ia
+						     singur id-ul proaspăt din poziția din mesaj. -->
+						{#each bodyData.attachments as att, i (att.id)}
 							<li>
 								<a
-									href={`/${page.params.tenant}/api/task-emails/${bodyEmailId}/attachments/${att.id}`}
+									href={`/${page.params.tenant}/api/task-emails/${bodyEmailId}/attachments/${i}`}
 									class="inline-flex items-center gap-1.5 text-sm text-[#1877F2] hover:underline"
 									download
 								>
