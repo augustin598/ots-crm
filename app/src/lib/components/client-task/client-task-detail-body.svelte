@@ -8,6 +8,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ClientTaskPageHead from './client-task-page-head.svelte';
 	import ClientTaskPills from './client-task-pills.svelte';
+	import ClientTaskEmailsCard from './client-task-emails-card.svelte';
 	import ClientTaskDescription from './client-task-description.svelte';
 	import ClientTaskComments from './client-task-comments.svelte';
 	import ClientTaskRail from './client-task-rail.svelte';
@@ -146,7 +147,9 @@
 							{task.title}
 						</h1>
 
-						<ClientTaskPills {task} tags={task.tags ?? []} emails={taskEmails} />
+						<ClientTaskPills {task} tags={task.tags ?? []} />
+
+						<ClientTaskEmailsCard emails={taskEmails} />
 
 						<ClientTaskDescription description={task.description} />
 
