@@ -211,6 +211,14 @@ describe('linkTaskEmail', () => {
 		expect((inserted.snippet as string).length).toBeLessThanOrEqual(200);
 	});
 
+	test('email deja asociat → no-op idempotent, fără insert', async () => {
+		currentEvent = staffEvent('admin');
+		queryQueue.push([{ id: 'task1' }]); // task lookup
+		queryQueue.push([{ id: 'te-existing' }]); // dup-check găsește rândul
+		await linkTaskEmail({ taskId: 'task1', gmailMessageId: 'm1' });
+		expect(insertedValues.length).toBe(0);
+	});
+
 	test('task inexistent în tenant → eroare, fără insert', async () => {
 		currentEvent = staffEvent('admin');
 		queryQueue.push([]); // task lookup gol

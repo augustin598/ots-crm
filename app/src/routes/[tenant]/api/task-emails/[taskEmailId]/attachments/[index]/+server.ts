@@ -54,7 +54,7 @@ export const GET: RequestHandler = async (event) => {
 	return new Response(new Uint8Array(buf), {
 		headers: {
 			'Content-Type': meta.mimeType,
-			'Content-Disposition': `attachment; filename="${meta.filename.replace(/"/g, '')}"`,
+			'Content-Disposition': `attachment; filename="${meta.filename.replace(/[\r\n"]/g, '')}"`,
 			'Cache-Control': 'private, no-store'
 		}
 	});

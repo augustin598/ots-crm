@@ -135,6 +135,21 @@ export const linkTaskEmail = command(
 			.limit(1);
 		if (!task) throw new Error('Task not found');
 
+		// Idempotent: emailul e deja asociat → no-op (altfel indexul unic ar
+		// produce un 500 generic în prod, unde mesajele Error nu ajung la client).
+		const [existing] = await db
+			.select({ id: table.taskEmail.id })
+			.from(table.taskEmail)
+			.where(
+				and(
+					eq(table.taskEmail.taskId, taskId),
+					eq(table.taskEmail.gmailMessageId, gmailMessageId),
+					eq(table.taskEmail.tenantId, event.locals.tenant.id)
+				)
+			)
+			.limit(1);
+		if (existing) return;
+
 		// Metadatele se copiază ACUM ca staff/portal să nu aibă nevoie de Gmail.
 		const email = await getEmail(event.locals.tenant.id, gmailMessageId);
 		await db.insert(table.taskEmail).values({
