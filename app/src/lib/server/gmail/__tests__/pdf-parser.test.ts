@@ -61,4 +61,38 @@ describe('parseInvoiceText — nr. factură', () => {
 		const r = parseInvoiceText('Your new invoice available now\nTotal in EUR 5,00');
 		expect(r.invoiceNumber).toBeUndefined();
 	});
+
+	it('nu ia numărul din adresă ("Str. ... nr. 128"), ia numărul facturii', () => {
+		const text = `Adresa: Str. Aviatorilor nr. 128, Sector 1, Bucuresti
+Factura nr. 900123
+Data: 01-01-2026`;
+		const r = parseInvoiceText(text);
+		expect(r.invoiceNumber).toBe('900123');
+	});
+
+	it('nu ia numărul din citarea unui ordin ("Ordinului nr. 2634/2015"), ia numărul din "Invoice number"', () => {
+		const text = `Conform Ordinului nr. 2634/2015
+Invoice number: INV-4482
+Date: 2026-01-01`;
+		const r = parseInvoiceText(text);
+		expect(r.invoiceNumber).toBe('INV-4482');
+	});
+});
+
+describe('parseInvoiceText — normalizare sume (separatori mii/zecimale)', () => {
+	it('"1.234,56" (format european cu separator de mii) → 123456 bani, RON din antetul de coloană', () => {
+		const text = `Valoare fara TVA - RON -
+Total de plata (TVA inclus) 1.234,56`;
+		const r = parseInvoiceText(text);
+		expect(r.amount).toBe(123456);
+		expect(r.currency).toBe('RON');
+	});
+});
+
+describe('parseInvoiceText — grossPatterns "grand total"', () => {
+	it('"Grand total: 25.00 USD" → 2500 bani, USD', () => {
+		const r = parseInvoiceText('Grand total: 25.00 USD');
+		expect(r.amount).toBe(2500);
+		expect(r.currency).toBe('USD');
+	});
 });

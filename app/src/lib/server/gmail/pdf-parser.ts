@@ -29,11 +29,21 @@ export async function extractInvoiceDataFromPdf(buffer: Buffer): Promise<PdfExtr
 function parseBareAmount(str: string): number | null {
 	let s = str.trim();
 	if (!s) return null;
-	const hasCommaAsDecimal = s.includes(',') && !s.includes('.');
-	if (hasCommaAsDecimal) {
+	const hasComma = s.includes(',');
+	const hasDot = s.includes('.');
+	if (hasComma && hasDot) {
+		// Both a thousands and a decimal separator are present. The separator that
+		// appears LAST in the string is the decimal one — handles both the European
+		// "1.234,56" (dot=thousands, comma=decimal) and the US "1,234.56" (reverse).
+		const lastComma = s.lastIndexOf(',');
+		const lastDot = s.lastIndexOf('.');
+		if (lastComma > lastDot) {
+			s = s.replace(/\./g, '').replace(',', '.');
+		} else {
+			s = s.replace(/,/g, '');
+		}
+	} else if (hasComma) {
 		s = s.replace(',', '.');
-	} else {
-		s = s.replace(/,/g, '');
 	}
 	const amount = Math.round(parseFloat(s) * 100);
 	return !isNaN(amount) && amount > 0 ? amount : null;
@@ -54,13 +64,21 @@ export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 
 	// --- Invoice Number ---
 	// Patterns: "Invoice #123", "Invoice Number: 123", "Factura nr. 123", "Rechnung Nr. 123"
+	// Order matters: text.match() returns the first match found, so the more specific,
+	// keyword-anchored patterns MUST come before the generic "nr." pattern — otherwise
+	// a street number ("Str. Aviatorilor nr. 128") or a law citation ("Ordinului nr.
+	// 2634/2015") gets picked up before the real invoice number.
 	const invoicePatterns = [
-		/document\s+number\s*[:\-–]?\s*([\w\-/.]+)/i,
-		/\bnr\.?\s+(\d{3,})\b/i,
+		// 1. Explicit invoice/factura/rechnung keyword patterns
 		/(?:invoice|factur[aă]|rechnung)\s*(?:number|num[aă]rul|nr\.?|no\.?|#|num[aă]r)\s*[:\-–]?\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă]|rechnung)\s*#\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă])\s*:\s*([\w\-/.]+)/i,
 		/\bnum[aă]rul facturii:\s*(\d+)/i,
+		// 2. "Document number" (INWX and similar)
+		/document\s+number\s*[:\-–]?\s*([\w\-/.]+)/i,
+		// 3. Generic "nr." pattern, anchored to line start to avoid matching mid-sentence
+		// occurrences like street numbers or legal citations
+		/(?:^|\n)\s*nr\.?\s+(\d{3,})\b/i,
 		// Specific vendor patterns
 		/\b([A-Z]{2}-\d{6,})\b/, // OVH: FR-1234567
 		/\bINV-[\w-]+\b/i, // AWS: INV-xxxxx
@@ -71,7 +89,7 @@ export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 		const match = text.match(pattern);
 		if (match) {
 			const num = match[1] || match[0];
-			// Sanity check: 3-30 chars și conține cel puțin o cifră (respinge "available" etc.)
+			// Sanity check: 3-30 chars and contains at least one digit (rejects "available" etc.)
 			if (num.length >= 3 && num.length <= 30 && /\d/.test(num)) {
 				result.invoiceNumber = num.replace(/^[:\-–\s]+/, '').trim();
 				break;
