@@ -13,11 +13,15 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
+import { logWarning, serializeError } from '$lib/server/logger';
 
 /** Numele folosit când Gmail nu raportează niciun filename pentru atașament. */
 const FALLBACK_FILENAME = 'atasament.pdf';
 
-/** Câte id-uri trimitem într-un singur `IN (...)` (limita de parametri libSQL). */
+/**
+ * Câte id-uri trimitem într-un singur `IN (...)`. Prag conservator ales de noi —
+ * limita reală SQLite (SQLITE_MAX_VARIABLE_NUMBER) e 32766.
+ */
 const ID_CHUNK_SIZE = 200;
 
 /**
@@ -92,10 +96,18 @@ export async function recordDownload(
 				}
 			});
 	} catch (err) {
-		console.warn(
-			`[Gmail evidență] Nu am putut înregistra descărcarea ${gmailMessageId}/${filename}:`,
-			err
-		);
+		// Toată rațiunea tabelei e auditabilitatea, deci o scriere pierdută în tăcere
+		// e cel mai prost rezultat posibil: logăm explicit, nu doar în consolă.
+		logWarning('gmail', 'Nu am putut înregistra descărcarea atașamentului', {
+			tenantId,
+			userId: userId ?? undefined,
+			metadata: {
+				gmailMessageId,
+				attachmentFilename: filename,
+				error: serializeError(err)
+			},
+			stackTrace: err instanceof Error ? err.stack : undefined
+		});
 	}
 }
 

@@ -3,6 +3,8 @@ import { error } from '@sveltejs/kit';
 import { requireStaff } from '$lib/server/get-actor';
 import { getEmail, getAttachment } from '$lib/server/gmail/client';
 import { recordDownload, sanitizeAttachmentFilename } from '$lib/server/gmail/download-evidence';
+import { mapGmailError } from '$lib/server/gmail/errors';
+import { logWarning, serializeError } from '$lib/server/logger';
 
 /**
  * Descarcă un singur atașament dintr-un email Gmail.
@@ -25,12 +27,37 @@ export const GET: RequestHandler = async (event) => {
 
 	const tenantId = event.locals.tenant.id;
 
+	// Browserul navighează direct la acest GET, deci o eroare Gmail nemapată i-ar
+	// arăta pagina HTML de eroare a SvelteKit în loc de fișier. Traducem în statusuri
+	// distincte: 409 = reconectează Gmail, 404 = emailul nu mai există, 502 = Gmail e jos.
+	const failGmail = (err: unknown): never => {
+		const mapped = mapGmailError(err);
+		logWarning('gmail', 'Descărcare atașament eșuată', {
+			tenantId,
+			userId: event.locals.user?.id,
+			metadata: { gmailMessageId: messageId, index, kind: mapped.kind, error: serializeError(err) }
+		});
+		throw error(mapped.status, mapped.message);
+	};
+
 	// Refetch: id-urile de atașament sunt efemere — rezolvăm mereu proaspăt, după index
-	const email = await getEmail(tenantId, messageId);
-	const attachment = email.attachments[index];
+	let email: Awaited<ReturnType<typeof getEmail>>;
+	try {
+		email = await getEmail(tenantId, messageId);
+	} catch (err) {
+		failGmail(err);
+	}
+
+	const attachment = email!.attachments[index];
 	if (!attachment) throw error(404, 'Atașamentul nu există');
 
-	const buffer = await getAttachment(tenantId, messageId, attachment.id);
+	let buffer: Buffer;
+	try {
+		buffer = await getAttachment(tenantId, messageId, attachment.id);
+	} catch (err) {
+		failGmail(err);
+	}
+
 	await recordDownload(
 		tenantId,
 		event.locals.user.id,
@@ -41,12 +68,12 @@ export const GET: RequestHandler = async (event) => {
 
 	const filename = sanitizeAttachmentFilename(attachment.filename);
 
-	return new Response(buffer as unknown as BodyInit, {
+	return new Response(buffer! as unknown as BodyInit, {
 		status: 200,
 		headers: {
 			'Content-Type': attachment.mimeType || 'application/pdf',
 			'Content-Disposition': `attachment; filename="${filename}"`,
-			'Content-Length': buffer.length.toString()
+			'Content-Length': buffer!.length.toString()
 		}
 	});
 };
