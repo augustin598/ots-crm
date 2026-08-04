@@ -14,6 +14,8 @@ import {
 	shouldExcludeEmail
 } from '$lib/server/gmail/parsers';
 import { getGmailStatus, updateLastSyncAt } from '$lib/server/gmail/auth';
+import { mapGmailError } from '$lib/server/gmail/errors';
+import { MISSING_DOCS_SCAN_LIMIT } from '$lib/utils/gmail-search';
 import { extractInvoiceDataFromPdf } from '$lib/server/gmail/pdf-parser';
 import { getDownloadedMap } from '$lib/server/gmail/download-evidence';
 import {
@@ -66,6 +68,36 @@ function normalizeExcludePatterns(patterns: string[]): string[] {
 		result.push(pattern);
 	}
 	return result;
+}
+
+/**
+ * Rearuncă o eroare Gmail cu statusul și mesajul ei acționabile.
+ *
+ * `searchEmails`/`getEmail` aruncă erori simple (`new Error('Gmail not connected')`,
+ * erori Gaxios), iar `hooks.server.ts` rescrie orice `Error` neprins în „A aparut o
+ * eroare interna.". Din toastul acela nu se mai vede NIMIC: nici că trebuie
+ * reconectat Gmail, nici că Gmail e picat. Detectorul din client (`isGmailAuthError`)
+ * caută statusul 409, care există doar dacă traducem eroarea aici — la fel ca rutele
+ * de descărcare, care folosesc `mapGmailError` de la început.
+ *
+ * Garda de conexiune din `GmailSearchTab.svelte` NU acoperă cazul: `getGmailStatus`
+ * raportează `connected: integration.isActive`, care rămâne `true` și după ce
+ * tokenul de refresh a fost revocat din contul Google.
+ */
+function throwGmailError(err: unknown, context: string): never {
+	const mapped = mapGmailError(err);
+	console.error(`[${context}] Eroare Gmail (${mapped.kind}):`, err);
+	svelteError(mapped.status, mapped.message);
+}
+
+/**
+ * O autorizare expirată nu e o problemă a UNUI mesaj: ar face să pice fiecare
+ * `getEmail` din buclă, iar utilizatorul ar primi „0 facturi găsite” în loc de un
+ * motiv. Buclele înghit erorile per-mesaj (un email șters nu are voie să pice tot
+ * rezultatul), dar pe asta o scot la suprafață.
+ */
+function rethrowIfGmailAuthError(err: unknown, context: string): void {
+	if (mapGmailError(err).kind === 'not-connected') throwGmailError(err, context);
 }
 
 /** Tiparele de excludere salvate pentru tenant (lista goală dacă n-are integrare). */
@@ -385,7 +417,9 @@ export const searchGmailForDownload = command(
 		});
 		console.log(`[Gmail Download Search] Search query: ${searchQuery}`);
 
-		const messages = await searchEmails(tenantId, searchQuery, data.maxResults || 150);
+		const messages = await searchEmails(tenantId, searchQuery, data.maxResults || 150).catch(
+			(err) => throwGmailError(err, 'Gmail Download Search')
+		);
 
 		const existingInvoices = await db
 			.select({ gmailMessageId: table.supplierInvoice.gmailMessageId })
@@ -437,6 +471,7 @@ export const searchGmailForDownload = command(
 					downloadedAt: downloadedMap.get(msg.id) ?? null
 				});
 			} catch (err) {
+				rethrowIfGmailAuthError(err, 'Gmail Download Search');
 				console.error(`[Gmail Download Search] Error on message ${msg.id}:`, err);
 			}
 		}
@@ -463,9 +498,17 @@ export const matchMissingDocuments = command(
 		const workbook = XLSX.read(Buffer.from(base64Data, 'base64'), { type: 'buffer' });
 		const sheet = workbook.Sheets[workbook.SheetNames[0]];
 		const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true }) as unknown[][];
-		const { payments, ignoredIncomes } = parseMissingDocumentsRows(rawRows);
+		const { payments, ignoredIncomes, invalidDates } = parseMissingDocumentsRows(rawRows);
 		if (payments.length === 0) {
-			return { payments: [], ignoredIncomes, candidatesFound: 0, excludedCount: 0 };
+			return {
+				payments: [],
+				ignoredIncomes,
+				invalidDates,
+				candidatesFound: 0,
+				excludedCount: 0,
+				totalFound: 0,
+				scanLimit: MISSING_DOCS_SCAN_LIMIT
+			};
 		}
 
 		// Fereastra de căutare: min/max data plăților, cu padding de 10 zile
@@ -485,7 +528,9 @@ export const matchMissingDocuments = command(
 		});
 		console.log(`[Missing Docs Match] Search query: ${searchQuery}`);
 
-		const messages = await searchEmails(tenantId, searchQuery, 200);
+		const messages = await searchEmails(tenantId, searchQuery, MISSING_DOCS_SCAN_LIMIT).catch(
+			(err) => throwGmailError(err, 'Missing Docs Match')
+		);
 
 		const downloadedMap = await getDownloadedMap(
 			tenantId,
@@ -553,6 +598,7 @@ export const matchMissingDocuments = command(
 					downloadedAt: downloadedMap.get(msg.id) ?? null
 				});
 			} catch (err) {
+				rethrowIfGmailAuthError(err, 'Missing Docs Match');
 				console.error(`[Missing Docs Match] Error on message ${msg.id}:`, err);
 			}
 		}
@@ -580,8 +626,18 @@ export const matchMissingDocuments = command(
 				matchMeta: m.match ? (candidateMeta.get(m.match.gmailMessageId) ?? null) : null
 			})),
 			ignoredIncomes,
+			/** Rânduri cu dată neinterpretabilă: nu se pot potrivi cu nicio factură. */
+			invalidDates,
 			candidatesFound: candidates.length,
-			excludedCount
+			excludedCount,
+			/**
+			 * Câte mesaje a întors Gmail și cu ce plafon am cerut. Când sunt egale,
+			 * căutarea a fost TRUNCHIATĂ: plățile ale căror facturi au rămas dincolo de
+			 * plafon apar drept „plată fără factură”, imposibil de deosebit de un document
+			 * care chiar lipsește. UI-ul avertizează pe baza acestei perechi.
+			 */
+			totalFound: messages.length,
+			scanLimit: MISSING_DOCS_SCAN_LIMIT
 		};
 	}
 );

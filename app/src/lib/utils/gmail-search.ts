@@ -16,6 +16,18 @@
  */
 export const MAX_ZIP_ITEMS = 100;
 
+/**
+ * Câte mesaje Gmail scanează potrivirea din modul „Documente lipsă”.
+ *
+ * SURSĂ UNICĂ: `matchMissingDocuments` din `$lib/remotes/supplier-invoices.remote.ts`
+ * o folosește la `searchEmails(...)` și o întoarce în răspuns, iar
+ * `MissingDocsMode.svelte` o afișează. Fereastra de căutare e min→max data plăților
+ * ±10 zile (~50 de zile pentru un export lunar), deci plafonul chiar se atinge: fără
+ * avertismentul din UI, o factură rămasă dincolo de el ar arăta identic cu un document
+ * care chiar lipsește.
+ */
+export const MISSING_DOCS_SCAN_LIMIT = 200;
+
 /** Câmpurile unei plăți de care depinde numele fișierului descărcat. */
 export interface PaymentLabelInput {
 	reference: string;
@@ -241,6 +253,30 @@ export function suggestedExclusionsToAdd(current: string[]): string[] {
 export function isXlsxFile(file: { name: string; type?: string }): boolean {
 	if (file.name.toLowerCase().endsWith('.xlsx')) return true;
 	return file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+}
+
+// ---- Erori Gmail văzute din client ----
+
+/**
+ * Statusul HTTP al unei erori remote/fetch, când există.
+ *
+ * `svelteError(status, mesaj)` de pe server ajunge pe client ca `HttpError`, care NU
+ * e `instanceof Error`, dar poartă `status` și `body.message` — vezi `remoteErrorMessage`.
+ */
+export function errorStatus(err: unknown): number | undefined {
+	const status = (err as { status?: unknown } | null)?.status;
+	return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * Autorizarea Gmail a expirat sau contul nu e conectat?
+ *
+ * 409 e statusul pe care `mapGmailError` ($lib/server/gmail/errors.ts) îl dă acestui
+ * caz, iar comenzile remote de căutare îl rearuncă prin `svelteError`. Verificarea pe
+ * text rămâne ca plasă de siguranță pentru erorile care nu trec prin acea traducere.
+ */
+export function isGmailAuthError(err: unknown, message: string): boolean {
+	return errorStatus(err) === 409 || /reconect|nu este conectat|not connected/i.test(message);
 }
 
 /** Sparge o listă în felii de cel mult `size` elemente (selecția → tranșe ZIP). */

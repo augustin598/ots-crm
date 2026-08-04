@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { error as svelteError } from '@sveltejs/kit';
 import {
 	MAX_ZIP_ITEMS,
+	MISSING_DOCS_SCAN_LIMIT,
 	SUGGESTED_EXCLUDE_PATTERNS,
 	addExcludePattern,
 	batchArchiveName,
 	chunk,
+	errorStatus,
+	isGmailAuthError,
 	isXlsxFile,
 	merchantShort,
 	nextDayIso,
@@ -161,6 +165,61 @@ describe('chunk', () => {
 
 	test('lista goală nu produce tranșe', () => {
 		expect(chunk([], MAX_ZIP_ITEMS)).toEqual([]);
+	});
+});
+
+describe('erori Gmail văzute din client', () => {
+	/**
+	 * Exact forma care ajunge în `catch`-ul unei comenzi remote: serverul aruncă
+	 * `error(status, mesaj)`, SvelteKit trimite `status` + `body` pe fir, iar clientul
+	 * reface un `HttpError` din aceleași două valori (aceeași clasă). HttpError NU e
+	 * `instanceof Error`, deci tiparele obișnuite de citire a mesajului nu merg pe el.
+	 */
+	function remoteError(status: number, message: string): { status: number; body: App.Error } {
+		try {
+			svelteError(status, message);
+		} catch (e) {
+			return e as { status: number; body: App.Error };
+		}
+		throw new Error('svelteError trebuie să arunce');
+	}
+
+	test('409-ul dat de mapGmailError declanșează reconectarea', () => {
+		const message =
+			'Contul Gmail nu este conectat sau autorizarea a expirat. Reconectează-l din Setări → Integrări.';
+		const err = remoteError(409, message);
+		expect(err).not.toBeInstanceOf(Error);
+		expect(err.body.message).toBe(message);
+		expect(errorStatus(err)).toBe(409);
+		expect(isGmailAuthError(err, err.body.message)).toBe(true);
+	});
+
+	test('502-ul de la Gmail picat NU cere reconectare', () => {
+		const message = 'Gmail nu a răspuns la timp. Încearcă din nou peste câteva momente.';
+		const err = remoteError(502, message);
+		expect(errorStatus(err)).toBe(502);
+		expect(isGmailAuthError(err, err.body.message)).toBe(false);
+	});
+
+	test('plasa de siguranță pe text prinde erorile netraduse', () => {
+		expect(isGmailAuthError(new Error('Gmail not connected'), 'Gmail not connected')).toBe(true);
+		expect(isGmailAuthError(null, 'Contul nu este conectat')).toBe(true);
+		expect(isGmailAuthError(null, 'Potrivirea documentelor a eșuat')).toBe(false);
+	});
+
+	test('o eroare fără status nu inventează unul', () => {
+		expect(errorStatus(new Error('boom'))).toBeUndefined();
+		expect(errorStatus(null)).toBeUndefined();
+		expect(errorStatus({ status: '409' })).toBeUndefined();
+	});
+});
+
+describe('plafoane', () => {
+	test('plafonul de scanare al potrivirii e o constantă comună, nu un literal', () => {
+		// Serverul o folosește la `searchEmails` și o întoarce în răspuns; clientul o
+		// afișează și compară `totalFound` cu ea ca să avertizeze la trunchiere.
+		expect(MISSING_DOCS_SCAN_LIMIT).toBeGreaterThan(MAX_ZIP_ITEMS);
+		expect(Number.isInteger(MISSING_DOCS_SCAN_LIMIT)).toBe(true);
 	});
 });
 

@@ -9,21 +9,20 @@ import { goto } from '$app/navigation';
 import { toast } from 'svelte-sonner';
 import { clientLogger } from '$lib/client-logger';
 import { remoteErrorMessage } from '$lib/utils/remote-error';
-import { MAX_ZIP_ITEMS, batchArchiveName, chunk, pluralRo } from '$lib/utils/gmail-search';
+import {
+	MAX_ZIP_ITEMS,
+	batchArchiveName,
+	chunk,
+	errorStatus,
+	isGmailAuthError,
+	pluralRo
+} from '$lib/utils/gmail-search';
 import { formatAmount, CURRENCIES, type Currency } from '$lib/utils/currency';
 
 // ---- Erori: mesajul REAL, nu „a apărut o eroare neașteptată” ----
-
-/** Statusul HTTP al unei erori remote/fetch, când există. */
-export function errorStatus(err: unknown): number | undefined {
-	const status = (err as { status?: unknown } | null)?.status;
-	return typeof status === 'number' ? status : undefined;
-}
-
-/** 409 e statusul pe care `mapGmailError` îl dă autorizării expirate. */
-export function isGmailAuthError(err: unknown, message: string): boolean {
-	return errorStatus(err) === 409 || /reconect|nu este conectat|not connected/i.test(message);
-}
+// `errorStatus` și `isGmailAuthError` stau în `$lib/utils/gmail-search` fiindcă sunt
+// pure și au nevoie de teste; modulul de față importă `$app/navigation` și nu poate fi
+// încărcat de `bun test`.
 
 /**
  * Loghează eroarea și o arată utilizatorului CU MESAJUL EI.

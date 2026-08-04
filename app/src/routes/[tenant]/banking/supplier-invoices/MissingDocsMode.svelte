@@ -11,7 +11,13 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { formatAmount } from '$lib/utils/currency';
-	import { MAX_ZIP_ITEMS, paymentLabel, pluralRo, toIsoDate } from '$lib/utils/gmail-search';
+	import {
+		MAX_ZIP_ITEMS,
+		MISSING_DOCS_SCAN_LIMIT,
+		paymentLabel,
+		pluralRo,
+		toIsoDate
+	} from '$lib/utils/gmail-search';
 	import { Download, Search } from '@lucide/svelte';
 	import XlsxDropZone from './XlsxDropZone.svelte';
 	import {
@@ -37,9 +43,6 @@
 
 	type MatchResponse = Awaited<ReturnType<typeof matchMissingDocuments>>;
 	type MatchedPayment = MatchResponse['payments'][number];
-
-	/** Câte emailuri scanează comanda de potrivire (`searchEmails(..., 200)` din remote). */
-	const MATCH_SCAN_LIMIT = 200;
 
 	let uploading = $state(false);
 	let elapsedSeconds = $state(0);
@@ -216,8 +219,9 @@
 			onFile={handleFile}
 		/>
 		<p class="mt-3 text-xs text-muted-foreground">
-			Scanăm cel mult {MATCH_SCAN_LIMIT} de emailuri din fereastra plăților (±10 zile). Potrivirea
-			unei luni întregi poate dura 1-3 minute — nu închide pagina cât rulează.
+			Scanăm cel mult {pluralRo(MISSING_DOCS_SCAN_LIMIT, 'email', 'emailuri')} din fereastra
+			plăților (±10 zile). Potrivirea unei luni întregi poate dura 1-3 minute — nu închide pagina
+			cât rulează.
 		</p>
 	</CardContent>
 </Card>
@@ -248,6 +252,7 @@
 					'factură găsită în Gmail',
 					'facturi găsite în Gmail'
 				)}
+				· {pluralRo(matchResult.totalFound, 'mesaj scanat', 'mesaje scanate')}
 				{#if matchResult.ignoredIncomes > 0}
 					· {pluralRo(matchResult.ignoredIncomes, 'încasare ignorată', 'încasări ignorate')}
 				{/if}
@@ -255,6 +260,29 @@
 					· {pluralRo(matchResult.excludedCount, 'email sărit', 'emailuri sărite')} prin excluderi
 				{/if}
 			</p>
+			<!--
+				Trunchiere: Gmail a întors exact cât am cerut, deci pot exista mesaje necuprinse.
+				Fără avertismentul ăsta, o plată a cărei factură a rămas dincolo de plafon arată
+				identic cu un document care chiar lipsește — și se caută manual degeaba.
+			-->
+			{#if matchResult.totalFound >= matchResult.scanLimit}
+				<p class="mt-0.5 font-medium text-amber-600 dark:text-amber-500">
+					Am scanat primele {pluralRo(matchResult.scanLimit, 'mesaj', 'mesaje')} — exact plafonul,
+					deci pot exista facturi necuprinse, iar unele plăți pot apărea greșit drept „fără
+					factură”. Restrânge intervalul exportului „Documente Lipsa” din Keez (o lună) și încarcă
+					fișierul din nou.
+				</p>
+			{/if}
+			{#if matchResult.invalidDates > 0}
+				<p class="mt-0.5 font-medium text-amber-600 dark:text-amber-500">
+					{pluralRo(
+						matchResult.invalidDates,
+						'plată cu dată necitită',
+						'plăți cu dată necitită'
+					)} — rândurile acestea nu se pot potrivi cu nicio factură. Exportă din nou din Keez, cu
+					data ca dată calendaristică, nu ca text.
+				</p>
+			{/if}
 			{#if matchRows.length > 0}
 				<p class="mt-0.5">
 					{pluralRo(matchCounts.sure, 'potrivire sigură', 'potriviri sigure')} · {pluralRo(
