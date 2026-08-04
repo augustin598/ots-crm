@@ -207,6 +207,9 @@ export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {
 		bodyLower.includes('payment confirmed') ||
 		bodyLower.includes('payment confirmation') ||
 		bodyLower.includes('paid') ||
+		bodyLower.includes('achitat') ||
+		bodyLower.includes('amount received') ||
+		bodyLower.includes('prepayment') ||
 		bodyLower.includes('plata confirmata') ||
 		bodyLower.includes('plată confirmată') ||
 		bodyLower.includes('incasat') ||

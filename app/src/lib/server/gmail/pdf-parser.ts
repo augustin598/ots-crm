@@ -7,6 +7,7 @@ export interface PdfExtractedInvoiceData {
 	currency?: string;
 	issueDate?: Date;
 	dueDate?: Date;
+	status?: 'paid';
 }
 
 /**
@@ -289,6 +290,11 @@ export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	if (!result.issueDate && foundDates.length > 0) {
 		const sorted = [...foundDates].sort((a, b) => a.date.getTime() - b.date.getTime());
 		result.issueDate = sorted[0].date;
+	}
+
+	// Paid detection from PDF text (only positive signal; absence means unknown)
+	if (/achitat|amount received|prepayment|paid in full|payment received/i.test(text)) {
+		result.status = 'paid';
 	}
 
 	return result;

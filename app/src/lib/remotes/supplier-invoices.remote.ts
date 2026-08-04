@@ -262,6 +262,7 @@ export const previewGmailInvoices = command(
 						}
 						if (!parsed.dueDate && pdfData.dueDate) parsed.dueDate = pdfData.dueDate;
 						if (!parsed.issueDate && pdfData.issueDate) parsed.issueDate = pdfData.issueDate;
+						if ((!parsed.status || parsed.status === 'pending') && pdfData.status) parsed.status = pdfData.status;
 					} catch {
 						// PDF parsing failed (encrypted/image-only) — continue with email data
 					}
@@ -354,6 +355,7 @@ export const importSelectedInvoices = command(
 						}
 						if (!parsed.dueDate && pdfData.dueDate) parsed.dueDate = pdfData.dueDate;
 						if (!parsed.issueDate && pdfData.issueDate) parsed.issueDate = pdfData.issueDate;
+						if ((!parsed.status || parsed.status === 'pending') && pdfData.status) parsed.status = pdfData.status;
 					} catch {
 						// PDF parsing failed — continue with email data
 					}
@@ -374,7 +376,7 @@ export const importSelectedInvoices = command(
 					tenantId,
 					supplierId,
 					invoiceNumber: parsed.invoiceNumber || null,
-					amount: parsed.amount || null,
+					amount: parsed.currency ? parsed.amount || null : null,
 					currency: parsed.currency || 'USD',
 					issueDate: parsed.issueDate || email.date,
 					dueDate: parsed.dueDate || null,

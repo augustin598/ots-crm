@@ -96,3 +96,15 @@ describe('parseInvoiceText — grossPatterns "grand total"', () => {
 		expect(r.currency).toBe('USD');
 	});
 });
+
+describe('parseInvoiceText — status', () => {
+	it('ROTLD: "Achitat cu (RRN)" => paid', () => {
+		expect(parseInvoiceText(ROTLD_TEXT).status).toBe('paid');
+	});
+	it('INWX: "Amount received by prepayment" => paid', () => {
+		expect(parseInvoiceText(INWX_TEXT).status).toBe('paid');
+	});
+	it('fără indicii => status undefined', () => {
+		expect(parseInvoiceText('Total in EUR 5,00').status).toBeUndefined();
+	});
+});
