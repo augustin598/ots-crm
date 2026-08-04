@@ -10,10 +10,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { Input } from '$lib/components/ui/input';
 	import { formatAmount } from '$lib/utils/currency';
 	import { MAX_ZIP_ITEMS, paymentLabel, pluralRo, toIsoDate } from '$lib/utils/gmail-search';
-	import { Download, Search, Upload } from '@lucide/svelte';
+	import { Download, Search } from '@lucide/svelte';
+	import XlsxDropZone from './XlsxDropZone.svelte';
 	import {
 		confidenceBadge,
 		confidenceLabel,
@@ -43,6 +43,7 @@
 
 	let uploading = $state(false);
 	let elapsedSeconds = $state(0);
+	let uploadedFileName = $state<string | null>(null);
 	let matchResult = $state<MatchResponse | null>(null);
 	/** Cheia unei selecții = indexul rândului + referința + mesajul Gmail potrivit. */
 	let selectedPayments = $state(new Set<string>());
@@ -125,17 +126,13 @@
 			: `${Math.floor(elapsedSeconds / 60)}m ${String(elapsedSeconds % 60).padStart(2, '0')}s`
 	);
 
-	async function handleFileChange(
-		event: Event & { currentTarget: EventTarget & HTMLInputElement }
-	) {
-		const input = event.currentTarget;
-		const file = input.files?.[0];
-		if (!file) return;
+	async function handleFile(file: File) {
 		uploading = true;
 		try {
 			const base64 = toBase64(await file.arrayBuffer());
 			const result = await matchMissingDocuments({ fileBase64: base64 });
 			matchResult = result;
+			uploadedFileName = file.name;
 			downloadedNow = new Map();
 			// Pre-bifăm doar potrivirile sigure care NU au fost deja descărcate — evidența
 			// de descărcare există exact ca să nu descărcăm de două ori aceeași lună.
@@ -150,7 +147,6 @@
 			reportError('gmail_match_missing_documents', err, 'Potrivirea documentelor a eșuat', tenantSlug);
 		} finally {
 			uploading = false;
-			input.value = '';
 		}
 	}
 
@@ -213,19 +209,12 @@
 		</CardDescription>
 	</CardHeader>
 	<CardContent>
-		<label class="flex cursor-pointer items-center gap-3">
-			<Upload class="h-4 w-4 shrink-0" />
-			<span class="text-sm whitespace-nowrap">
-				{uploading ? 'Se procesează...' : 'Alege fișierul XLSX'}
-			</span>
-			<Input
-				type="file"
-				accept=".xlsx"
-				class="max-w-sm"
-				disabled={uploading}
-				onchange={handleFileChange}
-			/>
-		</label>
+		<XlsxDropZone
+			fileName={uploadedFileName}
+			disabled={uploading}
+			busy={uploading}
+			onFile={handleFile}
+		/>
 		<p class="mt-3 text-xs text-muted-foreground">
 			Scanăm cel mult {MATCH_SCAN_LIMIT} de emailuri din fereastra plăților (±10 zile). Potrivirea
 			unei luni întregi poate dura 1-3 minute — nu închide pagina cât rulează.
@@ -261,6 +250,9 @@
 				)}
 				{#if matchResult.ignoredIncomes > 0}
 					· {pluralRo(matchResult.ignoredIncomes, 'încasare ignorată', 'încasări ignorate')}
+				{/if}
+				{#if matchResult.excludedCount > 0}
+					· {pluralRo(matchResult.excludedCount, 'email sărit', 'emailuri sărite')} prin excluderi
 				{/if}
 			</p>
 			{#if matchRows.length > 0}

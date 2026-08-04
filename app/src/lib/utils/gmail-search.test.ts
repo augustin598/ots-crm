@@ -1,15 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import {
 	MAX_ZIP_ITEMS,
+	SUGGESTED_EXCLUDE_PATTERNS,
+	addExcludePattern,
 	batchArchiveName,
 	chunk,
+	isXlsxFile,
 	merchantShort,
 	nextDayIso,
+	normalizeExcludePattern,
 	paymentLabel,
 	pluralRo,
 	previousMonthRange,
+	suggestedExclusionsToAdd,
 	toIsoDate
 } from './gmail-search';
+// Import de TEST, nu de client: verificăm că lista duplicată nu a divergat de sursă.
+import { SUGGESTED_EXCLUDE_PATTERNS as SERVER_SUGGESTIONS } from '../server/gmail/parsers/index';
 
 const basePayment = {
 	reference: '12326',
@@ -154,6 +161,79 @@ describe('chunk', () => {
 
 	test('lista goală nu produce tranșe', () => {
 		expect(chunk([], MAX_ZIP_ITEMS)).toEqual([]);
+	});
+});
+
+describe('excluderi de expeditori', () => {
+	test('sugestiile din client sunt identice cu cele de pe server', () => {
+		// Lista din `$lib/utils` e un duplicat deliberat (modulul de server nu poate
+		// ajunge în bundle-ul de client). Testul e singurul lucru care le ține la fel.
+		expect(SUGGESTED_EXCLUDE_PATTERNS).toEqual(SERVER_SUGGESTIONS);
+	});
+
+	test('acceptă domeniu, @domeniu și adresă completă', () => {
+		expect(normalizeExcludePattern('tiktok.com')).toEqual({ ok: true, pattern: 'tiktok.com' });
+		expect(normalizeExcludePattern('@Facebook.com')).toEqual({ ok: true, pattern: '@facebook.com' });
+		expect(normalizeExcludePattern('  Billing@Meta.com ')).toEqual({
+			ok: true,
+			pattern: 'billing@meta.com'
+		});
+	});
+
+	test('refuză intrările care nu pot fi un expeditor', () => {
+		expect(normalizeExcludePattern('')).toMatchObject({ ok: false });
+		// Fără punct nu e nici domeniu, nici adresă — serverul oricum ar arunca intrarea
+		expect(normalizeExcludePattern('tiktok')).toMatchObject({ ok: false });
+		expect(normalizeExcludePattern('tik tok.com')).toMatchObject({ ok: false });
+		expect(normalizeExcludePattern('a@b@c.com')).toMatchObject({ ok: false });
+		expect(normalizeExcludePattern('-tiktok.com')).toMatchObject({ ok: false });
+		expect(normalizeExcludePattern('tiktok..com')).toMatchObject({ ok: false });
+	});
+
+	test('mesajele de eroare sunt în română', () => {
+		const result = normalizeExcludePattern('tiktok');
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.error).toContain('Domeniul trebuie să arate');
+	});
+
+	test('adăugarea nu mută lista primită și refuză duplicatele', () => {
+		const current = ['tiktok.com'];
+		const added = addExcludePattern(current, 'Facebook.com');
+		expect(added).toEqual({ ok: true, patterns: ['tiktok.com', 'facebook.com'] });
+		expect(current).toEqual(['tiktok.com']);
+		expect(addExcludePattern(current, ' TIKTOK.com ')).toMatchObject({ ok: false });
+	});
+
+	test('sugestiile deja folosite nu mai sunt oferite (nici sub forma @domeniu)', () => {
+		expect(suggestedExclusionsToAdd([])).toEqual(SUGGESTED_EXCLUDE_PATTERNS);
+		expect(suggestedExclusionsToAdd(['tiktok.com', '@facebook.com'])).toEqual([
+			'facebookmail.com',
+			'meta.com',
+			'instagram.com',
+			'linkedin.com'
+		]);
+	});
+});
+
+describe('isXlsxFile', () => {
+	test('acceptă extensia, indiferent de MIME', () => {
+		expect(isXlsxFile({ name: 'Documente Lipsa.XLSX', type: '' })).toBe(true);
+		expect(isXlsxFile({ name: 'export.xlsx', type: 'application/octet-stream' })).toBe(true);
+	});
+
+	test('acceptă MIME-ul corect chiar și fără extensie', () => {
+		expect(
+			isXlsxFile({
+				name: 'export',
+				type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+			})
+		).toBe(true);
+	});
+
+	test('refuză celelalte formate', () => {
+		expect(isXlsxFile({ name: 'documente.xls', type: 'application/vnd.ms-excel' })).toBe(false);
+		expect(isXlsxFile({ name: 'factura.pdf', type: 'application/pdf' })).toBe(false);
+		expect(isXlsxFile({ name: 'export.csv', type: 'text/csv' })).toBe(false);
 	});
 });
 

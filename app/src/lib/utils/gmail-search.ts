@@ -144,6 +144,105 @@ export function previousMonthRange(now: Date = new Date()): { from: string; to: 
 	return { from: toIsoDate(first), to: toIsoDate(last) };
 }
 
+// ---- Excluderi de expeditori ----
+
+/**
+ * Sugestiile de excludere oferite în UI.
+ *
+ * DUPLICAT INTENȚIONAT al lui `SUGGESTED_EXCLUDE_PATTERNS` din
+ * `$lib/server/gmail/parsers/index.ts`: acela e modul de server (importă toți
+ * parserii, deci și clientul Gmail) și n-are ce căuta în bundle-ul de client.
+ * Divergența e prinsă de testul „sugestiile sunt identice cu cele de pe server”
+ * din `gmail-search.test.ts`, care compară cele două liste.
+ */
+export const SUGGESTED_EXCLUDE_PATTERNS: string[] = [
+	'tiktok.com',
+	'facebook.com',
+	'facebookmail.com',
+	'meta.com',
+	'instagram.com',
+	'linkedin.com'
+];
+
+/** Un domeniu cu cel puțin un punct: etichete alfanumerice legate prin cratime. */
+const DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+/** Partea dinaintea lui „@” dintr-o adresă. */
+const LOCAL_PART_PATTERN = /^[a-z0-9._%+-]+$/;
+
+export type ExcludePatternResult =
+	| { ok: true; pattern: string }
+	| { ok: false; error: string };
+
+/**
+ * Validează un tipar scris de utilizator și îl aduce la forma stocată (trim +
+ * minuscule), la fel ca `normalizeExcludePatterns` de pe server.
+ *
+ * Forme acceptate: `domeniu.com` (și subdomeniile lui), `@domeniu.com`,
+ * `user@domeniu.com`.
+ */
+export function normalizeExcludePattern(raw: string): ExcludePatternResult {
+	const pattern = raw.trim().toLowerCase();
+	if (!pattern) {
+		return { ok: false, error: 'Scrie un domeniu sau o adresă, de exemplu „tiktok.com”.' };
+	}
+	if (/\s/.test(pattern)) {
+		return { ok: false, error: 'Tiparul nu poate conține spații — adaugă expeditorii pe rând.' };
+	}
+	if (pattern.indexOf('@') !== pattern.lastIndexOf('@')) {
+		return { ok: false, error: 'Tiparul poate conține un singur „@”.' };
+	}
+	const at = pattern.indexOf('@');
+	const local = at > 0 ? pattern.slice(0, at) : '';
+	const domain = at === -1 ? pattern : pattern.slice(at + 1);
+	if (at > 0 && !LOCAL_PART_PATTERN.test(local)) {
+		return { ok: false, error: 'Partea dinaintea lui „@” conține caractere nepermise.' };
+	}
+	if (!DOMAIN_PATTERN.test(domain)) {
+		return {
+			ok: false,
+			error:
+				'Domeniul trebuie să arate ca „tiktok.com”: litere, cifre sau cratime și cel puțin un punct.'
+		};
+	}
+	return { ok: true, pattern };
+}
+
+/**
+ * Adaugă un tipar la listă, cu validare și fără duplicate. Întoarce lista NOUĂ —
+ * nu mutăm niciodată lista primită (starea din componentă se reasignează).
+ */
+export function addExcludePattern(
+	current: string[],
+	raw: string
+): { ok: true; patterns: string[] } | { ok: false; error: string } {
+	const result = normalizeExcludePattern(raw);
+	if (!result.ok) return result;
+	if (current.some((existing) => existing.toLowerCase() === result.pattern)) {
+		return { ok: false, error: `„${result.pattern}” e deja în listă.` };
+	}
+	return { ok: true, patterns: [...current, result.pattern] };
+}
+
+/**
+ * Sugestiile pe care lista curentă nu le acoperă încă. `tiktok.com` e considerat
+ * acoperit și de `@tiktok.com`: ambele opresc același expeditor, iar a-l oferi din
+ * nou ar produce o a doua intrare fără efect.
+ */
+export function suggestedExclusionsToAdd(current: string[]): string[] {
+	const used = new Set(current.map((pattern) => pattern.trim().toLowerCase().replace(/^@/, '')));
+	return SUGGESTED_EXCLUDE_PATTERNS.filter((suggestion) => !used.has(suggestion));
+}
+
+/**
+ * Fișierul tras peste zona de încărcare e exportul XLSX din Keez?
+ * Verificăm extensia, nu doar `type`: în drag & drop din unele surse (arhive,
+ * Outlook) MIME-ul ajunge gol sau `application/octet-stream`.
+ */
+export function isXlsxFile(file: { name: string; type?: string }): boolean {
+	if (file.name.toLowerCase().endsWith('.xlsx')) return true;
+	return file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+}
+
 /** Sparge o listă în felii de cel mult `size` elemente (selecția → tranșe ZIP). */
 export function chunk<T>(items: T[], size: number): T[][] {
 	if (size <= 0) return [items];
