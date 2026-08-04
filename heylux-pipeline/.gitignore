@@ -1,0 +1,5 @@
+# PDF-uri generate cu make-pdf.ts — artefacte de livrare, se regenerează din results/
+*.pdf
+
+# Symlink către app/node_modules (scripturile rulează cu depsurile aplicației)
+node_modules
