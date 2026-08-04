@@ -60,7 +60,7 @@ Facturi/emailuri cu data în fereastra **−3…+10 zile** față de data plăț
 Aliasuri (în cod, extensibil): `hetzner→[HETZNER]`, `google→[GOOGLE CLOUD, GOOGLE WORKSPACE, GOOGLE*]`, `directadmin→[DIRECTADMIN]`, `litespeed→[LITESPEED]`, `anthropic→[CLAUDE SUB, ANTHROPIC]`, `cursor→[CURSOR, ANYSPHERE]`, `inwx→[INWX]`, `openai→[OPENAI, CHATGPT]`, `rotld→[ROTLD, ICI]`.
 
 ### Praguri
-- **≥70 — match sigur** (verde): pre-bifat la „Selectează tot".
+- **≥70 ȘI potrivire de comerciant — match sigur** (verde): pre-bifat la „Selectează tot". Condiția de comerciant e obligatorie: suma exactă (+60) plus aceeași zi (+10) ating singure 70, iar la abonamente recurente cu aceeași sumă (două plăți de 29,00 USD într-o lună) asta ar eticheta drept „sigură" factura altui furnizor. Un match doar pe sumă rămâne „probabil" și îl confirmi tu.
 - **40–69 — probabil** (galben): utilizatorul confirmă manual.
 - **<40 — negăsit** (gri): plata rămâne evidențiată ca fără document, cu buton „Caută manual" (deschide Mod B pre-populat cu fereastra de date).
 
