@@ -3,6 +3,7 @@ import {
 	extractPaymentDetails,
 	parseMissingDocumentsRows,
 	matchPayments,
+	merchantTokens,
 	type PaymentRow,
 	type InvoiceCandidate
 } from '../payment-match';
@@ -15,6 +16,8 @@ const CLAUDE_COMMENT =
 	'  Plata la POS non-BT cu card VISA;EPOS 24/07/2026 Q0RRUWQV26H30SO TID:G0A3LMSE * CLAUDE SUB  +14152360599 US 42444505 valoare tranzactie: 211.56 EUR RRN:620514488579 comision tranzactie 0.00 RON;REF: 000NVPO262084soF; ';
 const FIDA_COMMENT =
 	'  Plata la POS;EPOS 03/08/2026 MID 644214659202RON MPY*fidasolutions Maramures ROM valoare trz: 8.00 RON RRN:322793237391 comision trz 0.00 RON  OD Order 533710000-853464267;REF: 044POSP2621517B3; ';
+const KESSELRING_COMMENT =
+	'  Plata la POS non-BT cu card VISA;EPOS 17/07/2026 4210252 TID:PAYW0006 MPY*KESSELRING SRL    ROZ  NOV RO 42444505 valoare tranzactie: 81.09 RON RRN:619811671945 comision tranzactie 0.00 RON;REF: 000NVPO262012NnP; ';
 
 describe('extractPaymentDetails', () => {
 	it('extrage suma și valuta ORIGINALĂ (nu RON) din comentariu', () => {
@@ -86,6 +89,42 @@ function candidate(over: Partial<InvoiceCandidate>): InvoiceCandidate {
 	};
 }
 
+describe('merchantTokens — fără fragmente din codurile bancare', () => {
+	// Codurile bancare (REF, RRN, TID, autorizări) sunt alfanumerice; dacă le spargem
+	// pe caractere non-alfabetice rămân fragmente ca NVPO care apar în ORICE plată cu cardul.
+	it('HETZNER: păstrează comerciantul, elimină NVPO din 000NVPO261975UOO', () => {
+		const tokens = merchantTokens(payment({ comment: HETZNER_COMMENT }));
+		expect(tokens).toContain('HETZNER');
+		expect(tokens).not.toContain('NVPO');
+	});
+	it('DIRECTADMIN: elimină RRDTDHDRM (9RRDTDHDRM9WVW9) și JRYLIO (TID:H9JRYLIO)', () => {
+		const tokens = merchantTokens(payment({ comment: DA_COMMENT }));
+		expect(tokens).toContain('DIRECTADMIN');
+		expect(tokens).not.toContain('RRDTDHDRM');
+		expect(tokens).not.toContain('JRYLIO');
+		expect(tokens).not.toContain('NVPO');
+	});
+	it('CLAUDE: elimină RRUWQV (Q0RRUWQV26H30SO) și LMSE (TID:G0A3LMSE)', () => {
+		const tokens = merchantTokens(payment({ comment: CLAUDE_COMMENT }));
+		expect(tokens).toContain('CLAUDE');
+		expect(tokens).not.toContain('RRUWQV');
+		expect(tokens).not.toContain('LMSE');
+		expect(tokens).not.toContain('NVPO');
+	});
+	it('FIDASOLUTIONS: elimină POSP (044POSP2621517B3), păstrează MARAMURES', () => {
+		const tokens = merchantTokens(payment({ comment: FIDA_COMMENT }));
+		expect(tokens).toContain('FIDASOLUTIONS');
+		expect(tokens).toContain('MARAMURES'); // face parte din descriptorul comerciantului
+		expect(tokens).not.toContain('POSP');
+	});
+	it('KESSELRING supraviețuiește (MPY*KESSELRING nu conține cifre)', () => {
+		const tokens = merchantTokens(payment({ comment: KESSELRING_COMMENT }));
+		expect(tokens).toContain('KESSELRING');
+		expect(tokens).not.toContain('NVPO');
+		expect(tokens).not.toContain('PAYW');
+	});
+});
+
 describe('matchPayments — scoring', () => {
 	it('sumă+valută+comerciant+dată apropiată => match sigur (>=70)', () => {
 		const res = matchPayments([payment({})], [candidate({})]);
@@ -106,6 +145,9 @@ describe('matchPayments — scoring', () => {
 				})
 			]
 		);
+		// Garda pe valută e invariantul central al modulului: fără ea, 968.77 RON s-ar
+		// lipi de o factură de 968.77 EUR. Verificăm ABSENȚA match-ului, nu doar 'sure'.
+		expect(res[0].match).toBeUndefined();
 		expect(res[0].confidence).not.toBe('sure');
 	});
 	it('doar comerciant, fără sumă => probabil, nu sigur', () => {
@@ -128,8 +170,6 @@ describe('matchPayments — scoring', () => {
 		expect(matched[0].reference).toBe('a'); // data mai apropiată de factură
 	});
 	it('furnizor FĂRĂ parser: match pe tokenul din descriere (KESSELRING)', () => {
-		const KESSELRING_COMMENT =
-			'  Plata la POS non-BT cu card VISA;EPOS 17/07/2026 4210252 TID:PAYW0006 MPY*KESSELRING SRL    ROZ  NOV RO 42444505 valoare tranzactie: 81.09 RON RRN:619811671945 comision tranzactie 0.00 RON;REF: 000NVPO262012NnP; ';
 		const res = matchPayments(
 			[
 				payment({
@@ -159,6 +199,24 @@ describe('matchPayments — scoring', () => {
 			[
 				candidate({
 					from: 'Online Payment <noreply@random.com>',
+					subject: 'Invoice',
+					amount: undefined,
+					currency: undefined,
+					supplierType: undefined
+				})
+			]
+		);
+		expect(res[0].match).toBeUndefined();
+	});
+
+	it('nu face match pe un fragment de referință bancară (NVPO)', () => {
+		// 000NVPO… e prefixul de referință BT prezent în ORICE plată cu cardul;
+		// un expeditor care conține din întâmplare „NVPO" nu e comerciantul plății.
+		const res = matchPayments(
+			[payment({})],
+			[
+				candidate({
+					from: 'NVPO Services <a@nvpo-invest.ro>',
 					subject: 'Invoice',
 					amount: undefined,
 					currency: undefined,

@@ -156,14 +156,28 @@ const MERCHANT_STOPWORDS = new Set([
 	'MPY'
 ]);
 
+/** Lungimea minimă a unui token de comerciant folosit ca semnal de rezervă. */
+const MIN_MERCHANT_TOKEN_LENGTH = 5;
+
 /**
  * Merchant tokens extracted from the statement description, for suppliers that
  * have no parser (and therefore no alias entry): "MPY*KESSELRING SRL" -> KESSELRING.
+ *
+ * Codurile bancare (REF, RRN, TID, coduri de autorizare) sunt alfanumerice: dacă le-am
+ * sparge direct pe caractere non-alfabetice ar rămâne fragmente pur alfabetice —
+ * „000NVPO261975UOO" -> NVPO, „TID:G0A3LMSE" -> LMSE — care nu au nicio legătură cu
+ * comerciantul. NVPO e chiar prefixul de referință BT, deci apare în ORICE plată cu
+ * cardul și ar produce match-uri false pe orice expeditor care îl conține întâmplător.
+ * De aceea aruncăm întâi orice token brut (delimitat de spații) care conține o cifră.
  */
-function merchantTokens(payment: PaymentRow): string[] {
+export function merchantTokens(payment: PaymentRow): string[] {
 	const source = (payment.comment + ' ' + (payment.partner || '')).toUpperCase();
-	return [...new Set(source.split(/[^A-Z]+/))].filter(
-		(w) => w.length >= 4 && !MERCHANT_STOPWORDS.has(w)
+	const words = source
+		.split(/\s+/)
+		.filter((raw) => !/\d/.test(raw)) // afară codurile bancare, înainte de spargere
+		.flatMap((raw) => raw.split(/[^A-Z]+/));
+	return [...new Set(words)].filter(
+		(w) => w.length >= MIN_MERCHANT_TOKEN_LENGTH && !MERCHANT_STOPWORDS.has(w)
 	);
 }
 
