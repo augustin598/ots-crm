@@ -6,7 +6,12 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, desc, gte, lte, like } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { searchEmails, getEmail, getAttachment } from '$lib/server/gmail/client';
-import { findParser, buildSearchQuery, buildInvoiceSearchQuery } from '$lib/server/gmail/parsers';
+import {
+	findParser,
+	buildSearchQuery,
+	buildInvoiceSearchQuery,
+	shouldExcludeEmail
+} from '$lib/server/gmail/parsers';
 import { getGmailStatus, updateLastSyncAt } from '$lib/server/gmail/auth';
 import { extractInvoiceDataFromPdf } from '$lib/server/gmail/pdf-parser';
 import { getDownloadedMap } from '$lib/server/gmail/download-evidence';
@@ -23,6 +28,53 @@ import { uploadBuffer } from '$lib/server/storage';
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
 	return encodeBase32LowerCase(bytes);
+}
+
+/**
+ * Citește tiparele de excludere din coloana JSON, apărat: o valoare coruptă
+ * (JSON invalid, alt tip) nu are voie să pice căutarea — doar dezactivează filtrul.
+ */
+function parseExcludePatterns(raw: string | null | undefined): string[] {
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter((p): p is string => typeof p === 'string')
+			.map((p) => p.trim())
+			.filter((p) => p.length > 0);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Normalizează lista înainte de salvare: trim, minuscule, fără duplicate
+ * (case-insensitive), fără intrări goale sau evident invalide (fără punct).
+ */
+function normalizeExcludePatterns(patterns: string[]): string[] {
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const raw of patterns) {
+		const pattern = raw.trim().toLowerCase();
+		if (!pattern) continue;
+		// Fără punct nu poate fi nici domeniu, nici adresă — ar exclude imprevizibil
+		if (!pattern.includes('.')) continue;
+		if (seen.has(pattern)) continue;
+		seen.add(pattern);
+		result.push(pattern);
+	}
+	return result;
+}
+
+/** Tiparele de excludere salvate pentru tenant (lista goală dacă n-are integrare). */
+async function getExcludePatternsForTenant(tenantId: string): Promise<string[]> {
+	const [integration] = await db
+		.select({ excludeEmails: table.gmailIntegration.excludeEmails })
+		.from(table.gmailIntegration)
+		.where(eq(table.gmailIntegration.tenantId, tenantId))
+		.limit(1);
+	return parseExcludePatterns(integration?.excludeEmails);
 }
 
 // ---- Queries ----
@@ -320,12 +372,15 @@ export const searchGmailForDownload = command(
 		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 
+		const excludePatterns = await getExcludePatternsForTenant(tenantId);
+
 		const searchQuery = buildInvoiceSearchQuery({
 			scope: data.scope ?? 'all',
 			parserIds: data.parserIds,
 			customEmails: data.customEmails,
 			dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
-			dateTo: data.dateTo ? new Date(data.dateTo) : undefined
+			dateTo: data.dateTo ? new Date(data.dateTo) : undefined,
+			excludeEmails: excludePatterns
 		});
 		console.log(`[Gmail Download Search] Search query: ${searchQuery}`);
 
@@ -343,9 +398,15 @@ export const searchGmailForDownload = command(
 		);
 
 		const results = [];
+		let excludedCount = 0;
 		for (const msg of messages) {
 			try {
 				const email = await getEmail(tenantId, msg.id);
+				// Centură și bretele: operatorii negativi din query sunt doar o optimizare
+				if (shouldExcludeEmail(email.from, excludePatterns)) {
+					excludedCount++;
+					continue;
+				}
 				const pdfAttachments = email.attachments
 					.map((a, index) => ({
 						index,
@@ -379,7 +440,7 @@ export const searchGmailForDownload = command(
 			}
 		}
 
-		return { results, totalFound: messages.length };
+		return { results, totalFound: messages.length, excludedCount };
 	}
 );
 
@@ -403,7 +464,7 @@ export const matchMissingDocuments = command(
 		const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true }) as unknown[][];
 		const { payments, ignoredIncomes } = parseMissingDocumentsRows(rawRows);
 		if (payments.length === 0) {
-			return { payments: [], ignoredIncomes, candidatesFound: 0 };
+			return { payments: [], ignoredIncomes, candidatesFound: 0, excludedCount: 0 };
 		}
 
 		// Fereastra de căutare: min/max data plăților, cu padding de 10 zile
@@ -414,7 +475,13 @@ export const matchMissingDocuments = command(
 		// Căutăm la ORICE expeditor cu PDF atașat, nu doar la furnizorii cu parser —
 		// altfel plățile către furnizori necunoscuți (Kesselring, fidasolutions etc.)
 		// n-ar găsi niciodată factura.
-		const searchQuery = buildInvoiceSearchQuery({ scope: 'all', dateFrom, dateTo });
+		const excludePatterns = await getExcludePatternsForTenant(tenantId);
+		const searchQuery = buildInvoiceSearchQuery({
+			scope: 'all',
+			dateFrom,
+			dateTo,
+			excludeEmails: excludePatterns
+		});
 		console.log(`[Missing Docs Match] Search query: ${searchQuery}`);
 
 		const messages = await searchEmails(tenantId, searchQuery, 200);
@@ -429,9 +496,15 @@ export const matchMissingDocuments = command(
 			{ pdfAttachments: Array<{ index: number; filename: string }>; downloadedAt: Date | null }
 		>();
 
+		let excludedCount = 0;
 		for (const msg of messages) {
 			try {
 				const email = await getEmail(tenantId, msg.id);
+				// Centură și bretele: operatorii negativi din query sunt doar o optimizare
+				if (shouldExcludeEmail(email.from, excludePatterns)) {
+					excludedCount++;
+					continue;
+				}
 				const pdfAttachments = email.attachments
 					.map((a, index) => ({ index, filename: a.filename, mimeType: a.mimeType }))
 					.filter(
@@ -490,7 +563,8 @@ export const matchMissingDocuments = command(
 				matchMeta: m.match ? (candidateMeta.get(m.match.gmailMessageId) ?? null) : null
 			})),
 			ignoredIncomes,
-			candidatesFound: candidates.length
+			candidatesFound: candidates.length,
+			excludedCount
 		};
 	}
 );
@@ -676,6 +750,63 @@ export const updateGmailSyncConfig = command(
 			.where(eq(table.gmailIntegration.id, integration.id));
 
 		return { success: true };
+	}
+);
+
+/**
+ * Excluderile de expeditori salvate pentru tenant — folosite atât de sincronizarea
+ * automată, cât și de tabul de căutare.
+ */
+export const getGmailExclusions = query(async (): Promise<string[]> => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	await requireStaff(event);
+
+	return getExcludePatternsForTenant(event.locals.tenant.id);
+});
+
+/**
+ * Salvează lista de excluderi din tabul de căutare.
+ *
+ * Deliberat separată de `updateGmailSyncConfig`: aceea cere TOATE câmpurile de
+ * configurare, deci un apel parțial de aici ar suprascrie setările de sincronizare.
+ */
+export const updateGmailExclusions = command(
+	v.object({ patterns: v.array(v.string()) }),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		await requireStaff(event);
+
+		const tenantId = event.locals.tenant.id;
+
+		const [integration] = await db
+			.select({ id: table.gmailIntegration.id })
+			.from(table.gmailIntegration)
+			.where(eq(table.gmailIntegration.tenantId, tenantId))
+			.limit(1);
+
+		if (!integration) {
+			throw new Error(
+				'Gmail nu este conectat pentru acest tenant. Conectează Gmail înainte de a salva excluderi.'
+			);
+		}
+
+		const patterns = normalizeExcludePatterns(data.patterns);
+
+		await db
+			.update(table.gmailIntegration)
+			.set({
+				excludeEmails: patterns.length > 0 ? JSON.stringify(patterns) : null,
+				updatedAt: new Date()
+			})
+			.where(eq(table.gmailIntegration.id, integration.id));
+
+		return { patterns };
 	}
 );
 

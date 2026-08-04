@@ -1,21 +1,21 @@
 import type { GmailMessage } from '../client';
 import { cpanelParser } from './cpanel';
-import { whmcsParser } from './whmcs';
 import { hetznerParser } from './hetzner';
 import { googleParser } from './google';
 import { ovhParser } from './ovh';
 import { digitaloceanParser } from './digitalocean';
 import { awsParser } from './aws';
-import { litespeedParser } from './litespeed';
-import { tiktokParser } from './tiktok';
-import { anthropicParser } from './anthropic';
-import { metaParser } from './meta';
 import { linkedinParser } from './linkedin';
 import { openaiParser } from './openai';
 import { cloudflareParser } from './cloudflare';
 import { directadminParser } from './directadmin';
 import { cursorParser } from './cursor';
 import { inwxParser } from './inwx';
+import { whmcsParser } from './whmcs';
+import { litespeedParser } from './litespeed';
+import { tiktokParser } from './tiktok';
+import { anthropicParser } from './anthropic';
+import { metaParser } from './meta';
 import { roSuppliersParser } from './ro-suppliers';
 import { genericParser } from './generic';
 
@@ -39,27 +39,49 @@ export interface SupplierParser {
 }
 
 /**
- * Registry of supplier parsers, ordered by specificity.
- * First match wins. Generic parser is always last.
+ * Registry of supplier parsers. First match wins, so ORDER encodes an
+ * invariant, not just "specificity":
+ *
+ * 1. DOMAIN-PRECISE matchers first — matchEmail relies ONLY on the sender's
+ *    from-domain (or a from-domain check ANDed with a subject keyword, e.g.
+ *    googleParser). These can never be hijacked by an unrelated supplier's
+ *    subject line, because they don't look at the subject at all (or only
+ *    look at it after the domain already matched).
+ * 2. SUBJECT-HEURISTIC matchers second — matchEmail returns true from a
+ *    subject keyword ALONE (from-domain OR subject-keyword), with no
+ *    from-domain requirement. Placed BEFORE a domain-precise parser, one of
+ *    these would silently hijack it: e.g. anthropicParser matches any subject
+ *    containing "claude", so "Your receipt from Cursor — Claude Sonnet usage"
+ *    from billing@cursor.com would mislabel the invoice as Anthropic's
+ *    instead of Cursor's if anthropicParser ran first. Keep these AFTER every
+ *    domain-precise parser.
+ * 3. CATCH-ALLS last — roSuppliersParser (matches on "factura" in the subject
+ *    with no domain requirement) and genericParser (any invoice-ish subject).
+ *
+ * See parsers.test.ts "nu se lasă umbrite de matcher-e pe subiect" for the
+ * regression this ordering guards against.
  */
 export const parserRegistry: SupplierParser[] = [
+	// --- domain-precise (from-domain only, or from-domain AND subject) ---
 	cpanelParser,
-	whmcsParser,
 	hetznerParser,
 	googleParser,
 	ovhParser,
 	digitaloceanParser,
 	awsParser,
-	litespeedParser,
-	tiktokParser,
-	anthropicParser,
-	metaParser,
 	linkedinParser,
 	openaiParser,
 	cloudflareParser,
 	directadminParser,
 	cursorParser,
 	inwxParser,
+	// --- subject-heuristic (from-domain OR subject keyword alone) ---
+	whmcsParser,
+	litespeedParser,
+	tiktokParser,
+	anthropicParser,
+	metaParser,
+	// --- catch-alls ---
 	roSuppliersParser,
 	genericParser
 ];
@@ -135,7 +157,62 @@ export interface InvoiceSearchOptions {
 	customEmails?: string[];
 	dateFrom?: Date;
 	dateTo?: Date;
+	/**
+	 * Tipare de expeditori de exclus permanent (chitanțe de publicitate etc.).
+	 * ATENȚIE: filtrarea din query e doar o optimizare — Gmail interpretează unele
+	 * tipare mai larg sau mai îngust decât ne așteptăm. Excluderea trebuie aplicată
+	 * ȘI pe rezultate, cu `shouldExcludeEmail`.
+	 */
+	excludeEmails?: string[];
 }
+
+/**
+ * Normalizează un tipar de excludere la operatorul negativ pe care îl înțelege Gmail.
+ *
+ * - `@domeniu.com` și `domeniu.com` → `-from:domeniu.com` (Gmail nu vrea „@" în față)
+ * - `user@domeniu.com`             → `-from:user@domeniu.com`
+ *
+ * Întoarce `null` pentru tiparele goale sau evident invalide (fără punct, cu spații),
+ * ca să nu injectăm în query un operator care ar exclude mai mult decât s-a cerut.
+ */
+export function toGmailExcludeOperator(pattern: string): string | null {
+	const trimmed = pattern.trim().toLowerCase();
+	if (!trimmed) return null;
+	const normalized = trimmed.startsWith('@') ? trimmed.slice(1) : trimmed;
+	if (!normalized || !normalized.includes('.')) return null;
+	// Un spațiu ar rupe query-ul: Gmail ar trata restul ca termen de căutare separat
+	if (/\s/.test(normalized)) return null;
+	return `-from:${normalized}`;
+}
+
+/**
+ * Sugestii de excludere oferite în UI cu un clic. NU se aplică automat —
+ * utilizatorul alege ce adaugă.
+ *
+ * Regula listei: doar platforme de publicitate/social, de unde vin chitanțe de
+ * reclame pe care contabilitatea nu le vrea în fluxul de facturi de furnizor.
+ * Furnizorii de infrastructură reali (Hetzner, OVH, Google Workspace, DirectAdmin…)
+ * NU au ce căuta aici — facturile lor trebuie să ajungă în Keez.
+ */
+export const SUGGESTED_EXCLUDE_PATTERNS: string[] = [
+	// Numit explicit de utilizator: chitanțele TikTok Ads. Potrivirea pe domeniu
+	// prinde și subdomeniile (ads.tiktok.com, business.tiktok.com).
+	'tiktok.com',
+	// Numit explicit de utilizator: Facebook/Meta Ads.
+	'facebook.com',
+	// Domeniul real de trimitere al notificărilor și chitanțelor Facebook.
+	'facebookmail.com',
+	// Meta Platforms — facturile de reclame migrate pe brandul nou.
+	'meta.com',
+	// Meta, partea de Instagram Ads.
+	'instagram.com',
+	// LinkedIn Ads / Campaign Manager.
+	'linkedin.com'
+	// Intenționat ABSENTE:
+	// - google.com → Google Ads trimite de pe payments-noreply@google.com, exact ca
+	//                Google Workspace. Excluderea ar arunca și facturi reale.
+	// - x.com      → potrivirea pe subșir de domeniu ar prinde fedex.com, linux.com etc.
+];
 
 /**
  * Interogare Gmail pentru tabul de descărcare. Intenționat mai largă decât
@@ -151,6 +228,14 @@ export function buildInvoiceSearchQuery(options: InvoiceSearchOptions): string {
 	}
 	if (options.dateFrom) query += ` after:${formatGmailDate(options.dateFrom)}`;
 	if (options.dateTo) query += ` before:${formatGmailDate(options.dateTo)}`;
+
+	// Excluderi persistente de expeditori — optimizare, nu garanție (vezi
+	// InvoiceSearchOptions.excludeEmails); rezultatele se refiltrează oricum.
+	const excludeOperators = (options.excludeEmails ?? [])
+		.map(toGmailExcludeOperator)
+		.filter((op): op is string => op !== null);
+	if (excludeOperators.length > 0) query += ` ${excludeOperators.join(' ')}`;
+
 	return query;
 }
 

@@ -4,7 +4,14 @@ import { cursorParser } from '../parsers/cursor';
 import { directadminParser } from '../parsers/directadmin';
 import { genericParser } from '../parsers/generic';
 import { googleParser } from '../parsers/google';
-import { buildInvoiceSearchQuery, detectStatus, findParser } from '../parsers/index';
+import {
+	SUGGESTED_EXCLUDE_PATTERNS,
+	buildInvoiceSearchQuery,
+	detectStatus,
+	findParser,
+	parseAmount,
+	toGmailExcludeOperator
+} from '../parsers/index';
 import { inwxParser } from '../parsers/inwx';
 import { openaiParser } from '../parsers/openai';
 import { roSuppliersParser } from '../parsers/ro-suppliers';
@@ -335,6 +342,23 @@ describe('parsere noi', () => {
 		expect(r.invoiceNumber).toBe('DA-2026-0099');
 	});
 
+	it('directadmin: cuvântul-cheie "receipt" e recunoscut ("Receipt #DA-2026-0099")', () => {
+		const r = directadminParser.parseInvoice(
+			makeEmail({
+				from: 'DirectAdmin <billing@directadmin.com>',
+				subject: 'Receipt #DA-2026-0099',
+				body: ''
+			})
+		);
+		expect(r.invoiceNumber).toBe('DA-2026-0099');
+	});
+
+	it('cursor: getSearchQuery acoperă și anysphere.com, nu doar cursor.com', () => {
+		expect(cursorParser.getSearchQuery()).toBe(
+			'(from:cursor.com OR from:anysphere.com) has:attachment filename:pdf'
+		);
+	});
+
 	it('cursor: extrage nr. chitanței din corp', () => {
 		const r = cursorParser.parseInvoice(
 			makeEmail({
@@ -360,6 +384,40 @@ describe('parsere noi', () => {
 	});
 });
 
+describe('parsere noi — nu se lasă umbrite de matcher-e pe subiect (ordine registru)', () => {
+	it('cursor.com nu e umbrit de anthropicParser ("...Claude Sonnet usage" în subiect)', () => {
+		expect(
+			findParser(
+				'Anysphere <billing@cursor.com>',
+				'Your receipt from Cursor — Claude Sonnet usage'
+			)?.id
+		).toBe('cursor');
+	});
+	it('directadmin.com nu e umbrit de whmcsParser ("WHMCS" în subiect)', () => {
+		expect(
+			findParser('DirectAdmin <billing@directadmin.com>', 'WHMCS module license invoice')?.id
+		).toBe('directadmin');
+	});
+});
+
+describe('parseAmount — separator zecimal: ultimul separator din text câștigă (bug: format german tratat ca mii+zecimale inversat)', () => {
+	it('format german cu miare de mii "1.234,56 EUR" => 123456 cenți (nu 23456)', () => {
+		expect(parseAmount('1.234,56 EUR')).toEqual({ amount: 123456, currency: 'EUR' });
+	});
+	it('format american cu virgulă de mii "1,234.56 USD" => 123456 cenți', () => {
+		expect(parseAmount('1,234.56 USD')).toEqual({ amount: 123456, currency: 'USD' });
+	});
+	it('format german "1.099,00 EUR" => 109900 cenți (nu 9900)', () => {
+		expect(parseAmount('1.099,00 EUR')).toEqual({ amount: 109900, currency: 'EUR' });
+	});
+	it('un singur separator zecimal (virgulă) rămâne corect: "12,34 EUR" => 1234 cenți', () => {
+		expect(parseAmount('12,34 EUR')).toEqual({ amount: 1234, currency: 'EUR' });
+	});
+	it('un singur separator zecimal (punct), simbol $: "$12.34" => 1234 cenți', () => {
+		expect(parseAmount('$12.34')).toEqual({ amount: 1234, currency: 'USD' });
+	});
+});
+
 describe('buildInvoiceSearchQuery', () => {
 	it('scope all caută orice email cu PDF, fără filtru de expeditor', () => {
 		const q = buildInvoiceSearchQuery({ scope: 'all' });
@@ -380,5 +438,70 @@ describe('buildInvoiceSearchQuery', () => {
 	it('scope suppliers restrânge la expeditorii cunoscuți', () => {
 		const q = buildInvoiceSearchQuery({ scope: 'suppliers', parserIds: ['hetzner'] });
 		expect(q).toContain('hetzner');
+	});
+});
+
+describe('excluderi de expeditori la căutarea de facturi', () => {
+	it('normalizează „@domeniu.com" la operatorul negativ pe domeniu', () => {
+		expect(toGmailExcludeOperator('@tiktok.com')).toBe('-from:tiktok.com');
+	});
+
+	it('păstrează adresa completă când tiparul e o adresă exactă', () => {
+		expect(toGmailExcludeOperator('facturi@x.ro')).toBe('-from:facturi@x.ro');
+	});
+
+	it('normalizează domeniul gol', () => {
+		expect(toGmailExcludeOperator('x.ro')).toBe('-from:x.ro');
+	});
+
+	it('respinge tiparele goale sau fără punct', () => {
+		expect(toGmailExcludeOperator('   ')).toBeNull();
+		expect(toGmailExcludeOperator('tiktok')).toBeNull();
+		expect(toGmailExcludeOperator('@')).toBeNull();
+	});
+
+	it('adaugă operatorii negativi în query și păstrează filtrul de PDF', () => {
+		const q = buildInvoiceSearchQuery({
+			scope: 'all',
+			excludeEmails: ['tiktok.com', '@facebook.com']
+		});
+		expect(q).toContain('has:attachment filename:pdf');
+		expect(q).toContain('-from:tiktok.com');
+		expect(q).toContain('-from:facebook.com');
+	});
+
+	it('regresie: fără excluderi query-ul rămâne exact ca înainte', () => {
+		expect(buildInvoiceSearchQuery({ scope: 'all' })).toBe('has:attachment filename:pdf');
+		expect(buildInvoiceSearchQuery({ scope: 'all', excludeEmails: [] })).toBe(
+			'has:attachment filename:pdf'
+		);
+	});
+
+	it('excluderile nu se pierd când există și filtre de dată', () => {
+		const q = buildInvoiceSearchQuery({
+			scope: 'all',
+			excludeEmails: ['tiktok.com'],
+			dateFrom: new Date(2026, 6, 1)
+		});
+		expect(q).toContain('after:2026/7/1');
+		expect(q).toContain('-from:tiktok.com');
+	});
+
+	it('sugestiile implicite acoperă platformele numite de utilizator', () => {
+		expect(SUGGESTED_EXCLUDE_PATTERNS).toContain('tiktok.com');
+		expect(SUGGESTED_EXCLUDE_PATTERNS).toContain('facebook.com');
+	});
+
+	it('sugestiile NU conțin furnizori de infrastructură (hetzner, google.com)', () => {
+		for (const pattern of SUGGESTED_EXCLUDE_PATTERNS) {
+			expect(pattern).not.toContain('hetzner');
+			expect(pattern).not.toContain('google.com');
+		}
+	});
+
+	it('sugestiile sunt tipare valide (toate produc un operator negativ)', () => {
+		for (const pattern of SUGGESTED_EXCLUDE_PATTERNS) {
+			expect(toGmailExcludeOperator(pattern)).not.toBeNull();
+		}
 	});
 });
