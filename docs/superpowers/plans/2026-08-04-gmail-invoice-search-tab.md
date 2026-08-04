@@ -1359,6 +1359,60 @@ git commit -m "feat(gmail): endpoint-uri descărcare atașamente live din Gmail 
 
 Adaugă și în `supplierTypeLabel` cazurile noi: `'directadmin' → 'DirectAdmin'`, `'cursor' → 'Cursor'`, `'inwx' → 'INWX'`, `'litespeed' → 'LiteSpeed'`, `'anthropic' → 'Anthropic'`; și în `<Select>`-ul de tip furnizor: `<SelectItem value="directadmin">DirectAdmin</SelectItem>`, `<SelectItem value="litespeed">LiteSpeed</SelectItem>`, `<SelectItem value="cursor">Cursor</SelectItem>`, `<SelectItem value="inwx">INWX</SelectItem>`, `<SelectItem value="anthropic">Anthropic</SelectItem>`.
 
+- [ ] **Step 1b: Filtru de dată pe lista de facturi importate (cerere utilizator)**
+
+Lista existentă filtrează doar după text/status/tip. Adaugă filtrare după `issueDate`, cu **default luna calendaristică anterioară** (fluxul e lunar). În `<script>`-ul din `+page.svelte`:
+
+```ts
+	// Interval implicit: luna calendaristică anterioară. Derivat din data curentă,
+	// niciodată hardcodat (regula proiectului „no hardcoded dynamic values").
+	function previousMonthRange(): { from: string; to: string } {
+		const now = new Date();
+		const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+		const last = new Date(now.getFullYear(), now.getMonth(), 0);
+		const iso = (d: Date) =>
+			`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+		return { from: iso(first), to: iso(last) };
+	}
+	const defaultRange = previousMonthRange();
+	let dateFromFilter = $state(defaultRange.from);
+	let dateToFilter = $state(defaultRange.to);
+```
+
+În `filteredInvoices`, adaugă înaintea lui `return true;`:
+
+```ts
+			if (dateFromFilter || dateToFilter) {
+				if (!inv.issueDate) return false;
+				const issued = new Date(inv.issueDate);
+				if (dateFromFilter && issued < new Date(`${dateFromFilter}T00:00:00`)) return false;
+				if (dateToFilter && issued > new Date(`${dateToFilter}T23:59:59`)) return false;
+			}
+```
+
+Adaugă `dateFromFilter; dateToFilter;` la dependențele din `$effect`-ul care resetează `currentPage = 1`.
+
+În blocul de filtre din markup, după `Input`-ul de căutare:
+
+```svelte
+				<div>
+					<Label class="text-xs">De la</Label>
+					<Input type="date" bind:value={dateFromFilter} class="w-[150px]" />
+				</div>
+				<div>
+					<Label class="text-xs">Până la</Label>
+					<Input type="date" bind:value={dateToFilter} class="w-[150px]" />
+				</div>
+				<Button variant="outline" size="sm" onclick={() => { const r = previousMonthRange(); dateFromFilter = r.from; dateToFilter = r.to; }}>
+					Luna anterioară
+				</Button>
+				<Button variant="ghost" size="sm" onclick={() => { dateFromFilter = ''; dateToFilter = ''; }}>
+					Toate datele
+				</Button>
+```
+
+(importă `Label` din `$lib/components/ui/label` dacă nu e deja importat). Mesajul de „nicio factură" trebuie să rămână corect când filtrul de dată e cel care golește lista — textul existent „Încearcă să modifici filtrele." acoperă cazul.
+
 - [ ] **Step 2: Creează `GmailSearchTab.svelte`**
 
 Structura completă (adaptează micile diferențe de API la componentele UI existente — uită-te la felul în care `+page.svelte` folosește `Select`, `Checkbox`, `Card`):
@@ -1425,8 +1479,21 @@ Structura completă (adaptează micile diferențe de API la componentele UI exis
 	}
 
 	// ---- Mod B: căutare liberă ----
-	let dateFrom = $state('');
-	let dateTo = $state('');
+	// Default: luna calendaristică ANTERIOARĂ (fluxul e lunar — facturile lunii trecute
+	// se urcă în Keez la începutul lunii curente). NU hardcoda anul/luna (regula proiectului
+	// „no hardcoded dynamic values") — derivă din data curentă.
+	function previousMonthRange(): { from: string; to: string } {
+		const now = new Date();
+		const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+		const last = new Date(now.getFullYear(), now.getMonth(), 0);
+		const iso = (d: Date) =>
+			`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+		return { from: iso(first), to: iso(last) };
+	}
+	const defaultRange = previousMonthRange();
+
+	let dateFrom = $state(defaultRange.from);
+	let dateTo = $state(defaultRange.to);
 	let searching = $state(false);
 	let onlyNotDownloaded = $state(false);
 	let searchResult = $state<Awaited<ReturnType<typeof searchGmailForDownload>> | null>(null);
@@ -1631,6 +1698,9 @@ Structura completă (adaptează micile diferențe de API la componentele UI exis
 					<Label class="text-xs">Până la</Label>
 					<Input type="date" bind:value={dateTo} class="w-[160px]" />
 				</div>
+				<Button variant="outline" size="sm" onclick={() => { const r = previousMonthRange(); dateFrom = r.from; dateTo = r.to; }}>
+					Luna anterioară
+				</Button>
 				<Button onclick={handleSearch} disabled={searching}>
 					<Search class="h-4 w-4 mr-2" />
 					{searching ? 'Se caută...' : 'Caută în Gmail'}
@@ -1757,7 +1827,8 @@ Expected: fără erori; warning-urile preexistente sunt acceptabile.
 1. `bun run dev` din `app/`, login `office@onetopsolution.ro` pe `/ots/banking/supplier-invoices`.
 2. Tab „Căutare Gmail" → „Documente Lipsa" → încarcă `/Users/augustin598/Projects/CRM/MissingDocuments.xlsx`.
 3. Verifică: plățile Hetzner/DirectAdmin/LiteSpeed/Google au match sigur; Kesselring/fidasolutions probabil fără match (n-au email); descarcă ZIP-ul și deschide un PDF.
-4. Căutare liberă pe ultimele 30 de zile → bifează 2 → ZIP → badge „Descărcată" apare la re-căutare.
+4. Căutare liberă: verifică întâi că intervalul e pre-completat cu **luna anterioară** → bifează 2 → ZIP → badge „Descărcată" apare la re-căutare.
+5. Tab „Facturi importate": intervalul de dată e pre-completat cu luna anterioară; butonul „Toate datele" golește filtrul și reafișează toate facturile.
 
 - [ ] **Step 4: Commit final dacă au apărut ajustări, apoi raportează**
 
