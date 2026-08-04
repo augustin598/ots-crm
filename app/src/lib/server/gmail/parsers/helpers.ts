@@ -200,7 +200,15 @@ export function extractInvoiceNumber(text: string, keywords: string[]): string |
 	const keywordRe = new RegExp(`(?:${keywords.join('|')})`, 'gi');
 	for (const km of text.matchAll(keywordRe)) {
 		const start = (km.index ?? 0) + km[0].length;
-		const restTokens = text.slice(start).split(/\s+/).filter(Boolean);
+		// Bound the slice BEFORE splitting. This is a performance guard, not a
+		// semantic limit: `.split(/\s+/)` on the entire remaining text would be
+		// O(n) allocations per keyword occurrence, and an invoice email body can
+		// be tens of KB with "invoice"/"factura" appearing many times. 200 chars
+		// must stay comfortably larger than the token windows below (6 tokens for
+		// MARKER_WINDOW_TOKENS) — ordinary words/markers/numbers never need
+		// anywhere near 200 characters to span 6 whitespace-delimited tokens, so
+		// this bound can't truncate the token window in practice.
+		const restTokens = text.slice(start, start + 200).split(/\s+/).filter(Boolean);
 
 		// 1. Explicit marker anywhere in the (token) window.
 		const markerWindow = restTokens.slice(0, MARKER_WINDOW_TOKENS).join(' ');
