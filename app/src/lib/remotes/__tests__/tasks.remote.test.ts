@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { CAPABILITY_IDS } from '$lib/access/catalog';
 
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
@@ -217,13 +218,43 @@ const {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Remote-urile staff trec prin `requireStaff(event)` → `getActor(event)`, care
+// întoarce direct `locals.actor` dacă e deja construit. Îl pre-populăm aici, ca
+// `buildActor` să nu încerce un SELECT pe tenant_user din coada de query-uri
+// (care e pregătită pentru interogările de business) și să cadă pe `anon` → 401.
+function tenantActor(tenantId: string) {
+	return {
+		kind: 'tenant' as const,
+		tenantUserId: `tu-${tenantId}`,
+		userId: 'user1',
+		tenantId,
+		role: 'owner' as const,
+		capabilities: new Set(CAPABILITY_IDS),
+		hasOverride: false
+	};
+}
+
+function clientActor(tenantId: string, clientId: string) {
+	return {
+		kind: 'client' as const,
+		clientUserId: 'cu-1',
+		userId: 'client-user-1',
+		tenantId,
+		clientId,
+		isPrimary: true,
+		capabilities: new Set<(typeof CAPABILITY_IDS)[number]>(),
+		preset: null
+	};
+}
+
 function makeEvent(tenantId: string) {
 	return {
 		locals: {
 			user: { id: 'user1', email: 'user1@example.com', firstName: 'User', lastName: 'One' },
 			tenant: { id: tenantId, slug: tenantId },
 			isClientUser: false,
-			client: null
+			client: null,
+			actor: tenantActor(tenantId)
 		}
 	};
 }
@@ -234,7 +265,8 @@ function makeClientEvent(tenantId: string, clientId: string) {
 			user: { id: 'client-user-1', email: 'client@example.com', firstName: 'Client', lastName: 'User' },
 			tenant: { id: tenantId, slug: tenantId },
 			isClientUser: true,
-			client: { id: clientId, tenantId }
+			client: { id: clientId, tenantId },
+			actor: clientActor(tenantId, clientId)
 		}
 	};
 }
