@@ -170,6 +170,59 @@ describe('extractInvoiceNumber — ancorat pe cuvântul-cheie (regresie: NU mai 
 	});
 });
 
+describe('extractInvoiceNumber — fereastră pe TOKENI (regresie: fereastra pe caractere trunchia candidații lungi)', () => {
+	it('generic: nu trunchiază nr. lung după marcajul "no." ("...subscription no. 1234567890")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({
+				subject: 'New Invoice available',
+				body: 'Invoice for your monthly subscription no. 1234567890'
+			})
+		);
+		expect(r.invoiceNumber).toBe('1234567890');
+	});
+	it('generic: nu trunchiază nr. lung după "#" chiar cu mult text de umplutură înainte', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({
+				subject: 'New Invoice available',
+				body: 'Invoice regarding your subscription #987654321098'
+			})
+		);
+		expect(r.invoiceNumber).toBe('987654321098');
+	});
+});
+
+describe('extractInvoiceNumber — marcajele cer delimitare de cuvânt (regresie: "no." se potrivea în interiorul "not"/"now"/"notification")', () => {
+	it('generic: "not" nu blochează marcajul real "no." mai departe ("Invoice not yet paid, no. 8899")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice not yet paid, no. 8899' })
+		);
+		expect(r.invoiceNumber).toBe('8899');
+	});
+	it('generic: "now" nu blochează marcajul real "#" mai departe ("Invoice is now ready, see #12345")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice is now ready, see #12345' })
+		);
+		expect(r.invoiceNumber).toBe('12345');
+	});
+	it('generic: "notification" nu blochează marcajul real "#" mai departe ("Invoice notification for you: #12345")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice notification for you: #12345' })
+		);
+		expect(r.invoiceNumber).toBe('12345');
+	});
+});
+
+describe('extractInvoiceNumber — fereastra de tokeni FĂRĂ marcaj lărgită la ~4 (dar cu prag de lungime)', () => {
+	it('generic: al 3-lea token fără marcaj e găsit ("Your invoice is available INV-0042")', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'Your invoice is available INV-0042' }));
+		expect(r.invoiceNumber).toBe('INV-0042');
+	});
+	it('generic: pragul de lungime (>=3) respinge un token scurt fără marcaj ("Invoice 42")', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'Invoice 42' }));
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+});
+
 describe('extragere nr. factură — google/openai/whmcs nu mai capturează cuvinte gunoi', () => {
 	it('google: nu ia "is" din "Your Google invoice is available - #INV-9911"', () => {
 		const r = googleParser.parseInvoice(

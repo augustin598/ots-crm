@@ -129,16 +129,51 @@ export function isValidInvoiceNumber(candidate: string, hasExplicitMarker: boole
 	return true;
 }
 
-/** Markers that mean the following token IS the invoice number. */
-const INVOICE_MARKERS = '#|nr\\.?|no\\.?|number|num[ăa]rul';
+/**
+ * Markers that mean the following token IS the invoice number. Word markers
+ * ("nr", "no", "number", "num[ăa]rul") are wrapped in `\b` so they can't match
+ * as a substring inside a longer word ("no" must not match inside
+ * "notification"/"now"/"not"/"November"). "#" is left unanchored — it's
+ * already a non-word character so it can't blend into a word either way.
+ */
+const INVOICE_MARKERS = '#|\\bnr\\.?\\b|\\bno\\.?\\b|\\bnumber\\b|\\bnum[ăa]rul\\b';
+
+/**
+ * How many whitespace-delimited tokens after the keyword are scanned for a
+ * MARKED candidate ("New Invoice available - #INV-2026-0042" needs the marker
+ * 3 tokens out; "...subscription no. 1234567890" needs 6). Wider than this
+ * risks picking up an unrelated marker-like word deep in unrelated prose.
+ */
+const MARKER_WINDOW_TOKENS = 6;
+
+/**
+ * How many of those tokens are tried as a BARE (unmarked) candidate. Kept
+ * narrower than the marker window — prose further along starts looking like
+ * a plausible number — but needs to reach at least the 3rd token for cases
+ * like "...invoice is available INV-0042".
+ */
+const BARE_WINDOW_TOKENS = 4;
 
 /**
  * Extract an invoice number anchored on a keyword. Only text AFTER a keyword
- * occurrence is scanned, in a bounded window — otherwise unrelated numbers
- * (order ids, dates, amounts, ticket ids) get captured. This replaced an
+ * occurrence is scanned, and only a bounded number of TOKENS (never raw
+ * characters) — a character slice can truncate a long candidate mid-digit-run
+ * (e.g. cut "987654321098" down to "987654321"), while a token-based window
+ * always keeps a candidate whole no matter how long it is. This replaced an
  * earlier version where the keyword was optional in a global regex, which
  * degraded to "first digit-bearing token anywhere in the text" and silently
  * wrote order numbers/dates/amounts into the CRM as invoice numbers.
+ *
+ * A candidate is accepted either:
+ * 1. Right after an EXPLICIT marker ("#", "nr.", "no.", "number", "numărul")
+ *    — any length is fine, digit/year rules still apply (isValidInvoiceNumber).
+ *    Every marker occurrence in the window is tried, in order, and the first
+ *    one whose candidate validates wins — a marker-like match that turns out
+ *    to have no valid number after it must not block a real one further along.
+ * 2. As a BARE token with no marker ("Invoice 12345") — same digit/year rules,
+ *    PLUS a >= 3 char floor: a short bare token ("Invoice 42") is too weak a
+ *    signal without a marker, whereas an explicit marker is enough signal on
+ *    its own for a short candidate ("Invoice #42" IS accepted).
  *
  * The candidate character class is deliberately narrow (`[\w-]+`, no "/" or
  * "."): a wider class swallows date/path separators and trailing punctuation
@@ -150,19 +185,17 @@ export function extractInvoiceNumber(text: string, keywords: string[]): string |
 	const keywordRe = new RegExp(`(?:${keywords.join('|')})`, 'gi');
 	for (const km of text.matchAll(keywordRe)) {
 		const start = (km.index ?? 0) + km[0].length;
-		const window = text.slice(start, start + 40);
+		const restTokens = text.slice(start).split(/\s+/).filter(Boolean);
 
-		// 1. Explicit marker right after the keyword: "Invoice #INV-2026-0042",
-		//    "Invoice number: 12345", "Factura nr. 5566"
-		const marked =
-			window.match(new RegExp(`^[^\\w]{0,3}(?:${INVOICE_MARKERS})\\s*[:.]?\\s*([\\w-]+)`, 'i')) ||
-			window.match(new RegExp(`(?:${INVOICE_MARKERS})\\s*[:.]?\\s*([\\w-]+)`, 'i'));
-		if (marked && isValidInvoiceNumber(marked[1], true)) return marked[1];
+		// 1. Explicit marker anywhere in the (token) window.
+		const markerWindow = restTokens.slice(0, MARKER_WINDOW_TOKENS).join(' ');
+		const markerRe = new RegExp(`(?:${INVOICE_MARKERS})\\s*[:.]?\\s*([\\w-]+)`, 'gi');
+		for (const mm of markerWindow.matchAll(markerRe)) {
+			if (isValidInvoiceNumber(mm[1], true)) return mm[1];
+		}
 
-		// 2. No marker: accept only a candidate in the first two tokens after the
-		//    keyword ("Invoice 12345"), so prose further along is never scanned.
-		const tokens = window.trim().split(/\s+/).slice(0, 2);
-		for (const raw of tokens) {
+		// 2. No marker: bare token in the first few tokens after the keyword.
+		for (const raw of restTokens.slice(0, BARE_WINDOW_TOKENS)) {
 			const token = raw.replace(/^[^\w]+|[^\w]+$/g, '');
 			if (token.length >= 3 && isValidInvoiceNumber(token, false)) return token;
 		}
