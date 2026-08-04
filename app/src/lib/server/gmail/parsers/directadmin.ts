@@ -2,7 +2,7 @@ import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
 import { parseAmount, detectStatus, extractInvoiceNumber } from './helpers';
 
-const INVOICE_KEYWORDS = ['invoice'];
+const INVOICE_KEYWORDS = ['invoice', 'receipt'];
 
 export const directadminParser: SupplierParser = {
 	id: 'directadmin',

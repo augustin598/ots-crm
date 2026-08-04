@@ -36,6 +36,6 @@ export const cursorParser: SupplierParser = {
 	},
 
 	getSearchQuery(): string {
-		return 'from:cursor.com has:attachment filename:pdf';
+		return '(from:cursor.com OR from:anysphere.com) has:attachment filename:pdf';
 	}
 };

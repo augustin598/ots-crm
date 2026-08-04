@@ -8,12 +8,16 @@
  * Helper: parse amount string like "$12.34" or "12,34 EUR" to cents
  */
 export function parseAmount(text: string): { amount: number; currency: string } | null {
-	// Match patterns like: $12.34, 12.34 USD, €12,34, 12,34 EUR
+	// Match patterns like: $12.34, 12.34 USD, €12,34, 12,34 EUR. The number
+	// itself allows BOTH separators ("[\d]+(?:[.,]\d+)*") so a full mixed
+	// thousands+decimal number ("1.234,56", "1,234.56") is captured as ONE
+	// token instead of being cut at the first separator — see normalization
+	// below for how the two separators are told apart.
 	const patterns = [
-		/\$\s*([\d,]+\.?\d*)/,
-		/€\s*([\d.,]+)/,
-		/([\d,]+\.?\d*)\s*(USD|EUR|RON|GBP)/i,
-		/(USD|EUR|RON|GBP)\s*([\d,]+\.?\d*)/i
+		/\$\s*(\d+(?:[.,]\d+)*)/,
+		/€\s*(\d+(?:[.,]\d+)*)/,
+		/(\d+(?:[.,]\d+)*)\s*(USD|EUR|RON|GBP)/i,
+		/(USD|EUR|RON|GBP)\s*(\d+(?:[.,]\d+)*)/i
 	];
 
 	for (const pattern of patterns) {
@@ -36,12 +40,25 @@ export function parseAmount(text: string): { amount: number; currency: string } 
 				currency = match[2].toUpperCase();
 			}
 
-			// Normalize number: "1,234.56" or "1.234,56"
-			const hasCommaAsDecimal = amountStr.includes(',') && !amountStr.includes('.');
-			if (hasCommaAsDecimal) {
+			// Normalize number. When BOTH '.' and ',' are present, the LAST one
+			// in the string is the decimal separator — this is the same rule
+			// used by pdf-parser.ts's parseBareAmount and banking/payment-match.ts's
+			// parseDecimalToCents, and it handles both the European "1.234,56"
+			// (dot=thousands, comma=decimal) and the US "1,234.56" (reverse).
+			// A bare single separator ("12,34") is still assumed decimal, same
+			// as before.
+			const hasComma = amountStr.includes(',');
+			const hasDot = amountStr.includes('.');
+			if (hasComma && hasDot) {
+				const lastComma = amountStr.lastIndexOf(',');
+				const lastDot = amountStr.lastIndexOf('.');
+				if (lastComma > lastDot) {
+					amountStr = amountStr.replace(/\./g, '').replace(',', '.');
+				} else {
+					amountStr = amountStr.replace(/,/g, '');
+				}
+			} else if (hasComma) {
 				amountStr = amountStr.replace(',', '.');
-			} else {
-				amountStr = amountStr.replace(/,/g, '');
 			}
 
 			const amount = Math.round(parseFloat(amountStr) * 100);
