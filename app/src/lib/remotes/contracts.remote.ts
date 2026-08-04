@@ -15,6 +15,7 @@ import { requireStaff } from '$lib/server/get-actor';
 import { recordContractActivity } from '$lib/server/contract-activity';
 import { shouldZeroVatForClient } from '$lib/server/vat/classify-client';
 import { resolveVatPercent } from '$lib/server/vat/rate';
+import { getAppBaseUrl } from '$lib/server/app-url';
 
 const DEBUG_EXTRACTION = () => env.DEBUG_CONTRACT_EXTRACTION === 'true';
 
@@ -917,7 +918,7 @@ export const sendContractForSigning = command(
 
 		const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const baseUrl = getAppBaseUrl();
 		const signingUrl = `${baseUrl}/sign/${tenantSlug}/${encodeURIComponent(rawToken)}`;
 
 		await db.insert(table.contractSignToken).values({

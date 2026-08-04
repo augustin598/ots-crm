@@ -13,6 +13,7 @@ import { checkAuthRateLimit } from '$lib/server/rate-limiter';
 import { logInfo } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
 import { env as publicEnv } from '$env/dynamic/public';
+import { getAppBaseUrl } from '$lib/server/app-url';
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
 
@@ -313,7 +314,7 @@ export const generateClientMagicLink = command(
 			metadata: { clientId, clientEmail: client.email, adminUserId: event!.locals.user!.id, mode: 'single' }
 		});
 
-		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const baseUrl = getAppBaseUrl();
 		const url = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(plainToken)}`;
 		return { url, email: client.email, expiresAt };
 	}
@@ -509,7 +510,7 @@ export const generateClientMultiCompanyMagicLink = command(
 			}
 		});
 
-		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const baseUrl = getAppBaseUrl();
 		const url = `${baseUrl}/client/${tenantSlug}/verify?token=${encodeURIComponent(plainToken)}`;
 		return { url, email: normalizedEmail, matchedCount: matched.length, matched, expiresAt };
 	}

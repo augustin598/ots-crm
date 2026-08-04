@@ -34,6 +34,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { env as publicEnv } from '$env/dynamic/public';
 import { tenantUserPrefAllowsBatch, type TenantUserNotifyKey } from './tenant-user-preferences';
+import { getAppBaseUrl } from '$lib/server/app-url';
 
 export type TaskEvent = 'assigned' | 'comment' | 'status-change';
 
@@ -59,7 +60,7 @@ interface CandidateRow {
 	reason: RecipientReason;
 }
 
-const baseUrl = () => publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+const baseUrl = () => getAppBaseUrl();
 
 function buildTaskUrl(tenantSlug: string, taskId: string, kind: RecipientKind): string {
 	const base = baseUrl();

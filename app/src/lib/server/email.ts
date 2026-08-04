@@ -23,6 +23,7 @@ import { createInvoiceViewToken } from '$lib/server/invoice-token';
 import { renderInvoicePaidEmailHtml } from './email-templates/invoice-paid';
 import { htmlToPlainText } from './html-text';
 import * as storage from '$lib/server/storage';
+import { getAppBaseUrl } from '$lib/server/app-url';
 
 // Re-export so existing callers can import the helper from `$lib/server/email`
 // alongside the production sender (`sendInvoicePaidEmail`). Demo scripts and
@@ -212,6 +213,7 @@ async function buildCommentEmailBlock(
 
 		const rows = await db
 			.select({
+				id: table.taskCommentAttachment.id,
 				path: table.taskCommentAttachment.path,
 				fileName: table.taskCommentAttachment.fileName,
 				mimeType: table.taskCommentAttachment.mimeType,
@@ -248,7 +250,9 @@ async function buildCommentEmailBlock(
 				attachments.push({
 					filename: row.fileName || `imagine-${attachments.length + 1}`,
 					content,
-					cid: `taskcommentimg${attachments.length}`,
+					// cid-ul poartă id-ul atașamentului, nu poziția: previzualizarea din
+					// /admin/logs/email-preview îl rezolvă înapoi la fișierul exact.
+					cid: `taskcommentimg-${row.id}`,
 					contentType: row.mimeType || 'application/octet-stream'
 				});
 			} catch (error) {
@@ -1035,7 +1039,7 @@ export async function sendWithPersistence(
 		'invitation', 'invoice', 'invoice-paid', 'contract-signing'
 	];
 	if (!TRANSACTIONAL_TYPES.includes(ctx.emailType)) {
-		const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+		const baseUrl = getAppBaseUrl();
 		const token = generateUnsubscribeToken(ctx.toEmail, ctx.tenantId);
 		const params = new URLSearchParams({
 			email: ctx.toEmail,
@@ -1146,7 +1150,7 @@ export async function sendInvitationEmail(
 ): Promise<void> {
 	const safeTenantName = escapeHtml(tenantName);
 	const safeInviterName = escapeHtml(inviterName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 	const invitationUrl = `${baseUrl}/invite/${invitationToken}`;
 	const subject = `Invitație de alăturare la ${tenantName}`;
 
@@ -1217,7 +1221,7 @@ export async function sendInvitationEmail(
  * Send invoice email to client
  */
 export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): Promise<void> {
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	// Get invoice details (needed up-front for tenantId & subject)
 	const [invoice] = await db
@@ -1408,7 +1412,7 @@ export async function sendMagicLinkEmail(
 	tenantSlug: string,
 	clientName: string
 ): Promise<void> {
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	// Get tenant by slug
 	const [tenant] = await db
@@ -1500,7 +1504,7 @@ export async function sendClientTeamInviteEmail(
 	clientName: string,
 	inviterName: string
 ): Promise<void> {
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [tenant] = await db
 		.select()
@@ -1595,7 +1599,7 @@ export async function sendAdminMagicLinkEmail(
 	userTenantId?: string | null
 ): Promise<void> {
 	userName = escapeHtml(userName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 	const appName = 'CRM Admin';
 	const loginUrl = `${baseUrl}/login/verify?token=${encodeURIComponent(token)}`;
 
@@ -1660,7 +1664,7 @@ export async function sendPasswordResetEmail(
 	userTenantId?: string | null
 ): Promise<void> {
 	userName = escapeHtml(userName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 	const appName = 'CRM Admin';
 	const resetUrl = `${baseUrl}/login/reset-password/${encodeURIComponent(token)}`;
 
@@ -1725,7 +1729,7 @@ export async function sendTaskAssignmentEmail(
 	taskUrlOverride?: string
 ): Promise<void> {
 	if (assigneeName) assigneeName = escapeHtml(assigneeName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	// Get task details (needed up-front for tenantId & subject)
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
@@ -1853,7 +1857,7 @@ export async function sendTaskUpdateEmail(
 	commentId?: string | null
 ): Promise<void> {
 	if (watcherName) watcherName = escapeHtml(watcherName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
@@ -2015,7 +2019,7 @@ export async function sendTaskClientNotificationEmail(
 	if (extra?.changedFields) extra.changedFields = escapeHtml(extra.changedFields);
 	// Extract first name for a more personal greeting
 	const greeting = clientName?.split(' ')[0] || 'ziua';
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 	if (!task) {
@@ -2205,7 +2209,7 @@ Vezi task: ${taskUrl}
  * Send invoice paid confirmation email
  */
 export async function sendInvoicePaidEmail(invoiceId: string, clientEmail: string): Promise<void> {
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [invoice] = await db
 		.select()
@@ -2299,7 +2303,7 @@ export async function sendOverdueReminderEmail(
 	daysOverdue: number,
 	reminderNumber: number
 ): Promise<void> {
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [invoice] = await db
 		.select()
@@ -2479,7 +2483,7 @@ export async function sendTaskReminderEmail(
 	assigneeName?: string
 ): Promise<void> {
 	if (assigneeName) assigneeName = escapeHtml(assigneeName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [task] = await db.select().from(table.task).where(eq(table.task.id, taskId)).limit(1);
 
@@ -2592,7 +2596,7 @@ export async function sendDailyWorkReminderEmail(
 	userName: string
 ): Promise<void> {
 	userName = escapeHtml(userName);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [user] = await db.select().from(table.user).where(eq(table.user.id, userId)).limit(1);
 
@@ -2735,7 +2739,7 @@ export async function sendContractSigningEmail(
 ): Promise<void> {
 	clientName = escapeHtml(clientName);
 	contractNumber = escapeHtml(contractNumber);
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [tenant] = await db
 		.select()
@@ -2922,7 +2926,7 @@ export async function sendPackageRequestEmail(
 	recipientName?: string
 ): Promise<void> {
 	const safeRecipientName = recipientName ? escapeHtml(recipientName) : '';
-	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
+	const baseUrl = getAppBaseUrl();
 
 	const [request] = await db
 		.select()
