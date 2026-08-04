@@ -2,6 +2,14 @@ import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
 import { parseAmount, detectStatus } from './index';
 
+function isValidInvoiceNumber(candidate: string, hasExplicitMarker: boolean): boolean {
+	if (!/\d/.test(candidate)) return false; // rejects "available", "ready"
+	// A bare 4-digit year next to the trigger word is prose, not a number —
+	// but an explicit "#"/"nr" marker means it really is the invoice number.
+	if (!hasExplicitMarker && /^(19|20)\d{2}$/.test(candidate)) return false;
+	return true;
+}
+
 export const roSuppliersParser: SupplierParser = {
 	id: 'ro-suppliers',
 	name: 'Furnizori România (eMAG, SmartBill, Digi, etc.)',
@@ -38,16 +46,24 @@ export const roSuppliersParser: SupplierParser = {
 		};
 
 		// RO invoice numbers: often "Seria XXX Nr. YYY" or numeric after "Factura"
-		const invoiceMatch = email.body.match(/(?:seria|serie)\s+([\w-]+)\s+(?:nr|numar)\s+([\w-]+)/i) ||
-			email.subject.match(/(?:factura|invoice)\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/factura\s*#?\s*([\w-]+)/i);
-		
-		if (invoiceMatch) {
-			const candidate = invoiceMatch[2] ? `${invoiceMatch[1]}-${invoiceMatch[2]}` : invoiceMatch[1];
-			// Invoice numbers always contain digits — rejects words like "available"/"ready".
-			// Also rejects a bare 4-digit year (1900-2099) that happened to follow "Factura" —
-			// e.g. "Factura 2026 emisa" is not an invoice number, it's the year.
-			if (/\d/.test(candidate) && !/^(19|20)\d{2}$/.test(candidate)) result.invoiceNumber = candidate;
+		const seriaMatch = email.body.match(/(?:seria|serie)\s+([\w-]+)\s+(?:nr|numar)\s+([\w-]+)/i);
+		// Subject captures its own marker (group 1) so a bare year is only trusted
+		// when an explicit "#"/"nr"/"no"/"number" marker precedes it.
+		const subjectMatch = email.subject.match(
+			/(?:factura|invoice)\s*(#|nr\.?|no\.?|number)?\s*[:.]?\s*([\w-]+)/i
+		);
+		const bodyMatch = email.body.match(
+			/factura\s*(#|nr\.?|no\.?|number)?\s*[:.]?\s*([\w-]+)/i
+		);
+
+		const seriaCandidate = seriaMatch ? `${seriaMatch[1]}-${seriaMatch[2]}` : undefined;
+		// "Seria X nr Y" always has an explicit marker (nr/numar) by construction.
+		if (seriaCandidate && isValidInvoiceNumber(seriaCandidate, true)) {
+			result.invoiceNumber = seriaCandidate;
+		} else if (subjectMatch && isValidInvoiceNumber(subjectMatch[2], !!subjectMatch[1])) {
+			result.invoiceNumber = subjectMatch[2];
+		} else if (bodyMatch && isValidInvoiceNumber(bodyMatch[2], !!bodyMatch[1])) {
+			result.invoiceNumber = bodyMatch[2];
 		}
 
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);

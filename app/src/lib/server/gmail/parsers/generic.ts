@@ -2,6 +2,14 @@ import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
 import { parseAmount, detectStatus } from './index';
 
+function isValidInvoiceNumber(candidate: string, hasExplicitMarker: boolean): boolean {
+	if (!/\d/.test(candidate)) return false; // rejects "available", "ready"
+	// A bare 4-digit year next to the trigger word is prose, not a number —
+	// but an explicit "#"/"nr" marker means it really is the invoice number.
+	if (!hasExplicitMarker && /^(19|20)\d{2}$/.test(candidate)) return false;
+	return true;
+}
+
 export const genericParser: SupplierParser = {
 	id: 'generic',
 	name: 'Generic (any supplier)',
@@ -27,13 +35,20 @@ export const genericParser: SupplierParser = {
 			supplierName
 		};
 
-		const invoiceMatch = email.subject.match(/(?:invoice|factura|factură)\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/(?:invoice|factura|factură)\s*(?:number|nr\.?|#|no\.?)\s*:?\s*([\w-]+)/i);
-		// Invoice numbers always contain digits — rejects words like "available"/"ready".
-		// Also rejects a bare 4-digit year (1900-2099) that happened to follow "Invoice" —
-		// e.g. "Invoice 2026 renewal reminder" is not an invoice number, it's the year.
-		if (invoiceMatch && /\d/.test(invoiceMatch[1]) && !/^(19|20)\d{2}$/.test(invoiceMatch[1])) {
-			result.invoiceNumber = invoiceMatch[1];
+		// Subject captures its own marker (group 1) so a bare year is only trusted
+		// when an explicit "#"/"nr"/"no"/"number" marker precedes it.
+		const subjectMatch = email.subject.match(
+			/(?:invoice|factura|factură)\s*(#|nr\.?|no\.?|number)?\s*[:.]?\s*([\w-]+)/i
+		);
+		// Body match always requires one of these keywords, so it always has an explicit marker.
+		const bodyMatch = email.body.match(
+			/(?:invoice|factura|factură)\s*(?:number|nr\.?|#|no\.?)\s*:?\s*([\w-]+)/i
+		);
+
+		if (subjectMatch && isValidInvoiceNumber(subjectMatch[2], !!subjectMatch[1])) {
+			result.invoiceNumber = subjectMatch[2];
+		} else if (bodyMatch && isValidInvoiceNumber(bodyMatch[1], true)) {
+			result.invoiceNumber = bodyMatch[1];
 		}
 
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);

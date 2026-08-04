@@ -51,7 +51,7 @@ describe('extragere nr. factură din email', () => {
 		const r = roSuppliersParser.parseInvoice(
 			makeEmail({ from: 'facturi@rotld.ro', subject: 'ROTLD Factura #453940/2026-07-21', body: '' })
 		);
-		expect(r.invoiceNumber).toContain('453940');
+		expect(r.invoiceNumber).toBe('453940');
 	});
 	it('generic: nu confundă anul din subiect cu nr. de factură ("Invoice 2026 renewal reminder")', () => {
 		const r = genericParser.parseInvoice(
@@ -64,5 +64,21 @@ describe('extragere nr. factură din email', () => {
 			makeEmail({ from: 'facturi@rotld.ro', subject: 'Factura 2026 emisa', body: '' })
 		);
 		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('generic: subiect respins ("available") nu blochează fallback-ul din body ("Invoice number: 12345")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice number: 12345' })
+		);
+		expect(r.invoiceNumber).toBe('12345');
+	});
+	it('generic: an cu marcaj explicit "#" e acceptat ("Invoice #2026")', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'Invoice #2026' }));
+		expect(r.invoiceNumber).toBe('2026');
+	});
+	it('ro-suppliers: subiect respins ("2026" fără marcaj) nu blochează fallback-ul din body ("Factura #5566")', () => {
+		const r = roSuppliersParser.parseInvoice(
+			makeEmail({ from: 'facturi@rotld.ro', subject: 'Factura 2026 emisa', body: 'Factura #5566' })
+		);
+		expect(r.invoiceNumber).toBe('5566');
 	});
 });
