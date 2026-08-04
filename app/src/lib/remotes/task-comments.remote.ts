@@ -41,6 +41,12 @@ function sanitizeCommentHtml(html: string): string {
 			'*': { 'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/] }
 		},
 		allowedSchemes: ['http', 'https', 'mailto'],
+		// Un `<img>` a cărui schemă de `src` nu e permisă (tipic `data:base64`,
+		// inserat de TipTap când editorul n-are flux de atașamente) rămâne altfel
+		// în conținut ca `<img />` gol — iconiță de imagine ruptă, pe veci.
+		// Îl scoatem de tot: poza tot nu poate fi recuperată, dar nu mai poluează
+		// firul de comentarii. Fluxul corect e uploadul ca atașament.
+		exclusiveFilter: (frame) => frame.tag === 'img' && !frame.attribs?.src
 	});
 }
 
@@ -319,7 +325,7 @@ export const createTaskComment = command(
 			if (r.kind === 'agency' && !internalEnabled) continue;
 			const changeType = r.reason === 'mention' ? 'mention' : 'comment';
 			try {
-				await sendTaskUpdateEmail(data.taskId, r.email, r.name, changeType, r.taskUrl);
+				await sendTaskUpdateEmail(data.taskId, r.email, r.name, changeType, r.taskUrl, commentId);
 			} catch (error) {
 				console.error(`Failed to send comment notification to ${r.email}:`, error);
 			}
@@ -392,7 +398,7 @@ export const createTaskComment = command(
 								recipient.email,
 								recipient.name || null,
 								'comment',
-								{ commentPreview: data.content }
+								{ commentPreview: data.content, commentId }
 							);
 						} catch (error) {
 							console.error(`Failed to send comment notification to ${recipient.email}:`, error);

@@ -155,7 +155,14 @@ async function dispatchLegacyRetry(log: typeof table.emailLog.$inferSelect): Pro
 			await sendTaskAssignmentEmail(metadata.taskId, log.toEmail);
 			break;
 		case 'task-update':
-			await sendTaskUpdateEmail(metadata.taskId, log.toEmail, undefined, metadata.changeType);
+			await sendTaskUpdateEmail(
+				metadata.taskId,
+				log.toEmail,
+				undefined,
+				metadata.changeType,
+				undefined,
+				metadata.commentId
+			);
 			break;
 		case 'task-client-notification':
 			await sendTaskClientNotificationEmail(
@@ -166,7 +173,8 @@ async function dispatchLegacyRetry(log: typeof table.emailLog.$inferSelect): Pro
 				{
 					newStatus: metadata.newStatus,
 					commentPreview: metadata.commentPreview,
-					changedFields: metadata.changedFields
+					changedFields: metadata.changedFields,
+					commentId: metadata.commentId
 				}
 			);
 			break;

@@ -14,7 +14,8 @@
 	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import { Button } from '$lib/components/ui/button';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
-	import ImageLightbox from '$lib/components/image-lightbox.svelte';
+	import ImageLightbox, { type LightboxImage } from '$lib/components/image-lightbox.svelte';
+	import { inlineImageLightbox } from '$lib/actions/inline-image-lightbox';
 	import { MessageSquare, Pencil, Trash2, Reply, X } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -56,8 +57,35 @@
 	>([]);
 	let uploadingImage = $state(false);
 	let attachmentUrls = $state<Record<string, string>>({});
-	let lightboxSrc = $state('');
+	let lightboxImages = $state.raw<LightboxImage[]>([]);
+	let lightboxIndex = $state(0);
 	let lightboxOpen = $state(false);
+
+	/**
+	 * Editoarele de răspuns/editare nu au flux de atașamente. Fără handler,
+	 * TipTap ar insera poza ca data:base64 în HTML, iar sanitizer-ul de pe server
+	 * (allowedSchemes http/https/mailto) i-ar tăia `src` → rămâne un `<img />` gol
+	 * și poza e pierdută. Interceptăm și explicăm în loc să pierdem fișierul.
+	 */
+	function rejectImageHere(message: string) {
+		return () => toast.error(message);
+	}
+
+	function openLightbox(images: LightboxImage[], index: number) {
+		if (images.length === 0) return;
+		lightboxImages = images;
+		lightboxIndex = Math.max(0, Math.min(index, images.length - 1));
+		lightboxOpen = true;
+	}
+
+	/** Galeria = toate atașamentele deja încărcate ale comentariului, deschisă pe cel apăsat. */
+	function openAttachmentLightbox(comment: any, attachmentId: string) {
+		const loaded = (comment.attachments ?? []).filter((a: any) => attachmentUrls[a.id]);
+		openLightbox(
+			loaded.map((a: any) => ({ url: attachmentUrls[a.id], name: a.fileName ?? undefined })),
+			loaded.findIndex((a: any) => a.id === attachmentId)
+		);
+	}
 
 	function getInitials(name: string): string {
 		return name
@@ -102,7 +130,10 @@
 				throw new Error(err.message || `HTTP ${response.status}`);
 			}
 			const result = await response.json();
-			pendingAttachments = [...pendingAttachments, { ...result, previewUrl: URL.createObjectURL(file) }];
+			pendingAttachments = [
+				...pendingAttachments,
+				{ ...result, previewUrl: URL.createObjectURL(file) }
+			];
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la upload');
 		} finally {
@@ -199,7 +230,10 @@
 	async function handleDeleteComment(commentId: string) {
 		if (!confirm('Ștergi comentariul?')) return;
 		try {
-			await deleteTaskComment(commentId).updates(getTaskComments(taskId), getTaskActivities(taskId));
+			await deleteTaskComment(commentId).updates(
+				getTaskComments(taskId),
+				getTaskActivities(taskId)
+			);
 			toast.success('Comentariu șters');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
@@ -242,7 +276,7 @@
 								<p class="text-sm font-semibold">{authorName}</p>
 								<p class="text-xs text-muted-foreground">{timeAgo(comment.createdAt)}</p>
 								{#if comment.updatedAt && new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime() > 1000}
-									<span class="text-xs italic text-muted-foreground">(editat)</span>
+									<span class="text-xs text-muted-foreground italic">(editat)</span>
 								{/if}
 							</div>
 						</div>
@@ -289,6 +323,9 @@
 								placeholder="Editează comentariul..."
 								minHeight="120px"
 								showFooter={false}
+								onPasteImage={rejectImageHere(
+									'La editare nu se pot adăuga imagini — trimite-le într-un comentariu nou.'
+								)}
 								users={mentionUsers}
 							/>
 							<div class="flex gap-2">
@@ -308,7 +345,12 @@
 							</div>
 						</div>
 					{:else}
-						<div class="comment-display text-sm leading-relaxed">{@html comment.content}</div>
+						<div
+							class="comment-display text-sm leading-relaxed"
+							use:inlineImageLightbox={openLightbox}
+						>
+							{@html comment.content}
+						</div>
 					{/if}
 
 					<div class="mt-2 flex flex-wrap gap-1">
@@ -339,11 +381,9 @@
 								{:else}
 									<button
 										type="button"
-										class="block cursor-pointer overflow-hidden rounded-lg border"
-										onclick={() => {
-											lightboxSrc = url;
-											lightboxOpen = true;
-										}}
+										class="block cursor-zoom-in overflow-hidden rounded-lg border"
+										title="Click pentru mărire"
+										onclick={() => openAttachmentLightbox(comment, att.id)}
 									>
 										<img
 											src={url}
@@ -382,7 +422,9 @@
 											</button>
 										{/if}
 									</div>
-									<div class="comment-display ml-8 text-sm">{@html reply.content}</div>
+									<div class="comment-display ml-8 text-sm" use:inlineImageLightbox={openLightbox}>
+										{@html reply.content}
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -395,6 +437,9 @@
 								placeholder="Scrie un răspuns..."
 								minHeight="100px"
 								showFooter={false}
+								onPasteImage={rejectImageHere(
+									'Imaginile se adaugă doar în comentariu nou, nu în răspunsuri.'
+								)}
 								users={mentionUsers}
 							/>
 							<div class="mt-2 flex gap-2">
@@ -427,7 +472,9 @@
 		/>
 		{#if uploadingImage}
 			<div class="flex items-center gap-2 text-sm text-muted-foreground">
-				<div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+				<div
+					class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
+				></div>
 				Se încarcă imaginea...
 			</div>
 		{/if}
@@ -454,7 +501,13 @@
 	</div>
 </div>
 
-<ImageLightbox src={lightboxSrc} open={lightboxOpen} onClose={() => (lightboxOpen = false)} />
+<ImageLightbox
+	images={lightboxImages}
+	index={lightboxIndex}
+	open={lightboxOpen}
+	onIndexChange={(i) => (lightboxIndex = i)}
+	onClose={() => (lightboxOpen = false)}
+/>
 
 <style>
 	.reaction-btn {
@@ -467,7 +520,9 @@
 		background: transparent;
 		font-size: 0.8rem;
 		cursor: pointer;
-		transition: background 0.15s, border-color 0.15s;
+		transition:
+			background 0.15s,
+			border-color 0.15s;
 	}
 	.reaction-btn:hover {
 		background: hsl(var(--muted));
@@ -493,6 +548,23 @@
 	}
 	.comment-display :global(p) {
 		margin-bottom: 0.25rem;
+	}
+	.comment-display :global(img) {
+		max-width: 100%;
+		height: auto;
+		border-radius: 0.5rem;
+	}
+	/* Comentarii vechi în care sanitizer-ul a tăiat un `src` data:base64 —
+	   fără regula asta browserul afișează iconița de imagine ruptă. */
+	.comment-display :global(img:not([src])) {
+		display: none;
+	}
+	.comment-display :global(img[data-lightbox='on']:hover) {
+		opacity: 0.9;
+	}
+	.comment-display :global(img[data-lightbox='on']:focus-visible) {
+		outline: 2px solid hsl(var(--primary));
+		outline-offset: 2px;
 	}
 	.comment-display :global(ul),
 	.comment-display :global(ol) {

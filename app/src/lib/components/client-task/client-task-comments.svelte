@@ -12,6 +12,7 @@
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import type { LightboxImage } from './client-task-lightbox.svelte';
+	import { inlineImageLightbox } from '$lib/actions/inline-image-lightbox';
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { toast } from 'svelte-sonner';
@@ -289,7 +290,8 @@
 							</button>
 						</div>
 						<div
-							class="ct-comment-text mt-1 text-[13.5px] leading-[1.65] text-[#334155] [&_p]:m-0 [&_p+p]:mt-2"
+							class="ct-comment-text mt-1 text-[13.5px] leading-[1.65] text-[#334155] [&_img:not([src])]:hidden [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg [&_p]:m-0 [&_p+p]:mt-2"
+							use:inlineImageLightbox={onOpenLightbox}
 						>
 							{@html c.content}
 						</div>
@@ -408,7 +410,10 @@
 													{fmtDate(r.createdAt)}
 												</span>
 											</div>
-											<div class="mt-1 text-[13px] text-[#334155] [&_p]:m-0 [&_p+p]:mt-2">
+											<div
+												class="mt-1 text-[13px] text-[#334155] [&_img:not([src])]:hidden [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg [&_p]:m-0 [&_p+p]:mt-2"
+												use:inlineImageLightbox={onOpenLightbox}
+											>
 												{@html r.content}
 											</div>
 										</div>
@@ -424,6 +429,10 @@
 									placeholder="Scrie un răspuns..."
 									minHeight="100px"
 									showFooter={false}
+									onPasteImage={() =>
+										toast.error(
+											'Imaginile se adaugă doar în comentariu nou, nu în răspunsuri.'
+										)}
 								/>
 								<div class="mt-1.5 flex justify-end gap-2">
 									<button

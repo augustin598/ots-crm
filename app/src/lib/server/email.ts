@@ -22,6 +22,7 @@ import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
 import { renderInvoicePaidEmailHtml } from './email-templates/invoice-paid';
 import { htmlToPlainText } from './html-text';
+import * as storage from '$lib/server/storage';
 
 // Re-export so existing callers can import the helper from `$lib/server/email`
 // alongside the production sender (`sendInvoicePaidEmail`). Demo scripts and
@@ -157,6 +158,152 @@ function buildHeaderLogoHtml(logoAttachment: { cid: string } | null): string {
 	return logoAttachment
 		? '<img src="cid:companylogo" alt="" style="display: block; max-height: 36px; max-width: 140px; margin-bottom: 18px;" />'
 		: '';
+}
+
+// ---------------------------------------------------------------------------
+// Comentarii pe task → text + imagini inline (cid:) în emailul de notificare
+// ---------------------------------------------------------------------------
+
+/** Câte imagini urcă în corpul emailului; restul rămân doar în task. */
+const COMMENT_IMAGE_MAX_COUNT = 6;
+/** Plafon total al imaginilor inline — Gmail respinge mesajele peste ~25MB. */
+const COMMENT_IMAGE_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+
+export type EmailInlineAttachment = {
+	filename: string;
+	content: Buffer;
+	cid: string;
+	contentType: string;
+};
+
+export type CommentEmailBlock = {
+	/** Atașamente nodemailer cu `cid`, de concatenat la `attachments`. */
+	attachments: EmailInlineAttachment[];
+	/** HTML gata de inserat în corpul emailului (citat + imagini). */
+	html: string;
+	/** Echivalentul text-only, pentru alternativa `text` a emailului. */
+	text: string;
+};
+
+const EMPTY_COMMENT_BLOCK: CommentEmailBlock = { attachments: [], html: '', text: '' };
+
+/**
+ * Construiește blocul „comentariu nou" pentru emailurile de notificare:
+ * textul comentariului (din HTML-ul TipTap, redus la text simplu și escapat)
+ * plus imaginile atașate, încărcate din MinIO și inserate inline prin `cid:`
+ * — clienții de email nu pot deschide URL-urile presemnate din storage, deci
+ * atașarea e singura cale ca pozele să se vadă efectiv în mesaj.
+ *
+ * Nu aruncă niciodată: o imagine care nu poate fi citită din storage e sărită,
+ * ca să nu blocheze notificarea în sine.
+ */
+async function buildCommentEmailBlock(
+	commentId: string,
+	themeColor: string
+): Promise<CommentEmailBlock> {
+	try {
+		const [comment] = await db
+			.select({ content: table.taskComment.content })
+			.from(table.taskComment)
+			.where(eq(table.taskComment.id, commentId))
+			.limit(1);
+
+		const plain = comment?.content ? htmlToPlainText(comment.content).trim() : '';
+
+		const rows = await db
+			.select({
+				path: table.taskCommentAttachment.path,
+				fileName: table.taskCommentAttachment.fileName,
+				mimeType: table.taskCommentAttachment.mimeType,
+				fileSize: table.taskCommentAttachment.fileSize
+			})
+			.from(table.taskCommentAttachment)
+			.where(eq(table.taskCommentAttachment.commentId, commentId))
+			.orderBy(table.taskCommentAttachment.createdAt);
+
+		const imageRows = rows.filter((r) => (r.mimeType ?? '').toLowerCase().startsWith('image/'));
+
+		const attachments: EmailInlineAttachment[] = [];
+		let totalBytes = 0;
+		let skipped = 0;
+
+		for (const row of imageRows) {
+			if (attachments.length >= COMMENT_IMAGE_MAX_COUNT) {
+				skipped++;
+				continue;
+			}
+			// Filtrăm după dimensiunea din DB înainte de download, ca să nu tragem
+			// degeaba din MinIO o poză care oricum n-ar încăpea în plafon.
+			if (row.fileSize && totalBytes + row.fileSize > COMMENT_IMAGE_MAX_TOTAL_BYTES) {
+				skipped++;
+				continue;
+			}
+			try {
+				const content = await storage.getFileBuffer(row.path);
+				if (totalBytes + content.length > COMMENT_IMAGE_MAX_TOTAL_BYTES) {
+					skipped++;
+					continue;
+				}
+				totalBytes += content.length;
+				attachments.push({
+					filename: row.fileName || `imagine-${attachments.length + 1}`,
+					content,
+					cid: `taskcommentimg${attachments.length}`,
+					contentType: row.mimeType || 'application/octet-stream'
+				});
+			} catch (error) {
+				skipped++;
+				logWarning('email', 'Imagine de comentariu nedisponibilă în storage — sărită', {
+					metadata: { commentId, path: row.path, error: serializeError(error).message }
+				});
+			}
+		}
+
+		if (!plain && attachments.length === 0) return EMPTY_COMMENT_BLOCK;
+
+		const quoteHtml = plain
+			? `<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; margin: 0 0 16px 0;">
+					<tr>
+						<td style="padding: 12px 16px; background-color: #f9fafb; border-left: 3px solid ${themeColor}; border-radius: 0 8px 8px 0; color: #374151; font-size: 14px; line-height: 1.65;">
+							${escapeHtml(plain).replace(/\n/g, '<br />')}
+						</td>
+					</tr>
+				</table>`
+			: '';
+
+		const imagesHtml = attachments.length
+			? `<div style="margin: 0 0 16px 0;">
+					${attachments
+						.map(
+							(a) =>
+								`<img src="cid:${a.cid}" alt="${escapeHtml(a.filename)}" style="display: block; width: 100%; max-width: 520px; height: auto; border-radius: 8px; margin: 0 0 10px 0;" />`
+						)
+						.join('')}
+					${
+						skipped > 0
+							? `<p style="color: #6b7280; font-size: 12px; margin: 0;">Încă ${skipped} ${skipped === 1 ? 'imagine este disponibilă' : 'imagini sunt disponibile'} în task.</p>`
+							: ''
+					}
+				</div>`
+			: '';
+
+		const textLines = [
+			...(plain ? [plain] : []),
+			...(attachments.length
+				? [
+						`(${attachments.length} ${attachments.length === 1 ? 'imagine atasata' : 'imagini atasate'}${skipped > 0 ? `, inca ${skipped} in task` : ''})`
+					]
+				: [])
+		];
+
+		return { attachments, html: `${quoteHtml}${imagesHtml}`, text: textLines.join('\n\n') };
+	} catch (error) {
+		// Blocul e opțional — notificarea pleacă și fără el.
+		logWarning('email', 'Nu am putut construi blocul de comentariu pentru email', {
+			metadata: { commentId, error: serializeError(error).message }
+		});
+		return EMPTY_COMMENT_BLOCK;
+	}
 }
 
 export interface BrandedEmailOptions {
@@ -1701,7 +1848,9 @@ export async function sendTaskUpdateEmail(
 	watcherEmail: string,
 	watcherName?: string,
 	changeType?: string,
-	taskUrlOverride?: string
+	taskUrlOverride?: string,
+	/** Comentariul care a declanșat notificarea — textul + pozele lui intră în email. */
+	commentId?: string | null
 ): Promise<void> {
 	if (watcherName) watcherName = escapeHtml(watcherName);
 	const baseUrl = publicEnv.PUBLIC_APP_URL || 'http://localhost:5173';
@@ -1718,11 +1867,11 @@ export async function sendTaskUpdateEmail(
 			toEmail: watcherEmail,
 			subject: `Task actualizat: ${task.title}`,
 			emailType: 'task-update',
-			metadata: { taskId, taskTitle: task.title, changeType },
+			metadata: { taskId, taskTitle: task.title, changeType, commentId },
 			htmlBody: '',
 			payload: {
 				sendFn: 'sendTaskUpdateEmail',
-				args: [taskId, watcherEmail, watcherName, changeType, taskUrlOverride]
+				args: [taskId, watcherEmail, watcherName, changeType, taskUrlOverride, commentId]
 			}
 		},
 		async () => {
@@ -1760,7 +1909,16 @@ export async function sendTaskUpdateEmail(
 						? 'atribuirea a fost modificată'
 						: changeType === 'dueDate'
 							? 'termenul a fost actualizat'
-							: 'taskul a fost modificat';
+							: changeType === 'comment'
+								? 'a fost adăugat un comentariu nou'
+								: changeType === 'mention'
+									? 'ați fost menționat într-un comentariu'
+									: 'taskul a fost modificat';
+
+			// Textul + pozele comentariului (inline prin cid:), dacă notificarea vine dintr-un comentariu.
+			const commentBlock = commentId
+				? await buildCommentEmailBlock(commentId, themeColor)
+				: EMPTY_COMMENT_BLOCK;
 
 			const updStatusColors = getEmailStatusColors(task.status);
 			const updPriorityColors = getEmailPriorityColors(task.priority);
@@ -1791,14 +1949,20 @@ export async function sendTaskUpdateEmail(
 						</td>
 					</tr>
 				</table>
+				${commentBlock.html}
 				${renderCtaButton(taskUrl, 'Vezi task-ul', themeColor)}
 			`;
+
+			const updAttachments = [
+				...(updLogoAttachment ? [updLogoAttachment] : []),
+				...commentBlock.attachments
+			];
 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: watcherEmail,
 				subject: `Task actualizat: ${task.title}`,
-				...(updLogoAttachment ? { attachments: [updLogoAttachment] } : {}),
+				...(updAttachments.length > 0 ? { attachments: updAttachments } : {}),
 				html: renderBrandedEmail({
 					themeColor,
 					headerLogoHtml: updHeaderLogoHtml,
@@ -1815,7 +1979,7 @@ export async function sendTaskUpdateEmail(
 			Un task pe care il urmariti a fost actualizat (${changeDescription}):
 
 			${task.title}
-			${task.description ? `\n${task.description}\n` : ''}
+			${task.description ? `\n${task.description}\n` : ''}${commentBlock.text ? `\n${commentBlock.text}\n` : ''}
 			Prioritate: ${task.priority || 'Medium'}
 			Status: ${task.status || 'Todo'}
 			${task.dueDate ? `Termen: ${formatDateRo(task.dueDate)}\n` : ''}
@@ -1835,7 +1999,13 @@ export async function sendTaskClientNotificationEmail(
 	clientEmail: string,
 	clientName: string | null,
 	notificationType: 'created' | 'status-change' | 'comment' | 'modified',
-	extra?: { newStatus?: string; commentPreview?: string; changedFields?: string }
+	extra?: {
+		newStatus?: string;
+		commentPreview?: string;
+		changedFields?: string;
+		/** Comentariul sursă — pozele lui se atașează inline în email. */
+		commentId?: string;
+	}
 ): Promise<void> {
 	if (clientName) clientName = escapeHtml(clientName);
 	// commentPreview arrives as TipTap rich-text HTML — strip to plain text
@@ -1908,6 +2078,12 @@ export async function sendTaskClientNotificationEmail(
 			const themeColor = normalizeThemeColor(tenant?.themeColor);
 			const taskUrl = `${baseUrl}/${tenant?.slug || 'tenant'}/tasks/${taskId}`;
 
+			// Pozele comentariului merg inline (cid:) — clientul nu are acces la storage.
+			const commentBlock =
+				notificationType === 'comment' && extra?.commentId
+					? await buildCommentEmailBlock(extra.commentId, themeColor)
+					: EMPTY_COMMENT_BLOCK;
+
 			// Full subject + description based on notification type
 			let subject: string;
 			let changeDescription: string;
@@ -1937,9 +2113,12 @@ export async function sendTaskClientNotificationEmail(
 				}
 				case 'comment':
 					subject = `Comentariu nou pe task: ${task.title}`;
-					changeDescription = extra?.commentPreview
-						? `Un comentariu nou a fost adăugat: "${extra.commentPreview.substring(0, 200)}${extra.commentPreview.length > 200 ? '...' : ''}"`
-						: 'Un comentariu nou a fost adăugat pe task.';
+					// Când avem blocul complet (citat + poze) nu mai repetăm previzualizarea trunchiată.
+					changeDescription = commentBlock.html
+						? 'Un comentariu nou a fost adăugat pe task:'
+						: extra?.commentPreview
+							? `Un comentariu nou a fost adăugat: "${extra.commentPreview.substring(0, 200)}${extra.commentPreview.length > 200 ? '...' : ''}"`
+							: 'Un comentariu nou a fost adăugat pe task.';
 					break;
 				case 'modified':
 					subject = `Task modificat: ${task.title}`;
@@ -1966,7 +2145,8 @@ export async function sendTaskClientNotificationEmail(
 			const safeDesc = task.description ? escapeHtml(task.description) : '';
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ${greeting},</p>
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${changeDescription}</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 ${commentBlock.html ? '12px' : '20px'} 0;">${changeDescription}</p>
+				${commentBlock.html}
 				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
@@ -1985,7 +2165,14 @@ export async function sendTaskClientNotificationEmail(
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
 				subject,
-				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+				...(logoAttachment || commentBlock.attachments.length > 0
+					? {
+							attachments: [
+								...(logoAttachment ? [logoAttachment] : []),
+								...commentBlock.attachments
+							]
+						}
+					: {}),
 				html: renderBrandedEmail({
 					themeColor: headerColor,
 					headerLogoHtml: clientNotifHeaderLogoHtml,
@@ -2000,7 +2187,7 @@ ${subject}
 Bună ${greeting},
 
 ${changeDescription.replace(/<[^>]+>/g, '')}
-
+${commentBlock.text ? `\n${commentBlock.text}\n` : ''}
 ${task.title}
 ${task.description ? `\n${task.description}\n` : ''}
 Prioritate: ${task.priority || 'Medium'}

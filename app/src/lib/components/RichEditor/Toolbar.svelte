@@ -16,9 +16,15 @@
 	interface Props {
 		editor: Editor;
 		onImageUpload?: ((file: File) => Promise<string>) | null;
+		/**
+		 * Editoare care stochează pozele ca atașamente separate (comentarii pe
+		 * task), nu inline în HTML. Primesc fișierul și NU se inserează nimic în
+		 * document — altfel base64-ul ar fi tăiat de sanitizer la salvare.
+		 */
+		onPickImage?: ((file: File) => void) | null;
 	}
 
-	let { editor, onImageUpload = null }: Props = $props();
+	let { editor, onImageUpload = null, onPickImage = null }: Props = $props();
 
 	let linkUrl = $state('');
 	let showLinkInput = $state(false);
@@ -52,6 +58,8 @@
 			if (onImageUpload) {
 				const url = await onImageUpload(file);
 				editor.chain().focus().setImage({ src: url }).run();
+			} else if (onPickImage) {
+				onPickImage(file);
 			} else {
 				const reader = new FileReader();
 				reader.onload = () => {

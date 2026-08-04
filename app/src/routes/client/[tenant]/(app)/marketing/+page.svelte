@@ -513,8 +513,7 @@
 
 <!-- Image Lightbox -->
 <ImageLightbox
-	src={lightboxSrc}
-	alt={previewMaterial?.title || ''}
+	images={lightboxSrc ? [{ url: lightboxSrc, name: previewMaterial?.title || undefined }] : []}
 	open={lightboxOpen}
 	onClose={() => { lightboxOpen = false; }}
 />

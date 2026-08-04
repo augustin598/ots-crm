@@ -187,7 +187,7 @@
 <div class={cn('rich-editor overflow-visible rounded-lg border', className)} style="--editor-min-height: {minHeight};">
 	{#if editor && editable}
 		{#key editorRevision}
-			<Toolbar {editor} {onImageUpload} />
+			<Toolbar {editor} {onImageUpload} onPickImage={onPasteImage} />
 		{/key}
 	{/if}
 
