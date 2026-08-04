@@ -326,19 +326,57 @@ const SCORE_AMOUNT_EXACT = 60;
 /** Sumă în toleranța de 2% (curs valutar, rotunjiri). */
 const SCORE_AMOUNT_NEAR = 40;
 /**
- * Sume egale DUPĂ conversie la cursul BNR al zilei plății.
+ * Sume egale DUPĂ conversie la cursul BNR al zilei plății, în DOUĂ trepte după cât de
+ * departe cade deriva. Treapta contează la fel de mult ca valoarea: un scor BINAR pe toată
+ * banda ar lăsa departajarea a două facturi de la același furnizor exclusiv pe seama datei.
  *
- * Sub `SCORE_AMOUNT_NEAR`: e o aproximare cu două surse de eroare (cursul băncii ≠ cursul
- * BNR, plus banda de toleranță de mai jos, mult mai largă decât cei 2% de la aceeași
- * valută), deci nu are voie să cântărească la fel ca o coincidență de sumă în aceeași
- * valută. Suficient de mare totuși cât, împreună cu dovada de comerciant (40) și o dată
- * apropiată, să treacă pragul de 'sigur': 35 + 40 + 9 = 84 pe cazul INWX din raport.
+ * De ce e nevoie de gradient: banda de conversie e largă (−2%…+6%), iar la INWX — registrar
+ * de domenii, cu facturi grupate în 8-15 € — două înnoiri la câteva zile distanță cad
+ * rutinier amândouă în fereastră. Pentru plata reală de 51,81 lei, orice factură între 9,34
+ * și 10,09 € intră în bandă. Cu un scor unic, factura la paritate (9,89 €) și cea de la
+ * marginea benzii (9,40 €) primeau ambele 35, iar câștiga cea cu data mai apropiată — adică
+ * factura greșită, etichetată „sigur".
  *
- * Efect secundar dorit: SINGURĂ (fără comerciant) conversia dă cel mult 35 + 10 = 45, deci
- * o potrivire speculativă pe sumă convertită apare doar la o distanță de cel mult 5 zile —
- * banda largă nu se poate transforma în potriviri „probabile" pe toată fereastra de 10 zile.
+ * Ecartul dintre trepte (35 − 19 = 16) e strict mai mare decât `SCORE_PROXIMITY_MAX` (10),
+ * exact cum ecartul dintre potrivirea exactă și cea aproximativă pe aceeași valută (60 − 40
+ * = 20) e mai mare decât aceeași proximitate: fidelitatea sumei bate mereu apropierea de
+ * dată, pe ambele drumuri.
+ *
+ * Treapta strânsă rămâne 35, cât să treacă pragul de 'sigur' împreună cu dovada de
+ * comerciant (40) și o dată apropiată: 35 + 40 + 9 = 84 pe cazul INWX din raport. Treapta
+ * largă e aleasă astfel încât maximul ei să rămână SUB prag (19 + 40 + 10 = 69 < 70): o
+ * potrivire de la marginea benzii nu se mai poate declara „sigură" de una singură.
+ *
+ * Efect secundar dorit: SINGURĂ (fără comerciant) treapta largă dă cel mult 19 + 10 = 29,
+ * sub `PROBABLE_THRESHOLD` — deci coada benzii nu mai produce deloc potriviri speculative
+ * cu furnizori fără nicio legătură, iar treapta strânsă le produce (35 + 10 = 45) doar la
+ * cel mult 5 zile distanță.
+ *
+ * CENTRUL treptei strânse NU e paritatea, ci adaosul tipic de conversie (vezi
+ * `FX_TYPICAL_MARKUP`). Pe datele reale ale extrasului, o plată în lei către un furnizor
+ * care facturează în valută iese SISTEMATIC peste conversia BNR; o treaptă strânsă centrată
+ * pe paritate ar retrograda tocmai potrivirile corecte și, între două candidate, ar da
+ * scorul mai mare celei mai apropiate de cursul BNR — adică celei GREȘITE.
  */
-const SCORE_AMOUNT_FX = 35;
+const SCORE_AMOUNT_FX_TIGHT = 35;
+const SCORE_AMOUNT_FX_LOOSE = 19;
+/**
+ * Adaosul de conversie AȘTEPTAT, adică centrul treptei strânse.
+ *
+ * Măsurat pe extrasul real: plata către HETZNER din 14.07.2026 e raportată ca „valoare
+ * tranzactie: 180.04 EUR", iar coloana Valoare arată 968,77 lei debitați — 5,3809 lei/€,
+ * cu 2,8% peste cotația BNR a acelei săptămâni (~5,23). Când transacția e raportată direct
+ * în lei, conversia a făcut-o comerciantul sau procesatorul lui (DCC), unde adaosul e și
+ * mai mare. Deriva așteptată a unei potriviri CORECTE nu e deci 0, ci ~2-4%.
+ */
+const FX_TYPICAL_MARKUP = 0.025;
+/**
+ * Cât de departe de adaosul tipic mai poate cădea o conversie și să rămână „strânsă":
+ * ±2,5 puncte procentuale, adică deriva din intervalul [0%, +5%]. Restul benzii — plata
+ * SUB conversia BNR (adaos negativ, imposibil de explicat prin comisioane) și adaosul de
+ * peste 5% — rămâne pe treapta largă.
+ */
+const FX_TIGHT_SPREAD = 0.025;
 const SCORE_MERCHANT = 40;
 const SCORE_PROXIMITY_MAX = 10;
 
@@ -409,7 +447,8 @@ export function scoreMatch(
 			if (paid && billed && billed.ron > 0) {
 				const drift = (paid.ron - billed.ron) / billed.ron;
 				if (drift <= FX_TOLERANCE_ABOVE && drift >= -FX_TOLERANCE_BELOW) {
-					score += SCORE_AMOUNT_FX;
+					const tight = Math.abs(drift - FX_TYPICAL_MARKUP) <= FX_TIGHT_SPREAD;
+					score += tight ? SCORE_AMOUNT_FX_TIGHT : SCORE_AMOUNT_FX_LOOSE;
 					fx = {
 						invoiceRon: billed.ron,
 						paymentRon: paid.ron,
@@ -440,8 +479,8 @@ export interface Pair {
 
 /**
  * Scorul maxim pe care îl poate întoarce `scoreMatch` — cea mai grea componentă de sumă
- * (cele trei se exclud reciproc: aceeași valută dă exact SAU apropiat, valute diferite dau
- * conversie) + comerciant + proximitate maximă.
+ * (toate se exclud reciproc: aceeași valută dă exact SAU apropiat, valute diferite dau
+ * conversia strânsă SAU pe cea largă) + comerciant + proximitate maximă.
  *
  * DERIVAT, nu hardcodat: separarea nivelurilor din `pairWeights` cere
  * `MAX_PAIR_SCORE >= scorul maxim atins`, iar cele două erau exact egale (110 = 110).
@@ -450,7 +489,7 @@ export interface Pair {
  * deposedează unul confirmat", fără ca vreun test să pice. Aici cuplajul e structural.
  */
 export const MAX_PAIR_SCORE =
-	Math.max(SCORE_AMOUNT_EXACT, SCORE_AMOUNT_NEAR, SCORE_AMOUNT_FX) +
+	Math.max(SCORE_AMOUNT_EXACT, SCORE_AMOUNT_NEAR, SCORE_AMOUNT_FX_TIGHT, SCORE_AMOUNT_FX_LOOSE) +
 	SCORE_MERCHANT +
 	SCORE_PROXIMITY_MAX;
 

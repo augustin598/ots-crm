@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'bun:test';
-import { findRateOnOrBefore, resolveFxRates, type BnrRateRow } from '../rate-lookup';
+import {
+	findRateOnOrBefore,
+	resolveFxRates,
+	RATE_LOOKBACK_DAYS,
+	type BnrRateRow
+} from '../rate-lookup';
 
 /**
  * Cotații reale din `bnr_exchange_rate` (prod), prima săptămână din iulie 2026.
@@ -12,8 +17,8 @@ const ROWS: BnrRateRow[] = [
 	{ currency: 'EUR', rate: 5.2359, multiplier: 1, rateDate: '2026-07-02' },
 	{ currency: 'EUR', rate: 5.2374, multiplier: 1, rateDate: '2026-07-03' },
 	{ currency: 'EUR', rate: 5.2317, multiplier: 1, rateDate: '2026-07-06' },
-	{ currency: 'USD', rate: 4.6227, multiplier: 1, rateDate: '2026-07-02' },
-	{ currency: 'HUF', rate: 1.4757, multiplier: 100, rateDate: '2026-07-02' }
+	{ currency: 'USD', rate: 4.5875, multiplier: 1, rateDate: '2026-07-02' },
+	{ currency: 'HUF', rate: 1.4728, multiplier: 100, rateDate: '2026-07-02' }
 ];
 
 describe('findRateOnOrBefore', () => {
@@ -58,7 +63,7 @@ describe('findRateOnOrBefore', () => {
 		// BNR cotează HUF pentru 100 de unități: 1,4757 lei / 100 HUF.
 		it('HUF (cotat la 100) dă lei pe UNITATE, nu pe sută', () => {
 			const found = findRateOnOrBefore(ROWS, 'HUF', '2026-07-02');
-			expect(found?.ronPerUnit).toBeCloseTo(0.014757, 9);
+			expect(found?.ronPerUnit).toBeCloseTo(0.014728, 9);
 		});
 
 		it('multiplicator absent (null) = 1', () => {
@@ -71,6 +76,47 @@ describe('findRateOnOrBefore', () => {
 		it('multiplicator 0 (dată coruptă) e tratat ca 1, nu ca împărțire la zero', () => {
 			const rows: BnrRateRow[] = [
 				{ currency: 'EUR', rate: 5.2359, multiplier: 0, rateDate: '2026-07-02' }
+			];
+			expect(findRateOnOrBefore(rows, 'EUR', '2026-07-02')?.ronPerUnit).toBe(5.2359);
+		});
+	});
+
+	describe('plafonul de vechime', () => {
+		const singura: BnrRateRow[] = [
+			{ currency: 'EUR', rate: 4.97, multiplier: 1, rateDate: '2026-03-10' }
+		];
+
+		it('o cotație mai veche decât plafonul nu se aplică — mai bine niciun curs decât unul stricat', () => {
+			// Sync BNR oprit: fără plafon, cotația din martie ar fi fost folosită și pe 31 iulie
+			// (143 de zile vechime), lărgind tăcut zona în care două facturi se potrivesc la fel.
+			expect(findRateOnOrBefore(singura, 'EUR', '2026-07-31')).toBeNull();
+			expect(findRateOnOrBefore(singura, 'EUR', '2026-03-30')).toBeNull();
+		});
+
+		it('exact la limită (15 zile) se aplică, o zi peste nu', () => {
+			expect(findRateOnOrBefore(singura, 'EUR', '2026-03-25')?.rateDate).toBe('2026-03-10');
+			expect(findRateOnOrBefore(singura, 'EUR', '2026-03-26')).toBeNull();
+		});
+
+		it('plafonul e cel exportat, nu un al doilea număr scris de mână', () => {
+			expect(RATE_LOOKBACK_DAYS).toBe(15);
+			expect(findRateOnOrBefore(singura, 'EUR', '2026-03-26', 30)?.rateDate).toBe('2026-03-10');
+		});
+
+		it('și `resolveFxRates` îl respectă, per zi cerută, nu doar pe prima', () => {
+			const fx = resolveFxRates(singura, ['2026-03-15', '2026-07-31']);
+			expect(fx['2026-03-15'].EUR.rateDate).toBe('2026-03-10');
+			expect(fx['2026-07-31']).toBeUndefined();
+		});
+
+		it('o dată cerută nevalidă nu primește un curs oarecare', () => {
+			expect(findRateOnOrBefore(ROWS, 'EUR', 'nu e o dată')).toBeNull();
+		});
+
+		it('un rând cu dată nevalidă e ignorat, nu ascunde cotația bună', () => {
+			const rows: BnrRateRow[] = [
+				{ currency: 'EUR', rate: 9.99, multiplier: 1, rateDate: '2026-07-0' },
+				{ currency: 'EUR', rate: 5.2359, multiplier: 1, rateDate: '2026-07-02' }
 			];
 			expect(findRateOnOrBefore(rows, 'EUR', '2026-07-02')?.ronPerUnit).toBe(5.2359);
 		});
@@ -101,11 +147,11 @@ describe('resolveFxRates', () => {
 	it('indexează pe (dată, valută) — forma cerută de matchPayments', () => {
 		const fx = resolveFxRates(ROWS, ['2026-07-02', '2026-07-04']);
 		expect(fx['2026-07-02'].EUR.ronPerUnit).toBe(5.2359);
-		expect(fx['2026-07-02'].USD.ronPerUnit).toBe(4.6227);
+		expect(fx['2026-07-02'].USD.ronPerUnit).toBe(4.5875);
 		// Sâmbătă: aceleași valute, fiecare cu ultima ei cotație anterioară — EUR de vineri,
 		// USD (nesincronizat după 02) tot de pe 02.
 		expect(fx['2026-07-04'].EUR).toEqual({ ronPerUnit: 5.2374, rateDate: '2026-07-03' });
-		expect(fx['2026-07-04'].USD).toEqual({ ronPerUnit: 4.6227, rateDate: '2026-07-02' });
+		expect(fx['2026-07-04'].USD).toEqual({ ronPerUnit: 4.5875, rateDate: '2026-07-02' });
 	});
 
 	it('zilele fără nicio cotație lipsesc din rezultat', () => {

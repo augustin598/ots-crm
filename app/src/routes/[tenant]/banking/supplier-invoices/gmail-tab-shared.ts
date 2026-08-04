@@ -185,6 +185,20 @@ export function formatDate(value: Date | string | null | undefined): string {
 	return date.toLocaleDateString('ro-RO');
 }
 
+/**
+ * O ZI calendaristică ISO („2026-07-02"), nu un moment: formatată direct din șir.
+ *
+ * `formatDate` ar construi `new Date('2026-07-02')` — miezul nopții UTC — și l-ar trece
+ * prin `toLocaleDateString`, care pe orice fus negativ afișează ziua dinainte. E exact
+ * hazardul pentru care `fxDateKey` din payment-match.ts lucrează în UTC; data cotației BNR
+ * n-are voie să-l reintroducă la afișare.
+ */
+export function formatIsoDay(iso: string | null | undefined): string {
+	const m = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+	if (!m) return '—';
+	return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
 const knownCurrencies = new Set<string>(CURRENCIES);
 
 /** Nicio sumă fără valută: fără valută cunoscută afișăm codul brut lângă valoare. */

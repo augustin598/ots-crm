@@ -12,6 +12,7 @@ import {
 	parseAmount,
 	toGmailExcludeOperator
 } from '../parsers/index';
+import { parseAmountNearKeyword } from '../parsers/helpers';
 import { inwxParser } from '../parsers/inwx';
 import { openaiParser } from '../parsers/openai';
 import { roSuppliersParser } from '../parsers/ro-suppliers';
@@ -381,6 +382,68 @@ describe('parsere noi', () => {
 		);
 		expect(r.supplierType).toBe('inwx');
 		expect(r.invoiceNumber).toBeUndefined();
+	});
+
+	// Notificarea INWX nu conține suma (ea stă în PDF). Un „$1" oarecare din corp devenea
+	// factură de 1,00 USD, iar suma inventată închidea îmbogățirea din PDF — vezi
+	// `shouldPreferPdfAmount` și poarta din supplier-invoices.remote.ts.
+	it('inwx: nicio sumă inventată dintr-o notificare fără sumă', () => {
+		const r = inwxParser.parseInvoice(
+			makeEmail({
+				from: 'INWX GmbH <buchhaltung@inwx.de>',
+				subject: 'New Invoice available',
+				body: 'A new invoice is available in your account. Log in with $1 click to download it.'
+			})
+		);
+		expect(r.amount).toBeUndefined();
+		expect(r.currency).toBeUndefined();
+	});
+
+	it('inwx: suma DECLARATĂ în corp e citită („Rechnungsbetrag: 9,89 EUR")', () => {
+		const r = inwxParser.parseInvoice(
+			makeEmail({
+				from: 'INWX GmbH <buchhaltung@inwx.de>',
+				subject: 'Neue Rechnung verfügbar',
+				body: 'Ihre Rechnung liegt bereit. Rechnungsbetrag: 9,89 EUR. Vielen Dank.'
+			})
+		);
+		expect(r.amount).toBe(989);
+		expect(r.currency).toBe('EUR');
+	});
+
+	it('inwx: și forma engleză („Total amount: EUR 12.50")', () => {
+		const r = inwxParser.parseInvoice(
+			makeEmail({
+				from: 'INWX GmbH <buchhaltung@inwx.de>',
+				subject: 'New Invoice available',
+				body: 'Total amount: EUR 12.50'
+			})
+		);
+		expect(r.amount).toBe(1250);
+		expect(r.currency).toBe('EUR');
+	});
+});
+
+describe('parseAmountNearKeyword — suma declarată, nu suma găsită', () => {
+	it('fără cuvânt-cheie nu întoarce nimic, oricâte numere ar fi în text', () => {
+		expect(parseAmountNearKeyword('Click here: $1 or 25.00 EUR of savings', ['total'])).toBeNull();
+	});
+
+	it('ia suma de după cuvântul-cheie, nu prima din text', () => {
+		expect(parseAmountNearKeyword('Subscription $1 trial. Total: 25,00 EUR', ['total'])).toEqual({
+			amount: 2500,
+			currency: 'EUR'
+		});
+	});
+
+	it('o sumă prea departe de cuvântul-cheie nu i se atribuie', () => {
+		const text = `Total for the period described in the following paragraph of this notice: 25,00 EUR`;
+		expect(parseAmountNearKeyword(text, ['total'])).toBeNull();
+	});
+
+	it('încearcă fiecare apariție a cuvântului-cheie', () => {
+		const text = 'Total items: three. Total price: 40,00 RON';
+		expect(parseAmountNearKeyword(text, ['total'])).toEqual({ amount: 4000, currency: 'RON' });
 	});
 });
 

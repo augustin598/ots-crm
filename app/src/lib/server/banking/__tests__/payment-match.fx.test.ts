@@ -21,8 +21,9 @@ const INWX_COMMENT =
 const PAYMENT_DATE = new Date('2026-07-02T00:00:00.000Z');
 const INVOICE_DATE = new Date('2026-07-01T01:43:55.000Z');
 
-/** Cursul BNR real pentru 02.07.2026, citit din `bnr_exchange_rate` (prod). */
+/** Cursurile BNR reale pentru 02.07.2026, citite din `bnr_exchange_rate` (prod). */
 const EUR_02_07 = 5.2359;
+const USD_02_07 = 4.5875;
 
 function payment(over: Partial<PaymentRow> = {}): PaymentRow {
 	return {
@@ -113,6 +114,19 @@ describe('toleranța asimetrică (adaosul băncii peste cursul BNR)', () => {
 		expect(res.fx).toBeDefined();
 	});
 
+	// Treapta strânsă e centrată pe adaosul tipic (2,5%), nu pe paritate: o plată în lei
+	// pentru o factură în valută iese SISTEMATIC peste conversia BNR.
+	it('adaosul tipic de card (2,8%, măsurat pe plata HETZNER) e pe treapta strânsă', () => {
+		const res = at(956); // 956 × 5,2359 = 5005,5 → 5006; plata e cu 3,5% peste
+		expect(res.score).toBe(84); // 35 strâns + 40 comerciant + 9 proximitate
+	});
+
+	it('plata SUB conversia BNR e plauzibilă, dar mai slabă — treapta largă', () => {
+		const res = at(999); // 999 × 5,2359 = 5231 bani; plata 5181 e cu 0,96% SUB
+		expect(res.fx).toBeDefined();
+		expect(res.score).toBe(68); // 19 larg + 40 comerciant + 9 proximitate
+	});
+
 	it('adaos de ~8%: prea mult ca să fie diferență de curs — fără scor pe sumă', () => {
 		const res = at(917); // 917 × 5,2359 = 4801 bani; plata e cu 7,9% peste
 		expect(res.fx).toBeUndefined();
@@ -145,7 +159,7 @@ describe('sume clar diferite', () => {
 
 	it('o factură de 1,00 USD (parsare greșită) nu e confirmată de plata de 51,81 lei', () => {
 		const [result] = matchPayments([payment()], [candidate({ amount: 100, currency: 'USD' })], {
-			fxRates: { '2026-07-02': { USD: { ronPerUnit: 4.6227, rateDate: '2026-07-02' } } }
+			fxRates: { '2026-07-02': { USD: { ronPerUnit: USD_02_07, rateDate: '2026-07-02' } } }
 		});
 		expect(result.fx).toBeUndefined();
 		expect(result.confidence).toBe('probable');
@@ -213,9 +227,9 @@ describe('cursul e cel de la DATA PLĂȚII', () => {
 });
 
 describe('valute cotate la 100 de unități (multiplicator)', () => {
-	// HUF: BNR publică 1,4757 lei pentru 100 HUF, deci 0,014757 lei/unitate. Dacă
+	// HUF: BNR publică 1,4728 lei pentru 100 HUF, deci 0,014728 lei/unitate. Dacă
 	// multiplicatorul se pierde, conversia iese de 100 de ori mai mare și nimic nu se potrivește.
-	const HUF_PER_UNIT = 1.4757 / 100;
+	const HUF_PER_UNIT = 1.4728 / 100;
 
 	it('o factură de 3.511 HUF se potrivește cu o plată de 51,81 lei', () => {
 		const fx: FxRates = {
@@ -224,12 +238,12 @@ describe('valute cotate la 100 de unități (multiplicator)', () => {
 		const res = scoreMatch(payment(), candidate({ amount: 351_100, currency: 'HUF' }), {
 			fxRates: fx
 		});
-		expect(res.fx?.invoiceRon).toBe(5181);
+		expect(res.fx?.invoiceRon).toBe(5171); // 351.100 × 0,014728
 		expect(res.score).toBeGreaterThan(70);
 	});
 
 	it('cu cursul brut (fără împărțirea la 100) nu s-ar potrivi nimic', () => {
-		const fx: FxRates = { '2026-07-02': { HUF: { ronPerUnit: 1.4757, rateDate: '2026-07-02' } } };
+		const fx: FxRates = { '2026-07-02': { HUF: { ronPerUnit: 1.4728, rateDate: '2026-07-02' } } };
 		const res = scoreMatch(payment(), candidate({ amount: 351_100, currency: 'HUF' }), {
 			fxRates: fx
 		});
@@ -242,23 +256,25 @@ describe('plăți în valută față de facturi în ALTĂ valută', () => {
 		'  Plata la POS non-BT cu card VISA;EPOS 02/07/2026 9RRDTDHD TID:H9JRYLIO DIRECTADMIN.COM  +15879214476 CA 42444505 valoare tranzactie: 29.00 USD RRN:618811530698 comision tranzactie 0.00 RON;REF: 000NVPO261904iEK; ';
 	const fx: FxRates = {
 		'2026-07-02': {
-			USD: { ronPerUnit: 4.6227, rateDate: '2026-07-02' },
+			USD: { ronPerUnit: USD_02_07, rateDate: '2026-07-02' },
 			EUR: { ronPerUnit: EUR_02_07, rateDate: '2026-07-02' }
 		}
 	};
 
-	it('29,00 USD plătiți se potrivesc cu o factură de 25,60 € (ambele ≈ 134 lei)', () => {
+	it('29,00 USD plătiți se potrivesc cu o factură de 25,00 € (ambele ≈ 131 lei)', () => {
 		const p = payment({ comment: USD_COMMENT, originalAmount: 2900, originalCurrency: 'USD' });
 		const c = candidate({
 			from: 'DirectAdmin <sales@directadmin.com>',
 			subject: 'Invoice 12345',
-			amount: 2560,
+			amount: 2500,
 			currency: 'EUR',
 			supplierType: 'directadmin'
 		});
 		const res = scoreMatch(p, c, { fxRates: fx });
-		expect(res.fx?.paymentRon).toBe(13406); // 29,00 × 4,6227
-		expect(res.fx?.invoiceRon).toBe(13404); // 25,60 × 5,2359
+		expect(res.fx?.paymentRon).toBe(13304); // 29,00 × 4,5875
+		expect(res.fx?.invoiceRon).toBe(13090); // 25,00 × 5,2359
+		// Diferența de 1,6% e adaosul cu care furnizorul a convertit el însuși prețul în EUR
+		// la momentul încasării în USD — același fenomen, deci aceeași bandă asimetrică.
 		expect(res.score).toBeGreaterThan(70);
 	});
 
@@ -272,7 +288,7 @@ describe('plăți în valută față de facturi în ALTĂ valută', () => {
 			supplierType: 'directadmin'
 		});
 		const onlyUsd: FxRates = {
-			'2026-07-02': { USD: { ronPerUnit: 4.6227, rateDate: '2026-07-02' } }
+			'2026-07-02': { USD: { ronPerUnit: USD_02_07, rateDate: '2026-07-02' } }
 		};
 		expect(scoreMatch(p, c, { fxRates: onlyUsd }).fx).toBeUndefined();
 	});
@@ -296,6 +312,85 @@ describe('conversia nu atinge drumurile existente', () => {
 	it('fereastra de 10 zile bate conversia: o factură prea veche nu se potrivește', () => {
 		const old = candidate({ date: new Date('2026-06-01T00:00:00.000Z') });
 		expect(scoreMatch(payment(), old, { fxRates: rates() }).score).toBe(0);
+	});
+});
+
+describe('două facturi de la ACELAȘI furnizor, amândouă în bandă', () => {
+	// Pentru plata reală de 51,81 lei, banda de conversie (−2%…+6%) acoperă orice factură
+	// între 9,34 și 10,09 €. INWX e registrar de domenii, cu facturi grupate în 8-15 €, deci
+	// două înnoiri la câteva zile distanță cad rutinier amândouă în fereastră.
+	const corecta = candidate({
+		gmailMessageId: 'inwx-corect',
+		amount: 989, // 51,78 lei convertit — derivă +0,06%
+		date: INVOICE_DATE // 01.07, cu o zi înaintea plății
+	});
+	const gresita = candidate({
+		gmailMessageId: 'inwx-gresit',
+		amount: 940, // 49,22 lei convertit — derivă +5,26%, tot în bandă
+		date: PAYMENT_DATE // 02.07, chiar ziua plății: proximitate MAXIMĂ
+	});
+
+	// Ambele ordini: la scoruri egale câștigă indicele mai mic din listă, deci un test pe o
+	// singură ordine ar putea trece din întâmplare.
+	for (const [eticheta, lista] of [
+		['corecta prima', [corecta, gresita]],
+		['greșita prima', [gresita, corecta]]
+	] as const) {
+		it(`suma bate data — ${eticheta}`, () => {
+			const [result] = matchPayments([payment()], [...lista], { fxRates: rates() });
+			expect(result.match?.gmailMessageId).toBe('inwx-corect');
+			expect(result.score).toBe(84); // 35 strâns + 40 comerciant + 9 proximitate
+			expect(result.confidence).toBe('sure');
+		});
+	}
+
+	it('și când amândouă sunt din ziua plății, tot fidelitatea sumei decide', () => {
+		const [result] = matchPayments(
+			[payment()],
+			[gresita, candidate({ gmailMessageId: 'inwx-corect', date: PAYMENT_DATE })],
+			{ fxRates: rates() }
+		);
+		expect(result.match?.gmailMessageId).toBe('inwx-corect');
+		expect(result.score).toBe(85); // 35 + 40 + 10
+	});
+
+	// Anti-inversiune: dacă treapta strânsă ar fi centrată pe PARITATE, factura de 10,05 €
+	// (0,96 lei mai mult decât s-a plătit) ar primi scorul mare, iar cea plătită cu adaosul
+	// obișnuit de card l-ar pierde — exact pe dos față de cum se debitează în realitate.
+	it('adaosul tipic bate o factură mai apropiată de cursul BNR, dar plătită „prea ieftin"', () => {
+		const cuAdaos = candidate({ gmailMessageId: 'inwx-cu-adaos', amount: 956, date: INVOICE_DATE });
+		const subBnr = candidate({
+			gmailMessageId: 'inwx-sub-bnr',
+			amount: 1005, // 52,62 lei convertit: am fi plătit cu 1,5% SUB cursul BNR
+			date: PAYMENT_DATE
+		});
+		const [result] = matchPayments([payment()], [subBnr, cuAdaos], { fxRates: rates() });
+		expect(result.match?.gmailMessageId).toBe('inwx-cu-adaos');
+		expect(result.score).toBe(84);
+	});
+
+	it('factura de la marginea benzii nu poate fi „sigură" singură', () => {
+		const [result] = matchPayments([payment()], [gresita], { fxRates: rates() });
+		expect(result.fx).toBeDefined();
+		expect(result.score).toBe(69); // 19 + 40 + 10 — sub pragul de 70
+		expect(result.confidence).toBe('probable');
+	});
+});
+
+describe('treapta largă singură nu inventează potriviri', () => {
+	it('expeditor fără nicio legătură, derivă mare → „negăsită", nu „probabilă"', () => {
+		const strain = candidate({
+			gmailMessageId: 'strain-1',
+			from: 'Billing <billing@fara-legatura.example>',
+			subject: 'Your receipt',
+			supplierType: undefined,
+			amount: 940, // derivă +5,26%: în bandă, dar pe treapta largă
+			date: PAYMENT_DATE
+		});
+		const [result] = matchPayments([payment()], [strain], { fxRates: rates() });
+		expect(scoreMatch(payment(), strain, { fxRates: rates() }).score).toBe(29); // 19 + 10
+		expect(result.match).toBeUndefined();
+		expect(result.confidence).toBe('none');
 	});
 });
 

@@ -24,6 +24,7 @@
 		confidenceBadge,
 		confidenceLabel,
 		formatDate,
+		formatIsoDay,
 		formatMoney,
 		reportError,
 		runZipDownload,
@@ -195,7 +196,10 @@
 		const fx = payment.fx;
 		if (!fx || !payment.match) return null;
 		const invoice = `${formatMoney(payment.match.amount, payment.match.currency)} ≈ ${formatAmount(fx.invoiceRon, 'RON')}`;
-		const parts = [`${invoice} la cursul BNR din ${formatDate(fx.rateDate)}`];
+		// `formatIsoDay`, nu `formatDate`: data cotației e o zi calendaristică ISO, iar
+		// drumul prin `new Date(...)` + `toLocaleDateString` ar muta-o cu o zi înapoi pe
+		// fusurile negative.
+		const parts = [`${invoice} la cursul BNR din ${formatIsoDay(fx.rateDate)}`];
 		// Când și plata a fost în valută, echivalentul ei e la fel de necesar: altfel
 		// comparația arată o singură parte.
 		if (payment.originalCurrency && payment.originalCurrency !== 'RON') {

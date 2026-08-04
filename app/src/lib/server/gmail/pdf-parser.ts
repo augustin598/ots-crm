@@ -32,6 +32,38 @@ export async function extractInvoiceDataFromPdf(buffer: Buffer): Promise<PdfExtr
 	return parseInvoiceText(text);
 }
 
+/** Câte ori trebuie să difere cele două sume ca documentul să bată emailul. */
+const ORDER_OF_MAGNITUDE = 10;
+
+/**
+ * Cine dă suma facturii când și emailul, și PDF-ul spun ceva: emailul (parser per furnizor,
+ * calibrat pe formatul lui) sau documentul?
+ *
+ * Implicit rămâne emailul — parserele de furnizor citesc totalul din textul pe care îl
+ * cunosc, în timp ce extragerea din PDF e generică și poate nimeri un subtotal sau o linie
+ * de TVA. Documentul câștigă în exact două situații, amândouă însemnând că numărul din
+ * email nu poate fi totalul facturii:
+ *
+ *   1. VALUTE DIFERITE. Un total scris în altă monedă decât cea a documentului nu e o
+ *      citire mai slabă, ci un număr luat din altă parte a textului (cazul INWX: un „$1"
+ *      oarecare din corp, față de euro pe factură).
+ *   2. UN ORDIN DE MĂRIME diferență în aceeași valută. 1,00 față de 129,99 nu e o rotunjire.
+ *
+ * Rămâne pur (fără I/O) ca să poată fi testat direct.
+ */
+export function shouldPreferPdfAmount(
+	email: { amount?: number; currency?: string },
+	pdf: { amount?: number; currency?: string }
+): boolean {
+	if (pdf.amount == null || !pdf.currency) return false;
+	if (email.amount == null || !email.currency) return true;
+	if (pdf.currency !== email.currency) return true;
+	const high = Math.max(pdf.amount, email.amount);
+	const low = Math.min(pdf.amount, email.amount);
+	if (low <= 0) return high > 0;
+	return high / low >= ORDER_OF_MAGNITUDE;
+}
+
 /**
  * Parse a bare number string (no currency symbol) to cents.
  * Handles "241.30", "1,234.56", "241,30" (comma as decimal).

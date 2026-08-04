@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseInvoiceText } from '../pdf-parser';
+import { parseInvoiceText, shouldPreferPdfAmount } from '../pdf-parser';
 
 // Text aproximat din PDF-ul real ROTLD (factura 453940)
 const ROTLD_TEXT = `Institutul National de Cercetare-Dezvoltare in Informatica - ICI Bucuresti
@@ -175,5 +175,40 @@ describe('parseInvoiceText — status', () => {
 	it('cerere de prepayment (nu confirmare) => status undefined, nu paid', () => {
 		const r = parseInvoiceText('Please transfer the prepayment amount of 50,00 EUR');
 		expect(r.status).toBeUndefined();
+	});
+});
+
+describe('shouldPreferPdfAmount — cine dă suma când amândouă spun ceva', () => {
+	it('emailul n-a dat nimic → documentul decide', () => {
+		expect(shouldPreferPdfAmount({}, { amount: 989, currency: 'EUR' })).toBe(true);
+	});
+
+	it('PDF-ul n-a dat nimic → rămâne suma din email', () => {
+		expect(shouldPreferPdfAmount({ amount: 989, currency: 'EUR' }, {})).toBe(false);
+		expect(shouldPreferPdfAmount({ amount: 989, currency: 'EUR' }, { amount: 500 })).toBe(false);
+	});
+
+	it('valute diferite → documentul decide (cazul „$1" scrapat din notificarea INWX)', () => {
+		expect(
+			shouldPreferPdfAmount({ amount: 100, currency: 'USD' }, { amount: 989, currency: 'EUR' })
+		).toBe(true);
+	});
+
+	it('aceeași valută, sume apropiate → parserul de furnizor rămâne autoritatea', () => {
+		expect(
+			shouldPreferPdfAmount({ amount: 989, currency: 'EUR' }, { amount: 785, currency: 'EUR' })
+		).toBe(false);
+	});
+
+	it('aceeași valută, un ordin de mărime diferență → documentul decide', () => {
+		expect(
+			shouldPreferPdfAmount({ amount: 100, currency: 'EUR' }, { amount: 12999, currency: 'EUR' })
+		).toBe(true);
+	});
+
+	it('o sumă de 0 în email nu blochează documentul', () => {
+		expect(
+			shouldPreferPdfAmount({ amount: 0, currency: 'EUR' }, { amount: 989, currency: 'EUR' })
+		).toBe(true);
 	});
 });

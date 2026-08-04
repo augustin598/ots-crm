@@ -16,7 +16,7 @@ import {
 import { getGmailStatus, updateLastSyncAt } from '$lib/server/gmail/auth';
 import { mapGmailError } from '$lib/server/gmail/errors';
 import { MISSING_DOCS_SCAN_LIMIT } from '$lib/utils/gmail-search';
-import { extractInvoiceDataFromPdf } from '$lib/server/gmail/pdf-parser';
+import { extractInvoiceDataFromPdf, shouldPreferPdfAmount } from '$lib/server/gmail/pdf-parser';
 import { getDownloadedMap } from '$lib/server/gmail/download-evidence';
 import {
 	parseMissingDocumentsRows,
@@ -573,26 +573,27 @@ export const matchMissingDocuments = command(
 				// primărie) — vezi `InvoiceCandidate.documentText`.
 				let documentText: string | undefined;
 
-				// Îmbogățire din PDF doar când emailul n-a dat suma — un singur fetch în plus per email
-				if (amount == null) {
-					const pdfAtt = email.attachments.find(
-						(a) => a.mimeType === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf')
-					);
-					if (pdfAtt) {
-						try {
-							const pdfBuffer = await getAttachment(tenantId, msg.id, pdfAtt.id);
-							const pdfData = await extractInvoiceDataFromPdf(pdfBuffer);
-							if (pdfData.amount && pdfData.currency) {
-								amount = pdfData.amount;
-								currency = pdfData.currency;
-							}
-							// Legat de „am descărcat PDF-ul", nu de „lipsea suma": dacă motivul
-							// descărcării se schimbă vreodată, numele furnizorului se ia oricum.
-							// Fetch-ul rămâne unul singur per email — nu descărcăm nimic în plus.
-							documentText = pdfData.supplierName;
-						} catch {
-							// PDF criptat/imagine — mergem mai departe fără sumă
+				// PDF-ul e factura, emailul e doar notificarea despre ea: îl citim ori de câte
+				// ori există, nu doar când emailul n-a dat nicio sumă. Poarta veche („am ceva")
+				// se închidea și în fața unei sume INVENTATE — un „$1" din corpul notificării
+				// INWX trecea drept factură de 1,00 USD și bloca definitiv citirea documentului,
+				// unde stă suma reală. Cine câștigă la conflict: `shouldPreferPdfAmount`.
+				// Rămâne un singur fetch per email; în plus, numele furnizorului din antet
+				// ajunge acum și la emailurile cu parser, nu doar la cele fără.
+				const pdfAtt = email.attachments.find(
+					(a) => a.mimeType === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf')
+				);
+				if (pdfAtt) {
+					try {
+						const pdfBuffer = await getAttachment(tenantId, msg.id, pdfAtt.id);
+						const pdfData = await extractInvoiceDataFromPdf(pdfBuffer);
+						if (shouldPreferPdfAmount({ amount, currency }, pdfData)) {
+							amount = pdfData.amount;
+							currency = pdfData.currency;
 						}
+						documentText = pdfData.supplierName;
+					} catch {
+						// PDF criptat/imagine — mergem mai departe cu ce a dat emailul
 					}
 				}
 

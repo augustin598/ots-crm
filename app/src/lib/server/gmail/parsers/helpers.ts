@@ -71,6 +71,40 @@ export function parseAmount(text: string): { amount: number; currency: string } 
 }
 
 /**
+ * Câte caractere după cuvântul-cheie mai poate sta suma ca să fie ÎNCĂ a lui. Suficient
+ * pentru „Rechnungsbetrag: 9,89 EUR" sau „Total amount due: EUR 9.89" (etichetă, separator,
+ * eventual o valută înaintea cifrelor), prea puțin pentru o frază întreagă.
+ */
+const AMOUNT_KEYWORD_WINDOW = 40;
+
+/**
+ * Suma DOAR când e declarată ca atare — adică apare imediat după un cuvânt care spune că
+ * numărul e un total de plată („total", „amount", „Rechnungsbetrag").
+ *
+ * De ce există, pe lângă `parseAmount`: primul tipar din `parseAmount` e `/\$\s*(\d+…)/`,
+ * deci un „$1" oarecare din corpul unui email devine o factură de 1,00 USD. Pe notificările
+ * care NU conțin suma (INWX trimite doar „New Invoice available", suma stă în PDF) asta nu
+ * e o parsare mai slabă, ci una INVENTATĂ: acoperă poarta de îmbogățire din PDF, unde stă
+ * suma reală, și strică apoi comparația de sumă din potrivirea plăților (1,00 USD față de
+ * 51,81 lei plătiți → nicio dovadă pe sumă, potrivirea rămâne „probabilă").
+ *
+ * `null` înseamnă „emailul nu spune suma" — exact starea care lasă documentul să decidă.
+ */
+export function parseAmountNearKeyword(
+	text: string,
+	keywords: string[]
+): { amount: number; currency: string } | null {
+	if (!text) return null;
+	const keywordRe = new RegExp(`(?:${keywords.join('|')})`, 'gi');
+	for (const km of text.matchAll(keywordRe)) {
+		const start = (km.index ?? 0) + km[0].length;
+		const found = parseAmount(text.slice(start, start + AMOUNT_KEYWORD_WINDOW));
+		if (found) return found;
+	}
+	return null;
+}
+
+/**
  * Helper: Detect invoice status from text (body or subject)
  */
 export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {

@@ -2,7 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, desc, sql, and, gte, lte, inArray } from 'drizzle-orm';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
-import { resolveFxRates, type BnrRateRow } from './rate-lookup';
+import { resolveFxRates, RATE_LOOKBACK_DAYS, type BnrRateRow } from './rate-lookup';
 import type { FxRates } from '$lib/server/banking/payment-match';
 
 const BNR_XML_URL = 'https://www.bnr.ro/nbrfxrates.xml';
@@ -202,14 +202,6 @@ export async function getLatestBnrRates(): Promise<
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * Cât de departe în urmă căutăm cotația aplicabilă unei zile fără cotație proprie.
- * BNR nu cotează în weekend și de sărbători; cea mai lungă pauză din calendarul românesc
- * (Paște, Rusalii, 1 Decembrie lipit de weekend) ajunge la 4-5 zile lucrătoare pierdute.
- * 15 zile lasă marjă confortabilă și ține interogarea mică.
- */
-const RATE_LOOKBACK_DAYS = 15;
-
 function shiftIsoDate(isoDate: string, days: number): string {
 	const shifted = new Date(`${isoDate}T00:00:00.000Z`);
 	shifted.setUTCDate(shifted.getUTCDate() + days);
@@ -225,6 +217,9 @@ function shiftIsoDate(isoDate: string, days: number): string {
  * Leul nu se cere niciodată: e baza conversiei, tratată ca identitate în `payment-match`.
  * Absența cotațiilor (tabel gol, valută nesincronizată) întoarce pur și simplu mai puține
  * intrări — potrivirea funcționează atunci exact ca înainte de conversie.
+ *
+ * `RATE_LOOKBACK_DAYS` apare aici DOAR ca margine stângă a interogării, ca să nu citim tot
+ * istoricul; plafonul care contează se aplică per zi cerută, în `findRateOnOrBefore`.
  */
 export async function loadBnrFxRates(
 	currencies: string[],
