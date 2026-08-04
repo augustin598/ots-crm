@@ -4,6 +4,7 @@ import {
 	parseMissingDocumentsRows,
 	matchPayments,
 	merchantTokens,
+	scoreMatch,
 	type PaymentRow,
 	type InvoiceCandidate
 } from '../payment-match';
@@ -18,6 +19,10 @@ const FIDA_COMMENT =
 	'  Plata la POS;EPOS 03/08/2026 MID 644214659202RON MPY*fidasolutions Maramures ROM valoare trz: 8.00 RON RRN:322793237391 comision trz 0.00 RON  OD Order 533710000-853464267;REF: 044POSP2621517B3; ';
 const KESSELRING_COMMENT =
 	'  Plata la POS non-BT cu card VISA;EPOS 17/07/2026 4210252 TID:PAYW0006 MPY*KESSELRING SRL    ROZ  NOV RO 42444505 valoare tranzactie: 81.09 RON RRN:619811671945 comision tranzactie 0.00 RON;REF: 000NVPO262012NnP; ';
+const CARTON_COMMENT =
+	'  Plata la POS non-BT cu card VISA;EPOS 17/07/2026 4210252 TID:PAYW0006 MPY*CARTON SRL    ROZ  NOV RO 42444505 valoare tranzactie: 50.00 RON RRN:619811671945 comision tranzactie 0.00 RON;REF: 000NVPO262012NnP; ';
+const MEDICI_COMMENT =
+	'  Plata la POS non-BT cu card VISA;EPOS 17/07/2026 4210252 TID:PAYW0006 MPY*MEDICI SRL    ROZ  NOV RO 42444505 valoare tranzactie: 50.00 RON RRN:619811671945 comision tranzactie 0.00 RON;REF: 000NVPO262012NnP; ';
 
 describe('extractPaymentDetails', () => {
 	it('extrage suma și valuta ORIGINALĂ (nu RON) din comentariu', () => {
@@ -125,6 +130,166 @@ describe('merchantTokens — fără fragmente din codurile bancare', () => {
 	});
 });
 
+// Scoruri EXACTE, nu etichete derivate: o etichetă ('sure'/'probable') ascunde
+// modificări ale ponderilor, pragurilor și ferestrei. Componente: sumă exactă 60 /
+// sumă în toleranța de 2% 40, comerciant 40, proximitate dată round(10*(1-zile/10)).
+describe('scoreMatch — scoruri exacte pe componente', () => {
+	const cases: Array<{
+		name: string;
+		p: Partial<PaymentRow>;
+		c: Partial<InvoiceCandidate>;
+		score: number;
+		merchant: boolean;
+	}> = [
+		{
+			name: 'sumă exactă + alias + aceeași zi = 60+40+10',
+			p: {},
+			c: { date: new Date('2026-07-16') },
+			score: 110,
+			merchant: true
+		},
+		{
+			name: 'sumă exactă + alias + 5 zile = 60+40+5',
+			p: {},
+			c: { date: new Date('2026-07-21') },
+			score: 105,
+			merchant: true
+		},
+		{
+			name: 'exact pe marginea ferestrei (10 zile) = 60+40+0',
+			p: {},
+			c: { date: new Date('2026-07-26') },
+			score: 100,
+			merchant: true
+		},
+		{
+			name: 'în afara ferestrei (11 zile) = 0',
+			p: {},
+			c: { date: new Date('2026-07-27') },
+			score: 0,
+			merchant: false
+		},
+		{
+			name: 'doar comerciant (fără sumă) = 40+10',
+			p: {},
+			c: { date: new Date('2026-07-16'), amount: undefined, currency: undefined },
+			score: 50,
+			merchant: true
+		},
+		{
+			name: 'sumă în toleranța de 2% (18300 vs 18004) = 40+40+10',
+			p: {},
+			c: { date: new Date('2026-07-16'), amount: 18300 },
+			score: 90,
+			merchant: true
+		},
+		{
+			name: 'sumă în afara toleranței (18500 = 2.75%) nu punctează = 40+10',
+			p: {},
+			c: { date: new Date('2026-07-16'), amount: 18500 },
+			score: 50,
+			merchant: true
+		},
+		{
+			name: 'valută diferită nu punctează suma = 40+10',
+			p: {},
+			c: { date: new Date('2026-07-16'), currency: 'USD' },
+			score: 50,
+			merchant: true
+		},
+		{
+			name: 'C1: sumă exactă fără NICIO dovadă de comerciant = 60+0+10',
+			p: {},
+			c: {
+				date: new Date('2026-07-16'),
+				from: 'Totally Unrelated Zzz <b@zzz.io>',
+				subject: 'Receipt',
+				supplierType: undefined
+			},
+			score: 70,
+			merchant: false
+		},
+		{
+			name: 'token scurt (NOV) nu e comerciant — prag de lungime',
+			p: { comment: KESSELRING_COMMENT, originalAmount: 8109, originalCurrency: 'RON' },
+			c: {
+				date: new Date('2026-07-16'),
+				from: 'NOV Solutions <a@nov-solutions.ro>',
+				subject: 'Invoice',
+				amount: undefined,
+				currency: undefined,
+				supplierType: undefined
+			},
+			score: 10,
+			merchant: false
+		},
+		{
+			name: 'I7: CARTON nu face match în interiorul lui SCARTONIS (limită de cuvânt)',
+			p: { comment: CARTON_COMMENT, originalAmount: 5000, originalCurrency: 'RON' },
+			c: {
+				date: new Date('2026-07-16'),
+				from: 'Scartonis Ltd <a@scartonis.com>',
+				subject: 'Invoice',
+				amount: undefined,
+				currency: undefined,
+				supplierType: undefined
+			},
+			score: 10,
+			merchant: false
+		},
+		{
+			name: 'I8: KESSELRING nu face match cu o factură FIDASOLUTIONS din același bucket ro-supplier',
+			p: { comment: KESSELRING_COMMENT, originalAmount: 8109, originalCurrency: 'RON' },
+			c: {
+				date: new Date('2026-07-16'),
+				from: 'Fida Solutions <facturi@fidasolutions.ro>',
+				subject: 'Factura 99',
+				amount: undefined,
+				currency: undefined,
+				supplierType: 'ro-supplier'
+			},
+			score: 10,
+			merchant: false
+		},
+		{
+			name: 'I8: MEDICI nu activează bucket-ul ro-supplier (aliasul „ICI" e eliminat)',
+			p: { comment: MEDICI_COMMENT, originalAmount: 5000, originalCurrency: 'RON' },
+			c: {
+				date: new Date('2026-07-16'),
+				from: 'ROTLD <facturi@rotld.ro>',
+				subject: 'Factura',
+				amount: undefined,
+				currency: undefined,
+				supplierType: 'ro-supplier'
+			},
+			score: 10,
+			merchant: false
+		},
+		{
+			name: 'I8: ro-supplier funcționează când aliasul e în AMBELE (KESSELRING)',
+			p: { comment: KESSELRING_COMMENT, originalAmount: 8109, originalCurrency: 'RON' },
+			c: {
+				date: new Date('2026-07-16'),
+				from: 'Kesselring SRL <facturi@kesselring.ro>',
+				subject: 'Factura 1234',
+				amount: undefined,
+				currency: undefined,
+				supplierType: 'ro-supplier'
+			},
+			score: 50,
+			merchant: true
+		}
+	];
+
+	for (const tc of cases) {
+		it(tc.name, () => {
+			const res = scoreMatch(payment(tc.p), candidate(tc.c));
+			expect(res.score).toBe(tc.score);
+			expect(res.merchantMatched).toBe(tc.merchant);
+		});
+	}
+});
+
 describe('matchPayments — scoring', () => {
 	it('sumă+valută+comerciant+dată apropiată => match sigur (>=70)', () => {
 		const res = matchPayments([payment({})], [candidate({})]);
@@ -169,6 +334,59 @@ describe('matchPayments — scoring', () => {
 		expect(matched.length).toBe(1);
 		expect(matched[0].reference).toBe('a'); // data mai apropiată de factură
 	});
+	it('C1: sumă exactă fără dovadă de comerciant NU poate fi „sigur"', () => {
+		// 60 (sumă) + 10 (aceeași zi) = exact 70 = SURE_THRESHOLD, dar expeditorul nu are
+		// nicio legătură cu plata. Cu abonamente recurente pe aceeași sumă (două de 29.00
+		// USD, mai multe de 8.00 RON) asta ar da „sigur" facturii furnizorului greșit.
+		const res = matchPayments(
+			[payment({})],
+			[
+				candidate({
+					date: new Date('2026-07-16'),
+					from: 'Totally Unrelated Zzz <b@zzz.io>',
+					subject: 'Receipt',
+					supplierType: undefined
+				})
+			]
+		);
+		expect(res[0].score).toBe(70);
+		expect(res[0].confidence).toBe('probable');
+	});
+
+	it('doar comerciant, aceeași zi (scor 50) rămâne „probabil"', () => {
+		const res = matchPayments(
+			[payment({})],
+			[candidate({ date: new Date('2026-07-16'), amount: undefined, currency: undefined })]
+		);
+		expect(res[0].score).toBe(50);
+		expect(res[0].confidence).toBe('probable');
+	});
+
+	it('la scor egal câștigă factura cu data mai apropiată', () => {
+		// Ambele perechi dau 108 (60+40+8): 2.4 zile și 2.0 zile rotunjesc la același bonus.
+		const p1 = payment({ reference: 'departe', date: new Date('2026-07-16T09:36:00Z') });
+		const p2 = payment({ reference: 'aproape', date: new Date('2026-07-16T00:00:00Z') });
+		const res = matchPayments([p1, p2], [candidate({ date: new Date('2026-07-14T00:00:00Z') })]);
+		expect(res[0].score).toBe(0);
+		expect(res[1].score).toBe(108);
+		expect(res[1].match?.gmailMessageId).toBe('g1');
+		expect(res[0].match).toBeUndefined();
+	});
+
+	it('I3: plata rămasă fără opțiuni recuperează factura printr-o rocadă', () => {
+		// Greedy pur ia P_early×C_new (110) și lasă P_late nematchuit, deși C_old e liberă
+		// pentru P_early. Pasul de recuperare mută P_early pe C_old și dă C_new lui P_late.
+		const pEarly = payment({ reference: 'early', date: new Date('2026-07-14') });
+		const pLate = payment({ reference: 'late', date: new Date('2026-07-22') });
+		const cOld = candidate({ gmailMessageId: 'old', date: new Date('2026-07-08') });
+		const cNew = candidate({ gmailMessageId: 'new', date: new Date('2026-07-14') });
+		const res = matchPayments([pEarly, pLate], [cOld, cNew]);
+		expect(res[0].match?.gmailMessageId).toBe('old');
+		expect(res[0].score).toBe(104);
+		expect(res[1].match?.gmailMessageId).toBe('new');
+		expect(res[1].score).toBe(102);
+	});
+
 	it('furnizor FĂRĂ parser: match pe tokenul din descriere (KESSELRING)', () => {
 		const res = matchPayments(
 			[
@@ -184,13 +402,15 @@ describe('matchPayments — scoring', () => {
 					from: 'Kesselring SRL <facturi@kesselring.ro>',
 					subject: 'Factura 1234',
 					date: new Date('2026-07-17'),
-					amount: 8109,
-					currency: 'RON',
+					amount: undefined,
+					currency: undefined,
 					supplierType: undefined
 				})
 			]
 		);
-		expect(res[0].confidence).toBe('sure');
+		// Fără sumă/valută, DOAR tokenul de comerciant poate ridica scorul: 40 + 10.
+		expect(res[0].score).toBe(50);
+		expect(res[0].match?.gmailMessageId).toBe('g1');
 	});
 
 	it('nu face match pe cuvinte generice din descriere', () => {
@@ -235,11 +455,79 @@ describe('matchPayments — scoring', () => {
 					from: 'Anthropic <receipts@anthropic.com>',
 					subject: 'Your receipt',
 					supplierType: 'anthropic',
-					amount: 21156,
+					amount: undefined,
+					currency: undefined,
 					date: new Date('2026-07-24')
 				})
 			]
 		);
-		expect(res[0].confidence).toBe('sure');
+		// Nici „CLAUDE" ca token nu apare în emailul Anthropic: doar aliasul poate puncta.
+		expect(res[0].score).toBe(50);
+		expect(res[0].match?.gmailMessageId).toBe('g1');
+	});
+});
+
+describe('parseMissingDocumentsRows — sume și date invalide', () => {
+	const row = (over: { data?: unknown; valoare?: unknown }) => [
+		'Plati fara document',
+		'12326',
+		over.data ?? 46219,
+		null,
+		over.valoare ?? '968.77',
+		'RON',
+		HETZNER_COMMENT,
+		'RO86...'
+	];
+
+	it('I5: „968,77" (virgulă zecimală) = 96877 bani, nu 9687700', () => {
+		const { payments } = parseMissingDocumentsRows([row({ valoare: '968,77' })]);
+		expect(payments[0].amountRon).toBe(96877);
+	});
+	it('I5: „1,479.83" (virgulă ca separator de mii) = 147983 bani', () => {
+		const { payments } = parseMissingDocumentsRows([row({ valoare: '1,479.83' })]);
+		expect(payments[0].amountRon).toBe(147983);
+	});
+	it('I5: „1.234,56" (format european) = 123456 bani', () => {
+		const { payments } = parseMissingDocumentsRows([row({ valoare: '1.234,56' })]);
+		expect(payments[0].amountRon).toBe(123456);
+	});
+
+	it('I4: data nevalidă e numărată, nu strecurată ca Invalid Date', () => {
+		const res = parseMissingDocumentsRows([row({ data: '16.07.2026' })]);
+		expect(res.invalidDates).toBe(1);
+		expect(res.payments.length).toBe(1);
+	});
+	it('I4: o plată cu dată nevalidă nu primește match', () => {
+		const { payments } = parseMissingDocumentsRows([row({ data: '16.07.2026' })]);
+		const res = matchPayments(payments, [candidate({})]);
+		expect(res[0].match).toBeUndefined();
+		expect(res[0].score).toBe(0);
+	});
+	it('I4: scorul unei plăți cu dată nevalidă e 0, nu NaN', () => {
+		// Prin matchPayments NaN e înghițit (NaN >= prag e false); doar aici se vede
+		// diferența dintre o gardă explicită și propagarea accidentală a lui NaN.
+		const { payments } = parseMissingDocumentsRows([row({ data: '16.07.2026' })]);
+		const res = scoreMatch(payments[0], candidate({}));
+		expect(res.score).toBe(0);
+		expect(res.merchantMatched).toBe(false);
+	});
+	it('rândurile valide nu sunt numărate ca date nevalide', () => {
+		const res = parseMissingDocumentsRows([row({})]);
+		expect(res.invalidDates).toBe(0);
+	});
+});
+
+describe('extractPaymentDetails — formate de număr', () => {
+	const withValue = (v: string) =>
+		`valoare tranzactie: ${v} EUR RRN:1 comision tranzactie 0.00 RON`;
+
+	it('I5: „1.234,56" european = 123456 bani', () => {
+		expect(extractPaymentDetails(withValue('1.234,56')).originalAmount).toBe(123456);
+	});
+	it('I5: „1,234.56" american = 123456 bani', () => {
+		expect(extractPaymentDetails(withValue('1,234.56')).originalAmount).toBe(123456);
+	});
+	it('„180,04" cu virgulă zecimală = 18004 bani', () => {
+		expect(extractPaymentDetails(withValue('180,04')).originalAmount).toBe(18004);
 	});
 });
