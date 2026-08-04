@@ -13,6 +13,9 @@ import { metaParser } from './meta';
 import { linkedinParser } from './linkedin';
 import { openaiParser } from './openai';
 import { cloudflareParser } from './cloudflare';
+import { directadminParser } from './directadmin';
+import { cursorParser } from './cursor';
+import { inwxParser } from './inwx';
 import { roSuppliersParser } from './ro-suppliers';
 import { genericParser } from './generic';
 
@@ -54,6 +57,9 @@ export const parserRegistry: SupplierParser[] = [
 	linkedinParser,
 	openaiParser,
 	cloudflareParser,
+	directadminParser,
+	cursorParser,
+	inwxParser,
 	roSuppliersParser,
 	genericParser
 ];

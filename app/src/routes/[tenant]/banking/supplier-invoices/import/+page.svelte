@@ -34,7 +34,7 @@
 	let dateToValue = $state<DateValue | undefined>(undefined);
 	let dateFromOpen = $state(false);
 	let dateToOpen = $state(false);
-	let selectedParsers = $state<string[]>(['cpanel', 'whmcs', 'hetzner', 'google', 'ovh', 'digitalocean', 'aws', 'generic']);
+	let selectedParsers = $state<string[]>(['cpanel', 'whmcs', 'hetzner', 'google', 'ovh', 'digitalocean', 'aws', 'directadmin', 'cursor', 'inwx', 'generic']);
 
 	// Preview step
 	let previews = $state<any[]>([]);
@@ -69,6 +69,9 @@
 		{ id: 'ovh', label: 'OVH' },
 		{ id: 'digitalocean', label: 'DigitalOcean' },
 		{ id: 'aws', label: 'AWS' },
+		{ id: 'directadmin', label: 'DirectAdmin' },
+		{ id: 'cursor', label: 'Cursor (Anysphere)' },
+		{ id: 'inwx', label: 'INWX' },
 		{ id: 'generic', label: 'Altele (generic)' }
 	];
 

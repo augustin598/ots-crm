@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'bun:test';
 import type { GmailMessage } from '../client';
+import { cursorParser } from '../parsers/cursor';
+import { directadminParser } from '../parsers/directadmin';
 import { genericParser } from '../parsers/generic';
 import { googleParser } from '../parsers/google';
-import { detectStatus } from '../parsers/index';
+import { detectStatus, findParser } from '../parsers/index';
+import { inwxParser } from '../parsers/inwx';
 import { openaiParser } from '../parsers/openai';
 import { roSuppliersParser } from '../parsers/ro-suppliers';
 import { whmcsParser } from '../parsers/whmcs';
@@ -141,5 +144,53 @@ describe('extragere nr. factură — google/openai/whmcs nu mai capturează cuvi
 		);
 		expect(r.invoiceNumber).not.toBe('available');
 		expect(r.invoiceNumber).toBe('4455');
+	});
+});
+
+describe('parsere noi', () => {
+	it('directadmin match pe expeditor', () => {
+		expect(findParser('DirectAdmin <billing@directadmin.com>', 'Invoice')?.id).toBe('directadmin');
+	});
+	it('cursor match pe anysphere/cursor.com', () => {
+		expect(findParser('Anysphere <billing@cursor.com>', 'Your receipt')?.id).toBe('cursor');
+	});
+	it('inwx match pe inwx.de', () => {
+		expect(findParser('INWX GmbH <buchhaltung@inwx.de>', 'New Invoice available')?.id).toBe('inwx');
+	});
+
+	it('directadmin: extrage nr. facturii din subiect', () => {
+		const r = directadminParser.parseInvoice(
+			makeEmail({
+				from: 'DirectAdmin <billing@directadmin.com>',
+				subject: 'Invoice #DA-2026-0099',
+				body: 'Your DirectAdmin license invoice is attached. Total: $24.00 USD'
+			})
+		);
+		expect(r.supplierType).toBe('directadmin');
+		expect(r.invoiceNumber).toBe('DA-2026-0099');
+	});
+
+	it('cursor: extrage nr. chitanței din corp', () => {
+		const r = cursorParser.parseInvoice(
+			makeEmail({
+				from: 'Anysphere <billing@cursor.com>',
+				subject: 'Your receipt from Cursor',
+				body: 'Receipt number: 2345-6789. Amount paid: $20.00 USD'
+			})
+		);
+		expect(r.supplierType).toBe('cursor');
+		expect(r.invoiceNumber).toBe('2345-6789');
+	});
+
+	it('inwx: "New Invoice available" nu produce nr. gunoi', () => {
+		const r = inwxParser.parseInvoice(
+			makeEmail({
+				from: 'INWX GmbH <buchhaltung@inwx.de>',
+				subject: 'New Invoice available',
+				body: 'A new invoice is available in your account.'
+			})
+		);
+		expect(r.supplierType).toBe('inwx');
+		expect(r.invoiceNumber).toBeUndefined();
 	});
 });
