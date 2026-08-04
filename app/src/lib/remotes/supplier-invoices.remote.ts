@@ -568,6 +568,11 @@ export const matchMissingDocuments = command(
 				let amount = parsed?.currency ? parsed.amount : undefined;
 				let currency = parsed?.currency;
 
+				// Numele furnizorului din antetul PDF-ului: dovada de comerciant atunci când
+				// factura vine printr-un intermediar (parcarea FIDA SOLUTIONS trimisă de
+				// primărie) — vezi `InvoiceCandidate.documentText`.
+				let documentText: string | undefined;
+
 				// Îmbogățire din PDF doar când emailul n-a dat suma — un singur fetch în plus per email
 				if (amount == null) {
 					const pdfAtt = email.attachments.find(
@@ -581,6 +586,10 @@ export const matchMissingDocuments = command(
 								amount = pdfData.amount;
 								currency = pdfData.currency;
 							}
+							// Legat de „am descărcat PDF-ul", nu de „lipsea suma": dacă motivul
+							// descărcării se schimbă vreodată, numele furnizorului se ia oricum.
+							// Fetch-ul rămâne unul singur per email — nu descărcăm nimic în plus.
+							documentText = pdfData.supplierName;
 						} catch {
 							// PDF criptat/imagine — mergem mai departe fără sumă
 						}
@@ -594,7 +603,8 @@ export const matchMissingDocuments = command(
 					date: email.date,
 					amount: amount ?? undefined,
 					currency: currency ?? undefined,
-					supplierType: parsed?.supplierType
+					supplierType: parsed?.supplierType,
+					documentText
 				});
 				candidateMeta.set(msg.id, {
 					pdfAttachments,

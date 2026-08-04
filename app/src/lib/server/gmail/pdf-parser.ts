@@ -8,6 +8,15 @@ export interface PdfExtractedInvoiceData {
 	issueDate?: Date;
 	dueDate?: Date;
 	status?: 'paid';
+	/**
+	 * Denumirea furnizorului din antetul documentului („Furnizor: FIDA SOLUTIONS").
+	 *
+	 * E singura urmă a comerciantului real când emailul vine de la un intermediar —
+	 * primăria trimite factura de parcare, dar furnizorul e FIDA SOLUTIONS, iar
+	 * extrasul bancar scrie tot FIDA. Potrivirea plăților o folosește ca dovadă de
+	 * comerciant (vezi `InvoiceCandidate.documentText` din banking/payment-match.ts).
+	 */
+	supplierName?: string;
 }
 
 /**
@@ -66,8 +75,55 @@ function normalizeSymbolCurrency(c: string): string {
 	return map[c] || normalizeCurrency(c);
 }
 
+/**
+ * Linii care urmează antetului „Furnizor" fără să fie denumirea lui: identificatori
+ * fiscali, adresă, eticheta coloanei vecine. Într-un PDF pe două coloane extragerea de
+ * text le poate intercala ÎNAINTEA denumirii, deci nu e destul să luăm prima linie de
+ * după antet. Niciuna nu poate fi și început de denumire.
+ */
+const SUPPLIER_FIELD_LABEL =
+	/^(?:(?:c\.?\s*i\.?\s*f|c\.?\s*u\.?\s*i|cod\s+fiscal|nr\.?\s*reg|reg\.?\s*com|adres[aă]|localitate|jude[țt]|iban|e-?mail|capital\s+social|cump[aă]r[aă]tor|beneficiar|denumire|furnizor)(?:[\s:.\-–]|$)|j\d{1,2}\/|str\.|bd\.)/i;
+
+/**
+ * Etichete care POT deschide o denumire reală — „Banca Transilvania", „Telekom
+ * Romania", „Client Services SRL". Le respingem doar când sunt folosite ca etichetă de
+ * câmp, adică urmate de două puncte: altfel am pierde tocmai furnizorii cu acest nume.
+ */
+const SUPPLIER_AMBIGUOUS_LABEL = /^(?:banca|client|cont|tel(?:efon)?|fax)\s*[:.\-–]/i;
+
+/** Cel puțin trei litere: respinge „RO15974040", „---", „1 buc" luate drept denumire. */
+const NAME_LETTER = '[A-Za-zĂÂÎȘȚăâîșțŞŢşţ]';
+const HAS_NAME_LETTERS = new RegExp(`${NAME_LETTER}.*${NAME_LETTER}.*${NAME_LETTER}`);
+
+/**
+ * Denumirea furnizorului din antetul unei facturi românești.
+ *
+ * Formele acoperite: „Furnizor: DENUMIRE" (pe aceeași linie) și antetul pe rând
+ * separat, urmat de denumire pe una dintre liniile următoare. Ne oprim la prima linie
+ * care arată a denumire — restul (CIF, adresă, bancă) e filtrat explicit, ca să nu
+ * întoarcem „CIF: RO15974040" drept nume de comerciant.
+ */
+function extractSupplierName(text: string): string | undefined {
+	// `\b` la final: „Furnizorul se obligă…" din condițiile de plată NU e antetul.
+	const marker = /\bfurnizor\b/i.exec(text);
+	if (!marker) return undefined;
+	const after = text.slice(marker.index + marker[0].length);
+	for (const line of after.split('\n', 5)) {
+		const segment = line.replace(/^[\s:\-–]+/, '').trim();
+		if (!segment || segment.length > 80) continue;
+		if (SUPPLIER_FIELD_LABEL.test(segment) || SUPPLIER_AMBIGUOUS_LABEL.test(segment)) continue;
+		if (!HAS_NAME_LETTERS.test(segment)) continue;
+		return segment;
+	}
+	return undefined;
+}
+
 export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	const result: PdfExtractedInvoiceData = {};
+
+	// --- Furnizor ---
+	const supplierName = extractSupplierName(text);
+	if (supplierName) result.supplierName = supplierName;
 
 	// --- Invoice Number ---
 	// Patterns: "Invoice #123", "Invoice Number: 123", "Factura nr. 123", "Rechnung Nr. 123"
@@ -108,9 +164,18 @@ export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	// Strategy: try multiple approaches from most specific to least specific
 
 	// 0. Gross totals — highest priority: "Total de plata (TVA inclus) 76,12",
-	// "Total with VAT: 9,50 €", "Grand total", "Gesamtbetrag"
+	// "TOTAL PLATĂ 8.00 LEI", "Total with VAT: 9,50 €", "Grand total", "Gesamtbetrag"
 	const grossPatterns: Array<{ re: RegExp; amountIdx: number; currencyIdx?: number }> = [
-		{ re: /total\s+de\s+plat[aă][^\d\n]*?([\d.,]+)/i, amountIdx: 1 },
+		// „de" e OPȚIONAL: facturile românești scriu și „TOTAL PLATĂ", fără el (FIDA
+		// SOLUTIONS, parcare Suceava) — cu „de" obligatoriu suma nu se citea deloc, iar
+		// plata rămânea nepotrivită. Valuta e capturată și când e scrisă DUPĂ sumă
+		// („8.00 LEI"), fiindcă fără ea suma e ștearsă mai jos (regula „niciodată sumă
+		// fără valută"); „LEI" ajunge „RON" prin normalizeSymbolCurrency.
+		{
+			re: /total\s+(?:de\s+)?plat[aă][^\d\n]*?([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
+			amountIdx: 1,
+			currencyIdx: 2
+		},
 		{
 			re: /total\s+with\s+vat\s*[:\-–]?\s*([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
 			amountIdx: 1,

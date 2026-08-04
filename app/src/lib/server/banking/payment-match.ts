@@ -24,6 +24,24 @@ export interface InvoiceCandidate {
 	amount?: number; // cents
 	currency?: string;
 	supplierType?: string;
+	/**
+	 * Textul de IDENTIFICARE din documentul atașat — în practică denumirea furnizorului
+	 * din antetul PDF-ului („FIDA SOLUTIONS"), completată de apelant. Modulul rămâne PUR:
+	 * nu descarcă și nu citește nimic, primește câmpul gata făcut.
+	 *
+	 * De ce e nevoie de el: la facturile trimise printr-un intermediar, comerciantul din
+	 * extrasul bancar nu apare nici în expeditor, nici în subiect. Plata la FIDA SOLUTIONS
+	 * (parcare) vine pe un email de la `noreply@primariasv.ro` cu subiectul „Plata parcare
+	 * Municipiu Suceava" — fără textul documentului nu există nicio dovadă de comerciant,
+	 * iar potrivirea nu poate ajunge niciodată „sigură".
+	 *
+	 * De ce DOAR denumirea și nu tot textul PDF-ului: tokenii de comerciant se extrag din
+	 * descrierea bancară, unde apar și cuvinte fără legătură cu furnizorul (localitatea
+	 * terminalului: „Maramures"). Un asemenea cuvânt se lovește ușor de corpul unei
+	 * facturi oarecare — adresă, descrierea serviciului — și ar produce o dovadă falsă,
+	 * exact semnalul care ridică o potrivire la „sigur".
+	 */
+	documentText?: string;
 }
 
 export interface PaymentMatchResult extends PaymentRow {
@@ -240,9 +258,38 @@ function containsWord(haystack: string, word: string): boolean {
 	return new RegExp(`\\b${word}\\b`).test(haystack);
 }
 
+/**
+ * Tokenul e concatenarea unor cuvinte CONSECUTIVE din text?
+ *
+ * Descriptorul de card lipește cuvintele denumirii („MPY*fidasolutions"), în timp ce
+ * factura le scrie separat („FIDA SOLUTIONS", „S.C. FIDA SOLUTIONS S.R.L."), deci
+ * potrivirea pe cuvânt întreg nu are ce găsi. Comparăm concatenări de cuvinte
+ * consecutive, nu subșiruri oarecare: egalitatea exactă pe o secvență de cuvinte
+ * păstrează garanția de la `containsWord` — „CARTON" nu se lipește niciodată de
+ * „SCARTONIS", iar ordinea contează („SOLUTIONS FIDA" ≠ „FIDASOLUTIONS").
+ */
+function matchesWordRun(words: string[], token: string): boolean {
+	for (let i = 0; i < words.length; i++) {
+		let run = '';
+		for (let j = i; j < words.length && run.length < token.length; j++) {
+			run += words[j];
+			if (run === token) return true;
+		}
+	}
+	return false;
+}
+
 function merchantMatches(payment: PaymentRow, candidate: InvoiceCandidate): boolean {
 	const haystack = (payment.comment + ' ' + (payment.partner || '')).toUpperCase();
-	const emailHaystack = `${candidate.from} ${candidate.subject}`.toUpperCase();
+	const documentText = (candidate.documentText || '').toUpperCase();
+	const emailHaystack = `${candidate.from} ${candidate.subject} ${documentText}`.toUpperCase();
+	// Denumirea din document, spartă în cuvinte pur alfabetice: „S.C. FIDA SOLUTIONS
+	// S.R.L." → [S, C, FIDA, SOLUTIONS, S, R, L]. Plafonat, ca un apelant care ar trimite
+	// din greșeală tot textul PDF-ului să nu ducă la o buclă pătratică pe mii de cuvinte.
+	const documentWords = documentText
+		.split(/[^A-Z]+/)
+		.filter(Boolean)
+		.slice(0, 24);
 	const supplierType = candidate.supplierType || '';
 	const aliases = MERCHANT_ALIASES[supplierType];
 	if (
@@ -256,9 +303,11 @@ function merchantMatches(payment: PaymentRow, candidate: InvoiceCandidate): bool
 	}
 
 	// Fallback for senders without a parser: does a merchant token from the statement
-	// appear as a WHOLE WORD in the sender address or subject? Substring matching would
-	// let „CARTON" match „SCARTONIS".
-	return merchantTokens(payment).some((token) => containsWord(emailHaystack, token));
+	// appear as a WHOLE WORD in the sender address, subject or supplier name from the
+	// document? Substring matching would let „CARTON" match „SCARTONIS".
+	return merchantTokens(payment).some(
+		(token) => containsWord(emailHaystack, token) || matchesWordRun(documentWords, token)
+	);
 }
 
 export interface MatchScore {

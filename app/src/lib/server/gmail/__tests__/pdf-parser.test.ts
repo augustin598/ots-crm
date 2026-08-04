@@ -27,7 +27,34 @@ Total without VAT: 7,85 €
 VAT 21.00%: 1,65 €
 Amount received by prepayment.`;
 
+// Text aproximat din PDF-ul real FIDA SOLUTIONS (parcare Suceava, factura SV-956589).
+// Trimis de primărie (noreply@primariasv.ro): numele furnizorului apare DOAR aici, în PDF.
+const FIDA_TEXT = `FIDA SOLUTIONS S.R.L.
+Furnizor
+FIDA SOLUTIONS
+CIF: RO15974040
+Reg. Com.: J24/1041/2004
+Adresa: Baia Mare, jud. Maramures
+FACTURA Nr. SV-956589
+Data: 03.08.2026
+Cumparator: Persoana fizica
+Nr. crt. Denumire serviciu Cantitate Pret unitar Valoare
+1 Plata parcare in ZonaMixta pentru 2 ore 1 8.00 8.00
+TOTAL PLATĂ 8.00 LEI`;
+
 describe('parseInvoiceText — sume și valute', () => {
+	it('FIDA: „TOTAL PLATĂ 8.00 LEI" (fără „de", cu diacritice, majuscule) → 800 bani RON', () => {
+		const r = parseInvoiceText(FIDA_TEXT);
+		expect(r.amount).toBe(800);
+		expect(r.currency).toBe('RON');
+	});
+
+	it('„Total plata 100,00 LEI" — valuta scrisă după sumă e normalizată la RON', () => {
+		const r = parseInvoiceText('Total plata 100,00 LEI');
+		expect(r.amount).toBe(10000);
+		expect(r.currency).toBe('RON');
+	});
+
 	it('ROTLD: ia totalul de plată cu TVA, în RON', () => {
 		const r = parseInvoiceText(ROTLD_TEXT);
 		expect(r.amount).toBe(7612);
@@ -94,6 +121,40 @@ describe('parseInvoiceText — grossPatterns "grand total"', () => {
 		const r = parseInvoiceText('Grand total: 25.00 USD');
 		expect(r.amount).toBe(2500);
 		expect(r.currency).toBe('USD');
+	});
+});
+
+describe('parseInvoiceText — numele furnizorului', () => {
+	it('FIDA: ia denumirea de sub antetul „Furnizor", nu eticheta', () => {
+		expect(parseInvoiceText(FIDA_TEXT).supplierName).toBe('FIDA SOLUTIONS');
+	});
+
+	it('forma pe aceeași linie: „Furnizor: KESSELRING SRL"', () => {
+		const r = parseInvoiceText('Furnizor: KESSELRING SRL\nTotal plata 100,00 LEI');
+		expect(r.supplierName).toBe('KESSELRING SRL');
+	});
+
+	it('sare peste liniile de identificare fiscală și ia denumirea', () => {
+		const text = `Furnizor
+CIF: RO15974040
+Reg. Com.: J24/1041/2004
+FIDA SOLUTIONS
+Total plata 8,00 LEI`;
+		expect(parseInvoiceText(text).supplierName).toBe('FIDA SOLUTIONS');
+	});
+
+	it('nu confundă o denumire care începe cu un cuvânt de etichetă („Banca Transilvania")', () => {
+		const r = parseInvoiceText('Furnizor\nBanca Transilvania SA\nCIF: RO5022670');
+		expect(r.supplierName).toBe('Banca Transilvania SA');
+	});
+
+	it('fără antet „Furnizor" nu inventează un nume', () => {
+		expect(parseInvoiceText('Total in EUR 5,00').supplierName).toBeUndefined();
+	});
+
+	it('„Furnizorul se obligă…" din condiții nu e antet de furnizor', () => {
+		const r = parseInvoiceText('Furnizorul se obliga sa presteze serviciul.\nTotal plata 8,00 LEI');
+		expect(r.supplierName).toBeUndefined();
 	});
 });
 
