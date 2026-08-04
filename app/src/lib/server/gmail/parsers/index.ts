@@ -124,6 +124,36 @@ export function buildSearchQuery(
 	return query;
 }
 
+export interface InvoiceSearchOptions {
+	/**
+	 * 'all'       — orice email cu PDF atașat (implicit pentru tabul de descărcare):
+	 *               prinde și furnizorii fără parser (Kesselring, fidasolutions etc.)
+	 * 'suppliers' — doar expeditorii cu parser + adresele custom
+	 */
+	scope: 'all' | 'suppliers';
+	parserIds?: string[];
+	customEmails?: string[];
+	dateFrom?: Date;
+	dateTo?: Date;
+}
+
+/**
+ * Interogare Gmail pentru tabul de descărcare. Intenționat mai largă decât
+ * `buildSearchQuery` (folosită de fluxul de import): o plată către un furnizor
+ * fără parser nu și-ar găsi niciodată factura dacă am filtra pe expeditori.
+ */
+export function buildInvoiceSearchQuery(options: InvoiceSearchOptions): string {
+	let query: string;
+	if (options.scope === 'all') {
+		query = 'has:attachment filename:pdf';
+	} else {
+		query = buildSearchQuery(options.parserIds, undefined, undefined, options.customEmails);
+	}
+	if (options.dateFrom) query += ` after:${formatGmailDate(options.dateFrom)}`;
+	if (options.dateTo) query += ` before:${formatGmailDate(options.dateTo)}`;
+	return query;
+}
+
 function formatGmailDate(date: Date): string {
 	return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }

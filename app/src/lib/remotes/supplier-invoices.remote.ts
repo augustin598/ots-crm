@@ -6,9 +6,16 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, desc, gte, lte, like } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { searchEmails, getEmail, getAttachment } from '$lib/server/gmail/client';
-import { findParser, buildSearchQuery } from '$lib/server/gmail/parsers';
+import { findParser, buildSearchQuery, buildInvoiceSearchQuery } from '$lib/server/gmail/parsers';
 import { getGmailStatus, updateLastSyncAt } from '$lib/server/gmail/auth';
 import { extractInvoiceDataFromPdf } from '$lib/server/gmail/pdf-parser';
+import { getDownloadedMap } from '$lib/server/gmail/download-evidence';
+import {
+	parseMissingDocumentsRows,
+	matchPayments,
+	type InvoiceCandidate
+} from '$lib/server/banking/payment-match';
+import XLSX from 'xlsx';
 import { unlink } from 'fs/promises';
 import { join } from 'path';
 import { uploadBuffer } from '$lib/server/storage';
@@ -284,6 +291,207 @@ export const previewGmailInvoices = command(
 		}
 
 		return { previews, totalFound: messages.length };
+	}
+);
+
+/**
+ * Caută în Gmail emailuri cu facturi de furnizor FĂRĂ să le importe în CRM
+ * (tabul de descărcare). Implicit caută la ORICE expeditor cu PDF atașat.
+ *
+ * Nu întoarce niciodată attachmentId-uri Gmail (sunt efemere) — doar indexul
+ * atașamentului în lista mesajului, pe care endpoint-ul de descărcare îl
+ * rezolvă la un id proaspăt.
+ */
+export const searchGmailForDownload = command(
+	v.object({
+		parserIds: v.optional(v.array(v.string())),
+		dateFrom: v.optional(v.string()),
+		dateTo: v.optional(v.string()),
+		customEmails: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
+		/** 'all' (implicit) caută la ORICE expeditor cu PDF atașat, nu doar la furnizorii cunoscuți. */
+		scope: v.optional(v.picklist(['all', 'suppliers'])),
+		maxResults: v.optional(v.number())
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		await requireStaff(event);
+		const tenantId = event.locals.tenant.id;
+
+		const searchQuery = buildInvoiceSearchQuery({
+			scope: data.scope ?? 'all',
+			parserIds: data.parserIds,
+			customEmails: data.customEmails,
+			dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
+			dateTo: data.dateTo ? new Date(data.dateTo) : undefined
+		});
+		console.log(`[Gmail Download Search] Search query: ${searchQuery}`);
+
+		const messages = await searchEmails(tenantId, searchQuery, data.maxResults || 150);
+
+		const existingInvoices = await db
+			.select({ gmailMessageId: table.supplierInvoice.gmailMessageId })
+			.from(table.supplierInvoice)
+			.where(eq(table.supplierInvoice.tenantId, tenantId));
+		const importedIds = new Set(existingInvoices.map((i) => i.gmailMessageId).filter(Boolean));
+
+		const downloadedMap = await getDownloadedMap(
+			tenantId,
+			messages.map((m) => m.id)
+		);
+
+		const results = [];
+		for (const msg of messages) {
+			try {
+				const email = await getEmail(tenantId, msg.id);
+				const pdfAttachments = email.attachments
+					.map((a, index) => ({
+						index,
+						filename: a.filename,
+						size: a.size,
+						mimeType: a.mimeType
+					}))
+					.filter(
+						(a) => a.mimeType === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf')
+					);
+				if (pdfAttachments.length === 0) continue;
+
+				const parser = findParser(email.from, email.subject);
+				const parsed = parser ? parser.parseInvoice(email) : null;
+
+				results.push({
+					gmailMessageId: msg.id,
+					from: email.from,
+					subject: email.subject,
+					date: email.date,
+					pdfAttachments,
+					// Nicio sumă fără valută — dacă parserul n-a putut determina valuta, nu o raportăm
+					amount: parsed?.currency ? (parsed.amount ?? null) : null,
+					currency: parsed?.currency ?? null,
+					supplierType: parsed?.supplierType ?? null,
+					alreadyImported: importedIds.has(msg.id),
+					downloadedAt: downloadedMap.get(msg.id) ?? null
+				});
+			} catch (err) {
+				console.error(`[Gmail Download Search] Error on message ${msg.id}:`, err);
+			}
+		}
+
+		return { results, totalFound: messages.length };
+	}
+);
+
+/**
+ * Primește XLSX-ul „Documente Lipsa" exportat din Keez (plăți fără document)
+ * și potrivește fiecare plată cu emailurile de factură găsite în Gmail.
+ */
+export const matchMissingDocuments = command(
+	v.object({ fileBase64: v.pipe(v.string(), v.minLength(8)) }),
+	async (data) => {
+		const event = getRequestEvent();
+		if (!event?.locals.user || !event?.locals.tenant) {
+			throw new Error('Unauthorized');
+		}
+		await requireStaff(event);
+		const tenantId = event.locals.tenant.id;
+
+		const base64Data = data.fileBase64.replace(/^data:.*;base64,/, '');
+		const workbook = XLSX.read(Buffer.from(base64Data, 'base64'), { type: 'buffer' });
+		const sheet = workbook.Sheets[workbook.SheetNames[0]];
+		const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true }) as unknown[][];
+		const { payments, ignoredIncomes } = parseMissingDocumentsRows(rawRows);
+		if (payments.length === 0) {
+			return { payments: [], ignoredIncomes, candidatesFound: 0 };
+		}
+
+		// Fereastra de căutare: min/max data plăților, cu padding de 10 zile
+		const times = payments.map((p) => p.date.getTime());
+		const dateFrom = new Date(Math.min(...times) - 10 * 86_400_000);
+		const dateTo = new Date(Math.max(...times) + 10 * 86_400_000);
+
+		// Căutăm la ORICE expeditor cu PDF atașat, nu doar la furnizorii cu parser —
+		// altfel plățile către furnizori necunoscuți (Kesselring, fidasolutions etc.)
+		// n-ar găsi niciodată factura.
+		const searchQuery = buildInvoiceSearchQuery({ scope: 'all', dateFrom, dateTo });
+		console.log(`[Missing Docs Match] Search query: ${searchQuery}`);
+
+		const messages = await searchEmails(tenantId, searchQuery, 200);
+
+		const downloadedMap = await getDownloadedMap(
+			tenantId,
+			messages.map((m) => m.id)
+		);
+		const candidates: InvoiceCandidate[] = [];
+		const candidateMeta = new Map<
+			string,
+			{ pdfAttachments: Array<{ index: number; filename: string }>; downloadedAt: Date | null }
+		>();
+
+		for (const msg of messages) {
+			try {
+				const email = await getEmail(tenantId, msg.id);
+				const pdfAttachments = email.attachments
+					.map((a, index) => ({ index, filename: a.filename, mimeType: a.mimeType }))
+					.filter(
+						(a) => a.mimeType === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf')
+					)
+					.map(({ index, filename }) => ({ index, filename }));
+				if (pdfAttachments.length === 0) continue;
+
+				const parser = findParser(email.from, email.subject);
+				const parsed = parser ? parser.parseInvoice(email) : null;
+				// Nicio sumă fără valută — altfel am compara mere cu pere la scor
+				let amount = parsed?.currency ? parsed.amount : undefined;
+				let currency = parsed?.currency;
+
+				// Îmbogățire din PDF doar când emailul n-a dat suma — un singur fetch în plus per email
+				if (amount == null) {
+					const pdfAtt = email.attachments.find(
+						(a) => a.mimeType === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf')
+					);
+					if (pdfAtt) {
+						try {
+							const pdfBuffer = await getAttachment(tenantId, msg.id, pdfAtt.id);
+							const pdfData = await extractInvoiceDataFromPdf(pdfBuffer);
+							if (pdfData.amount && pdfData.currency) {
+								amount = pdfData.amount;
+								currency = pdfData.currency;
+							}
+						} catch {
+							// PDF criptat/imagine — mergem mai departe fără sumă
+						}
+					}
+				}
+
+				candidates.push({
+					gmailMessageId: msg.id,
+					from: email.from,
+					subject: email.subject,
+					date: email.date,
+					amount: amount ?? undefined,
+					currency: currency ?? undefined,
+					supplierType: parsed?.supplierType
+				});
+				candidateMeta.set(msg.id, {
+					pdfAttachments,
+					downloadedAt: downloadedMap.get(msg.id) ?? null
+				});
+			} catch (err) {
+				console.error(`[Missing Docs Match] Error on message ${msg.id}:`, err);
+			}
+		}
+
+		const matched = matchPayments(payments, candidates);
+		return {
+			payments: matched.map((m) => ({
+				...m,
+				matchMeta: m.match ? (candidateMeta.get(m.match.gmailMessageId) ?? null) : null
+			})),
+			ignoredIncomes,
+			candidatesFound: candidates.length
+		};
 	}
 );
 
