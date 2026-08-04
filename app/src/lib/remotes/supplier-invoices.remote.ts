@@ -267,6 +267,7 @@ export const previewGmailInvoices = command(
 						// PDF parsing failed (encrypted/image-only) — continue with email data
 					}
 				}
+				if (!parsed.currency) parsed.amount = undefined;
 
 				previews.push({
 					gmailMessageId: msg.id,

@@ -107,4 +107,12 @@ describe('parseInvoiceText — status', () => {
 	it('fără indicii => status undefined', () => {
 		expect(parseInvoiceText('Total in EUR 5,00').status).toBeUndefined();
 	});
+	it('"Total de achitat" (sumă DATORATĂ) => status undefined, nu paid', () => {
+		const r = parseInvoiceText('Total de achitat: 119,00 RON\n- RON -');
+		expect(r.status).toBeUndefined();
+	});
+	it('cerere de prepayment (nu confirmare) => status undefined, nu paid', () => {
+		const r = parseInvoiceText('Please transfer the prepayment amount of 50,00 EUR');
+		expect(r.status).toBeUndefined();
+	});
 });

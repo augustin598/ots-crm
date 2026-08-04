@@ -292,8 +292,14 @@ export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 		result.issueDate = sorted[0].date;
 	}
 
-	// Paid detection from PDF text (only positive signal; absence means unknown)
-	if (/achitat|amount received|prepayment|paid in full|payment received/i.test(text)) {
+	// Paid detection from PDF text (only positive signal; absence means unknown).
+	// Guard against opposite-meaning phrases: "neachitat", "de achitat" (= amount due).
+	if (
+		!/neachitat|de\s+achitat/i.test(text) &&
+		/achitat[ăa]?\s*(?:cu|integral|prin|la\s+data)|amount\s+received|paid\s+in\s+full|payment\s+received/i.test(
+			text
+		)
+	) {
 		result.status = 'paid';
 	}
 

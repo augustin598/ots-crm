@@ -182,6 +182,8 @@ export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {
 		bodyLower.includes('unpaid') ||
 		bodyLower.includes('neplatit') ||
 		bodyLower.includes('neplătit') ||
+		bodyLower.includes('neachitat') ||
+		bodyLower.includes('de achitat') ||
 		bodyLower.includes('overdue') ||
 		bodyLower.includes('restant') ||
 		bodyLower.includes('scadenta') ||
@@ -209,7 +211,7 @@ export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {
 		bodyLower.includes('paid') ||
 		bodyLower.includes('achitat') ||
 		bodyLower.includes('amount received') ||
-		bodyLower.includes('prepayment') ||
+		bodyLower.includes('received by prepayment') ||
 		bodyLower.includes('plata confirmata') ||
 		bodyLower.includes('plată confirmată') ||
 		bodyLower.includes('incasat') ||
