@@ -44,12 +44,19 @@ function normalizeCurrency(c: string): string {
 	return upper === 'LEI' ? 'RON' : upper;
 }
 
-function parseInvoiceText(text: string): PdfExtractedInvoiceData {
+function normalizeSymbolCurrency(c: string): string {
+	const map: Record<string, string> = { '€': 'EUR', $: 'USD', '£': 'GBP' };
+	return map[c] || normalizeCurrency(c);
+}
+
+export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	const result: PdfExtractedInvoiceData = {};
 
 	// --- Invoice Number ---
 	// Patterns: "Invoice #123", "Invoice Number: 123", "Factura nr. 123", "Rechnung Nr. 123"
 	const invoicePatterns = [
+		/document\s+number\s*[:\-–]?\s*([\w\-/.]+)/i,
+		/\bnr\.?\s+(\d{3,})\b/i,
 		/(?:invoice|factur[aă]|rechnung)\s*(?:number|num[aă]rul|nr\.?|no\.?|#|num[aă]r)\s*[:\-–]?\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă]|rechnung)\s*#\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă])\s*:\s*([\w\-/.]+)/i,
@@ -64,8 +71,8 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 		const match = text.match(pattern);
 		if (match) {
 			const num = match[1] || match[0];
-			// Sanity check: invoice numbers are typically 3-30 chars
-			if (num.length >= 3 && num.length <= 30) {
+			// Sanity check: 3-30 chars și conține cel puțin o cifră (respinge "available" etc.)
+			if (num.length >= 3 && num.length <= 30 && /\d/.test(num)) {
 				result.invoiceNumber = num.replace(/^[:\-–\s]+/, '').trim();
 				break;
 			}
@@ -75,13 +82,42 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	// --- Amount ---
 	// Strategy: try multiple approaches from most specific to least specific
 
+	// 0. Gross totals — highest priority: "Total de plata (TVA inclus) 76,12",
+	// "Total with VAT: 9,50 €", "Grand total", "Gesamtbetrag"
+	const grossPatterns: Array<{ re: RegExp; amountIdx: number; currencyIdx?: number }> = [
+		{ re: /total\s+de\s+plat[aă][^\d\n]*?([\d.,]+)/i, amountIdx: 1 },
+		{
+			re: /total\s+with\s+vat\s*[:\-–]?\s*([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
+			amountIdx: 1,
+			currencyIdx: 2
+		},
+		{
+			re: /(?:grand\s+total|gesamtbetrag)\s*[:\-–]?\s*([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
+			amountIdx: 1,
+			currencyIdx: 2
+		}
+	];
+	for (const { re, amountIdx, currencyIdx } of grossPatterns) {
+		const m = text.match(re);
+		if (!m) continue;
+		const parsed = parseBareAmount(m[amountIdx]);
+		if (!parsed) continue;
+		result.amount = parsed;
+		if (currencyIdx && m[currencyIdx]) result.currency = normalizeSymbolCurrency(m[currencyIdx]);
+		break;
+	}
+
 	// 1. "Total in RON 241.30" or "Total in EUR 50.00" (exact currency + number)
-	const totalInCurrencyMatch = text.match(/(?:total)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)\s+([\d.,]+)/i);
-	if (totalInCurrencyMatch) {
-		const parsed = parseBareAmount(totalInCurrencyMatch[2]);
-		if (parsed) {
-			result.amount = parsed;
-			result.currency = normalizeCurrency(totalInCurrencyMatch[1]);
+	if (!result.amount) {
+		const totalInCurrencyMatch = text.match(
+			/(?:total)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)\s+([\d.,]+)/i
+		);
+		if (totalInCurrencyMatch) {
+			const parsed = parseBareAmount(totalInCurrencyMatch[2]);
+			if (parsed) {
+				result.amount = parsed;
+				result.currency = normalizeCurrency(totalInCurrencyMatch[1]);
+			}
 		}
 	}
 
@@ -150,6 +186,23 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 			result.amount = amountResult.amount;
 			result.currency = amountResult.currency;
 		}
+	}
+
+	// Currency from document context when amount was found without one:
+	// column headers like "- RON -", or RON invoices with Romanian VAT wording
+	if (result.amount && !result.currency) {
+		const columnHint = text.match(/-\s*(RON|EUR|USD|GBP|LEI)\s*-/i);
+		if (columnHint) {
+			result.currency = normalizeCurrency(columnHint[1]);
+		} else if (/\bTVA\b/i.test(text) && /\b(RON|LEI)\b/i.test(text)) {
+			result.currency = 'RON';
+		}
+	}
+
+	// Never return an amount without a currency — a wrong guess (old USD default)
+	// is worse than an empty field.
+	if (result.amount && !result.currency) {
+		delete result.amount;
 	}
 
 	// --- Dates ---
