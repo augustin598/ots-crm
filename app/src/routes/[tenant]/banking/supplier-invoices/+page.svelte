@@ -17,8 +17,9 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import GmailSearchTab from './GmailSearchTab.svelte';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
-	// Acord corect la numeral („1 factură”, „3 facturi”, „21 de facturi”)
-	import { pluralRo } from '$lib/utils/gmail-search';
+	// Acord corect la numeral („1 factură”, „3 facturi”, „21 de facturi”) + intervalul
+	// implicit, derivat din data curentă. Sunt testate în `gmail-search.test.ts`.
+	import { pluralRo, previousMonthRange } from '$lib/utils/gmail-search';
 	import {
 		Plus,
 		Trash2,
@@ -72,14 +73,6 @@
 
 	// Interval implicit: luna calendaristică anterioară (fluxul de facturi e lunar).
 	// Derivat din data curentă, niciodată hardcodat.
-	function previousMonthRange(): { from: string; to: string } {
-		const now = new Date();
-		const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-		const last = new Date(now.getFullYear(), now.getMonth(), 0);
-		const iso = (d: Date) =>
-			`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-		return { from: iso(first), to: iso(last) };
-	}
 	const defaultRange = previousMonthRange();
 	let dateFromFilter = $state(defaultRange.from);
 	let dateToFilter = $state(defaultRange.to);

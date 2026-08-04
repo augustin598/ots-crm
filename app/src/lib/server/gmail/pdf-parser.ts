@@ -26,8 +26,14 @@ export async function extractInvoiceDataFromPdf(buffer: Buffer): Promise<PdfExtr
 /**
  * Parse a bare number string (no currency symbol) to cents.
  * Handles "241.30", "1,234.56", "241,30" (comma as decimal).
+ *
+ * Exportat DOAR pentru testul de acord cu celelalte două implementări ale aceleiași
+ * reguli (`parseAmount` din parsers/helpers.ts și `parseDecimalToCents` din
+ * banking/payment-match.ts): ele stau pe laturi opuse ale comparației de scor —
+ * suma facturii față de suma plății — deci o divergență ar fi o regresie tăcută
+ * de potrivire. Vezi `__tests__/decimal-separator.test.ts`.
  */
-function parseBareAmount(str: string): number | null {
+export function parseBareAmount(str: string): number | null {
 	let s = str.trim();
 	if (!s) return null;
 	const hasComma = s.includes(',');

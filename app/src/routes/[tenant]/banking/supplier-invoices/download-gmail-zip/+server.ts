@@ -5,6 +5,7 @@ import { requireStaff } from '$lib/server/get-actor';
 import { getEmail, getAttachment } from '$lib/server/gmail/client';
 import { recordDownload, sanitizeAttachmentFilename } from '$lib/server/gmail/download-evidence';
 import { mapGmailError } from '$lib/server/gmail/errors';
+import { MAX_ZIP_ITEMS } from '$lib/utils/gmail-search';
 import { logWarning, serializeError } from '$lib/server/logger';
 
 interface ZipItem {
@@ -22,8 +23,12 @@ interface PreparedEntry {
 	bankReference?: string;
 }
 
-/** Numărul de emailuri dintr-o selecție. */
-const MAX_ITEMS = 100;
+/**
+ * Numărul de emailuri dintr-o selecție. Vine din modulul pur `$lib/utils/gmail-search`
+ * (SURSĂ UNICĂ) fiindcă și clientul are nevoie de el ca să spargă selecția în tranșe:
+ * un `+server.ts` nu poate fi importat de client, dar invers se poate.
+ */
+const MAX_ITEMS = MAX_ZIP_ITEMS;
 
 /**
  * Plafon de octeți pe arhivă. MAX_ITEMS limitează doar numărul de emailuri, nu

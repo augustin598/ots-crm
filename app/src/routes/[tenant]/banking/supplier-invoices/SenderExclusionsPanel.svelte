@@ -71,12 +71,17 @@
 	}
 </script>
 
-<div class="mt-4 border-t pt-4">
+<!--
+	Panoul e montat de `GmailSearchTab.svelte`, deasupra amândurora modurilor: excluderile
+	guvernează și potrivirea din „Documente lipsă”, iar înainte trebuia schimbat modul ca
+	să poată fi adăugat un expeditor nedorit.
+-->
+<div>
 	<div class="flex flex-wrap items-baseline justify-between gap-2">
 		<Label class="text-xs" for="gmail-exclusion-input">Expeditori excluși</Label>
 		<p class="text-xs text-muted-foreground">
-			Emailurile de la acești expeditori nu apar în rezultate. Se salvează automat și rămân active
-			și la potrivirea din „Documente lipsă”.
+			Emailurile de la acești expeditori nu apar în rezultate, în amândouă modurile. Se salvează
+			automat.
 		</p>
 	</div>
 

@@ -2,6 +2,9 @@
 // supplier invoices found in Gmail. Pure module — no DB, no network — for testability.
 
 import { maxWeightMatching } from './assignment';
+// Modul PUR de utilitare (fără cod de server): îl importăm ca stopwords-urile și pragul
+// de lungime să aibă o singură definiție, comună cu numele fișierelor din arhivă.
+import { MERCHANT_STOPWORDS, MIN_MERCHANT_TOKEN_LENGTH } from '$lib/utils/gmail-search';
 
 export interface PaymentRow {
 	reference: string; // Referinta Keez
@@ -146,47 +149,6 @@ export function parseMissingDocumentsRows(rows: unknown[][]): {
 function daysBetween(a: Date, b: Date): number {
 	return Math.abs(a.getTime() - b.getTime()) / 86_400_000;
 }
-
-/** Words in statement descriptions that are never a merchant name. */
-const MERCHANT_STOPWORDS = new Set([
-	'PLATA',
-	'CARD',
-	'VISA',
-	'EPOS',
-	'NON',
-	'TID',
-	'RRN',
-	'REF',
-	'MID',
-	'ORDER',
-	'VALOARE',
-	'TRANZACTIE',
-	'COMISION',
-	'TRZ',
-	'POS',
-	'RON',
-	'EUR',
-	'USD',
-	'GBP',
-	'INVOICE',
-	'FACTURA',
-	'PAYMENT',
-	'ONLINE',
-	'GMBH',
-	'SRL',
-	'INC',
-	'LTD',
-	'LIMITED',
-	'TECHNOLOGIES',
-	'COM',
-	'WWW',
-	'NOREPLY',
-	'BILLING',
-	'MPY'
-]);
-
-/** Lungimea minimă a unui token de comerciant folosit ca semnal de rezervă. */
-const MIN_MERCHANT_TOKEN_LENGTH = 5;
 
 /**
  * Merchant tokens extracted from the statement description, for suppliers that

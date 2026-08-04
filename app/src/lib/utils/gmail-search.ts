@@ -8,11 +8,11 @@
 /**
  * Plafonul de emailuri pe care le acceptă endpointul ZIP într-o singură cerere.
  *
- * DUPLICAT INTENȚIONAT al lui `MAX_ITEMS` din
- * `src/routes/[tenant]/banking/supplier-invoices/download-gmail-zip/+server.ts`:
- * un `+server.ts` nu poate fi importat din cod de client (ar trage tot serverul în
- * bundle). Dacă se schimbă acolo, se schimbă și aici — UI-ul sparge selecția în
- * tranșe de exact atâtea emailuri, ca să nu primească 400 „Prea multe selectate”.
+ * SURSĂ UNICĂ: `download-gmail-zip/+server.ts` importă exact această constantă.
+ * Un `+server.ts` nu poate fi importat din cod de client (ar trage tot serverul în
+ * bundle), dar invers se poate — modulul de față e pur, deci constanta stă aici și
+ * serverul o citește. UI-ul sparge selecția în tranșe de exact atâtea emailuri, ca
+ * să nu primească 400 „Prea multe selectate”.
  */
 export const MAX_ZIP_ITEMS = 100;
 
@@ -41,13 +41,14 @@ export interface PaymentLabelInput {
 /**
  * Cuvinte care nu sunt niciodată numele comerciantului în descrierea bancară.
  *
- * DUPLICAT INTENȚIONAT al lui `MERCHANT_STOPWORDS` din
- * `$lib/server/banking/payment-match.ts` (modul de server, nu poate fi importat de
- * client). Lista de acolo e sursa de adevăr pentru POTRIVIRE; aici e folosită doar
- * pentru NUMELE fișierului descărcat. Ține-le sincronizate: o divergență nu strică
- * potrivirea, dar produce prefixuri greșite în arhivă („MPY” în loc de „KESSELRING”).
+ * SURSĂ UNICĂ pentru amândouă întrebuințările: POTRIVIREA (`merchantTokens` din
+ * `$lib/server/banking/payment-match.ts`, care importă de aici) și NUMELE fișierului
+ * descărcat (`merchantShort`, mai jos). Erau două liste identice ținute manual în
+ * sincron: o divergență nu strica potrivirea, dar producea prefixuri greșite în
+ * arhivă („MPY” în loc de „KESSELRING”). Modulul de față e pur, deci serverul îl
+ * poate importa — invers nu se poate.
  */
-const LABEL_STOPWORDS = new Set([
+export const MERCHANT_STOPWORDS: ReadonlySet<string> = new Set([
 	'PLATA',
 	'CARD',
 	'VISA',
@@ -84,8 +85,11 @@ const LABEL_STOPWORDS = new Set([
 	'MPY'
 ]);
 
-/** Lungimea minimă a unui token de comerciant (aceeași ca pe server). */
-const MIN_MERCHANT_TOKEN_LENGTH = 5;
+/**
+ * Lungimea minimă a unui token de comerciant. SURSĂ UNICĂ: `payment-match.ts` o
+ * importă de aici, ca pragul de potrivire și cel de etichetare să nu poată diverge.
+ */
+export const MIN_MERCHANT_TOKEN_LENGTH = 5;
 
 /**
  * Numele scurt al comerciantului, pentru numele fișierului descărcat.
@@ -101,7 +105,7 @@ export function merchantShort(payment: PaymentLabelInput): string {
 		.split(/\s+/)
 		.filter((raw) => !/\d/.test(raw))
 		.flatMap((raw) => raw.split(/[^A-Z]+/))
-		.find((word) => word.length >= MIN_MERCHANT_TOKEN_LENGTH && !LABEL_STOPWORDS.has(word));
+		.find((word) => word.length >= MIN_MERCHANT_TOKEN_LENGTH && !MERCHANT_STOPWORDS.has(word));
 	return token ? token.slice(0, 20) : 'FURNIZOR';
 }
 

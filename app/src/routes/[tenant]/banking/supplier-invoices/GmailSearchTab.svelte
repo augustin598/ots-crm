@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import MissingDocsMode from './MissingDocsMode.svelte';
 	import FreeSearchMode from './FreeSearchMode.svelte';
+	import SenderExclusionsPanel from './SenderExclusionsPanel.svelte';
 
 	// Componenta trăiește sub ruta `[tenant]`, deci parametrul există întotdeauna.
 	const tenantSlug = $derived(page.params.tenant!);
@@ -34,7 +35,18 @@
 	}
 </script>
 
-{#if gmailStatus && !gmailStatus.connected}
+<!--
+	Starea de încărcare e tratată EXPLICIT: cu `{#if gmailStatus && !gmailStatus.connected}`,
+	un tenant fără Gmail vedea o clipă zona de încărcare a XLSX-ului (starea e `undefined`
+	până răspunde query-ul) și abia apoi cardul „Gmail nu este conectat”.
+-->
+{#if gmailStatus === undefined}
+	<Card>
+		<CardContent class="py-8 text-center text-muted-foreground">
+			Se verifică conexiunea Gmail…
+		</CardContent>
+	</Card>
+{:else if !gmailStatus.connected}
 	<Card>
 		<CardContent class="py-8 text-center">
 			<AlertCircle class="mx-auto mb-2 h-8 w-8 text-amber-500" />
@@ -66,6 +78,17 @@
 			Căutare liberă
 		</Button>
 	</div>
+
+	<!--
+		Excluderile guvernează AMÂNDOUĂ modurile, deci panoul stă în afara lor: înainte era
+		doar în „Căutare liberă”, iar din fluxul lunar trebuia schimbat modul ca să poată fi
+		exclus un expeditor nedorit.
+	-->
+	<Card class="mb-4">
+		<CardContent class="py-4">
+			<SenderExclusionsPanel {tenantSlug} />
+		</CardContent>
+	</Card>
 
 	<div hidden={mode !== 'upload'}>
 		<MissingDocsMode

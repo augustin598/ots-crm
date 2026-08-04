@@ -9,7 +9,6 @@
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { MAX_ZIP_ITEMS, nextDayIso, pluralRo, previousMonthRange } from '$lib/utils/gmail-search';
 	import { Download, Search } from '@lucide/svelte';
-	import SenderExclusionsPanel from './SenderExclusionsPanel.svelte';
 	import {
 		formatDate,
 		formatMoney,
@@ -211,8 +210,6 @@
 				Căutarea acoperă orice expeditor cu factură PDF în intervalul ales.
 			{/if}
 		</p>
-
-		<SenderExclusionsPanel {tenantSlug} />
 	</CardContent>
 </Card>
 

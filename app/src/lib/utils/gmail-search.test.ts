@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { error as svelteError } from '@sveltejs/kit';
 import {
 	MAX_ZIP_ITEMS,
+	MERCHANT_STOPWORDS,
+	MIN_MERCHANT_TOKEN_LENGTH,
 	MISSING_DOCS_SCAN_LIMIT,
 	SUGGESTED_EXCLUDE_PATTERNS,
 	addExcludePattern,
@@ -21,6 +23,7 @@ import {
 } from './gmail-search';
 // Import de TEST, nu de client: verificăm că lista duplicată nu a divergat de sursă.
 import { SUGGESTED_EXCLUDE_PATTERNS as SERVER_SUGGESTIONS } from '../server/gmail/parsers/index';
+import { merchantTokens } from '../server/banking/payment-match';
 
 const basePayment = {
 	reference: '12326',
@@ -51,6 +54,38 @@ describe('merchantShort', () => {
 		expect(
 			merchantShort({ ...basePayment, comment: 'PLATA CARD TID:G0A3LMSE RRN 000NVPO261975' })
 		).toBe('FURNIZOR');
+	});
+});
+
+describe('stopwords-urile de comerciant sunt aceleași pentru potrivire și pentru etichetă', () => {
+	/** `merchantTokens` (potrivire, server) cere un rând întreg de plată. */
+	const paymentRow = (comment: string) => ({
+		reference: '12326',
+		date: new Date(2026, 6, 17),
+		partner: null,
+		amountRon: 0,
+		comment,
+		originalAmount: null,
+		originalCurrency: null
+	});
+
+	test('niciun stopword nu ajunge nici token de potrivire, nici prefix de fișier', () => {
+		// Lista are o singură definiție (`$lib/utils/gmail-search`), dar cele două
+		// funcții o aplică separat: testul prinde și o filtrare care ar sări peste ea.
+		expect(MERCHANT_STOPWORDS.size).toBeGreaterThan(0);
+		for (const word of MERCHANT_STOPWORDS) {
+			expect(merchantTokens(paymentRow(`PLATA POS ${word} SRL`))).toEqual([]);
+			expect(merchantShort({ ...basePayment, comment: `PLATA POS ${word} SRL` })).toBe('FURNIZOR');
+		}
+	});
+
+	test('pragul de lungime e același în ambele părți', () => {
+		const short = 'A'.repeat(MIN_MERCHANT_TOKEN_LENGTH - 1);
+		const long = 'A'.repeat(MIN_MERCHANT_TOKEN_LENGTH);
+		expect(merchantTokens(paymentRow(short))).toEqual([]);
+		expect(merchantShort({ ...basePayment, comment: short })).toBe('FURNIZOR');
+		expect(merchantTokens(paymentRow(long))).toEqual([long]);
+		expect(merchantShort({ ...basePayment, comment: long })).toBe(long);
 	});
 });
 
