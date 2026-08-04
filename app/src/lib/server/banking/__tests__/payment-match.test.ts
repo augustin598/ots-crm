@@ -467,6 +467,104 @@ describe('matchPayments — scoring', () => {
 	});
 });
 
+describe('matchPayments — asignare optimă', () => {
+	// „Comerciant" = plată Hetzner + factură cu alias hetzner; „străin" = expeditor fără
+	// nicio legătură, care coincide doar pe sumă și valută.
+	const hetznerPayment = (over: Partial<PaymentRow>) => payment(over);
+
+	it('N1: nu destramă un match confirmat de comerciant pentru a bifa unul pe coincidență de sumă', () => {
+		// owner→C_best 110 (comerciant), owner→C_alt 70 (doar suma), newcomer→C_best 50
+		// (comerciant), newcomer→C_alt 10 (neeligibil). Maximizarea numărului de match-uri
+		// ar da owner→C_alt + newcomer→C_best: owner ar primi factura altui furnizor.
+		const owner = hetznerPayment({ reference: 'owner', date: new Date('2026-07-16') });
+		const newcomer = hetznerPayment({
+			reference: 'newcomer',
+			date: new Date('2026-07-16'),
+			originalAmount: 9999
+		});
+		const cBest = candidate({ gmailMessageId: 'best', date: new Date('2026-07-16') });
+		const cAlt = candidate({
+			gmailMessageId: 'alt',
+			date: new Date('2026-07-16'),
+			from: 'Totally Unrelated Zzz <b@zzz.io>',
+			subject: 'Receipt',
+			supplierType: undefined
+		});
+
+		// Verificăm întâi scorurile pe care se bazează scenariul.
+		expect(scoreMatch(owner, cBest)).toEqual({ score: 110, merchantMatched: true });
+		expect(scoreMatch(owner, cAlt)).toEqual({ score: 70, merchantMatched: false });
+		expect(scoreMatch(newcomer, cBest)).toEqual({ score: 50, merchantMatched: true });
+		expect(scoreMatch(newcomer, cAlt).score).toBeLessThan(40); // neeligibil
+
+		const res = matchPayments([owner, newcomer], [cBest, cAlt]);
+		expect(res[0].match?.gmailMessageId).toBe('best');
+		expect(res[0].confidence).toBe('sure');
+		expect(res[1].match).toBeUndefined();
+	});
+
+	it('N2: două match-uri confirmate de comerciant bat unul singur mai puternic', () => {
+		// owner→D_best 100, owner→D_alt 40, newcomer→D_best 41, newcomer→D_alt în afara
+		// ferestrei. Toate au dovadă de comerciant, deci nu riscăm furnizorul greșit.
+		const owner = hetznerPayment({ reference: 'owner', date: new Date('2026-07-16') });
+		const newcomer = hetznerPayment({
+			reference: 'newcomer',
+			date: new Date('2026-07-17'),
+			originalAmount: 9999
+		});
+		const dBest = candidate({ gmailMessageId: 'best', date: new Date('2026-07-26') });
+		const dAlt = candidate({
+			gmailMessageId: 'alt',
+			date: new Date('2026-07-06'),
+			amount: undefined,
+			currency: undefined
+		});
+
+		expect(scoreMatch(owner, dBest)).toEqual({ score: 100, merchantMatched: true });
+		expect(scoreMatch(owner, dAlt)).toEqual({ score: 40, merchantMatched: true });
+		expect(scoreMatch(newcomer, dBest)).toEqual({ score: 41, merchantMatched: true });
+		expect(scoreMatch(newcomer, dAlt).score).toBe(0); // în afara ferestrei
+
+		const res = matchPayments([owner, newcomer], [dBest, dAlt]);
+		expect(res[0].match?.gmailMessageId).toBe('alt');
+		expect(res[1].match?.gmailMessageId).toBe('best');
+	});
+
+	it('N3: lanț de adâncime 2 — toate cele trei plăți primesc factură', () => {
+		const p1 = hetznerPayment({ reference: 'p1', date: new Date('2026-07-08') });
+		const p2 = hetznerPayment({ reference: 'p2', date: new Date('2026-07-20') });
+		const p3 = hetznerPayment({ reference: 'p3', date: new Date('2026-07-21') });
+		const i1 = candidate({ gmailMessageId: 'i1', date: new Date('2026-06-30') });
+		const i2 = candidate({ gmailMessageId: 'i2', date: new Date('2026-07-10') });
+		const i3 = candidate({ gmailMessageId: 'i3', date: new Date('2026-07-20') });
+
+		const res = matchPayments([p1, p2, p3], [i1, i2, i3]);
+		expect(res.map((r) => r.match?.gmailMessageId)).toEqual(['i1', 'i2', 'i3']);
+	});
+
+	it('determinist: aceeași intrare, același rezultat', () => {
+		const payments = [
+			hetznerPayment({ reference: 'a', date: new Date('2026-07-16') }),
+			hetznerPayment({ reference: 'b', date: new Date('2026-07-17') }),
+			hetznerPayment({ reference: 'c', date: new Date('2026-07-18') })
+		];
+		const candidates = [
+			candidate({ gmailMessageId: 'x', date: new Date('2026-07-16') }),
+			candidate({ gmailMessageId: 'y', date: new Date('2026-07-17') }),
+			candidate({ gmailMessageId: 'z', date: new Date('2026-07-18') })
+		];
+		const first = matchPayments(payments, candidates).map((r) => [
+			r.match?.gmailMessageId,
+			r.score
+		]);
+		for (let i = 0; i < 5; i++) {
+			expect(
+				matchPayments(payments, candidates).map((r) => [r.match?.gmailMessageId, r.score])
+			).toEqual(first);
+		}
+	});
+});
+
 describe('parseMissingDocumentsRows — sume și date invalide', () => {
 	const row = (over: { data?: unknown; valoare?: unknown }) => [
 		'Plati fara document',

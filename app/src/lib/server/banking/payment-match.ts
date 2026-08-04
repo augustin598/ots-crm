@@ -1,6 +1,8 @@
 // Match algorithm between bank payments (Keez "Documente Lipsa" export) and
 // supplier invoices found in Gmail. Pure module — no DB, no network — for testability.
 
+import { maxWeightMatching } from './assignment';
+
 export interface PaymentRow {
 	reference: string; // Referinta Keez
 	date: Date;
@@ -280,9 +282,57 @@ interface Pair {
 	days: number;
 }
 
+/** Scorul maxim posibil: 60 sumă exactă + 40 comerciant + 10 proximitate. */
+const MAX_PAIR_SCORE = 110;
+
 /**
- * Atribuire unică: întâi greedy (perechi sortate după scor, departajate pe proximitatea
- * datei), apoi un pas de recuperare pentru plățile rămase pe dinafară.
+ * Obiectiv lexicografic turtit într-o singură greutate scalară, în ordinea:
+ *
+ *   1. numărul de match-uri CONFIRMATE DE COMERCIANT
+ *   2. suma scorurilor acelor match-uri
+ *   3. suma scorurilor match-urilor speculative (doar pe sumă)
+ *   4. departajarea (data mai apropiată, apoi indicele mai mic de factură)
+ *
+ * De ce numărul de match-uri NU e criteriul dominant: dacă ar fi, algoritmul ar rupe un
+ * match confirmat de comerciant ca să bifeze încă unul pe simpla coincidență de sumă
+ * (110 confirmat → 70 speculativ + 50 confirmat), adică exact eroarea pe care o previne
+ * regula „sure cere dovadă de comerciant". Cu tierele de mai sus, un match speculativ e
+ * adăugat doar când NU deposedează un match confirmat.
+ *
+ * Multiplicatorii se derivă din dimensiunea intrării, ca fiecare nivel să domine exact
+ * suma maximă a nivelurilor de sub el.
+ */
+function pairWeights(pairs: Pair[], maxMatches: number): number[] {
+	const m = pairs.length;
+	const wTie = 1;
+	const wSpeculativeScore = maxMatches * m + 1;
+	const wMerchantScore = (maxMatches * MAX_PAIR_SCORE + 1) * wSpeculativeScore;
+	const wMerchantCount = (maxMatches * MAX_PAIR_SCORE + 1) * wMerchantScore;
+
+	// Departajare: perechile mai apropiate ca dată primesc un bonus mai mare. Rangul e
+	// total ordonat, deci rezultatul nu depinde de ordinea de iterare.
+	const ranked = [...pairs].sort((a, b) => a.days - b.days || a.ci - b.ci || a.pi - b.pi);
+	const tieBonus = new Map<Pair, number>();
+	ranked.forEach((pair, rank) => tieBonus.set(pair, (m - rank) * wTie));
+
+	const weights = pairs.map((pair) =>
+		pair.merchantMatched
+			? wMerchantCount + pair.score * wMerchantScore + (tieBonus.get(pair) as number)
+			: pair.score * wSpeculativeScore + (tieBonus.get(pair) as number)
+	);
+
+	const maxTotal = maxMatches * (wMerchantCount + MAX_PAIR_SCORE * wMerchantScore + m);
+	if (maxTotal > Number.MAX_SAFE_INTEGER) {
+		throw new Error(
+			`payment-match: intrare prea mare pentru codificarea exactă a greutăților (${pairs.length} perechi)`
+		);
+	}
+	return weights;
+}
+
+/**
+ * Asignare optimă plăți ↔ facturi prin potrivire bipartită de greutate maximă.
+ * Perechile sub PROBABLE_THRESHOLD sunt neeligibile și nu apar deloc în matrice.
  */
 export function matchPayments(
 	payments: PaymentRow[],
@@ -297,48 +347,29 @@ export function matchPayments(
 			}
 		});
 	});
-	pairs.sort((a, b) => b.score - a.score || a.days - b.days);
 
-	const assignment = new Map<number, Pair>();
-	const candidateOwner = new Map<number, number>();
-	for (const pair of pairs) {
-		if (assignment.has(pair.pi) || candidateOwner.has(pair.ci)) continue;
-		assignment.set(pair.pi, pair);
-		candidateOwner.set(pair.ci, pair.pi);
-	}
+	const weights = pairWeights(pairs, Math.min(payments.length, candidates.length));
+	const matrix: (number | null)[][] = payments.map(() =>
+		new Array<number | null>(candidates.length).fill(null)
+	);
+	pairs.forEach((pair, index) => {
+		matrix[pair.pi][pair.ci] = weights[index];
+	});
 
-	// Pas de recuperare: greedy poate lăsa o plată fără nicio factură deși o atribuire
-	// mai bună există — dă-i unei plăți nematchuite o factură liberă, iar dacă singura ei
-	// factură e ocupată, mută deținătorul pe o factură liberă când totalul crește.
-	const pairsFor = (pi: number) => pairs.filter((p) => p.pi === pi);
-	for (const pi of payments.map((_, i) => i)) {
-		if (assignment.has(pi)) continue;
-		for (const pair of pairsFor(pi)) {
-			const owner = candidateOwner.get(pair.ci);
-			if (owner === undefined) {
-				assignment.set(pi, pair);
-				candidateOwner.set(pair.ci, pi);
-				break;
-			}
-			const ownerPair = assignment.get(owner);
-			const alternative = pairsFor(owner).find((alt) => !candidateOwner.has(alt.ci));
-			if (!ownerPair || !alternative) continue;
-			if (alternative.score + pair.score <= ownerPair.score) continue;
-			assignment.set(owner, alternative);
-			candidateOwner.set(alternative.ci, owner);
-			assignment.set(pi, pair);
-			candidateOwner.set(pair.ci, pi);
-			break;
-		}
-	}
+	const byPosition = new Map<number, Pair>();
+	pairs.forEach((pair) => byPosition.set(pair.pi * candidates.length + pair.ci, pair));
 
+	const assignment = maxWeightMatching(matrix);
 	return payments.map((p, pi) => {
-		const a = assignment.get(pi);
-		if (!a) return { ...p, score: 0, confidence: 'none' as const };
+		const ci = assignment[pi];
+		const pair = ci >= 0 ? byPosition.get(pi * candidates.length + ci) : undefined;
+		if (!pair) return { ...p, score: 0, confidence: 'none' as const };
 		// 'sure' cere ȘI dovadă de comerciant: sumă exactă + aceeași zi dau exact 70, iar
 		// pe abonamente recurente cu aceeași sumă asta ar eticheta „sigur" factura greșită.
 		const confidence =
-			a.score >= SURE_THRESHOLD && a.merchantMatched ? ('sure' as const) : ('probable' as const);
-		return { ...p, match: candidates[a.ci], score: a.score, confidence };
+			pair.score >= SURE_THRESHOLD && pair.merchantMatched
+				? ('sure' as const)
+				: ('probable' as const);
+		return { ...p, match: candidates[ci], score: pair.score, confidence };
 	});
 }
