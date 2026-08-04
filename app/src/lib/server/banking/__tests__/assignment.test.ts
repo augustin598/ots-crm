@@ -134,4 +134,37 @@ describe('maxWeightMatching', () => {
 		const first = maxWeightMatching(w);
 		for (let i = 0; i < 5; i++) expect(maxWeightMatching(w)).toEqual(first);
 	});
+
+	// Regula de departajare e DOCUMENTATĂ în assignment.ts („`<` strict: la egalitate
+	// câștigă coloana cu indicele mai mic"), dar nu era fixată de niciun test: schimbând
+	// ambele apariții ale lui `<` în `<=` toată suita rămânea verde. Testele de proprietate
+	// nu o prind, fiindcă `<=` întoarce tot o asignare OPTIMĂ — doar alta. Aici fixăm CARE
+	// dintre optimele egale îl întoarcem, pe matrice fixe cu egalități.
+	it('la egalitate câștigă coloana cu indicele mai mic (regula `<` strict)', () => {
+		// Ambele asignări au totalul 4: [0,1] = 3+1, [1,0] = 2+2. Regula alege [0,1],
+		// adică rândul 0 ia coloana cu indicele mai mic. Cu `<=` ar ieși [1,0].
+		expect(
+			maxWeightMatching([
+				[3, 2],
+				[2, 1]
+			])
+		).toEqual([0, 1]);
+
+		// Cu o coloană în plus: [0,1] = 3+2 și [2,0] = 2+3, tot 5 amândouă. Cu `<=` ar ieși [2,0].
+		expect(
+			maxWeightMatching([
+				[3, 1, 2],
+				[3, 2, 1]
+			])
+		).toEqual([0, 1]);
+
+		// Al treilea caz, cu o pereche neeligibilă în joc: [-1,0,1] = 3+3 vs [0,-1,1] = 3+3.
+		expect(
+			maxWeightMatching([
+				[3, 2],
+				[3, 1],
+				[1, 3]
+			])
+		).toEqual([-1, 0, 1]);
+	});
 });

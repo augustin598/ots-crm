@@ -249,6 +249,16 @@ export interface MatchScore {
 	merchantMatched: boolean;
 }
 
+/**
+ * Ponderile componentelor de scor. Sunt constante numite, nu literali împrăștiați, fiindcă
+ * `MAX_PAIR_SCORE` se DERIVĂ din ele — vezi comentariul de acolo.
+ */
+const SCORE_AMOUNT_EXACT = 60;
+/** Sumă în toleranța de 2% (curs valutar, rotunjiri). */
+const SCORE_AMOUNT_NEAR = 40;
+const SCORE_MERCHANT = 40;
+const SCORE_PROXIMITY_MAX = 10;
+
 export function scoreMatch(payment: PaymentRow, candidate: InvoiceCandidate): MatchScore {
 	const days = daysBetween(payment.date, candidate.date);
 	// isNaN prinde datele invalide: `NaN > MATCH_WINDOW_DAYS` e false, deci fără verificare
@@ -263,18 +273,18 @@ export function scoreMatch(payment: PaymentRow, candidate: InvoiceCandidate): Ma
 		candidate.amount != null &&
 		candidate.currency === payment.originalCurrency
 	) {
-		if (candidate.amount === payment.originalAmount) score += 60;
+		if (candidate.amount === payment.originalAmount) score += SCORE_AMOUNT_EXACT;
 		else if (Math.abs(candidate.amount - payment.originalAmount) / payment.originalAmount <= 0.02)
-			score += 40;
+			score += SCORE_AMOUNT_NEAR;
 	}
 	// Comerciantul singur trebuie să treacă pragul „probabil" (40), chiar și fără sumă
 	const merchantMatched = merchantMatches(payment, candidate);
-	if (merchantMatched) score += 40;
-	score += Math.max(0, Math.round(10 * (1 - days / MATCH_WINDOW_DAYS)));
+	if (merchantMatched) score += SCORE_MERCHANT;
+	score += Math.max(0, Math.round(SCORE_PROXIMITY_MAX * (1 - days / MATCH_WINDOW_DAYS)));
 	return { score, merchantMatched };
 }
 
-interface Pair {
+export interface Pair {
 	pi: number;
 	ci: number;
 	score: number;
@@ -282,8 +292,41 @@ interface Pair {
 	days: number;
 }
 
-/** Scorul maxim posibil: 60 sumă exactă + 40 comerciant + 10 proximitate. */
-const MAX_PAIR_SCORE = 110;
+/**
+ * Scorul maxim pe care îl poate întoarce `scoreMatch` — sumă exactă + comerciant +
+ * proximitate maximă.
+ *
+ * DERIVAT, nu hardcodat: separarea nivelurilor din `pairWeights` cere
+ * `MAX_PAIR_SCORE >= scorul maxim atins`, iar cele două erau exact egale (110 = 110).
+ * Cu o constantă hardcodată, ridicarea oricărei ponderi de mai sus (comerciant 40→50 ⇒
+ * maxim 120) rupea TĂCUT dominarea nivelurilor și redeschidea bugul „un match speculativ
+ * deposedează unul confirmat", fără ca vreun test să pice. Aici cuplajul e structural.
+ */
+export const MAX_PAIR_SCORE =
+	Math.max(SCORE_AMOUNT_EXACT, SCORE_AMOUNT_NEAR) + SCORE_MERCHANT + SCORE_PROXIMITY_MAX;
+
+/**
+ * Plafonul bonusului de departajare (nivelul 4).
+ *
+ * Varianta anterioară dădea bonusul din RANGUL perechii în lista sortată după dată, deci
+ * nivelul costa un factor de `m` = numărul de perechi (până la 22.500 cu plafonul de 150
+ * de candidați) în greutatea finală — garda de MAX_SAFE_INTEGER se declanșa deja de la ~87
+ * de rânduri de plată, o dimensiune atinsă de un export pe un trimestru.
+ *
+ * Departajarea trebuie doar să rupă egalitățile determinist, nu să ordoneze întreaga
+ * mulțime de perechi: cuantizăm distanța în zecimi de zi, ceea ce dă un plafon CONSTANT,
+ * independent de dimensiunea intrării. Perechile din aceeași zecime de zi rămân egale la
+ * nivelul 4 și sunt departajate de solver, care e determinist (vezi assignment.ts: la
+ * egalitate câștigă coloana cu indicele mai mic).
+ */
+const TIE_BONUS_CAP = MATCH_WINDOW_DAYS * 10;
+
+/** Bonus de departajare: cu cât data e mai apropiată, cu atât mai mare. [0, TIE_BONUS_CAP] */
+function tieBonus(days: number): number {
+	const quantized = Math.round(days * 10);
+	if (!Number.isFinite(quantized)) return 0;
+	return Math.min(TIE_BONUS_CAP, Math.max(0, TIE_BONUS_CAP - quantized));
+}
 
 /**
  * Obiectiv lexicografic turtit într-o singură greutate scalară, în ordinea:
@@ -291,7 +334,8 @@ const MAX_PAIR_SCORE = 110;
  *   1. numărul de match-uri CONFIRMATE DE COMERCIANT
  *   2. suma scorurilor acelor match-uri
  *   3. suma scorurilor match-urilor speculative (doar pe sumă)
- *   4. departajarea (data mai apropiată, apoi indicele mai mic de factură)
+ *   4. departajarea (data mai apropiată, cuantizată la zecimi de zi; egalitățile rămase
+ *      revin ordinii deterministe a solverului — indicele mai mic de coloană)
  *
  * De ce numărul de match-uri NU e criteriul dominant: dacă ar fi, algoritmul ar rupe un
  * match confirmat de comerciant ca să bifeze încă unul pe simpla coincidență de sumă
@@ -299,35 +343,49 @@ const MAX_PAIR_SCORE = 110;
  * regula „sure cere dovadă de comerciant". Cu tierele de mai sus, un match speculativ e
  * adăugat doar când NU deposedează un match confirmat.
  *
- * Multiplicatorii se derivă din dimensiunea intrării, ca fiecare nivel să domine exact
- * suma maximă a nivelurilor de sub el.
+ * De ce NU există un nivel de NUMĂR speculativ între 2 și 3 (adică de ce un match
+ * speculativ de 100 bate două de 40+41): un astfel de nivel ar costa un factor de
+ * `maxMatches` în greutatea finală, fiindcă unitatea de „număr" trebuie să domine suma
+ * scorurilor de sub el. Măsurat: garda de mai jos s-ar declanșa de la 94 de match-uri în
+ * loc de 294 — adică sub pragul de AZI (87 de rânduri de plată), exact regresiunea de
+ * dimensiune pe care o repară plafonarea departajării. Câștigul ar fi doar cosmetic (nimic
+ * nu se ascunde: plățile nepotrivite apar oricum, cu încredere 'none'), deci nu merită marja.
+ *
+ * De reținut la triaj: adăugarea unui candidat poate REASIGNA o plată fără legătură (B a
+ * trecut de la c2 la c3 în timp ce confirmata A→c1 a rămas neatinsă). E inerent unei
+ * optimizări globale, e mereu o îmbunătățire a totalului și NU e un bug.
+ *
+ * Multiplicatorii se derivă din `maxMatches`, ca fiecare nivel să domine exact suma maximă
+ * a nivelurilor de sub el. Spre deosebire de varianta inițială, NU mai depind de numărul
+ * de perechi: bonusul de departajare e plafonat la `TIE_BONUS_CAP` (vezi acolo).
  */
-function pairWeights(pairs: Pair[], maxMatches: number): number[] {
-	const m = pairs.length;
+export function pairWeights(pairs: Pair[], maxMatches: number): number[] {
 	const wTie = 1;
-	const wSpeculativeScore = maxMatches * m + 1;
+	const wSpeculativeScore = maxMatches * TIE_BONUS_CAP * wTie + 1;
 	const wMerchantScore = (maxMatches * MAX_PAIR_SCORE + 1) * wSpeculativeScore;
 	const wMerchantCount = (maxMatches * MAX_PAIR_SCORE + 1) * wMerchantScore;
 
-	// Departajare: perechile mai apropiate ca dată primesc un bonus mai mare. Rangul e
-	// total ordonat, deci rezultatul nu depinde de ordinea de iterare.
-	const ranked = [...pairs].sort((a, b) => a.days - b.days || a.ci - b.ci || a.pi - b.pi);
-	const tieBonus = new Map<Pair, number>();
-	ranked.forEach((pair, rank) => tieBonus.set(pair, (m - rank) * wTie));
-
-	const weights = pairs.map((pair) =>
-		pair.merchantMatched
-			? wMerchantCount + pair.score * wMerchantScore + (tieBonus.get(pair) as number)
-			: pair.score * wSpeculativeScore + (tieBonus.get(pair) as number)
-	);
-
-	const maxTotal = maxMatches * (wMerchantCount + MAX_PAIR_SCORE * wMerchantScore + m);
+	const maxTotal = maxMatches * (wMerchantCount + MAX_PAIR_SCORE * wMerchantScore + TIE_BONUS_CAP);
 	if (maxTotal > Number.MAX_SAFE_INTEGER) {
 		throw new Error(
-			`payment-match: intrare prea mare pentru codificarea exactă a greutăților (${pairs.length} perechi)`
+			`payment-match: intrare prea mare pentru codificarea exactă a greutăților (${maxMatches} match-uri posibile, ${pairs.length} perechi)`
 		);
 	}
-	return weights;
+
+	return pairs.map((pair) => {
+		// Plasă de siguranță pentru cuplajul dintre scoring și codificare: dacă apare o
+		// componentă de scor nouă care nu intră în MAX_PAIR_SCORE, nivelurile se suprapun
+		// și rezultatul devine tăcut greșit. Mai bine cădem zgomotos.
+		if (pair.score > MAX_PAIR_SCORE) {
+			throw new Error(
+				`payment-match: scor ${pair.score} peste MAX_PAIR_SCORE (${MAX_PAIR_SCORE}) — actualizează constantele de scoring`
+			);
+		}
+		const tie = tieBonus(pair.days);
+		return pair.merchantMatched
+			? wMerchantCount + pair.score * wMerchantScore + tie
+			: pair.score * wSpeculativeScore + tie;
+	});
 }
 
 /**

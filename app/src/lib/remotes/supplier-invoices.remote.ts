@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error as svelteError } from '@sveltejs/kit';
 import { requireStaff } from '$lib/server/get-actor';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
@@ -556,7 +557,23 @@ export const matchMissingDocuments = command(
 			}
 		}
 
-		const matched = matchPayments(payments, candidates);
+		// `matchPayments` poate refuza intrarea (codificarea exactă a greutăților are un
+		// plafon de dimensiune). Fără try/catch aici, un export pe un trimestru sau un an
+		// pica tot tabul cu 500 și un mesaj intern — blocurile try de mai sus sunt în bucla
+		// per-mesaj, nu în jurul apelului. `svelteError` e singura formă care supraviețuiește
+		// până la toast: SvelteKit maschează un Error obișnuit ca 500 generic, iar HttpError
+		// (ce ajunge pe client) NU e `instanceof Error` — vezi remoteErrorMessage().
+		let matched: ReturnType<typeof matchPayments>;
+		try {
+			matched = matchPayments(payments, candidates);
+		} catch (err) {
+			console.error('[Missing Docs Match] matchPayments a eșuat:', err);
+			svelteError(
+				400,
+				`Potrivirea nu a putut fi calculată pentru acest export (${payments.length} plăți × ${candidates.length} facturi găsite). Restrânge intervalul de date la exportul „Documente Lipsă" din Keez — o lună sau un trimestru — și încarcă fișierul din nou.`
+			);
+		}
+
 		return {
 			payments: matched.map((m) => ({
 				...m,

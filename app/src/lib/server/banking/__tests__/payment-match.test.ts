@@ -5,8 +5,11 @@ import {
 	matchPayments,
 	merchantTokens,
 	scoreMatch,
+	pairWeights,
+	MAX_PAIR_SCORE,
 	type PaymentRow,
-	type InvoiceCandidate
+	type InvoiceCandidate,
+	type Pair
 } from '../payment-match';
 
 const HETZNER_COMMENT =
@@ -562,6 +565,98 @@ describe('matchPayments — asignare optimă', () => {
 				matchPayments(payments, candidates).map((r) => [r.match?.gmailMessageId, r.score])
 			).toEqual(first);
 		}
+	});
+});
+
+// MAX_PAIR_SCORE trebuie să fie >= scorul maxim atins de scoreMatch, altfel nivelurile
+// obiectivului lexicografic se suprapun și un match speculativ poate deposeda unul
+// confirmat. Erau EGALE și duplicate: constanta hardcoda 110, iar 110 e suma ponderilor
+// din scoreMatch. Mutația 110→50 lăsa toate testele verzi, iar ridicarea oricărei ponderi
+// (comerciant 40→50 ⇒ maxim 120) ar fi rupt tăcut separarea. Testele de mai jos leagă
+// constanta de ponderile reale.
+describe('MAX_PAIR_SCORE — cuplat cu ponderile din scoreMatch', () => {
+	it('e exact scorul maxim atins: sumă exactă + comerciant + aceeași zi', () => {
+		const best = scoreMatch(payment({}), candidate({ date: new Date('2026-07-16') }));
+		expect(best.score).toBe(MAX_PAIR_SCORE);
+	});
+
+	it('niciun scor atins de scoreMatch nu depășește MAX_PAIR_SCORE', () => {
+		// Măturăm toate combinațiile de componente: sumă (exactă / în toleranță / absentă /
+		// valută greșită) × comerciant (da / nu) × distanța în zile (0..11).
+		const amounts: Array<Partial<InvoiceCandidate>> = [
+			{ amount: 18004, currency: 'EUR' }, // exact
+			{ amount: 18300, currency: 'EUR' }, // în toleranța de 2%
+			{ amount: 18004, currency: 'USD' }, // valută greșită
+			{ amount: undefined, currency: undefined }
+		];
+		const senders: Array<Partial<InvoiceCandidate>> = [
+			{}, // alias hetzner
+			{ from: 'Totally Unrelated Zzz <b@zzz.io>', subject: 'Receipt', supplierType: undefined }
+		];
+		let observed = 0;
+		for (const amount of amounts) {
+			for (const sender of senders) {
+				for (let day = 0; day <= 11; day++) {
+					const date = new Date(Date.UTC(2026, 6, 16 - day));
+					const { score } = scoreMatch(payment({}), candidate({ ...amount, ...sender, date }));
+					expect(score).toBeLessThanOrEqual(MAX_PAIR_SCORE);
+					observed = Math.max(observed, score);
+				}
+			}
+		}
+		expect(observed).toBe(MAX_PAIR_SCORE); // maximul e ATINS, deci limita nu e supraevaluată
+	});
+
+	it('o pereche peste plafon oprește codificarea în loc să o falsifice tăcut', () => {
+		const pair = (score: number): Pair => ({ pi: 0, ci: 0, score, merchantMatched: true, days: 0 });
+		expect(() => pairWeights([pair(MAX_PAIR_SCORE)], 1)).not.toThrow();
+		expect(() => pairWeights([pair(MAX_PAIR_SCORE + 1)], 1)).toThrow(/MAX_PAIR_SCORE/);
+	});
+});
+
+// Garda de MAX_SAFE_INTEGER nu era acoperită deloc: înlocuindu-i condiția cu `false`
+// rămâneau toate testele verzi. Pragul e fixat aici ca număr concret — dacă se schimbă
+// TIE_BONUS_CAP sau MAX_PAIR_SCORE, testul cade și obligă la o recalculare conștientă.
+describe('garda de codificare exactă a greutăților', () => {
+	// maxTotal(n) = n * (wMerchantCount + MAX_PAIR_SCORE * wMerchantScore + TIE_BONUS_CAP);
+	// cu bonusul de departajare plafonat, depinde DOAR de numărul maxim de match-uri.
+	const MAX_ENCODABLE = 293;
+
+	it('nu aruncă la dimensiunea maximă codificabilă', () => {
+		expect(() => pairWeights([], MAX_ENCODABLE)).not.toThrow();
+	});
+
+	it('aruncă imediat peste dimensiunea maximă codificabilă', () => {
+		expect(() => pairWeights([], MAX_ENCODABLE + 1)).toThrow(/prea mare/);
+	});
+
+	// `maxMatches` = min(plăți, facturi), deci pragul se atinge prin API-ul public doar cu
+	// AMBELE liste peste prag. Datele sunt la ani distanță: nicio pereche eligibilă, ca
+	// testul să nu plătească nici scoring-ul, nici solverul.
+	const bulkPayments = (n: number) =>
+		Array.from({ length: n }, (_, i) =>
+			payment({ reference: `p${i}`, date: new Date('2020-01-01') })
+		);
+	const bulkCandidates = (n: number) =>
+		Array.from({ length: n }, (_, i) =>
+			candidate({ gmailMessageId: `c${i}`, date: new Date('2026-07-16') })
+		);
+
+	it('prin matchPayments: peste prag aruncă', () => {
+		const n = MAX_ENCODABLE + 1;
+		expect(() => matchPayments(bulkPayments(n), bulkCandidates(n))).toThrow(/prea mare/);
+	});
+
+	it('prin matchPayments: sub prag nu aruncă', () => {
+		const n = MAX_ENCODABLE;
+		expect(() => matchPayments(bulkPayments(n), bulkCandidates(n))).not.toThrow();
+	});
+
+	// Plafonul de candidați din supplier-invoices.remote.ts e 200 (searchEmails(..., 200)),
+	// deci maxMatches nu poate depăși 200: un export „Documente Lipsă" pe un an întreg nu
+	// mai atinge garda, oricâte rânduri de plată ar avea.
+	it('un export realist (600 de plăți × 200 de facturi) nu atinge garda', () => {
+		expect(() => matchPayments(bulkPayments(600), bulkCandidates(200))).not.toThrow();
 	});
 });
 
