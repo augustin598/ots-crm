@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'bun:test';
-import { detectStatus } from '../parsers/index';
-import { genericParser } from '../parsers/generic';
-import { roSuppliersParser } from '../parsers/ro-suppliers';
 import type { GmailMessage } from '../client';
+import { genericParser } from '../parsers/generic';
+import { googleParser } from '../parsers/google';
+import { detectStatus } from '../parsers/index';
+import { openaiParser } from '../parsers/openai';
+import { roSuppliersParser } from '../parsers/ro-suppliers';
+import { whmcsParser } from '../parsers/whmcs';
 
 function makeEmail(overrides: Partial<GmailMessage>): GmailMessage {
 	return {
@@ -80,5 +83,63 @@ describe('extragere nr. factură din email', () => {
 			makeEmail({ from: 'facturi@rotld.ro', subject: 'Factura 2026 emisa', body: 'Factura #5566' })
 		);
 		expect(r.invoiceNumber).toBe('5566');
+	});
+	it('generic: candidat respins din subiect nu blochează un nr. real mai departe în ACELAȘI subiect ("New Invoice available - #INV-2026-0042")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available - #INV-2026-0042' })
+		);
+		expect(r.invoiceNumber).toBe('INV-2026-0042');
+	});
+	it('generic: candidat respins din subiect nu blochează un nr. real mai departe în ACELAȘI subiect ("New Invoice available: 12345")', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'New Invoice available: 12345' }));
+		expect(r.invoiceNumber).toBe('12345');
+	});
+	it('ro-suppliers: candidat respins din subiect nu blochează un nr. real mai departe în ACELAȘI subiect ("Factura disponibila - #5566")', () => {
+		const r = roSuppliersParser.parseInvoice(
+			makeEmail({ from: 'facturi@rotld.ro', subject: 'Factura disponibila - #5566', body: '' })
+		);
+		expect(r.invoiceNumber).toBe('5566');
+	});
+	it('generic: body cu marcaj explicit acceptă anul ("Invoice number: 2026")', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice number: 2026' })
+		);
+		expect(r.invoiceNumber).toBe('2026');
+	});
+});
+
+describe('extragere nr. factură — google/openai/whmcs nu mai capturează cuvinte gunoi', () => {
+	it('google: nu ia "is" din "Your Google invoice is available - #INV-9911"', () => {
+		const r = googleParser.parseInvoice(
+			makeEmail({
+				from: 'billing@google.com',
+				subject: 'Your Google invoice is available - #INV-9911',
+				body: ''
+			})
+		);
+		expect(r.invoiceNumber).not.toBe('is');
+		expect(r.invoiceNumber).toBe('INV-9911');
+	});
+	it('openai: nu ia "is" din "Your OpenAI invoice is ready - #INV-7788"', () => {
+		const r = openaiParser.parseInvoice(
+			makeEmail({
+				from: 'billing@openai.com',
+				subject: 'Your OpenAI invoice is ready - #INV-7788',
+				body: ''
+			})
+		);
+		expect(r.invoiceNumber).not.toBe('is');
+		expect(r.invoiceNumber).toBe('INV-7788');
+	});
+	it('whmcs: nu ia "available" din "New Invoice available - #4455"', () => {
+		const r = whmcsParser.parseInvoice(
+			makeEmail({
+				from: 'billing@whmcs.com',
+				subject: 'New Invoice available - #4455',
+				body: ''
+			})
+		);
+		expect(r.invoiceNumber).not.toBe('available');
+		expect(r.invoiceNumber).toBe('4455');
 	});
 });
