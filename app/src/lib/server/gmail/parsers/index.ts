@@ -132,7 +132,7 @@ function formatGmailDate(date: Date): string {
 // keep working. Parser files must import these from './helpers' directly, not from
 // here — importing them from here would recreate the index.ts <-> parser file cycle
 // that used to break depending on test import order (see parsers/helpers.ts).
-export { parseAmount, detectStatus, isValidInvoiceNumber } from './helpers';
+export { parseAmount, detectStatus, isValidInvoiceNumber, extractInvoiceNumber } from './helpers';
 
 /**
  * Extract email address from "Name <email>" format and match against a pattern.

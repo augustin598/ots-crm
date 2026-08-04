@@ -109,6 +109,65 @@ describe('extragere nr. factură din email', () => {
 		);
 		expect(r.invoiceNumber).toBe('2026');
 	});
+	it('ro-suppliers: formatul "Seria X nr Y" tot funcționează după refactor', () => {
+		const r = roSuppliersParser.parseInvoice(
+			makeEmail({ from: 'facturi@emag.ro', subject: 'Factura emisa', body: 'Seria ABC nr 12345' })
+		);
+		expect(r.invoiceNumber).toBe('ABC-12345');
+	});
+});
+
+describe('extractInvoiceNumber — ancorat pe cuvântul-cheie (regresie: NU mai ia primul token cu cifră din tot textul)', () => {
+	it('generic: nu ia "4471" (nr. de comandă) din "Renewal for order 4471 - invoice #INV-2026-0042"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'Renewal for order 4471 - invoice #INV-2026-0042' })
+		);
+		expect(r.invoiceNumber).toBe('INV-2026-0042');
+	});
+	it('generic: nu ia "2" (nr. de produse) din "Your 2 items shipped, invoice #123"', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'Your 2 items shipped, invoice #123' }));
+		expect(r.invoiceNumber).toBe('123');
+	});
+	it('generic: nu ia "15" (ziua din dată) din body "Hi John, on 15 July 2026 we issued invoice #5566."', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({
+				subject: 'New Invoice available',
+				body: 'Hi John, on 15 July 2026 we issued invoice #5566.'
+			})
+		);
+		expect(r.invoiceNumber).toBe('5566');
+	});
+	it('generic: nu ia "998877" (nr. de cont) din body "Hello, account 998877 was billed. Invoice number: 12345"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({
+				subject: 'New Invoice available',
+				body: 'Hello, account 998877 was billed. Invoice number: 12345'
+			})
+		);
+		expect(r.invoiceNumber).toBe('12345');
+	});
+	it('generic: nu ia "49" (din suma 49.99) din body "Total: 49.99 USD. Invoice #A-771"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Total: 49.99 USD. Invoice #A-771' })
+		);
+		expect(r.invoiceNumber).toBe('A-771');
+	});
+	it('whmcs: nu ia "9912" (nr. de tichet suport) din "Support ticket #9912 - invoice ready"', () => {
+		const r = whmcsParser.parseInvoice(
+			makeEmail({ from: 'billing@whmcs.com', subject: 'Support ticket #9912 - invoice ready', body: '' })
+		);
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('google: idiomul RO "Numărul facturii:" e verificat ÎNAINTE de scanarea generică, nu ia "777" din body "Comanda 777. Numarul facturii: 12345"', () => {
+		const r = googleParser.parseInvoice(
+			makeEmail({
+				from: 'billing@google.com',
+				subject: 'Google Cloud',
+				body: 'Comanda 777. Numarul facturii: 12345'
+			})
+		);
+		expect(r.invoiceNumber).toBe('12345');
+	});
 });
 
 describe('extragere nr. factură — google/openai/whmcs nu mai capturează cuvinte gunoi', () => {

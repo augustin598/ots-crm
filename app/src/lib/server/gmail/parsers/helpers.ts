@@ -128,3 +128,44 @@ export function isValidInvoiceNumber(candidate: string, hasExplicitMarker: boole
 	if (!hasExplicitMarker && /^(19|20)\d{2}$/.test(candidate)) return false;
 	return true;
 }
+
+/** Markers that mean the following token IS the invoice number. */
+const INVOICE_MARKERS = '#|nr\\.?|no\\.?|number|num[ăa]rul';
+
+/**
+ * Extract an invoice number anchored on a keyword. Only text AFTER a keyword
+ * occurrence is scanned, in a bounded window — otherwise unrelated numbers
+ * (order ids, dates, amounts, ticket ids) get captured. This replaced an
+ * earlier version where the keyword was optional in a global regex, which
+ * degraded to "first digit-bearing token anywhere in the text" and silently
+ * wrote order numbers/dates/amounts into the CRM as invoice numbers.
+ *
+ * The candidate character class is deliberately narrow (`[\w-]+`, no "/" or
+ * "."): a wider class swallows date/path separators and trailing punctuation
+ * -- e.g. "Factura #453940/2026-07-21" must stop at "453940", and
+ * "...invoice #5566." must not include the trailing sentence period.
+ */
+export function extractInvoiceNumber(text: string, keywords: string[]): string | undefined {
+	if (!text) return undefined;
+	const keywordRe = new RegExp(`(?:${keywords.join('|')})`, 'gi');
+	for (const km of text.matchAll(keywordRe)) {
+		const start = (km.index ?? 0) + km[0].length;
+		const window = text.slice(start, start + 40);
+
+		// 1. Explicit marker right after the keyword: "Invoice #INV-2026-0042",
+		//    "Invoice number: 12345", "Factura nr. 5566"
+		const marked =
+			window.match(new RegExp(`^[^\\w]{0,3}(?:${INVOICE_MARKERS})\\s*[:.]?\\s*([\\w-]+)`, 'i')) ||
+			window.match(new RegExp(`(?:${INVOICE_MARKERS})\\s*[:.]?\\s*([\\w-]+)`, 'i'));
+		if (marked && isValidInvoiceNumber(marked[1], true)) return marked[1];
+
+		// 2. No marker: accept only a candidate in the first two tokens after the
+		//    keyword ("Invoice 12345"), so prose further along is never scanned.
+		const tokens = window.trim().split(/\s+/).slice(0, 2);
+		for (const raw of tokens) {
+			const token = raw.replace(/^[^\w]+|[^\w]+$/g, '');
+			if (token.length >= 3 && isValidInvoiceNumber(token, false)) return token;
+		}
+	}
+	return undefined;
+}
