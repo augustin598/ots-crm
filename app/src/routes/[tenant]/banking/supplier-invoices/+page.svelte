@@ -17,6 +17,8 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import GmailSearchTab from './GmailSearchTab.svelte';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
+	// Acord corect la numeral („1 factură”, „3 facturi”, „21 de facturi”)
+	import { pluralRo } from '$lib/utils/gmail-search';
 	import {
 		Plus,
 		Trash2,
@@ -103,6 +105,15 @@
 			}
 			return true;
 		})
+	);
+
+	/**
+	 * `issueDate` e nullable (parserul nu extrage mereu data), iar intervalul implicit
+	 * e mereu nenul — facturile fără dată dispar tăcut de la prima încărcare a paginii.
+	 * Le numărăm ca să nu creadă nimeni că nu există.
+	 */
+	const hiddenByMissingDate = $derived(
+		dateFromFilter || dateToFilter ? allInvoices.filter((inv) => !inv.issueDate).length : 0
 	);
 
 	// Pagination
@@ -290,7 +301,8 @@
 	}
 </script>
 
-<div class="container mx-auto py-8 px-4">
+<!-- Fără padding exterior propriu: `[tenant]/+layout.svelte` are deja `<main class="… p-6">`. -->
+<div>
 	<div class="flex items-center justify-between mb-6">
 		<div>
 			<h1 class="text-2xl font-bold">Facturi Furnizori</h1>
@@ -412,6 +424,22 @@
 							</SelectContent>
 						</Select>
 					</div>
+					{#if hiddenByMissingDate > 0}
+						<p class="mt-3 text-xs text-muted-foreground">
+							{pluralRo(hiddenByMissingDate, 'factură este ascunsă', 'facturi sunt ascunse')} de
+							filtrul de dată (nu au dată de emitere extrasă).
+							<button
+								type="button"
+								class="underline underline-offset-2 hover:text-foreground"
+								onclick={() => {
+									dateFromFilter = '';
+									dateToFilter = '';
+								}}
+							>
+								Arată toate datele
+							</button>
+						</p>
+					{/if}
 				</CardContent>
 			</Card>
 
