@@ -122,10 +122,18 @@ export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {
  * - A bare 4-digit year (1900-2099) next to the trigger word is prose, not a
  *   number -- unless an explicit "#"/"nr"/"no"/"number" marker precedes it,
  *   in which case it really is the invoice number (e.g. "Invoice #2026").
+ * - A few SHAPES are never an invoice number regardless of marker: an ISO
+ *   date, a d/m/y date, or a decimal amount ("2026-07-21", "21/07/2026",
+ *   "129.99") — these are dates/amounts mentioned near the keyword, not the
+ *   number itself (e.g. "Invoice ready, total 129.99 EUR" must not turn
+ *   "129.99" into the invoice number).
  */
 export function isValidInvoiceNumber(candidate: string, hasExplicitMarker: boolean): boolean {
 	if (!/\d/.test(candidate)) return false;
 	if (!hasExplicitMarker && /^(19|20)\d{2}$/.test(candidate)) return false;
+	if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return false; // ISO date
+	if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(candidate)) return false; // d/m/y
+	if (/^\d+[.,]\d{1,2}$/.test(candidate)) return false; // amount
 	return true;
 }
 
@@ -150,9 +158,12 @@ const MARKER_WINDOW_TOKENS = 6;
  * How many of those tokens are tried as a BARE (unmarked) candidate. Kept
  * narrower than the marker window — prose further along starts looking like
  * a plausible number — but needs to reach at least the 3rd token for cases
- * like "...invoice is available INV-0042".
+ * like "...invoice is available INV-0042". Deliberately NOT wider than 3: a
+ * bare 3-digit quantity ("...for 150 domains renewed") has no shape that
+ * distinguishes it from a real 3-digit invoice number, so every extra token
+ * scanned is pure exposure to that ambiguity with no corresponding benefit.
  */
-const BARE_WINDOW_TOKENS = 4;
+const BARE_WINDOW_TOKENS = 3;
 
 /**
  * Extract an invoice number anchored on a keyword. Only text AFTER a keyword
@@ -178,7 +189,11 @@ const BARE_WINDOW_TOKENS = 4;
  * The candidate character class is deliberately narrow (`[\w-]+`, no "/" or
  * "."): a wider class swallows date/path separators and trailing punctuation
  * -- e.g. "Factura #453940/2026-07-21" must stop at "453940", and
- * "...invoice #5566." must not include the trailing sentence period.
+ * "...invoice #5566." must not include the trailing sentence period. The
+ * bare path normalizes its RETURNED candidate with this same `[\w-]+` rule
+ * (only after validating the fuller, punctuation-preserved token — see
+ * below) so "Invoice 123/2026" and "Invoice #123/2026" both resolve to
+ * "123" instead of the bare path alone keeping the "/2026" suffix.
  */
 export function extractInvoiceNumber(text: string, keywords: string[]): string | undefined {
 	if (!text) return undefined;
@@ -195,9 +210,17 @@ export function extractInvoiceNumber(text: string, keywords: string[]): string |
 		}
 
 		// 2. No marker: bare token in the first few tokens after the keyword.
+		// Strip only leading/trailing punctuation for VALIDATION — keeping internal
+		// "." and "/" intact is what lets isValidInvoiceNumber's amount/date shape
+		// guards actually see "129.99" or "21/07/2026" and reject them; truncating
+		// with [\w-]+ first would hide the decimal/slash and let e.g. "129" (from
+		// "129.99") through as a false invoice number. Only the RETURNED value is
+		// then normalized with [\w-]+, to match the marker path's own truncation.
 		for (const raw of restTokens.slice(0, BARE_WINDOW_TOKENS)) {
-			const token = raw.replace(/^[^\w]+|[^\w]+$/g, '');
-			if (token.length >= 3 && isValidInvoiceNumber(token, false)) return token;
+			const stripped = raw.replace(/^[^\w]+|[^\w]+$/g, '');
+			if (stripped.length >= 3 && isValidInvoiceNumber(stripped, false)) {
+				return stripped.match(/[\w-]+/)?.[0] ?? stripped;
+			}
 		}
 	}
 	return undefined;

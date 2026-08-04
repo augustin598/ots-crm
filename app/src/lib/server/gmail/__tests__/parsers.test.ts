@@ -4,7 +4,7 @@ import { cursorParser } from '../parsers/cursor';
 import { directadminParser } from '../parsers/directadmin';
 import { genericParser } from '../parsers/generic';
 import { googleParser } from '../parsers/google';
-import { detectStatus, findParser } from '../parsers/index';
+import { buildInvoiceSearchQuery, detectStatus, findParser } from '../parsers/index';
 import { inwxParser } from '../parsers/inwx';
 import { openaiParser } from '../parsers/openai';
 import { roSuppliersParser } from '../parsers/ro-suppliers';
@@ -212,7 +212,7 @@ describe('extractInvoiceNumber — marcajele cer delimitare de cuvânt (regresie
 	});
 });
 
-describe('extractInvoiceNumber — fereastra de tokeni FĂRĂ marcaj lărgită la ~4 (dar cu prag de lungime)', () => {
+describe('extractInvoiceNumber — fereastra de tokeni FĂRĂ marcaj (BARE_WINDOW_TOKENS=3, redus de la 4)', () => {
 	it('generic: al 3-lea token fără marcaj e găsit ("Your invoice is available INV-0042")', () => {
 		const r = genericParser.parseInvoice(makeEmail({ subject: 'Your invoice is available INV-0042' }));
 		expect(r.invoiceNumber).toBe('INV-0042');
@@ -220,6 +220,59 @@ describe('extractInvoiceNumber — fereastra de tokeni FĂRĂ marcaj lărgită l
 	it('generic: pragul de lungime (>=3) respinge un token scurt fără marcaj ("Invoice 42")', () => {
 		const r = genericParser.parseInvoice(makeEmail({ subject: 'Invoice 42' }));
 		expect(r.invoiceNumber).toBeUndefined();
+	});
+});
+
+describe('extractInvoiceNumber — respinge sume, cantități și date ca nr. de factură (regresie: fereastra lărgită inventa nr. din sume/date/cantități)', () => {
+	it('generic: nu ia "129.99" (sumă) din "Invoice ready - total 129.99 EUR due"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice ready - total 129.99 EUR due' })
+		);
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('generic: nu ia "129.99" (sumă) din "Invoice ready, total 129.99 EUR"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice ready, total 129.99 EUR' })
+		);
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('generic: nu ia "49.50" (sumă) din "Invoice available - 49.50 USD"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice available - 49.50 USD' })
+		);
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('generic: nu ia "2026-07-21" (dată ISO) din "Invoice is attached for 2026-07-21 period"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice is attached for 2026-07-21 period' })
+		);
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('generic: nu ia "2026-07-21" (dată ISO) via marcajul "no." din "Invoice no. 2026-07-21"', () => {
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice no. 2026-07-21' })
+		);
+		expect(r.invoiceNumber).toBeUndefined();
+	});
+	it('generic: limită cunoscută — o cantitate simplă de 3 cifre fără marcaj NU poate fi diferențiată de un nr. de factură real (rămâne acceptat, per notă coordonator)', () => {
+		// "150" nu are nicio formă distinctivă (nu e dată, nu e sumă, nu e an) — niciun shape-guard
+		// nu îl poate respinge fără fals-negative pe facturi reale cu 3 cifre. Documentat ca limitare
+		// acceptată; BARE_WINDOW_TOKENS=3 reduce doar EXPUNEREA (nu elimină acest caz specific).
+		const r = genericParser.parseInvoice(
+			makeEmail({ subject: 'New Invoice available', body: 'Invoice enclosed for 150 domains renewed' })
+		);
+		expect(r.invoiceNumber).toBe('150');
+	});
+});
+
+describe('extractInvoiceNumber — bare path normalizat identic cu marker path (regresie: "/" supraviețuia doar pe bare path)', () => {
+	it('bare: "Invoice 123/2026" se oprește la "123", la fel ca marker path', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'Invoice 123/2026' }));
+		expect(r.invoiceNumber).toBe('123');
+	});
+	it('marker: "Invoice #123/2026" se oprește la "123"', () => {
+		const r = genericParser.parseInvoice(makeEmail({ subject: 'Invoice #123/2026' }));
+		expect(r.invoiceNumber).toBe('123');
 	});
 });
 
@@ -304,5 +357,28 @@ describe('parsere noi', () => {
 		);
 		expect(r.supplierType).toBe('inwx');
 		expect(r.invoiceNumber).toBeUndefined();
+	});
+});
+
+describe('buildInvoiceSearchQuery', () => {
+	it('scope all caută orice email cu PDF, fără filtru de expeditor', () => {
+		const q = buildInvoiceSearchQuery({ scope: 'all' });
+		expect(q).toBe('has:attachment filename:pdf');
+		expect(q).not.toContain('from:');
+	});
+
+	it('adaugă intervalul de date', () => {
+		const q = buildInvoiceSearchQuery({
+			scope: 'all',
+			dateFrom: new Date(2026, 6, 1),
+			dateTo: new Date(2026, 6, 31)
+		});
+		expect(q).toContain('after:2026/7/1');
+		expect(q).toContain('before:2026/7/31');
+	});
+
+	it('scope suppliers restrânge la expeditorii cunoscuți', () => {
+		const q = buildInvoiceSearchQuery({ scope: 'suppliers', parserIds: ['hetzner'] });
+		expect(q).toContain('hetzner');
 	});
 });
