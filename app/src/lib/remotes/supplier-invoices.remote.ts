@@ -808,7 +808,10 @@ export const updateGmailExclusions = command(
 			.limit(1);
 
 		if (!integration) {
-			throw new Error(
+			// svelteError, nu Error simplu: SvelteKit maschează Error ca 500 generic,
+			// iar utilizatorul ar vedea un fallback în loc de îndrumarea utilă.
+			svelteError(
+				409,
 				'Gmail nu este conectat pentru acest tenant. Conectează Gmail înainte de a salva excluderi.'
 			);
 		}

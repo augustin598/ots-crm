@@ -66,7 +66,11 @@ export const GET: RequestHandler = async (event) => {
 		bankReference
 	);
 
-	const filename = sanitizeAttachmentFilename(attachment.filename);
+	// Referința Keez în nume, ca fișierele descărcate individual să se poată
+	// pune lângă plata corespunzătoare fără să fie redenumite manual.
+	const filename = sanitizeAttachmentFilename(
+		bankReference ? `${bankReference}_${attachment.filename}` : attachment.filename
+	);
 
 	return new Response(buffer! as unknown as BodyInit, {
 		status: 200,
