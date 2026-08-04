@@ -29,7 +29,10 @@ export const genericParser: SupplierParser = {
 
 		const invoiceMatch = email.subject.match(/(?:invoice|factura|factură)\s*#?\s*([\w-]+)/i) ||
 			email.body.match(/(?:invoice|factura|factură)\s*(?:number|nr\.?|#|no\.?)\s*:?\s*([\w-]+)/i);
-		if (invoiceMatch) {
+		// Invoice numbers always contain digits — rejects words like "available"/"ready".
+		// Also rejects a bare 4-digit year (1900-2099) that happened to follow "Invoice" —
+		// e.g. "Invoice 2026 renewal reminder" is not an invoice number, it's the year.
+		if (invoiceMatch && /\d/.test(invoiceMatch[1]) && !/^(19|20)\d{2}$/.test(invoiceMatch[1])) {
 			result.invoiceNumber = invoiceMatch[1];
 		}
 

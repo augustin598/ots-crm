@@ -43,7 +43,11 @@ export const roSuppliersParser: SupplierParser = {
 			email.body.match(/factura\s*#?\s*([\w-]+)/i);
 		
 		if (invoiceMatch) {
-			result.invoiceNumber = invoiceMatch[2] ? `${invoiceMatch[1]}-${invoiceMatch[2]}` : invoiceMatch[1];
+			const candidate = invoiceMatch[2] ? `${invoiceMatch[1]}-${invoiceMatch[2]}` : invoiceMatch[1];
+			// Invoice numbers always contain digits — rejects words like "available"/"ready".
+			// Also rejects a bare 4-digit year (1900-2099) that happened to follow "Factura" —
+			// e.g. "Factura 2026 emisa" is not an invoice number, it's the year.
+			if (/\d/.test(candidate) && !/^(19|20)\d{2}$/.test(candidate)) result.invoiceNumber = candidate;
 		}
 
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);
