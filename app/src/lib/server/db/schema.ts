@@ -2503,6 +2503,20 @@ export const supplierInvoice = sqliteTable('supplier_invoice', {
 		.default(sql`current_timestamp`)
 });
 
+export const gmailInvoiceDownload = sqliteTable('gmail_invoice_download', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	gmailMessageId: text('gmail_message_id').notNull(),
+	attachmentFilename: text('attachment_filename'),
+	bankReference: text('bank_reference'),
+	downloadedAt: timestamp('downloaded_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	downloadedByUserId: text('downloaded_by_user_id').references(() => user.id)
+});
+
 export const googleAdsIntegration = sqliteTable('google_ads_integration', {
 	id: text('id').primaryKey(),
 	tenantId: text('tenant_id')
