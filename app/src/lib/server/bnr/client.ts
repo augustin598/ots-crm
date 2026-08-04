@@ -1,7 +1,9 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and, gte, lte, inArray } from 'drizzle-orm';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { resolveFxRates, type BnrRateRow } from './rate-lookup';
+import type { FxRates } from '$lib/server/banking/payment-match';
 
 const BNR_XML_URL = 'https://www.bnr.ro/nbrfxrates.xml';
 
@@ -196,6 +198,62 @@ export async function getLatestBnrRates(): Promise<
 		multiplier: r.multiplier ?? 1,
 		date: r.rateDate
 	}));
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Cât de departe în urmă căutăm cotația aplicabilă unei zile fără cotație proprie.
+ * BNR nu cotează în weekend și de sărbători; cea mai lungă pauză din calendarul românesc
+ * (Paște, Rusalii, 1 Decembrie lipit de weekend) ajunge la 4-5 zile lucrătoare pierdute.
+ * 15 zile lasă marjă confortabilă și ține interogarea mică.
+ */
+const RATE_LOOKBACK_DAYS = 15;
+
+function shiftIsoDate(isoDate: string, days: number): string {
+	const shifted = new Date(`${isoDate}T00:00:00.000Z`);
+	shifted.setUTCDate(shifted.getUTCDate() + days);
+	return shifted.toISOString().slice(0, 10);
+}
+
+/**
+ * Cursurile aplicabile fiecărei zile de plată, pentru potrivirea între valute diferite
+ * (`matchPayments`). Pentru fiecare (zi, valută) se ia cotația de la ACEA dată sau, dacă
+ * lipsește (weekend, sărbătoare), ultima anterioară — niciodată cursul de azi, care pe un
+ * export de acum șase luni ar da o conversie complet greșită.
+ *
+ * Leul nu se cere niciodată: e baza conversiei, tratată ca identitate în `payment-match`.
+ * Absența cotațiilor (tabel gol, valută nesincronizată) întoarce pur și simplu mai puține
+ * intrări — potrivirea funcționează atunci exact ca înainte de conversie.
+ */
+export async function loadBnrFxRates(
+	currencies: string[],
+	isoDates: string[]
+): Promise<FxRates> {
+	const wanted = [...new Set(currencies.map((c) => c.trim().toUpperCase()))].filter(
+		(c) => c.length > 0 && c !== 'RON'
+	);
+	const dates = [...new Set(isoDates)].filter((d) => ISO_DATE.test(d)).sort();
+	if (wanted.length === 0 || dates.length === 0) return {};
+
+	const rows = await db
+		.select({
+			currency: table.bnrExchangeRate.currency,
+			rate: table.bnrExchangeRate.rate,
+			multiplier: table.bnrExchangeRate.multiplier,
+			rateDate: table.bnrExchangeRate.rateDate
+		})
+		.from(table.bnrExchangeRate)
+		.where(
+			and(
+				inArray(table.bnrExchangeRate.currency, wanted),
+				gte(table.bnrExchangeRate.rateDate, shiftIsoDate(dates[0], -RATE_LOOKBACK_DAYS)),
+				lte(table.bnrExchangeRate.rateDate, dates[dates.length - 1])
+			)
+		);
+
+	const typed: BnrRateRow[] = rows;
+	return resolveFxRates(typed, dates);
 }
 
 /**

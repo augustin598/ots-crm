@@ -21,8 +21,11 @@ import { getDownloadedMap } from '$lib/server/gmail/download-evidence';
 import {
 	parseMissingDocumentsRows,
 	matchPayments,
-	type InvoiceCandidate
+	fxDateKey,
+	type InvoiceCandidate,
+	type FxRates
 } from '$lib/server/banking/payment-match';
+import { loadBnrFxRates } from '$lib/server/bnr/client';
 import XLSX from 'xlsx';
 import { unlink } from 'fs/promises';
 import { join } from 'path';
@@ -603,6 +606,21 @@ export const matchMissingDocuments = command(
 			}
 		}
 
+		// Cursurile BNR pentru potrivirea între valute diferite: extrasul BT raportează
+		// uneori tranzacția direct în lei, deși furnizorul extern facturează în EUR/USD.
+		// Cerem cursul de la DATA FIECĂREI PLĂȚI, nu pe cel de azi. Dacă citirea pică sau
+		// tabelul e gol, mergem mai departe fără conversie: potrivirea rămâne cea de dinainte,
+		// niciodată o eroare pe tot tabul.
+		const fxCurrencies = [
+			...payments.map((p) => p.originalCurrency),
+			...candidates.map((c) => c.currency)
+		].filter((c): c is string => !!c);
+		const fxDates = payments.map((p) => fxDateKey(p.date)).filter((d): d is string => d !== null);
+		const fxRates: FxRates = await loadBnrFxRates(fxCurrencies, fxDates).catch((err) => {
+			console.error('[Missing Docs Match] Cursurile BNR nu au putut fi citite:', err);
+			return {};
+		});
+
 		// `matchPayments` poate refuza intrarea (codificarea exactă a greutăților are un
 		// plafon de dimensiune). Fără try/catch aici, un export pe un trimestru sau un an
 		// pica tot tabul cu 500 și un mesaj intern — blocurile try de mai sus sunt în bucla
@@ -611,7 +629,7 @@ export const matchMissingDocuments = command(
 		// (ce ajunge pe client) NU e `instanceof Error` — vezi remoteErrorMessage().
 		let matched: ReturnType<typeof matchPayments>;
 		try {
-			matched = matchPayments(payments, candidates);
+			matched = matchPayments(payments, candidates, { fxRates });
 		} catch (err) {
 			console.error('[Missing Docs Match] matchPayments a eșuat:', err);
 			svelteError(

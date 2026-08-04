@@ -186,6 +186,26 @@
 		selectedPayments = new Set();
 	}
 
+	/**
+	 * Explicația unei potriviri făcute prin conversie valutară: „10,42 € ≈ 51,79 lei la
+	 * cursul BNR din 02.07.2026". Fără ea, un rând în care plata e în lei și factura în euro
+	 * arată drept potrivire fără nicio dovadă vizibilă pe sumă.
+	 */
+	function fxNote(payment: MatchedPayment): string | null {
+		const fx = payment.fx;
+		if (!fx || !payment.match) return null;
+		const invoice = `${formatMoney(payment.match.amount, payment.match.currency)} ≈ ${formatAmount(fx.invoiceRon, 'RON')}`;
+		const parts = [`${invoice} la cursul BNR din ${formatDate(fx.rateDate)}`];
+		// Când și plata a fost în valută, echivalentul ei e la fel de necesar: altfel
+		// comparația arată o singură parte.
+		if (payment.originalCurrency && payment.originalCurrency !== 'RON') {
+			parts.push(
+				`plata ${formatMoney(payment.originalAmount, payment.originalCurrency)} ≈ ${formatAmount(fx.paymentRon, 'RON')}`
+			);
+		}
+		return parts.join(' · ');
+	}
+
 	/** Fereastră calendaristică de ±10 zile în jurul plății, pentru căutarea manuală. */
 	function requestSearchAround(payment: MatchedPayment) {
 		const paid = payment.date ? new Date(payment.date) : null;
@@ -208,7 +228,8 @@
 		<CardDescription>
 			XLSX-ul cu plățile fără document justificativ. Căutăm automat facturile în Gmail și le
 			potrivim cu fiecare plată. Atenție: plățile apar în lei, dar potrivirea se face pe suma
-			originală (EUR/USD) din descrierea tranzacției.
+			originală (EUR/USD) din descrierea tranzacției; când banca raportează tranzacția direct în
+			lei, sumele se compară la cursul BNR din ziua plății.
 		</CardDescription>
 	</CardHeader>
 	<CardContent>
@@ -407,10 +428,14 @@
 									</td>
 									<td class="max-w-[280px] p-3">
 										{#if payment.match}
+											{@const conversion = fxNote(payment)}
 											<div class="truncate font-medium">{payment.match.subject}</div>
 											<div class="truncate text-xs text-muted-foreground">
 												{payment.match.from} · {formatDate(payment.match.date)}
 											</div>
+											{#if conversion}
+												<div class="mt-0.5 text-xs text-muted-foreground">{conversion}</div>
+											{/if}
 											{#if downloadedNow.has(payment.match.gmailMessageId)}
 												<Badge variant="secondary" class="mt-1">Descărcată acum</Badge>
 											{:else if downloadedAt}

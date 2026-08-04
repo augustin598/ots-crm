@@ -30,6 +30,62 @@ export interface PaymentMatchResult extends PaymentRow {
 	match?: InvoiceCandidate;
 	score: number;
 	confidence: 'sure' | 'probable' | 'none';
+	/** Prezent DOAR când sumele au fost comparate după conversie (vezi FxConversion). */
+	fx?: FxConversion;
+}
+
+/**
+ * Curs BNR normalizat: lei pentru O unitate de valută.
+ *
+ * BNR cotează unele valute pentru 100 de unități (HUF, JPY, KRW…), iar coloana
+ * `bnr_exchange_rate.multiplier` păstrează acel 100. Împărțirea se face O SINGURĂ dată,
+ * la citire (`rate-lookup.ts`), ca modulul de potrivire să nu mai aibă de ales: aici
+ * `ronPerUnit` e mereu lei/unitate. Un curs brut de 1,4757 pentru HUF în loc de 0,014757
+ * face conversia de 100 de ori mai mare și nicio factură nu s-ar mai potrivi.
+ */
+export interface FxRate {
+	ronPerUnit: number;
+	/** Data cotației efectiv folosite (ISO). Poate fi anterioară plății (weekend, sărbători). */
+	rateDate: string;
+}
+
+/**
+ * Cursurile pre-rezolvate, indexate întâi pe DATA PLĂȚII (ISO, UTC) și apoi pe valută.
+ *
+ * De ce e datată și nu o simplă hartă valută → curs: un export „Documente Lipsă" acoperă
+ * o lună sau un trimestru, iar EUR/RON se mișcă cu procente în interval. O hartă plată ar
+ * aplica tăcut cursul unei singure zile peste tot, exact eroarea pe care conversia trebuie
+ * să o evite. Rezolvarea „cea mai apropiată cotație anterioară" (BNR nu cotează în weekend)
+ * o face apelantul, în `rate-lookup.ts`, ca modulul de față să rămână PUR: fără DB, fără
+ * rețea, fără reguli de calendar.
+ */
+export type FxRates = Record<string, Record<string, FxRate>>;
+
+export interface MatchOptions {
+	/** Absente sau incomplete ⇒ comportamentul de dinaintea conversiei, fără excepție. */
+	fxRates?: FxRates;
+}
+
+/** Ce a însemnat concret conversia, pentru explicația din interfață. */
+export interface FxConversion {
+	/** Suma facturii convertită în bani (RON). */
+	invoiceRon: number;
+	/** Suma plătită convertită în bani (RON); identitate când plata e deja în lei. */
+	paymentRon: number;
+	/** Data cotației BNR folosite (ISO, YYYY-MM-DD). */
+	rateDate: string;
+}
+
+/**
+ * Cheia sub care sunt indexate cursurile: ziua plății în ISO (UTC).
+ *
+ * UTC, nu ora locală: datele plăților vin din seriale Excel convertite la miezul nopții
+ * UTC, iar `toLocaleDateString` ar muta ziua înapoi pentru fusurile negative.
+ * Null pe dată invalidă — un rând necitit nu are voie să ceară un curs oarecare.
+ */
+export function fxDateKey(date: Date): string | null {
+	if (isNaN(date.getTime())) return null;
+	return date.toISOString().slice(0, 10);
 }
 
 // Merchant tokens as they appear in BT statement descriptions, keyed by supplierType
@@ -209,6 +265,8 @@ export interface MatchScore {
 	score: number;
 	/** Dacă există dovadă că factura vine de la comerciantul plății (cerută pentru 'sure'). */
 	merchantMatched: boolean;
+	/** Prezent doar când scorul pe sumă a venit din comparația după conversie. */
+	fx?: FxConversion;
 }
 
 /**
@@ -218,32 +276,108 @@ export interface MatchScore {
 const SCORE_AMOUNT_EXACT = 60;
 /** Sumă în toleranța de 2% (curs valutar, rotunjiri). */
 const SCORE_AMOUNT_NEAR = 40;
+/**
+ * Sume egale DUPĂ conversie la cursul BNR al zilei plății.
+ *
+ * Sub `SCORE_AMOUNT_NEAR`: e o aproximare cu două surse de eroare (cursul băncii ≠ cursul
+ * BNR, plus banda de toleranță de mai jos, mult mai largă decât cei 2% de la aceeași
+ * valută), deci nu are voie să cântărească la fel ca o coincidență de sumă în aceeași
+ * valută. Suficient de mare totuși cât, împreună cu dovada de comerciant (40) și o dată
+ * apropiată, să treacă pragul de 'sigur': 35 + 40 + 9 = 84 pe cazul INWX din raport.
+ *
+ * Efect secundar dorit: SINGURĂ (fără comerciant) conversia dă cel mult 35 + 10 = 45, deci
+ * o potrivire speculativă pe sumă convertită apare doar la o distanță de cel mult 5 zile —
+ * banda largă nu se poate transforma în potriviri „probabile" pe toată fereastra de 10 zile.
+ */
+const SCORE_AMOUNT_FX = 35;
 const SCORE_MERCHANT = 40;
 const SCORE_PROXIMITY_MAX = 10;
 
-export function scoreMatch(payment: PaymentRow, candidate: InvoiceCandidate): MatchScore {
+/**
+ * Banda de toleranță pentru comparația după conversie, ASIMETRICĂ în mod deliberat.
+ *
+ * Suma în lei debitată de bancă pentru o factură în valută nu e conversia BNR: schema de
+ * card (Visa/Mastercard) folosește cursul ei de referință, peste care emitentul pune un
+ * adaos, iar decontarea se face la o zi–două după autorizare. Adaosul e aproape mereu ÎN
+ * DEFAVOAREA clientului, tipic 1-3%, cu vârfuri peste 5% când moneda se mișcă sau când
+ * comerciantul face conversie dinamică (DCC). De aceea plafonul de SUS e 6%.
+ *
+ * În jos, plata poate ieși sub conversia BNR doar prin driftul cursului între momentul în
+ * care schema își fixează referința și cotația BNR a zilei — o abatere mică. 2% (aceeași
+ * mărime cu toleranța de la aceeași valută) o acoperă și, în plus, ține banda îngustă
+ * acolo unde o factură mai mare ar fi confundată cu una mai mică.
+ */
+const FX_TOLERANCE_ABOVE = 0.06;
+const FX_TOLERANCE_BELOW = 0.02;
+
+/**
+ * Suma, în bani RON, la cursul zilei. `null` = nu se poate converti (curs lipsă sau
+ * nevalid) — apelantul trebuie să renunțe la scorul pe sumă, NU să presupună paritatea.
+ */
+function toRon(
+	amount: number,
+	currency: string,
+	dayRates: Record<string, FxRate> | undefined
+): { ron: number; rate: FxRate | null } | null {
+	// Leul e baza: nu are cotație în tabelul BNR și nici nu are nevoie de una.
+	if (currency === 'RON') return { ron: amount, rate: null };
+	const fx = dayRates?.[currency];
+	if (!fx || !Number.isFinite(fx.ronPerUnit) || fx.ronPerUnit <= 0) return null;
+	return { ron: Math.round(amount * fx.ronPerUnit), rate: fx };
+}
+
+export function scoreMatch(
+	payment: PaymentRow,
+	candidate: InvoiceCandidate,
+	options: MatchOptions = {}
+): MatchScore {
 	const days = daysBetween(payment.date, candidate.date);
 	// isNaN prinde datele invalide: `NaN > MATCH_WINDOW_DAYS` e false, deci fără verificare
 	// explicită o plată cu dată coruptă ar trece de fereastră și ar aduna scor NaN.
 	if (isNaN(days) || days > MATCH_WINDOW_DAYS) return { score: 0, merchantMatched: false };
 	let score = 0;
+	let fx: FxConversion | undefined;
 	// Semnal principal: suma + valuta ORIGINALĂ a tranzacției (NU valoarea în RON —
 	// contul e în lei, facturile sunt adesea în EUR/USD)
 	if (
 		payment.originalAmount != null &&
 		payment.originalCurrency != null &&
 		candidate.amount != null &&
-		candidate.currency === payment.originalCurrency
+		candidate.currency != null
 	) {
-		if (candidate.amount === payment.originalAmount) score += SCORE_AMOUNT_EXACT;
-		else if (Math.abs(candidate.amount - payment.originalAmount) / payment.originalAmount <= 0.02)
-			score += SCORE_AMOUNT_NEAR;
+		if (candidate.currency === payment.originalCurrency) {
+			if (candidate.amount === payment.originalAmount) score += SCORE_AMOUNT_EXACT;
+			else if (Math.abs(candidate.amount - payment.originalAmount) / payment.originalAmount <= 0.02)
+				score += SCORE_AMOUNT_NEAR;
+		} else {
+			// Valute diferite: extrasul BT raportează uneori tranzacția direct în lei, deși
+			// furnizorul extern facturează în EUR/USD. Fără conversie, semnalul cel mai
+			// puternic — suma — se pierde complet și rămân doar comerciantul și data.
+			const dayKey = fxDateKey(payment.date);
+			const dayRates = dayKey ? options.fxRates?.[dayKey] : undefined;
+			const paid = toRon(payment.originalAmount, payment.originalCurrency, dayRates);
+			const billed = toRon(candidate.amount, candidate.currency, dayRates);
+			if (paid && billed && billed.ron > 0) {
+				const drift = (paid.ron - billed.ron) / billed.ron;
+				if (drift <= FX_TOLERANCE_ABOVE && drift >= -FX_TOLERANCE_BELOW) {
+					score += SCORE_AMOUNT_FX;
+					fx = {
+						invoiceRon: billed.ron,
+						paymentRon: paid.ron,
+						// Data cotației care a făcut conversia netrivială: cea a facturii dacă
+						// factura e în valută, altfel cea a plății. Una dintre ele există mereu,
+						// fiindcă valutele diferă și cel mult una e RON.
+						rateDate: (billed.rate ?? paid.rate)?.rateDate ?? ''
+					};
+				}
+			}
+		}
 	}
 	// Comerciantul singur trebuie să treacă pragul „probabil" (40), chiar și fără sumă
 	const merchantMatched = merchantMatches(payment, candidate);
 	if (merchantMatched) score += SCORE_MERCHANT;
 	score += Math.max(0, Math.round(SCORE_PROXIMITY_MAX * (1 - days / MATCH_WINDOW_DAYS)));
-	return { score, merchantMatched };
+	return { score, merchantMatched, fx };
 }
 
 export interface Pair {
@@ -252,11 +386,13 @@ export interface Pair {
 	score: number;
 	merchantMatched: boolean;
 	days: number;
+	fx?: FxConversion;
 }
 
 /**
- * Scorul maxim pe care îl poate întoarce `scoreMatch` — sumă exactă + comerciant +
- * proximitate maximă.
+ * Scorul maxim pe care îl poate întoarce `scoreMatch` — cea mai grea componentă de sumă
+ * (cele trei se exclud reciproc: aceeași valută dă exact SAU apropiat, valute diferite dau
+ * conversie) + comerciant + proximitate maximă.
  *
  * DERIVAT, nu hardcodat: separarea nivelurilor din `pairWeights` cere
  * `MAX_PAIR_SCORE >= scorul maxim atins`, iar cele două erau exact egale (110 = 110).
@@ -265,7 +401,9 @@ export interface Pair {
  * deposedează unul confirmat", fără ca vreun test să pice. Aici cuplajul e structural.
  */
 export const MAX_PAIR_SCORE =
-	Math.max(SCORE_AMOUNT_EXACT, SCORE_AMOUNT_NEAR) + SCORE_MERCHANT + SCORE_PROXIMITY_MAX;
+	Math.max(SCORE_AMOUNT_EXACT, SCORE_AMOUNT_NEAR, SCORE_AMOUNT_FX) +
+	SCORE_MERCHANT +
+	SCORE_PROXIMITY_MAX;
 
 /**
  * Plafonul bonusului de departajare (nivelul 4).
@@ -356,14 +494,15 @@ export function pairWeights(pairs: Pair[], maxMatches: number): number[] {
  */
 export function matchPayments(
 	payments: PaymentRow[],
-	candidates: InvoiceCandidate[]
+	candidates: InvoiceCandidate[],
+	options: MatchOptions = {}
 ): PaymentMatchResult[] {
 	const pairs: Pair[] = [];
 	payments.forEach((p, pi) => {
 		candidates.forEach((c, ci) => {
-			const { score, merchantMatched } = scoreMatch(p, c);
+			const { score, merchantMatched, fx } = scoreMatch(p, c, options);
 			if (score >= PROBABLE_THRESHOLD) {
-				pairs.push({ pi, ci, score, merchantMatched, days: daysBetween(p.date, c.date) });
+				pairs.push({ pi, ci, score, merchantMatched, days: daysBetween(p.date, c.date), fx });
 			}
 		});
 	});
@@ -390,6 +529,6 @@ export function matchPayments(
 			pair.score >= SURE_THRESHOLD && pair.merchantMatched
 				? ('sure' as const)
 				: ('probable' as const);
-		return { ...p, match: candidates[ci], score: pair.score, confidence };
+		return { ...p, match: candidates[ci], score: pair.score, confidence, fx: pair.fx };
 	});
 }
