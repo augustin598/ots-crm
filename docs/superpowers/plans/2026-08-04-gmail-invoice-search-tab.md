@@ -631,6 +631,31 @@ describe('matchPayments — scoring', () => {
 		expect(matched.length).toBe(1);
 		expect(matched[0].reference).toBe('a'); // data mai apropiată de factură
 	});
+	it('furnizor FĂRĂ parser: match pe tokenul din descriere (KESSELRING)', () => {
+		const KESSELRING_COMMENT =
+			'  Plata la POS non-BT cu card VISA;EPOS 17/07/2026 4210252 TID:PAYW0006 MPY*KESSELRING SRL    ROZ  NOV RO 42444505 valoare tranzactie: 81.09 RON RRN:619811671945 comision tranzactie 0.00 RON;REF: 000NVPO262012NnP; ';
+		const res = matchPayments(
+			[payment({ comment: KESSELRING_COMMENT, originalAmount: 8109, originalCurrency: 'RON', date: new Date('2026-07-17') })],
+			[candidate({
+				from: 'Kesselring SRL <facturi@kesselring.ro>',
+				subject: 'Factura 1234',
+				date: new Date('2026-07-17'),
+				amount: 8109,
+				currency: 'RON',
+				supplierType: undefined
+			})]
+		);
+		expect(res[0].confidence).toBe('sure');
+	});
+
+	it('nu face match pe cuvinte generice din descriere', () => {
+		const res = matchPayments(
+			[payment({ originalAmount: null, originalCurrency: null })],
+			[candidate({ from: 'Online Payment <noreply@random.com>', subject: 'Invoice', amount: undefined, currency: undefined, supplierType: undefined })]
+		);
+		expect(res[0].match).toBeUndefined();
+	});
+
 	it('CLAUDE SUB face match pe aliasul anthropic', () => {
 		const res = matchPayments(
 			[payment({ comment: CLAUDE_COMMENT, originalAmount: 21156, date: new Date('2026-07-24') })],
@@ -760,12 +785,34 @@ function daysBetween(a: Date, b: Date): number {
 	return Math.abs(a.getTime() - b.getTime()) / 86_400_000;
 }
 
+/** Words in statement descriptions that are never a merchant name. */
+const MERCHANT_STOPWORDS = new Set([
+	'PLATA', 'CARD', 'VISA', 'EPOS', 'NON', 'TID', 'RRN', 'REF', 'MID', 'ORDER',
+	'VALOARE', 'TRANZACTIE', 'COMISION', 'TRZ', 'POS', 'RON', 'EUR', 'USD', 'GBP',
+	'INVOICE', 'FACTURA', 'PAYMENT', 'ONLINE', 'GMBH', 'SRL', 'INC', 'LTD', 'LIMITED',
+	'TECHNOLOGIES', 'COM', 'WWW', 'NOREPLY', 'BILLING', 'MPY'
+]);
+
+/**
+ * Merchant tokens extracted from the statement description, for suppliers that
+ * have no parser (and therefore no alias entry): "MPY*KESSELRING SRL" -> KESSELRING.
+ */
+function merchantTokens(payment: PaymentRow): string[] {
+	const source = (payment.comment + ' ' + (payment.partner || '')).toUpperCase();
+	return [...new Set(source.split(/[^A-Z]+/))].filter(
+		(w) => w.length >= 4 && !MERCHANT_STOPWORDS.has(w)
+	);
+}
+
 function merchantMatches(payment: PaymentRow, candidate: InvoiceCandidate): boolean {
-	const key = candidate.supplierType || '';
-	const aliases = MERCHANT_ALIASES[key];
-	if (!aliases) return false;
 	const haystack = (payment.comment + ' ' + (payment.partner || '')).toUpperCase();
-	return aliases.some((a) => haystack.includes(a));
+	const aliases = MERCHANT_ALIASES[candidate.supplierType || ''];
+	if (aliases && aliases.some((a) => haystack.includes(a))) return true;
+
+	// Fallback for senders without a parser: does a merchant token from the
+	// statement appear in the sender address or subject?
+	const emailHaystack = `${candidate.from} ${candidate.subject}`.toUpperCase();
+	return merchantTokens(payment).some((token) => emailHaystack.includes(token));
 }
 
 export function scoreMatch(payment: PaymentRow, candidate: InvoiceCandidate): number {
@@ -989,6 +1036,65 @@ export async function getDownloadedMap(
 }
 ```
 
+- [ ] **Step 1b: `buildInvoiceSearchQuery` — căutare la ORICE expeditor, nu doar la parserele cunoscute**
+
+În `src/lib/server/gmail/parsers/index.ts`, lângă `buildSearchQuery` existent (care rămâne neschimbat — îl folosește fluxul de import), adaugă:
+
+```ts
+export interface InvoiceSearchOptions {
+	/**
+	 * 'all'       — orice email cu PDF atașat (implicit pentru tabul de descărcare):
+	 *               prinde și furnizorii fără parser (Kesselring, fidasolutions etc.)
+	 * 'suppliers' — doar expeditorii cu parser + adresele custom
+	 */
+	scope: 'all' | 'suppliers';
+	parserIds?: string[];
+	customEmails?: string[];
+	dateFrom?: Date;
+	dateTo?: Date;
+}
+
+/** Gmail query for the download tab. Broader than buildSearchQuery by design. */
+export function buildInvoiceSearchQuery(options: InvoiceSearchOptions): string {
+	let query: string;
+	if (options.scope === 'all') {
+		query = 'has:attachment filename:pdf';
+	} else {
+		query = buildSearchQuery(options.parserIds, undefined, undefined, options.customEmails);
+	}
+	if (options.dateFrom) query += ` after:${formatGmailDate(options.dateFrom)}`;
+	if (options.dateTo) query += ` before:${formatGmailDate(options.dateTo)}`;
+	return query;
+}
+```
+
+Test (adaugă în `src/lib/server/gmail/__tests__/parsers.test.ts`):
+
+```ts
+import { buildInvoiceSearchQuery } from '../parsers/index';
+
+describe('buildInvoiceSearchQuery', () => {
+	it('scope all caută orice email cu PDF, fără filtru de expeditor', () => {
+		const q = buildInvoiceSearchQuery({ scope: 'all' });
+		expect(q).toBe('has:attachment filename:pdf');
+		expect(q).not.toContain('from:');
+	});
+	it('adaugă intervalul de date', () => {
+		const q = buildInvoiceSearchQuery({
+			scope: 'all',
+			dateFrom: new Date(2026, 6, 1),
+			dateTo: new Date(2026, 6, 31)
+		});
+		expect(q).toContain('after:2026/7/1');
+		expect(q).toContain('before:2026/7/31');
+	});
+	it('scope suppliers restrânge la expeditorii cunoscuți', () => {
+		const q = buildInvoiceSearchQuery({ scope: 'suppliers', parserIds: ['hetzner'] });
+		expect(q).toContain('hetzner');
+	});
+});
+```
+
 - [ ] **Step 2: Adaugă comanda `searchGmailForDownload` (Mod B) în `supplier-invoices.remote.ts`**
 
 Importuri noi la începutul fișierului:
@@ -1003,6 +1109,8 @@ import {
 import * as XLSX from 'xlsx';
 ```
 
+și adaugă `buildInvoiceSearchQuery` la importul existent din `$lib/server/gmail/parsers`.
+
 Comanda (după `previewGmailInvoices`):
 
 ```ts
@@ -1015,6 +1123,8 @@ export const searchGmailForDownload = command(
 		dateFrom: v.optional(v.string()),
 		dateTo: v.optional(v.string()),
 		customEmails: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
+		/** 'all' (implicit) caută la ORICE expeditor cu PDF atașat, nu doar la furnizorii cunoscuți. */
+		scope: v.optional(v.picklist(['all', 'suppliers'])),
 		maxResults: v.optional(v.number())
 	}),
 	async (data) => {
@@ -1025,13 +1135,14 @@ export const searchGmailForDownload = command(
 		await requireStaff(event);
 		const tenantId = event.locals.tenant.id;
 
-		const searchQuery = buildSearchQuery(
-			data.parserIds,
-			data.dateFrom ? new Date(data.dateFrom) : undefined,
-			data.dateTo ? new Date(data.dateTo) : undefined,
-			data.customEmails
-		);
-		const messages = await searchEmails(tenantId, searchQuery, data.maxResults || 100);
+		const searchQuery = buildInvoiceSearchQuery({
+			scope: data.scope ?? 'all',
+			parserIds: data.parserIds,
+			customEmails: data.customEmails,
+			dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
+			dateTo: data.dateTo ? new Date(data.dateTo) : undefined
+		});
+		const messages = await searchEmails(tenantId, searchQuery, data.maxResults || 150);
 
 		const existingInvoices = await db
 			.select({ gmailMessageId: table.supplierInvoice.gmailMessageId })
@@ -1103,8 +1214,11 @@ export const matchMissingDocuments = command(
 		const dateFrom = new Date(Math.min(...times) - 10 * 86_400_000);
 		const dateTo = new Date(Math.max(...times) + 10 * 86_400_000);
 
-		const searchQuery = buildSearchQuery(undefined, dateFrom, dateTo);
-		const messages = await searchEmails(tenantId, searchQuery, 100);
+		// Căutăm la ORICE expeditor cu PDF atașat, nu doar la furnizorii cu parser —
+		// altfel plățile către furnizori necunoscuți (Kesselring, fidasolutions etc.)
+		// n-ar găsi niciodată factura.
+		const searchQuery = buildInvoiceSearchQuery({ scope: 'all', dateFrom, dateTo });
+		const messages = await searchEmails(tenantId, searchQuery, 200);
 
 		const downloadedMap = await getDownloadedMap(tenantId, messages.map((m) => m.id));
 		const candidates: InvoiceCandidate[] = [];
@@ -1786,7 +1900,8 @@ Structura completă (adaptează micile diferențe de API la componentele UI exis
 ```
 
 Note de implementare:
-- **Adrese custom (spec §2):** în Mod B, lângă filtrele de dată, adaugă un `Input` text „Adrese custom (virgulă)" legat la `let customEmailsText = $state('')`; la căutare trimite `customEmails: customEmailsText.split(',').map((s) => s.trim()).filter(Boolean)` către `searchGmailForDownload`. (Persistarea în `customMonitoredEmails` există deja prin configurarea de sync din pagina de import — aici e suficient parametrul ad-hoc.)
+- **Scope-ul căutării (cerere utilizator):** Mod B caută implicit la **toți expeditorii** cu PDF atașat (`scope: 'all'`), nu doar la furnizorii cu parser. Adaugă un checkbox „Doar furnizori cunoscuți" legat la `let onlyKnownSuppliers = $state(false)` și trimite `scope: onlyKnownSuppliers ? 'suppliers' : 'all'`. Sub filtre, afișează un hint: „Căutarea acoperă orice expeditor cu factură PDF în intervalul ales."
+- **Adrese custom (spec §2):** în Mod B, lângă filtrele de dată, adaugă un `Input` text „Adrese custom (virgulă)" legat la `let customEmailsText = $state('')`; la căutare trimite `customEmails: customEmailsText.split(',').map((s) => s.trim()).filter(Boolean)` către `searchGmailForDownload` (relevant doar când scope-ul e 'suppliers').
 - **„Caută manual" (spec §3, plăți fără match):** pe rândurile cu `confidence === 'none'` din Mod A, adaugă un buton mic care face `mode = 'search'` și pre-populează `dateFrom`/`dateTo` cu `p.date ± 10 zile` (format `YYYY-MM-DD`), apoi apelează `handleSearch()`.
 - `getGmailConnectionStatus` — verifică forma reală a răspunsului (`getGmailStatus`) înainte de a folosi `.connected`; adaptează.
 - Descărcarea individuală prin `href` navighează direct la endpoint (GET) — browserul descarcă fișierul; badge-ul „Descărcată" se actualizează la următoarea căutare.
