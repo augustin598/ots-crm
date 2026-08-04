@@ -37,13 +37,20 @@ mock.module('$lib/server/db', () => {
 	};
 });
 
+// NOTĂ: `mock.module` din Bun actualizează exporturile existente ale unui modul
+// deja linkuit, dar NU poate adăuga nume noi. Cum acest fișier se evaluează primul
+// (alfabetic), numele de care au nevoie celelalte teste din folder (vezi
+// download-evidence.test.ts) trebuie să existe deja aici — altfel importul lor
+// crapă cu „Export named ... not found”.
 mock.module('$lib/server/db/schema', () => ({
 	gmailIntegration: new Proxy({}, { get: (_t, p) => p }),
+	gmailInvoiceDownload: new Proxy({}, { get: (_t, p) => p }),
 }));
 
 mock.module('drizzle-orm', () => ({
 	eq: () => ({}),
 	and: () => ({}),
+	inArray: () => ({}),
 }));
 
 mock.module('$lib/server/logger', () => ({
