@@ -158,20 +158,32 @@
 							<h2 class="text-lg font-semibold">
 								{row.accountName || 'Cont Stripe conectat'}
 							</h2>
-							<div class="mt-1 flex items-center gap-2 text-xs">
+							<!--
+								Cele două etichete descriu lucruri diferite și erau ușor de citit
+								greșit ca „test mode = activ”. Modul NU e un comutator: rezultă din
+								cheile salvate (sk_/rk_ test vs live).
+							-->
+							<div class="mt-1 flex flex-wrap items-center gap-2 text-xs">
 								<span
 									class="rounded-full {row.isTestMode
 										? 'bg-amber-100 text-amber-700'
 										: 'bg-green-100 text-green-700'} px-2 py-0.5"
 								>
-									{row.isTestMode ? 'TEST MODE' : 'LIVE MODE'}
+									Chei: {row.isTestMode ? 'TEST' : 'LIVE'}
 								</span>
+								<span class="text-slate-400">·</span>
 								{#if row.isActive}
-									<span class="text-green-600">Activ</span>
+									<span class="text-green-600">Integrare pornită</span>
 								{:else}
-									<span class="text-slate-500">Dezactivat</span>
+									<span class="text-slate-500">Integrare oprită</span>
 								{/if}
 							</div>
+							{#if row.isTestMode}
+								<p class="mt-1 text-xs text-slate-500">
+									Plățile sunt simulate. Ca să încasezi real, apasă „Schimbă cheile” și pune
+									cheile live — modul se schimbă singur, nu există comutator separat.
+								</p>
+							{/if}
 							{#if row.accountId}
 								<p class="mt-1 font-mono text-xs text-slate-500">{row.accountId}</p>
 							{/if}

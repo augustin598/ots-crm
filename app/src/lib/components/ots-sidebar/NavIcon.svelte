@@ -32,6 +32,7 @@
 	import IconGoogleAds from '$lib/components/marketing/icon-google-ads.svelte';
 	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+	import IconStripe from '$lib/components/marketing/icon-stripe.svelte';
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import type { IconKey } from '$lib/config/sidebar-nav';
 
@@ -62,6 +63,8 @@
 	<IconFacebook class={className} />
 {:else if icon === 'invoice-tiktok' || icon === 'tiktok'}
 	<IconTiktok class={className} />
+{:else if icon === 'invoice-stripe'}
+	<IconStripe class={className} />
 {:else if icon === 'banking'}
 	<CreditCardIcon class={className} />
 {:else if icon === 'supplier-invoices'}
