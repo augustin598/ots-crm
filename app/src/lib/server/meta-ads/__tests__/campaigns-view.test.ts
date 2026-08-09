@@ -6,10 +6,16 @@ mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
 mock.module('$lib/server/db', () => ({ db: {} }));
 mock.module('$lib/server/db/schema', () => ({}));
+// Mock-ul include TOATE exporturile folosite în repo — mock.module e global în
+// bun test și se scurge în celelalte fișiere de test rulate în aceeași sesiune;
+// un mock parțial ar strica testele care importă serializeError/logDebug.
 mock.module('$lib/server/logger', () => ({
 	logInfo: () => {},
 	logError: () => {},
-	logWarning: () => {}
+	logWarning: () => {},
+	logDebug: async () => {},
+	flushLogBuffer: async () => {},
+	serializeError: (e: unknown) => ({ message: e instanceof Error ? e.message : String(e) })
 }));
 
 import type { MetaAdsCampaignInsight, MetaAdsCampaignInfo } from '../client';
