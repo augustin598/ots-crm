@@ -126,6 +126,13 @@ function throwMetaApiError(err: unknown, context?: { adAccountId?: string; integ
 	if (msg.includes('has not authorized application') || msg.includes('(#190)')) {
 		throw error(401, 'Aplicația nu mai este autorizată. Reconectează din Settings → Meta Ads.');
 	}
+	if (msg.includes('log in to www.facebook.com')) {
+		// OAuthException 190/459 — checkpoint de securitate pe contul FB al integrării.
+		throw error(
+			401,
+			'Contul Facebook al integrării are o verificare de securitate (checkpoint). Intră pe facebook.com cu acel cont, finalizează verificarea, apoi reîncearcă sau reconectează din Settings → Meta Ads.'
+		);
+	}
 	if (msg.includes('Invalid OAuth') || msg.includes('OAuthException')) {
 		throw error(401, 'Token OAuth invalid. Reconectează din Settings → Meta Ads.');
 	}
