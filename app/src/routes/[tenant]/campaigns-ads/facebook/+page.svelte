@@ -306,12 +306,14 @@
 		onPickStatus={pickStatus}
 	/>
 
-	<InsightsStrip
-		rows={allRows}
-		{periodDays}
-		active={filters.insight}
-		onPick={(id) => setFilters({ ...filters, insight: id })}
-	/>
+	{#if !loadError}
+		<InsightsStrip
+			rows={allRows}
+			{periodDays}
+			active={filters.insight}
+			onPick={(id) => setFilters({ ...filters, insight: id })}
+		/>
+	{/if}
 
 	<div class="toolbar-row">
 		<FilterToolbar

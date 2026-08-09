@@ -1112,7 +1112,9 @@ export async function getCampaignWithAdsets(
 	logInfo('meta-ads', `Fetching campaign+adsets for ${campaignId}`);
 
 	const proof = generateAppSecretProof(accessToken, appSecret);
-	const fields = 'id,name,daily_budget,lifetime_budget,account_currency,adsets{id,name,daily_budget,lifetime_budget,status}';
+	// `account_currency` nu există pe nodul Campaign în Graph v25 — cererea lui
+	// arunca (#100) și pica tot apelul; valuta vine din fallback-urile apelanților.
+	const fields = 'id,name,daily_budget,lifetime_budget,adsets{id,name,daily_budget,lifetime_budget,status}';
 	const params = new URLSearchParams({ fields, access_token: accessToken, appsecret_proof: proof });
 
 	const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}?${params}`, {
