@@ -2,6 +2,14 @@ import { google } from 'googleapis';
 import type { gmail_v1 } from 'googleapis';
 import { getAuthenticatedClient } from './auth';
 
+/**
+ * Niciun apel extern fără timeout: un fetch care atârnă blochează request-ul
+ * (sau workerul BullMQ) la nesfârșit. 30s e generos chiar și pentru atașamente
+ * mari, dar finit.
+ */
+const GMAIL_REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_OPTIONS = { timeout: GMAIL_REQUEST_TIMEOUT_MS } as const;
+
 export interface GmailMessage {
 	id: string;
 	threadId: string;
@@ -31,11 +39,14 @@ export async function searchEmails(
 	if (!auth) throw new Error('Gmail not connected');
 
 	const gmail = google.gmail({ version: 'v1', auth });
-	const res = await gmail.users.messages.list({
-		userId: 'me',
-		q: query,
-		maxResults
-	});
+	const res = await gmail.users.messages.list(
+		{
+			userId: 'me',
+			q: query,
+			maxResults
+		},
+		REQUEST_OPTIONS
+	);
 
 	return (res.data.messages || []).map((m) => ({
 		id: m.id!,
@@ -51,11 +62,14 @@ export async function getEmail(tenantId: string, messageId: string): Promise<Gma
 	if (!auth) throw new Error('Gmail not connected');
 
 	const gmail = google.gmail({ version: 'v1', auth });
-	const res = await gmail.users.messages.get({
-		userId: 'me',
-		id: messageId,
-		format: 'full'
-	});
+	const res = await gmail.users.messages.get(
+		{
+			userId: 'me',
+			id: messageId,
+			format: 'full'
+		},
+		REQUEST_OPTIONS
+	);
 
 	const headers = res.data.payload?.headers || [];
 	const getHeader = (name: string) =>
@@ -92,11 +106,14 @@ export async function getAttachment(
 	if (!auth) throw new Error('Gmail not connected');
 
 	const gmail = google.gmail({ version: 'v1', auth });
-	const res = await gmail.users.messages.attachments.get({
-		userId: 'me',
-		messageId,
-		id: attachmentId
-	});
+	const res = await gmail.users.messages.attachments.get(
+		{
+			userId: 'me',
+			messageId,
+			id: attachmentId
+		},
+		REQUEST_OPTIONS
+	);
 
 	const data = res.data.data;
 	if (!data) throw new Error('Attachment data is empty');

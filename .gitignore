@@ -31,3 +31,4 @@ graphify-out/
 
 # Local working data kept on disk but not versioned (Excel exports etc.)
 app/Evidenta interviuri*.xlsx
+MissingDocuments*.xlsx

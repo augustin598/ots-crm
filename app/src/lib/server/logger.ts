@@ -50,7 +50,8 @@ export type LogSource =
 	| 'ads-monitor'
 	| 'google-calendar'
 	| 'hosting-email'
-	| 'content';
+	| 'content'
+	| 'stripe';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));

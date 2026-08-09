@@ -15,6 +15,7 @@ export type IconKey =
 	| 'invoice-google'
 	| 'invoice-meta'
 	| 'invoice-tiktok'
+	| 'invoice-stripe'
 	| 'banking'
 	| 'supplier-invoices'
 	| 'seo-links'
@@ -106,6 +107,15 @@ export const SIDEBAR_NAV: NavGroup[] = [
 						label: 'TikTok Ads',
 						icon: 'invoice-tiktok',
 						href: '/invoices/tiktok-ads'
+					},
+					{
+						id: 'inv-stripe',
+						label: 'Extrase Stripe',
+						icon: 'invoice-stripe',
+						href: '/invoices/stripe-statements',
+						// Extrasele conțin toate tranzacțiile + datele plătitorilor →
+						// aceeași ștachetă ca `admin.stripe.view` (owner/admin).
+						requiredRole: 'admin'
 					}
 				]
 			},

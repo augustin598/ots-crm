@@ -1,18 +1,21 @@
 import type { GmailMessage } from '../client';
 import { cpanelParser } from './cpanel';
-import { whmcsParser } from './whmcs';
 import { hetznerParser } from './hetzner';
 import { googleParser } from './google';
 import { ovhParser } from './ovh';
 import { digitaloceanParser } from './digitalocean';
 import { awsParser } from './aws';
+import { linkedinParser } from './linkedin';
+import { openaiParser } from './openai';
+import { cloudflareParser } from './cloudflare';
+import { directadminParser } from './directadmin';
+import { cursorParser } from './cursor';
+import { inwxParser } from './inwx';
+import { whmcsParser } from './whmcs';
 import { litespeedParser } from './litespeed';
 import { tiktokParser } from './tiktok';
 import { anthropicParser } from './anthropic';
 import { metaParser } from './meta';
-import { linkedinParser } from './linkedin';
-import { openaiParser } from './openai';
-import { cloudflareParser } from './cloudflare';
 import { roSuppliersParser } from './ro-suppliers';
 import { genericParser } from './generic';
 
@@ -36,24 +39,49 @@ export interface SupplierParser {
 }
 
 /**
- * Registry of supplier parsers, ordered by specificity.
- * First match wins. Generic parser is always last.
+ * Registry of supplier parsers. First match wins, so ORDER encodes an
+ * invariant, not just "specificity":
+ *
+ * 1. DOMAIN-PRECISE matchers first — matchEmail relies ONLY on the sender's
+ *    from-domain (or a from-domain check ANDed with a subject keyword, e.g.
+ *    googleParser). These can never be hijacked by an unrelated supplier's
+ *    subject line, because they don't look at the subject at all (or only
+ *    look at it after the domain already matched).
+ * 2. SUBJECT-HEURISTIC matchers second — matchEmail returns true from a
+ *    subject keyword ALONE (from-domain OR subject-keyword), with no
+ *    from-domain requirement. Placed BEFORE a domain-precise parser, one of
+ *    these would silently hijack it: e.g. anthropicParser matches any subject
+ *    containing "claude", so "Your receipt from Cursor — Claude Sonnet usage"
+ *    from billing@cursor.com would mislabel the invoice as Anthropic's
+ *    instead of Cursor's if anthropicParser ran first. Keep these AFTER every
+ *    domain-precise parser.
+ * 3. CATCH-ALLS last — roSuppliersParser (matches on "factura" in the subject
+ *    with no domain requirement) and genericParser (any invoice-ish subject).
+ *
+ * See parsers.test.ts "nu se lasă umbrite de matcher-e pe subiect" for the
+ * regression this ordering guards against.
  */
 export const parserRegistry: SupplierParser[] = [
+	// --- domain-precise (from-domain only, or from-domain AND subject) ---
 	cpanelParser,
-	whmcsParser,
 	hetznerParser,
 	googleParser,
 	ovhParser,
 	digitaloceanParser,
 	awsParser,
+	linkedinParser,
+	openaiParser,
+	cloudflareParser,
+	directadminParser,
+	cursorParser,
+	inwxParser,
+	// --- subject-heuristic (from-domain OR subject keyword alone) ---
+	whmcsParser,
 	litespeedParser,
 	tiktokParser,
 	anthropicParser,
 	metaParser,
-	linkedinParser,
-	openaiParser,
-	cloudflareParser,
+	// --- catch-alls ---
 	roSuppliersParser,
 	genericParser
 ];
@@ -118,116 +146,108 @@ export function buildSearchQuery(
 	return query;
 }
 
+export interface InvoiceSearchOptions {
+	/**
+	 * 'all'       — orice email cu PDF atașat (implicit pentru tabul de descărcare):
+	 *               prinde și furnizorii fără parser (Kesselring, fidasolutions etc.)
+	 * 'suppliers' — doar expeditorii cu parser + adresele custom
+	 */
+	scope: 'all' | 'suppliers';
+	parserIds?: string[];
+	customEmails?: string[];
+	dateFrom?: Date;
+	dateTo?: Date;
+	/**
+	 * Tipare de expeditori de exclus permanent (chitanțe de publicitate etc.).
+	 * ATENȚIE: filtrarea din query e doar o optimizare — Gmail interpretează unele
+	 * tipare mai larg sau mai îngust decât ne așteptăm. Excluderea trebuie aplicată
+	 * ȘI pe rezultate, cu `shouldExcludeEmail`.
+	 */
+	excludeEmails?: string[];
+}
+
+/**
+ * Normalizează un tipar de excludere la operatorul negativ pe care îl înțelege Gmail.
+ *
+ * - `@domeniu.com` și `domeniu.com` → `-from:domeniu.com` (Gmail nu vrea „@" în față)
+ * - `user@domeniu.com`             → `-from:user@domeniu.com`
+ *
+ * Întoarce `null` pentru tiparele goale sau evident invalide (fără punct, cu spații),
+ * ca să nu injectăm în query un operator care ar exclude mai mult decât s-a cerut.
+ */
+export function toGmailExcludeOperator(pattern: string): string | null {
+	const trimmed = pattern.trim().toLowerCase();
+	if (!trimmed) return null;
+	const normalized = trimmed.startsWith('@') ? trimmed.slice(1) : trimmed;
+	if (!normalized || !normalized.includes('.')) return null;
+	// Un spațiu ar rupe query-ul: Gmail ar trata restul ca termen de căutare separat
+	if (/\s/.test(normalized)) return null;
+	return `-from:${normalized}`;
+}
+
+/**
+ * Sugestii de excludere oferite în UI cu un clic. NU se aplică automat —
+ * utilizatorul alege ce adaugă.
+ *
+ * Regula listei: doar platforme de publicitate/social, de unde vin chitanțe de
+ * reclame pe care contabilitatea nu le vrea în fluxul de facturi de furnizor.
+ * Furnizorii de infrastructură reali (Hetzner, OVH, Google Workspace, DirectAdmin…)
+ * NU au ce căuta aici — facturile lor trebuie să ajungă în Keez.
+ */
+export const SUGGESTED_EXCLUDE_PATTERNS: string[] = [
+	// Numit explicit de utilizator: chitanțele TikTok Ads. Potrivirea pe domeniu
+	// prinde și subdomeniile (ads.tiktok.com, business.tiktok.com).
+	'tiktok.com',
+	// Numit explicit de utilizator: Facebook/Meta Ads.
+	'facebook.com',
+	// Domeniul real de trimitere al notificărilor și chitanțelor Facebook.
+	'facebookmail.com',
+	// Meta Platforms — facturile de reclame migrate pe brandul nou.
+	'meta.com',
+	// Meta, partea de Instagram Ads.
+	'instagram.com',
+	// LinkedIn Ads / Campaign Manager.
+	'linkedin.com'
+	// Intenționat ABSENTE:
+	// - google.com → Google Ads trimite de pe payments-noreply@google.com, exact ca
+	//                Google Workspace. Excluderea ar arunca și facturi reale.
+	// - x.com      → potrivirea pe subșir de domeniu ar prinde fedex.com, linux.com etc.
+];
+
+/**
+ * Interogare Gmail pentru tabul de descărcare. Intenționat mai largă decât
+ * `buildSearchQuery` (folosită de fluxul de import): o plată către un furnizor
+ * fără parser nu și-ar găsi niciodată factura dacă am filtra pe expeditori.
+ */
+export function buildInvoiceSearchQuery(options: InvoiceSearchOptions): string {
+	let query: string;
+	if (options.scope === 'all') {
+		query = 'has:attachment filename:pdf';
+	} else {
+		query = buildSearchQuery(options.parserIds, undefined, undefined, options.customEmails);
+	}
+	if (options.dateFrom) query += ` after:${formatGmailDate(options.dateFrom)}`;
+	if (options.dateTo) query += ` before:${formatGmailDate(options.dateTo)}`;
+
+	// Excluderi persistente de expeditori — optimizare, nu garanție (vezi
+	// InvoiceSearchOptions.excludeEmails); rezultatele se refiltrează oricum.
+	const excludeOperators = (options.excludeEmails ?? [])
+		.map(toGmailExcludeOperator)
+		.filter((op): op is string => op !== null);
+	if (excludeOperators.length > 0) query += ` ${excludeOperators.join(' ')}`;
+
+	return query;
+}
+
 function formatGmailDate(date: Date): string {
 	return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-/**
- * Helper: parse amount string like "$12.34" or "12,34 EUR" to cents
- */
-export function parseAmount(text: string): { amount: number; currency: string } | null {
-	// Match patterns like: $12.34, 12.34 USD, €12,34, 12,34 EUR
-	const patterns = [
-		/\$\s*([\d,]+\.?\d*)/,
-		/€\s*([\d.,]+)/,
-		/([\d,]+\.?\d*)\s*(USD|EUR|RON|GBP)/i,
-		/(USD|EUR|RON|GBP)\s*([\d,]+\.?\d*)/i
-	];
-
-	for (const pattern of patterns) {
-		const match = text.match(pattern);
-		if (match) {
-			let amountStr: string;
-			let currency: string;
-
-			if (pattern === patterns[0]) {
-				amountStr = match[1];
-				currency = 'USD';
-			} else if (pattern === patterns[1]) {
-				amountStr = match[1];
-				currency = 'EUR';
-			} else if (pattern === patterns[3]) {
-				currency = match[1].toUpperCase();
-				amountStr = match[2];
-			} else {
-				amountStr = match[1];
-				currency = match[2].toUpperCase();
-			}
-
-			// Normalize number: "1,234.56" or "1.234,56"
-			const hasCommaAsDecimal = amountStr.includes(',') && !amountStr.includes('.');
-			if (hasCommaAsDecimal) {
-				amountStr = amountStr.replace(',', '.');
-			} else {
-				amountStr = amountStr.replace(/,/g, '');
-			}
-
-			const amount = Math.round(parseFloat(amountStr) * 100);
-			if (!isNaN(amount)) {
-				return { amount, currency };
-			}
-		}
-	}
-	return null;
-}
-
-/**
- * Helper: Detect invoice status from text (body or subject)
- */
-export function detectStatus(text: string): 'paid' | 'unpaid' | 'pending' {
-	const bodyLower = text.toLowerCase();
-
-	// Check UNPAID first to avoid false positives with "paid" word appearing in "unpaid"
-	if (
-		bodyLower.includes('unpaid') ||
-		bodyLower.includes('neplatit') ||
-		bodyLower.includes('neplătit') ||
-		bodyLower.includes('overdue') ||
-		bodyLower.includes('restant') ||
-		bodyLower.includes('scadenta') ||
-		bodyLower.includes('scadență') ||
-		bodyLower.includes('past due') ||
-		bodyLower.includes('in asteptare') ||
-		bodyLower.includes('în așteptare') ||
-		bodyLower.includes('pending') ||
-		bodyLower.includes('impayée') ||
-		bodyLower.includes('échéance') ||
-		bodyLower.includes('fällig') ||
-		bodyLower.includes('offen') ||
-		bodyLower.includes('payment due') ||
-		bodyLower.includes('payment is due') ||
-		bodyLower.includes('payment required')
-	) {
-		return 'unpaid';
-	}
-
-	if (
-		bodyLower.includes('payment received') ||
-		bodyLower.includes('payment is received') ||
-		bodyLower.includes('payment confirmed') ||
-		bodyLower.includes('payment confirmation') ||
-		bodyLower.includes('paid') ||
-		bodyLower.includes('plata confirmata') ||
-		bodyLower.includes('plată confirmată') ||
-		bodyLower.includes('incasat') ||
-		bodyLower.includes('încasat') ||
-		bodyLower.includes('receipt') ||
-		bodyLower.includes('chitanta') ||
-		bodyLower.includes('chitanță') ||
-		bodyLower.includes('payé') ||
-		bodyLower.includes('réglée') ||
-		bodyLower.includes('bezahlt') ||
-		bodyLower.includes('quittung') ||
-		bodyLower.includes('autopay') ||
-		bodyLower.includes('vei fi taxat(ă) automat') ||
-		bodyLower.includes('taxat automat') ||
-		bodyLower.includes('automatically charged')
-	) {
-		return 'paid';
-	}
-
-	return 'pending';
-}
+// Re-exported from the leaf helpers module (no parser imports) so existing importers
+// keep working. Parser files must import these from './helpers' directly, not from
+// here — importing them from here would recreate the index.ts <-> parser file cycle
+// that used to break depending on test import order (see parsers/helpers.ts).
+export { parseAmount, detectStatus, isValidInvoiceNumber, extractInvoiceNumber } from './helpers';
 
 /**
  * Extract email address from "Name <email>" format and match against a pattern.

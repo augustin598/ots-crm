@@ -1,6 +1,8 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount, detectStatus } from './index';
+import { parseAmount, detectStatus, isValidInvoiceNumber, extractInvoiceNumber } from './helpers';
+
+const INVOICE_KEYWORDS = ['factura', 'invoice'];
 
 export const roSuppliersParser: SupplierParser = {
 	id: 'ro-suppliers',
@@ -38,12 +40,16 @@ export const roSuppliersParser: SupplierParser = {
 		};
 
 		// RO invoice numbers: often "Seria XXX Nr. YYY" or numeric after "Factura"
-		const invoiceMatch = email.body.match(/(?:seria|serie)\s+([\w-]+)\s+(?:nr|numar)\s+([\w-]+)/i) ||
-			email.subject.match(/(?:factura|invoice)\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/factura\s*#?\s*([\w-]+)/i);
-		
-		if (invoiceMatch) {
-			result.invoiceNumber = invoiceMatch[2] ? `${invoiceMatch[1]}-${invoiceMatch[2]}` : invoiceMatch[1];
+		const seriaMatch = email.body.match(/(?:seria|serie)\s+([\w-]+)\s+(?:nr|numar)\s+([\w-]+)/i);
+		const seriaCandidate = seriaMatch ? `${seriaMatch[1]}-${seriaMatch[2]}` : undefined;
+
+		// "Seria X nr Y" always has an explicit marker (nr/numar) by construction.
+		if (seriaCandidate && isValidInvoiceNumber(seriaCandidate, true)) {
+			result.invoiceNumber = seriaCandidate;
+		} else {
+			result.invoiceNumber =
+				extractInvoiceNumber(email.subject, INVOICE_KEYWORDS) ??
+				extractInvoiceNumber(email.body, INVOICE_KEYWORDS);
 		}
 
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);

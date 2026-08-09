@@ -2918,6 +2918,115 @@ export async function sendReportEmail(
 }
 
 /**
+ * Trimite extrasele Stripe (CSV-urile cerute de Keez) către contabilitate.
+ *
+ * O lună (≤3 fișiere) merge cu CSV-urile atașate direct — așa se pot încărca
+ * în Keez fără dezarhivare. Mai multe luni merg ca arhivă, altfel emailul
+ * ajunge la 30+ atașamente.
+ */
+export async function sendStripeStatementsEmail(params: {
+	tenantId: string;
+	to: string;
+	/** `2026-07` sau `2026`. */
+	period: string;
+	files: { fileName: string; content: Buffer }[];
+	zip: Buffer;
+	zipName: string;
+	note: string | null;
+	senderName: string | null;
+}): Promise<void> {
+	const { tenantId, to, period, files, zip, zipName, note, senderName } = params;
+	const subject = `Extrase Stripe — ${period}`;
+	const asZip = files.length > 3;
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: to,
+			subject,
+			emailType: 'stripe-statements',
+			metadata: { period, fileCount: files.length, asZip, senderName },
+			htmlBody: '',
+			// payload: null — bufferele nu sunt serializabile; retrimiterea se face
+			// din pagina Extrase Stripe, unde fișierele se regenerează din Stripe.
+			payload: null
+		},
+		async () => {
+			const brand = await fetchTenantBrand(tenantId);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const safePeriod = escapeHtml(period);
+			const fileListHtml = files
+				.map((f) => `<div style="font-family: monospace;">${escapeHtml(f.fileName)}</div>`)
+				.join('');
+			const noteHtml = note
+				? `<p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">${escapeHtml(note).replace(/\n/g, '<br>')}</p>`
+				: '';
+
+			const bodyHtml = `
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua,</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Atașat găsiți extrasele Stripe pentru perioada <strong>${safePeriod}</strong>, exportate cu fusul orar Europe/Bucharest, în formatul cerut pentru import în Keez.</p>
+				${noteHtml}
+				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+					<tr>
+						<td style="padding: 16px 18px; color: #374151; font-size: 13px; line-height: 1.7;">
+							${fileListHtml}
+						</td>
+					</tr>
+				</table>
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 8px 0;">📎 ${asZip ? `Fișierele sunt grupate în arhiva <strong>${escapeHtml(zipName)}</strong>, câte un folder pe lună.` : 'Cele trei fișiere CSV sunt atașate individual.'}</p>
+				<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0;">Facturile de comision emise de Stripe nu fac parte din extras și se descarcă separat din contul Stripe (Settings → Documents).</p>
+			`;
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: 'Extrase Stripe',
+				bodyHtml,
+				previewTitle: `Extrase Stripe — ${safePeriod}`
+			});
+
+			const attachments = [
+				...(asZip
+					? [{ filename: zipName, content: zip, contentType: 'application/zip' }]
+					: files.map((f) => ({
+							filename: f.fileName,
+							content: f.content,
+							contentType: 'text/csv'
+						}))),
+				...(brand.logoAttachment ? [brand.logoAttachment] : [])
+			];
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to,
+				subject,
+				html,
+				text: trimPlainText(`
+				Extrase Stripe - ${period}
+
+				Buna ziua,
+
+				Atasat gasiti extrasele Stripe pentru perioada ${period}, exportate cu fusul orar Europe/Bucharest, in formatul cerut pentru import in Keez.
+
+				${note ? `${note}\n` : ''}
+				Fisiere:
+				${files.map((f) => `- ${f.fileName}`).join('\n')}
+
+				Facturile de comision emise de Stripe nu fac parte din extras si se descarca separat din contul Stripe (Settings - Documents).
+			`),
+				attachments
+			};
+		}
+	);
+}
+
+/**
  * Send notification to tenant admin/owner when a client requests a service package.
  */
 export async function sendPackageRequestEmail(

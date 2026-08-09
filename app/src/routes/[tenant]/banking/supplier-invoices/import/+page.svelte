@@ -34,7 +34,27 @@
 	let dateToValue = $state<DateValue | undefined>(undefined);
 	let dateFromOpen = $state(false);
 	let dateToOpen = $state(false);
-	let selectedParsers = $state<string[]>(['cpanel', 'whmcs', 'hetzner', 'google', 'ovh', 'digitalocean', 'aws', 'generic']);
+	let selectedParsers = $state<string[]>([
+		'cpanel',
+		'whmcs',
+		'hetzner',
+		'google',
+		'ovh',
+		'digitalocean',
+		'aws',
+		'directadmin',
+		'cursor',
+		'inwx',
+		'litespeed',
+		'tiktok',
+		'anthropic',
+		'meta',
+		'linkedin',
+		'openai',
+		'cloudflare',
+		'ro-suppliers',
+		'generic'
+	]);
 
 	// Preview step
 	let previews = $state<any[]>([]);
@@ -69,6 +89,17 @@
 		{ id: 'ovh', label: 'OVH' },
 		{ id: 'digitalocean', label: 'DigitalOcean' },
 		{ id: 'aws', label: 'AWS' },
+		{ id: 'directadmin', label: 'DirectAdmin' },
+		{ id: 'cursor', label: 'Cursor (Anysphere)' },
+		{ id: 'inwx', label: 'INWX' },
+		{ id: 'litespeed', label: 'LiteSpeed Technologies' },
+		{ id: 'tiktok', label: 'TikTok Ads' },
+		{ id: 'anthropic', label: 'Anthropic (Claude)' },
+		{ id: 'meta', label: 'Meta Ads (Facebook)' },
+		{ id: 'linkedin', label: 'LinkedIn' },
+		{ id: 'openai', label: 'OpenAI (ChatGPT)' },
+		{ id: 'cloudflare', label: 'Cloudflare' },
+		{ id: 'ro-suppliers', label: 'Furnizori România (eMAG, SmartBill etc.)' },
 		{ id: 'generic', label: 'Altele (generic)' }
 	];
 

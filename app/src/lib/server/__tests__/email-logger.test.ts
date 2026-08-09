@@ -37,8 +37,13 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 32 types (31 + client-team-invite, portal team parity 2026-07-27)', () => {
-		expect(EMAIL_TYPES.length).toBe(32);
+	test('has exactly 33 types (32 + stripe-statements, extrase Stripe 2026-08-05)', () => {
+		expect(EMAIL_TYPES.length).toBe(33);
+	});
+
+	test('includes the Stripe statements type', () => {
+		expect(EMAIL_TYPES).toContain('stripe-statements');
+		expect(isEmailType('stripe-statements')).toBe(true);
 	});
 
 	test('includes the client portal team invite type', () => {

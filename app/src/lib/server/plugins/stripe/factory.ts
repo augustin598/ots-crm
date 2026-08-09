@@ -40,9 +40,16 @@ function fingerprint(secret: string): string {
 	return secret.slice(0, 12); // sk_test_kIXo / sk_live_xxxx — destul pentru detect change
 }
 
+/**
+ * Prefixele acceptate. `rk_` = restricted key — permisă peste tot, inclusiv la
+ * plăți: e varianta recomandată de Stripe (drepturi minime), iar dacă îi lipsește
+ * o permisiune, API-ul răspunde cu o eroare explicită, nu cu date greșite.
+ */
+const STRIPE_KEY_PREFIXES = ['sk_live_', 'sk_test_', 'rk_live_', 'rk_test_'] as const;
+
 function buildClient(secret: string): Stripe {
-	if (!secret.startsWith('sk_test_') && !secret.startsWith('sk_live_')) {
-		throw new Error('Stripe secret key format invalid (trebuie sk_test_ sau sk_live_).');
+	if (!STRIPE_KEY_PREFIXES.some((p) => secret.startsWith(p))) {
+		throw new Error(`Stripe key format invalid (trebuie ${STRIPE_KEY_PREFIXES.join(' / ')}).`);
 	}
 	return new Stripe(secret, {
 		// Pin explicit ca să detectăm contract drift când facem `bun update stripe`.
@@ -59,7 +66,16 @@ function buildClient(secret: string): Stripe {
 	});
 }
 
-export async function getStripeForTenant(tenantId: string): Promise<Stripe> {
+/**
+ * Rezolvă cheia secretă a tenantului (DB sau fallback env), cu aceleași reguli
+ * ca `getStripeForTenant`. Sursă unică de adevăr pentru ambele: dacă apar două
+ * copii ale logicii, un guard (ex. `isActive`) ajunge inevitabil doar în una.
+ *
+ * `cacheKey` distinge cheia din DB de cea din env în cache-ul de clienți.
+ */
+async function resolveStripeSecret(
+	tenantId: string
+): Promise<{ secret: string; cacheKey: string }> {
 	const [integration] = await db
 		.select()
 		.from(table.stripeIntegration)
@@ -67,15 +83,7 @@ export async function getStripeForTenant(tenantId: string): Promise<Stripe> {
 		.limit(1);
 
 	if (integration && integration.isActive) {
-		const secret = decrypt(tenantId, integration.secretKeyEncrypted);
-		const fp = fingerprint(secret);
-		const cached = cache.get(tenantId);
-		if (cached && cached.secretFingerprint === fp) {
-			return cached.stripe;
-		}
-		const stripe = buildClient(secret);
-		cache.set(tenantId, { stripe, secretFingerprint: fp });
-		return stripe;
+		return { secret: decrypt(tenantId, integration.secretKeyEncrypted), cacheKey: tenantId };
 	}
 
 	// H1 (audit 2026-05-31): an EXPLICITLY deactivated integration row must NOT
@@ -107,14 +115,104 @@ export async function getStripeForTenant(tenantId: string): Promise<Stripe> {
 			tenantId,
 			metadata: { reason: 'no integration row + matches PUBLIC_HOSTING_TENANT_SLUG' }
 		});
-		const cached = cache.get(`${tenantId}:env`);
-		if (cached) return cached.stripe;
-		const stripe = buildClient(env.STRIPE_SECRET_KEY);
-		cache.set(`${tenantId}:env`, { stripe, secretFingerprint: fingerprint(env.STRIPE_SECRET_KEY) });
-		return stripe;
+		return { secret: env.STRIPE_SECRET_KEY, cacheKey: `${tenantId}:env` };
 	}
 
 	throw new StripeNotConfiguredError(tenantId);
+}
+
+export async function getStripeForTenant(tenantId: string): Promise<Stripe> {
+	const { secret, cacheKey } = await resolveStripeSecret(tenantId);
+	const fp = fingerprint(secret);
+	const cached = cache.get(cacheKey);
+	if (cached && cached.secretFingerprint === fp) return cached.stripe;
+
+	const stripe = buildClient(secret);
+	cache.set(cacheKey, { stripe, secretFingerprint: fp });
+	return stripe;
+}
+
+/**
+ * Cheia secretă în clar, pentru cele câteva apeluri care NU merg prin SDK:
+ * descărcarea fișierelor de raport de pe files.stripe.com (`/v1/files/:id/contents`
+ * nu e expus de SDK și cere Authorization: Bearer).
+ *
+ * SERVER-ONLY. Nu returna niciodată valoarea asta către client, nici mascată.
+ */
+export async function getStripeSecretForTenant(tenantId: string): Promise<string> {
+	const { secret } = await resolveStripeSecret(tenantId);
+	return secret;
+}
+
+// ---------------------------------------------------------------------------
+// Cheia de RAPOARTE (extrase contabile) — separată de cea de plăți
+// ---------------------------------------------------------------------------
+
+/**
+ * De ce o cheie separată: Reporting API rulează DOAR pe date live („A live-mode
+ * API key is required”), în timp ce integrarea de plăți poate sta legitim în
+ * test mode. Mai mult, în DB avem `client.stripe_customer_id` și
+ * `hosting_product.stripe_price_id` cache-uite din TEST — dacă am înlocui cheia
+ * de plăți cu una live, checkout-ul ar cere Stripe-ului live niște `cus_`/`price_`
+ * care nu există acolo și s-ar rupe.
+ *
+ * Deci: `STRIPE_REPORTING_KEY` (ideal o restricted key `rk_live_` cu drepturi
+ * doar pe rapoarte + fișiere) e folosită EXCLUSIV de extrasele contabile.
+ * Dacă nu e setată, cădem pe clientul normal al tenantului (comportament vechi).
+ */
+async function resolveReportingSecret(
+	tenantId: string
+): Promise<{ secret: string; cacheKey: string; dedicated: boolean }> {
+	const key = env.STRIPE_REPORTING_KEY;
+	if (key && !key.includes('REPLACE_ME')) {
+		// Aceeași ștachetă ca fallback-ul de plăți: o cheie din env aparține unui
+		// singur cont Stripe, deci o dăm doar tenantului care deține contul.
+		const fallbackTenantSlug = env.PUBLIC_HOSTING_TENANT_SLUG ?? 'ots';
+		const [row] = await db
+			.select({ slug: table.tenant.slug })
+			.from(table.tenant)
+			.where(eq(table.tenant.id, tenantId))
+			.limit(1);
+		if (row?.slug === fallbackTenantSlug) {
+			return { secret: key, cacheKey: `${tenantId}:reporting`, dedicated: true };
+		}
+	}
+	const { secret, cacheKey } = await resolveStripeSecret(tenantId);
+	return { secret, cacheKey, dedicated: false };
+}
+
+/** Client Stripe pentru rapoartele financiare (vezi `resolveReportingSecret`). */
+export async function getStripeReportingClient(tenantId: string): Promise<Stripe> {
+	const { secret, cacheKey } = await resolveReportingSecret(tenantId);
+	const fp = fingerprint(secret);
+	const cached = cache.get(cacheKey);
+	if (cached && cached.secretFingerprint === fp) return cached.stripe;
+
+	const stripe = buildClient(secret);
+	cache.set(cacheKey, { stripe, secretFingerprint: fp });
+	return stripe;
+}
+
+/** Cheia în clar pentru descărcarea fișierelor de raport. SERVER-ONLY. */
+export async function getStripeReportingSecret(tenantId: string): Promise<string> {
+	const { secret } = await resolveReportingSecret(tenantId);
+	return secret;
+}
+
+/**
+ * Ce cheie folosesc rapoartele, fără a expune secretul — pentru badge-ul din UI.
+ * `mode` vine din prefixul real al cheii, nu din flagul `is_test_mode` din DB
+ * (care descrie integrarea de plăți și ar minți despre rapoarte).
+ */
+export async function getStripeReportingKeyInfo(
+	tenantId: string
+): Promise<{ mode: 'live' | 'test'; restricted: boolean; dedicated: boolean }> {
+	const { secret, dedicated } = await resolveReportingSecret(tenantId);
+	return {
+		mode: secret.includes('_live_') ? 'live' : 'test',
+		restricted: secret.startsWith('rk_'),
+		dedicated
+	};
 }
 
 /**

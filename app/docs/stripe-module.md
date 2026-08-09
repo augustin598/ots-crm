@@ -275,6 +275,49 @@ Admin-only (tenantUser.role === 'owner' | 'admin'). Tenant-scoped automat pe `lo
 
 ---
 
+## Extrase Stripe pentru Keez (2026-08-05)
+
+Pagina `/[tenant]/invoices/stripe-statements` („Extrase Stripe”, în submeniul Invoices)
+produce cele trei CSV-uri pe care contabilitatea le importă în Keez ca extras bancar
+([ghid Keez](https://app.keez.ro/help/client/web_app/contabilitate/documente/extrase_bancare/import_bank_stripe.html)).
+
+| Fișier Keez | Report type Stripe | Coloane trimise |
+|---|---|---|
+| Balance Summary | `balance.summary.1` | default (= toate cele 4) |
+| Balance change from activity | `balance_change_from_activity.itemized.7` (fallback `.3`) | Default (9) + `customer_email` + `customer_name` = **11** |
+| Payouts | `payouts.itemized.5` (fallback `.3`) | Default (11) + `payout_type` |
+
+Toate cu `timezone=Europe/Bucharest` (obligatoriu — pe UTC se pierd tranzacțiile de la
+granița lunii) și interval `[1 ale lunii, 1 ale lunii următoare)`.
+
+**Fișiere:**
+- `src/lib/server/stripe/reports.ts` — specs, intervale cu DST, alegerea versiunii de
+  report type, potrivirea rulărilor existente, descărcarea CSV
+- `src/lib/server/stripe/statement-files.ts` — CSV individual + ZIP (folder pe lună)
+- `src/lib/remotes/stripe-statements.remote.ts` — overview pe an, generare lună/an, email
+- `src/routes/[tenant]/api/stripe-statements/+server.ts` — download CSV / ZIP
+- `src/routes/[tenant]/invoices/stripe-statements/+page.svelte` — UI + poll
+
+**Decizii:**
+- **Fără tabel nou în DB.** Starea vine din `reporting.report_runs` listate de la Stripe și
+  potrivite pe `(report_type, interval)`. Nicio migrare, nicio divergență CRM ↔ Stripe.
+- **Cheie LIVE obligatorie.** Reporting API respinge `sk_test_` („A live-mode API key is
+  required”); pagina afișează badge LIVE/TEST din `stripe_integration.is_test_mode`.
+- **Descărcarea trece prin server.** `result.url` (files.stripe.com) cere
+  `Authorization: Bearer <secret>` → `getStripeSecretForTenant()` în factory, niciodată spre client.
+- **Generare secvențială.** Stripe throttle-uiește rulările concurente (429).
+- **Luna în curs** se rulează tăiat la `data_available_end`; UI marchează „până la <dată>”.
+- **Poll doar cât există rulări pending** (`poll-watcher.svelte`, 4s, oprire după 5 min).
+- **Acces:** `admin.stripe.view` (owner/admin) pe pagină, remote și rută; item de meniu cu
+  `requiredRole: 'admin'`.
+- **Facturile de comision Stripe** nu fac parte din extras și n-au API — link în pagină către
+  `dashboard.stripe.com/settings/documents`.
+
+Teste: `src/lib/server/stripe/__tests__/reports.test.ts` (28) — DST martie/octombrie,
+coloanele cerute de Keez, selecția rulărilor, clamping pe date disponibile.
+
+---
+
 ## Verificare end-to-end
 
 ### Local dev

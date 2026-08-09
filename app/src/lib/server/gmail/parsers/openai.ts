@@ -1,6 +1,8 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount, detectStatus } from './index';
+import { parseAmount, detectStatus, extractInvoiceNumber } from './helpers';
+
+const INVOICE_KEYWORDS = ['invoice'];
 
 export const openaiParser: SupplierParser = {
 	id: 'openai',
@@ -18,12 +20,9 @@ export const openaiParser: SupplierParser = {
 		};
 
 		// OpenAI invoice numbers usually start with "INV" or numeric
-		const invoiceMatch = email.subject.match(/(?:invoice)\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/(?:invoice)\s*(?:number|#|no\.?)\s*:?\s*([\w-]+)/i);
-		
-		if (invoiceMatch) {
-			result.invoiceNumber = invoiceMatch[1];
-		}
+		result.invoiceNumber =
+			extractInvoiceNumber(email.subject, INVOICE_KEYWORDS) ??
+			extractInvoiceNumber(email.body, INVOICE_KEYWORDS);
 
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);
 		if (amountResult) {

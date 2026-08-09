@@ -70,9 +70,14 @@ export const getStripeIntegration = query(async () => {
 });
 
 const UpsertSchema = v.object({
+	// `rk_` = restricted key. E preferabilă unei secret key: dacă scapă, poate
+	// face doar ce i-ai bifat în Stripe, nu orice pe cont.
 	secretKey: v.pipe(
 		v.string(),
-		v.regex(/^sk_(test|live)_/, 'Secret key trebuie să înceapă cu sk_test_ sau sk_live_'),
+		v.regex(
+			/^(sk|rk)_(test|live)_/,
+			'Cheia trebuie să înceapă cu sk_test_ / sk_live_ / rk_test_ / rk_live_'
+		),
 		v.minLength(20)
 	),
 	publishableKey: v.pipe(
@@ -98,8 +103,10 @@ export const updateStripeIntegration = command(UpsertSchema, async (data) => {
 	const actor = await getActor(event);
 	assertCan(actor, 'admin.stripe.manage');
 
-	const isTest = data.secretKey.startsWith('sk_test_');
-	const isLive = data.secretKey.startsWith('sk_live_');
+	// Detecția pe `_test_`/`_live_`, nu pe prefix: acoperă și cheile restricționate
+	// (`rk_live_…`), altfel o cheie live ar fi salvată tăcut ca „nici test, nici live”.
+	const isTest = data.secretKey.includes('_test_');
+	const isLive = data.secretKey.includes('_live_');
 	const pkIsTest = data.publishableKey.startsWith('pk_test_');
 	const pkIsLive = data.publishableKey.startsWith('pk_live_');
 	if ((isTest && !pkIsTest) || (isLive && !pkIsLive)) {

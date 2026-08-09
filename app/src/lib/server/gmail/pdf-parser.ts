@@ -7,6 +7,16 @@ export interface PdfExtractedInvoiceData {
 	currency?: string;
 	issueDate?: Date;
 	dueDate?: Date;
+	status?: 'paid';
+	/**
+	 * Denumirea furnizorului din antetul documentului („Furnizor: FIDA SOLUTIONS").
+	 *
+	 * E singura urmă a comerciantului real când emailul vine de la un intermediar —
+	 * primăria trimite factura de parcare, dar furnizorul e FIDA SOLUTIONS, iar
+	 * extrasul bancar scrie tot FIDA. Potrivirea plăților o folosește ca dovadă de
+	 * comerciant (vezi `InvoiceCandidate.documentText` din banking/payment-match.ts).
+	 */
+	supplierName?: string;
 }
 
 /**
@@ -22,18 +32,66 @@ export async function extractInvoiceDataFromPdf(buffer: Buffer): Promise<PdfExtr
 	return parseInvoiceText(text);
 }
 
+/** Câte ori trebuie să difere cele două sume ca documentul să bată emailul. */
+const ORDER_OF_MAGNITUDE = 10;
+
+/**
+ * Cine dă suma facturii când și emailul, și PDF-ul spun ceva: emailul (parser per furnizor,
+ * calibrat pe formatul lui) sau documentul?
+ *
+ * Implicit rămâne emailul — parserele de furnizor citesc totalul din textul pe care îl
+ * cunosc, în timp ce extragerea din PDF e generică și poate nimeri un subtotal sau o linie
+ * de TVA. Documentul câștigă în exact două situații, amândouă însemnând că numărul din
+ * email nu poate fi totalul facturii:
+ *
+ *   1. VALUTE DIFERITE. Un total scris în altă monedă decât cea a documentului nu e o
+ *      citire mai slabă, ci un număr luat din altă parte a textului (cazul INWX: un „$1"
+ *      oarecare din corp, față de euro pe factură).
+ *   2. UN ORDIN DE MĂRIME diferență în aceeași valută. 1,00 față de 129,99 nu e o rotunjire.
+ *
+ * Rămâne pur (fără I/O) ca să poată fi testat direct.
+ */
+export function shouldPreferPdfAmount(
+	email: { amount?: number; currency?: string },
+	pdf: { amount?: number; currency?: string }
+): boolean {
+	if (pdf.amount == null || !pdf.currency) return false;
+	if (email.amount == null || !email.currency) return true;
+	if (pdf.currency !== email.currency) return true;
+	const high = Math.max(pdf.amount, email.amount);
+	const low = Math.min(pdf.amount, email.amount);
+	if (low <= 0) return high > 0;
+	return high / low >= ORDER_OF_MAGNITUDE;
+}
+
 /**
  * Parse a bare number string (no currency symbol) to cents.
  * Handles "241.30", "1,234.56", "241,30" (comma as decimal).
+ *
+ * Exportat DOAR pentru testul de acord cu celelalte două implementări ale aceleiași
+ * reguli (`parseAmount` din parsers/helpers.ts și `parseDecimalToCents` din
+ * banking/payment-match.ts): ele stau pe laturi opuse ale comparației de scor —
+ * suma facturii față de suma plății — deci o divergență ar fi o regresie tăcută
+ * de potrivire. Vezi `__tests__/decimal-separator.test.ts`.
  */
-function parseBareAmount(str: string): number | null {
+export function parseBareAmount(str: string): number | null {
 	let s = str.trim();
 	if (!s) return null;
-	const hasCommaAsDecimal = s.includes(',') && !s.includes('.');
-	if (hasCommaAsDecimal) {
+	const hasComma = s.includes(',');
+	const hasDot = s.includes('.');
+	if (hasComma && hasDot) {
+		// Both a thousands and a decimal separator are present. The separator that
+		// appears LAST in the string is the decimal one — handles both the European
+		// "1.234,56" (dot=thousands, comma=decimal) and the US "1,234.56" (reverse).
+		const lastComma = s.lastIndexOf(',');
+		const lastDot = s.lastIndexOf('.');
+		if (lastComma > lastDot) {
+			s = s.replace(/\./g, '').replace(',', '.');
+		} else {
+			s = s.replace(/,/g, '');
+		}
+	} else if (hasComma) {
 		s = s.replace(',', '.');
-	} else {
-		s = s.replace(/,/g, '');
 	}
 	const amount = Math.round(parseFloat(s) * 100);
 	return !isNaN(amount) && amount > 0 ? amount : null;
@@ -44,16 +102,78 @@ function normalizeCurrency(c: string): string {
 	return upper === 'LEI' ? 'RON' : upper;
 }
 
-function parseInvoiceText(text: string): PdfExtractedInvoiceData {
+function normalizeSymbolCurrency(c: string): string {
+	const map: Record<string, string> = { '€': 'EUR', $: 'USD', '£': 'GBP' };
+	return map[c] || normalizeCurrency(c);
+}
+
+/**
+ * Linii care urmează antetului „Furnizor" fără să fie denumirea lui: identificatori
+ * fiscali, adresă, eticheta coloanei vecine. Într-un PDF pe două coloane extragerea de
+ * text le poate intercala ÎNAINTEA denumirii, deci nu e destul să luăm prima linie de
+ * după antet. Niciuna nu poate fi și început de denumire.
+ */
+const SUPPLIER_FIELD_LABEL =
+	/^(?:(?:c\.?\s*i\.?\s*f|c\.?\s*u\.?\s*i|cod\s+fiscal|nr\.?\s*reg|reg\.?\s*com|adres[aă]|localitate|jude[țt]|iban|e-?mail|capital\s+social|cump[aă]r[aă]tor|beneficiar|denumire|furnizor)(?:[\s:.\-–]|$)|j\d{1,2}\/|str\.|bd\.)/i;
+
+/**
+ * Etichete care POT deschide o denumire reală — „Banca Transilvania", „Telekom
+ * Romania", „Client Services SRL". Le respingem doar când sunt folosite ca etichetă de
+ * câmp, adică urmate de două puncte: altfel am pierde tocmai furnizorii cu acest nume.
+ */
+const SUPPLIER_AMBIGUOUS_LABEL = /^(?:banca|client|cont|tel(?:efon)?|fax)\s*[:.\-–]/i;
+
+/** Cel puțin trei litere: respinge „RO15974040", „---", „1 buc" luate drept denumire. */
+const NAME_LETTER = '[A-Za-zĂÂÎȘȚăâîșțŞŢşţ]';
+const HAS_NAME_LETTERS = new RegExp(`${NAME_LETTER}.*${NAME_LETTER}.*${NAME_LETTER}`);
+
+/**
+ * Denumirea furnizorului din antetul unei facturi românești.
+ *
+ * Formele acoperite: „Furnizor: DENUMIRE" (pe aceeași linie) și antetul pe rând
+ * separat, urmat de denumire pe una dintre liniile următoare. Ne oprim la prima linie
+ * care arată a denumire — restul (CIF, adresă, bancă) e filtrat explicit, ca să nu
+ * întoarcem „CIF: RO15974040" drept nume de comerciant.
+ */
+function extractSupplierName(text: string): string | undefined {
+	// `\b` la final: „Furnizorul se obligă…" din condițiile de plată NU e antetul.
+	const marker = /\bfurnizor\b/i.exec(text);
+	if (!marker) return undefined;
+	const after = text.slice(marker.index + marker[0].length);
+	for (const line of after.split('\n', 5)) {
+		const segment = line.replace(/^[\s:\-–]+/, '').trim();
+		if (!segment || segment.length > 80) continue;
+		if (SUPPLIER_FIELD_LABEL.test(segment) || SUPPLIER_AMBIGUOUS_LABEL.test(segment)) continue;
+		if (!HAS_NAME_LETTERS.test(segment)) continue;
+		return segment;
+	}
+	return undefined;
+}
+
+export function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	const result: PdfExtractedInvoiceData = {};
+
+	// --- Furnizor ---
+	const supplierName = extractSupplierName(text);
+	if (supplierName) result.supplierName = supplierName;
 
 	// --- Invoice Number ---
 	// Patterns: "Invoice #123", "Invoice Number: 123", "Factura nr. 123", "Rechnung Nr. 123"
+	// Order matters: text.match() returns the first match found, so the more specific,
+	// keyword-anchored patterns MUST come before the generic "nr." pattern — otherwise
+	// a street number ("Str. Aviatorilor nr. 128") or a law citation ("Ordinului nr.
+	// 2634/2015") gets picked up before the real invoice number.
 	const invoicePatterns = [
+		// 1. Explicit invoice/factura/rechnung keyword patterns
 		/(?:invoice|factur[aă]|rechnung)\s*(?:number|num[aă]rul|nr\.?|no\.?|#|num[aă]r)\s*[:\-–]?\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă]|rechnung)\s*#\s*([\w\-/.]+)/i,
 		/(?:invoice|factur[aă])\s*:\s*([\w\-/.]+)/i,
 		/\bnum[aă]rul facturii:\s*(\d+)/i,
+		// 2. "Document number" (INWX and similar)
+		/document\s+number\s*[:\-–]?\s*([\w\-/.]+)/i,
+		// 3. Generic "nr." pattern, anchored to line start to avoid matching mid-sentence
+		// occurrences like street numbers or legal citations
+		/(?:^|\n)\s*nr\.?\s+(\d{3,})\b/i,
 		// Specific vendor patterns
 		/\b([A-Z]{2}-\d{6,})\b/, // OVH: FR-1234567
 		/\bINV-[\w-]+\b/i, // AWS: INV-xxxxx
@@ -64,8 +184,8 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 		const match = text.match(pattern);
 		if (match) {
 			const num = match[1] || match[0];
-			// Sanity check: invoice numbers are typically 3-30 chars
-			if (num.length >= 3 && num.length <= 30) {
+			// Sanity check: 3-30 chars and contains at least one digit (rejects "available" etc.)
+			if (num.length >= 3 && num.length <= 30 && /\d/.test(num)) {
 				result.invoiceNumber = num.replace(/^[:\-–\s]+/, '').trim();
 				break;
 			}
@@ -75,13 +195,51 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	// --- Amount ---
 	// Strategy: try multiple approaches from most specific to least specific
 
+	// 0. Gross totals — highest priority: "Total de plata (TVA inclus) 76,12",
+	// "TOTAL PLATĂ 8.00 LEI", "Total with VAT: 9,50 €", "Grand total", "Gesamtbetrag"
+	const grossPatterns: Array<{ re: RegExp; amountIdx: number; currencyIdx?: number }> = [
+		// „de" e OPȚIONAL: facturile românești scriu și „TOTAL PLATĂ", fără el (FIDA
+		// SOLUTIONS, parcare Suceava) — cu „de" obligatoriu suma nu se citea deloc, iar
+		// plata rămânea nepotrivită. Valuta e capturată și când e scrisă DUPĂ sumă
+		// („8.00 LEI"), fiindcă fără ea suma e ștearsă mai jos (regula „niciodată sumă
+		// fără valută"); „LEI" ajunge „RON" prin normalizeSymbolCurrency.
+		{
+			re: /total\s+(?:de\s+)?plat[aă][^\d\n]*?([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
+			amountIdx: 1,
+			currencyIdx: 2
+		},
+		{
+			re: /total\s+with\s+vat\s*[:\-–]?\s*([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
+			amountIdx: 1,
+			currencyIdx: 2
+		},
+		{
+			re: /(?:grand\s+total|gesamtbetrag)\s*[:\-–]?\s*([\d.,]+)\s*(€|\$|£|RON|EUR|USD|GBP|LEI)?/i,
+			amountIdx: 1,
+			currencyIdx: 2
+		}
+	];
+	for (const { re, amountIdx, currencyIdx } of grossPatterns) {
+		const m = text.match(re);
+		if (!m) continue;
+		const parsed = parseBareAmount(m[amountIdx]);
+		if (!parsed) continue;
+		result.amount = parsed;
+		if (currencyIdx && m[currencyIdx]) result.currency = normalizeSymbolCurrency(m[currencyIdx]);
+		break;
+	}
+
 	// 1. "Total in RON 241.30" or "Total in EUR 50.00" (exact currency + number)
-	const totalInCurrencyMatch = text.match(/(?:total)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)\s+([\d.,]+)/i);
-	if (totalInCurrencyMatch) {
-		const parsed = parseBareAmount(totalInCurrencyMatch[2]);
-		if (parsed) {
-			result.amount = parsed;
-			result.currency = normalizeCurrency(totalInCurrencyMatch[1]);
+	if (!result.amount) {
+		const totalInCurrencyMatch = text.match(
+			/(?:total)\s+(?:in|în)\s+(RON|EUR|USD|GBP|LEI)\s+([\d.,]+)/i
+		);
+		if (totalInCurrencyMatch) {
+			const parsed = parseBareAmount(totalInCurrencyMatch[2]);
+			if (parsed) {
+				result.amount = parsed;
+				result.currency = normalizeCurrency(totalInCurrencyMatch[1]);
+			}
 		}
 	}
 
@@ -152,6 +310,23 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 		}
 	}
 
+	// Currency from document context when amount was found without one:
+	// column headers like "- RON -", or RON invoices with Romanian VAT wording
+	if (result.amount && !result.currency) {
+		const columnHint = text.match(/-\s*(RON|EUR|USD|GBP|LEI)\s*-/i);
+		if (columnHint) {
+			result.currency = normalizeCurrency(columnHint[1]);
+		} else if (/\bTVA\b/i.test(text) && /\b(RON|LEI)\b/i.test(text)) {
+			result.currency = 'RON';
+		}
+	}
+
+	// Never return an amount without a currency — a wrong guess (old USD default)
+	// is worse than an empty field.
+	if (result.amount && !result.currency) {
+		delete result.amount;
+	}
+
 	// --- Dates ---
 	const datePatterns = [
 		// DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
@@ -218,6 +393,17 @@ function parseInvoiceText(text: string): PdfExtractedInvoiceData {
 	if (!result.issueDate && foundDates.length > 0) {
 		const sorted = [...foundDates].sort((a, b) => a.date.getTime() - b.date.getTime());
 		result.issueDate = sorted[0].date;
+	}
+
+	// Paid detection from PDF text (only positive signal; absence means unknown).
+	// Guard against opposite-meaning phrases: "neachitat", "de achitat" (= amount due).
+	if (
+		!/neachitat|de\s+achitat/i.test(text) &&
+		/achitat[ăa]?\s*(?:cu|integral|prin|la\s+data)|amount\s+received|paid\s+in\s+full|payment\s+received/i.test(
+			text
+		)
+	) {
+		result.status = 'paid';
 	}
 
 	return result;

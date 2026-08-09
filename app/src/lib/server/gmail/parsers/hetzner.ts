@@ -1,6 +1,6 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount, detectStatus } from './index';
+import { parseAmount, detectStatus } from './helpers';
 
 export const hetznerParser: SupplierParser = {
 	id: 'hetzner',

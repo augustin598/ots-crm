@@ -1,6 +1,8 @@
 import type { GmailMessage } from '../client';
 import type { SupplierParser, ParsedInvoice } from './index';
-import { parseAmount, detectStatus } from './index';
+import { parseAmount, detectStatus, extractInvoiceNumber } from './helpers';
+
+const INVOICE_KEYWORDS = ['invoice', 'factura', 'factură'];
 
 export const googleParser: SupplierParser = {
 	id: 'google',
@@ -22,14 +24,15 @@ export const googleParser: SupplierParser = {
 			supplierName: 'Google'
 		};
 
-		// Google invoice numbers in subject or body
-		const invoiceMatch = email.subject.match(/invoice\s*#?\s*([\w-]+)/i) ||
-			email.body.match(/(?:invoice|factur[aă])\s*(?:number|num[aă]rul|#|no\.?)\s*:?\s*([\w-]+)/i) ||
-			email.body.match(/num[aă]rul facturii:\s*(\d+)/i);
-		
-		if (invoiceMatch) {
-			result.invoiceNumber = invoiceMatch[1];
-		}
+		// Google invoice numbers in subject or body. "Numărul facturii: X" is a
+		// distinct RO idiom (marker word precedes the keyword, not the candidate) so
+		// it can't fold into extractInvoiceNumber — and it's checked FIRST, because
+		// if it were checked after the generic scan, an unrelated "invoice"/"factura"
+		// mention elsewhere in the body could win first and shadow the real number.
+		result.invoiceNumber =
+			email.body.match(/num[aă]rul facturii:\s*(\d+)/i)?.[1] ??
+			extractInvoiceNumber(email.subject, INVOICE_KEYWORDS) ??
+			extractInvoiceNumber(email.body, INVOICE_KEYWORDS);
 
 		const amountResult = parseAmount(email.body) || parseAmount(email.subject);
 		if (amountResult) {

@@ -12,8 +12,14 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import GmailSearchTab from './GmailSearchTab.svelte';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
+	// Acord corect la numeral („1 factură”, „3 facturi”, „21 de facturi”) + intervalul
+	// implicit, derivat din data curentă. Sunt testate în `gmail-search.test.ts`.
+	import { pluralRo, previousMonthRange } from '$lib/utils/gmail-search';
 	import {
 		Plus,
 		Trash2,
@@ -32,6 +38,9 @@
 	import { clientLogger } from '$lib/client-logger';
 
 	const tenantSlug = $derived(page.params.tenant);
+
+	// Taburi: facturile deja importate în CRM vs. căutarea directă în Gmail
+	let activeTab = $state('imported');
 
 	const invoicesQuery = getSupplierInvoices();
 	const allInvoices = $derived(invoicesQuery.current || []);
@@ -62,6 +71,12 @@
 	let supplierTypeFilter = $state<string>('');
 	let searchText = $state('');
 
+	// Interval implicit: luna calendaristică anterioară (fluxul de facturi e lunar).
+	// Derivat din data curentă, niciodată hardcodat.
+	const defaultRange = previousMonthRange();
+	let dateFromFilter = $state(defaultRange.from);
+	let dateToFilter = $state(defaultRange.to);
+
 	const filteredInvoices = $derived(
 		allInvoices.filter((inv) => {
 			if (statusFilter && inv.status !== statusFilter) return false;
@@ -75,8 +90,23 @@
 					(inv.supplierName || '').toLowerCase().includes(search);
 				if (!matchesSearch) return false;
 			}
+			if (dateFromFilter || dateToFilter) {
+				if (!inv.issueDate) return false;
+				const issued = new Date(inv.issueDate);
+				if (dateFromFilter && issued < new Date(`${dateFromFilter}T00:00:00`)) return false;
+				if (dateToFilter && issued > new Date(`${dateToFilter}T23:59:59`)) return false;
+			}
 			return true;
 		})
+	);
+
+	/**
+	 * `issueDate` e nullable (parserul nu extrage mereu data), iar intervalul implicit
+	 * e mereu nenul — facturile fără dată dispar tăcut de la prima încărcare a paginii.
+	 * Le numărăm ca să nu creadă nimeni că nu există.
+	 */
+	const hiddenByMissingDate = $derived(
+		dateFromFilter || dateToFilter ? allInvoices.filter((inv) => !inv.issueDate).length : 0
 	);
 
 	// Pagination
@@ -94,6 +124,8 @@
 		statusFilter;
 		supplierTypeFilter;
 		searchText;
+		dateFromFilter;
+		dateToFilter;
 		// Reset page
 		currentPage = 1;
 	});
@@ -140,6 +172,16 @@
 				return 'DigitalOcean';
 			case 'aws':
 				return 'AWS';
+			case 'directadmin':
+				return 'DirectAdmin';
+			case 'cursor':
+				return 'Cursor';
+			case 'inwx':
+				return 'INWX';
+			case 'litespeed':
+				return 'LiteSpeed';
+			case 'anthropic':
+				return 'Anthropic';
 			default:
 				return type || 'Necunoscut';
 		}
@@ -252,7 +294,8 @@
 	}
 </script>
 
-<div class="container mx-auto py-8 px-4">
+<!-- Fără padding exterior propriu: `[tenant]/+layout.svelte` are deja `<main class="… p-6">`. -->
+<div>
 	<div class="flex items-center justify-between mb-6">
 		<div>
 			<h1 class="text-2xl font-bold">Facturi Furnizori</h1>
@@ -264,259 +307,320 @@
 		</Button>
 	</div>
 
-	<!-- Sync results notification banner -->
-	{#if showSyncBanner()}
-		<div
-			class="mb-4 rounded-md bg-blue-50 border border-blue-200 p-4 flex items-center justify-between"
-		>
-			<div class="flex items-center gap-2">
-				<Info class="h-4 w-4 text-blue-600" />
-				<span class="text-sm text-blue-800">
-					Sincronizare automată: {lastSync.imported} facturi noi importate
-					{#if lastSync.errors > 0}, {lastSync.errors} erori{/if}
-					{#if lastSync.timestamp}
-						— {new Date(lastSync.timestamp).toLocaleString('ro-RO')}
-					{/if}
-				</span>
-			</div>
-			<Button variant="ghost" size="sm" onclick={dismissSyncBanner}>
-				<X class="h-4 w-4" />
-			</Button>
-		</div>
-	{/if}
-
-	<!-- Filters -->
-	<Card class="mb-6">
-		<CardContent class="pt-4">
-			<div class="flex flex-wrap gap-4 items-end">
-				<div class="flex-1 min-w-[200px]">
-					<Input
-						placeholder="Caută după nr. factură, furnizor, subiect..."
-						bind:value={searchText}
-					/>
-				</div>
-				<Select type="single" value={statusFilter} onValueChange={(v) => (statusFilter = v)}>
-					<SelectTrigger class="w-[160px]">
-						{statusFilter ? statusLabel(statusFilter) : 'Toate statusurile'}
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="">Toate</SelectItem>
-						<SelectItem value="paid">Plătită</SelectItem>
-						<SelectItem value="unpaid">Neplătită</SelectItem>
-						<SelectItem value="pending">În așteptare</SelectItem>
-					</SelectContent>
-				</Select>
-				<Select type="single" value={supplierTypeFilter} onValueChange={(v) => (supplierTypeFilter = v)}>
-					<SelectTrigger class="w-[160px]">
-						{supplierTypeFilter ? supplierTypeLabel(supplierTypeFilter) : 'Toți furnizorii'}
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="">Toți</SelectItem>
-						<SelectItem value="cpanel">cPanel</SelectItem>
-						<SelectItem value="whmcs">WHMCS</SelectItem>
-						<SelectItem value="hetzner">Hetzner</SelectItem>
-						<SelectItem value="google">Google</SelectItem>
-						<SelectItem value="ovh">OVH</SelectItem>
-						<SelectItem value="digitalocean">DigitalOcean</SelectItem>
-						<SelectItem value="aws">AWS</SelectItem>
-						<SelectItem value="unknown">Altele</SelectItem>
-					</SelectContent>
-				</Select>
-				<Select type="single" value={pageSize.toString()} onValueChange={(v) => { pageSize = parseInt(v); currentPage = 1; }}>
-					<SelectTrigger class="w-[120px]">
-						{pageSize} / pagină
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="10">10</SelectItem>
-						<SelectItem value="25">25</SelectItem>
-						<SelectItem value="50">50</SelectItem>
-						<SelectItem value="100">100</SelectItem>
-					</SelectContent>
-				</Select>
-			</div>
-		</CardContent>
-	</Card>
-
-	<!-- Bulk action bar -->
-	{#if selectedIds.size > 0}
-		<div class="mb-6 rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between">
-			<span class="text-sm font-medium">{selectedIds.size} selectate</span>
-			<div class="flex items-center gap-2">
-				<Button variant="outline" size="sm" onclick={handleBulkDownload} disabled={bulkDownloading}>
-					<Download class="h-4 w-4 mr-2" />
-					{bulkDownloading ? 'Se descarcă...' : 'Descarcă selecția'}
-				</Button>
-				<Button variant="outline" size="sm" onclick={() => (selectedIds = new Set())}>
-					Anulează selecția
-				</Button>
-				<Button variant="destructive" size="sm" onclick={handleBulkDelete} disabled={bulkDeleting}>
-					<Trash2 class="h-4 w-4 mr-2" />
-					{bulkDeleting ? 'Se șterge...' : 'Șterge selecția'}
-				</Button>
-			</div>
-		</div>
-	{/if}
-
-	<!-- Table -->
-	{#if loading}
-		<p class="text-center text-muted-foreground py-8">Se încarcă...</p>
-	{:else if filteredInvoices.length === 0}
-		<Card>
-			<CardContent class="py-12 text-center">
-				<FileText class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-				<p class="text-lg font-medium">Nicio factură găsită</p>
-				<p class="text-muted-foreground mb-4">
-					{allInvoices.length > 0
-						? 'Încearcă să modifici filtrele.'
-						: 'Importă facturi din Gmail pentru a începe.'}
-				</p>
-				{#if allInvoices.length === 0}
-					<Button href="/{tenantSlug}/banking/supplier-invoices/import">
-						<Plus class="h-4 w-4 mr-2" />
-						Import din Gmail
-					</Button>
-				{/if}
-			</CardContent>
-		</Card>
-	{:else}
-		<Card>
-			<CardContent class="p-0">
-				<div class="overflow-x-auto">
-					<table class="w-full">
-						<thead>
-							<tr class="border-b bg-muted/50">
-								<th class="w-10 p-3">
-									<Checkbox
-										checked={allPageSelected}
-										indeterminate={somePageSelected}
-										onCheckedChange={toggleSelectAll}
-									/>
-								</th>
-								<th class="text-left p-3 font-medium">Furnizor</th>
-								<th class="text-left p-3 font-medium">Nr. Factură</th>
-								<th class="text-right p-3 font-medium">Sumă</th>
-								<th class="text-left p-3 font-medium">Data</th>
-								<th class="text-left p-3 font-medium">Status</th>
-								<th class="text-left p-3 font-medium">Tip</th>
-								<th class="text-right p-3 font-medium">Acțiuni</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each paginatedInvoices as invoice}
-								<tr class="border-b hover:bg-muted/25">
-									<td class="w-10 p-3">
-										<Checkbox
-											checked={selectedIds.has(invoice.id)}
-											onCheckedChange={() => toggleSelect(invoice.id)}
-										/>
-									</td>
-									<td class="p-3">
-										<div class="font-medium">
-											{invoice.supplierName || invoice.emailFrom || '-'}
-										</div>
-										<div class="text-xs text-muted-foreground truncate max-w-[200px]">
-											{invoice.emailSubject || ''}
-										</div>
-									</td>
-									<td class="p-3">{invoice.invoiceNumber || '-'}</td>
-									<td class="p-3 text-right font-mono">
-										{#if invoice.amount}
-											{formatAmount(invoice.amount, invoice.currency as Currency)}
-										{:else}
-											-
-										{/if}
-									</td>
-									<td class="p-3">{formatDate(invoice.issueDate)}</td>
-									<td class="p-3">
-										<Badge variant={statusBadgeVariant(invoice.status)}>
-											{statusLabel(invoice.status)}
-										</Badge>
-									</td>
-									<td class="p-3">
-										<Badge variant="outline">{supplierTypeLabel(invoice.supplierType)}</Badge>
-									</td>
-									<td class="p-3 text-right">
-										<div class="flex items-center justify-end gap-1">
-											{#if invoice.pdfPath}
-												<Button
-													variant="ghost"
-													size="sm"
-													title="Vezi factura"
-													href="/{tenantSlug}/banking/supplier-invoices/{invoice.id}/pdf"
-													target="_blank"
-												>
-													<Eye class="h-4 w-4" />
-												</Button>
-											{/if}
-											{#if invoice.expenseId}
-												<Badge variant="secondary" class="text-xs cursor-pointer" onclick={() => goto(`/${tenantSlug}/banking/expenses`)}>
-													Cheltuială
-												</Badge>
-											{:else}
-												<Button
-													variant="ghost"
-													size="sm"
-													title="Creează cheltuială"
-													onclick={() => handleCreateExpense(invoice.id)}
-													disabled={creatingExpense === invoice.id}
-												>
-													<Receipt class="h-4 w-4" />
-												</Button>
-											{/if}
-											<Button
-												variant="ghost"
-												size="sm"
-												onclick={() => handleDelete(invoice.id)}
-												disabled={deleting === invoice.id}
-											>
-												<Trash2 class="h-4 w-4 text-destructive" />
-											</Button>
-										</div>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			</CardContent>
-		</Card>
-
-		<!-- Pagination -->
-		<div class="flex items-center justify-between mt-4">
-			<p class="text-sm text-muted-foreground">
-				Afișare {(currentPage - 1) * pageSize + 1}-{Math.min(
-					currentPage * pageSize,
-					filteredInvoices.length
-				)} din {filteredInvoices.length} facturi
-				{#if filteredInvoices.length !== allInvoices.length}
-					(total: {allInvoices.length})
-				{/if}
-			</p>
-			{#if totalPages > 1}
-				<div class="flex items-center gap-2">
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={currentPage <= 1}
-						onclick={() => (currentPage = currentPage - 1)}
-					>
-						<ChevronLeft class="h-4 w-4" />
-						Anterior
-					</Button>
-					<span class="text-sm text-muted-foreground">
-						Pagina {currentPage} / {totalPages}
-					</span>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={currentPage >= totalPages}
-						onclick={() => (currentPage = currentPage + 1)}
-					>
-						Următor
-						<ChevronRight class="h-4 w-4" />
+	<Tabs.Root bind:value={activeTab}>
+		<Tabs.List class="mb-4">
+			<Tabs.Trigger value="imported">Facturi importate</Tabs.Trigger>
+			<Tabs.Trigger value="gmail">Căutare Gmail</Tabs.Trigger>
+		</Tabs.List>
+		<Tabs.Content value="imported">
+			<!-- Sync results notification banner -->
+			{#if showSyncBanner()}
+				<div
+					class="mb-4 rounded-md bg-blue-50 border border-blue-200 p-4 flex items-center justify-between"
+				>
+					<div class="flex items-center gap-2">
+						<Info class="h-4 w-4 text-blue-600" />
+						<span class="text-sm text-blue-800">
+							Sincronizare automată: {lastSync.imported} facturi noi importate
+							{#if lastSync.errors > 0}, {lastSync.errors} erori{/if}
+							{#if lastSync.timestamp}
+								— {new Date(lastSync.timestamp).toLocaleString('ro-RO')}
+							{/if}
+						</span>
+					</div>
+					<Button variant="ghost" size="sm" onclick={dismissSyncBanner}>
+						<X class="h-4 w-4" />
 					</Button>
 				</div>
 			{/if}
-		</div>
-	{/if}
+
+			<!-- Filters -->
+			<Card class="mb-6">
+				<CardContent class="pt-4">
+					<div class="flex flex-wrap gap-4 items-end">
+						<div class="flex-1 min-w-[200px]">
+							<Input
+								placeholder="Caută după nr. factură, furnizor, subiect..."
+								bind:value={searchText}
+							/>
+						</div>
+						<div>
+							<Label class="text-xs" for="invoice-date-from">De la</Label>
+							<Input id="invoice-date-from" type="date" bind:value={dateFromFilter} class="w-[150px]" />
+						</div>
+						<div>
+							<Label class="text-xs" for="invoice-date-to">Până la</Label>
+							<Input id="invoice-date-to" type="date" bind:value={dateToFilter} class="w-[150px]" />
+						</div>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => {
+								const range = previousMonthRange();
+								dateFromFilter = range.from;
+								dateToFilter = range.to;
+							}}
+						>
+							Luna anterioară
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onclick={() => {
+								dateFromFilter = '';
+								dateToFilter = '';
+							}}
+						>
+							Toate datele
+						</Button>
+						<Select type="single" value={statusFilter} onValueChange={(v) => (statusFilter = v)}>
+							<SelectTrigger class="w-[160px]">
+								{statusFilter ? statusLabel(statusFilter) : 'Toate statusurile'}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="">Toate</SelectItem>
+								<SelectItem value="paid">Plătită</SelectItem>
+								<SelectItem value="unpaid">Neplătită</SelectItem>
+								<SelectItem value="pending">În așteptare</SelectItem>
+							</SelectContent>
+						</Select>
+						<Select type="single" value={supplierTypeFilter} onValueChange={(v) => (supplierTypeFilter = v)}>
+							<SelectTrigger class="w-[160px]">
+								{supplierTypeFilter ? supplierTypeLabel(supplierTypeFilter) : 'Toți furnizorii'}
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="">Toți</SelectItem>
+								<SelectItem value="cpanel">cPanel</SelectItem>
+								<SelectItem value="whmcs">WHMCS</SelectItem>
+								<SelectItem value="hetzner">Hetzner</SelectItem>
+								<SelectItem value="google">Google</SelectItem>
+								<SelectItem value="ovh">OVH</SelectItem>
+								<SelectItem value="digitalocean">DigitalOcean</SelectItem>
+								<SelectItem value="aws">AWS</SelectItem>
+								<SelectItem value="directadmin">DirectAdmin</SelectItem>
+								<SelectItem value="litespeed">LiteSpeed</SelectItem>
+								<SelectItem value="cursor">Cursor</SelectItem>
+								<SelectItem value="inwx">INWX</SelectItem>
+								<SelectItem value="anthropic">Anthropic</SelectItem>
+								<SelectItem value="unknown">Altele</SelectItem>
+							</SelectContent>
+						</Select>
+						<Select type="single" value={pageSize.toString()} onValueChange={(v) => { pageSize = parseInt(v); currentPage = 1; }}>
+							<SelectTrigger class="w-[120px]">
+								{pageSize} / pagină
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="10">10</SelectItem>
+								<SelectItem value="25">25</SelectItem>
+								<SelectItem value="50">50</SelectItem>
+								<SelectItem value="100">100</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					{#if hiddenByMissingDate > 0}
+						<p class="mt-3 text-xs text-muted-foreground">
+							{pluralRo(hiddenByMissingDate, 'factură este ascunsă', 'facturi sunt ascunse')} de
+							filtrul de dată (nu au dată de emitere extrasă).
+							<button
+								type="button"
+								class="underline underline-offset-2 hover:text-foreground"
+								onclick={() => {
+									dateFromFilter = '';
+									dateToFilter = '';
+								}}
+							>
+								Arată toate datele
+							</button>
+						</p>
+					{/if}
+				</CardContent>
+			</Card>
+
+			<!-- Bulk action bar -->
+			{#if selectedIds.size > 0}
+				<div class="mb-6 rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between">
+					<span class="text-sm font-medium">{selectedIds.size} selectate</span>
+					<div class="flex items-center gap-2">
+						<Button variant="outline" size="sm" onclick={handleBulkDownload} disabled={bulkDownloading}>
+							<Download class="h-4 w-4 mr-2" />
+							{bulkDownloading ? 'Se descarcă...' : 'Descarcă selecția'}
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => (selectedIds = new Set())}>
+							Anulează selecția
+						</Button>
+						<Button variant="destructive" size="sm" onclick={handleBulkDelete} disabled={bulkDeleting}>
+							<Trash2 class="h-4 w-4 mr-2" />
+							{bulkDeleting ? 'Se șterge...' : 'Șterge selecția'}
+						</Button>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Table -->
+			{#if loading}
+				<p class="text-center text-muted-foreground py-8">Se încarcă...</p>
+			{:else if filteredInvoices.length === 0}
+				<Card>
+					<CardContent class="py-12 text-center">
+						<FileText class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+						<p class="text-lg font-medium">Nicio factură găsită</p>
+						<p class="text-muted-foreground mb-4">
+							{allInvoices.length > 0
+								? 'Încearcă să modifici filtrele.'
+								: 'Importă facturi din Gmail pentru a începe.'}
+						</p>
+						{#if allInvoices.length === 0}
+							<Button href="/{tenantSlug}/banking/supplier-invoices/import">
+								<Plus class="h-4 w-4 mr-2" />
+								Import din Gmail
+							</Button>
+						{/if}
+					</CardContent>
+				</Card>
+			{:else}
+				<Card>
+					<CardContent class="p-0">
+						<div class="overflow-x-auto">
+							<table class="w-full">
+								<thead>
+									<tr class="border-b bg-muted/50">
+										<th class="w-10 p-3">
+											<Checkbox
+												checked={allPageSelected}
+												indeterminate={somePageSelected}
+												onCheckedChange={toggleSelectAll}
+											/>
+										</th>
+										<th class="text-left p-3 font-medium">Furnizor</th>
+										<th class="text-left p-3 font-medium">Nr. Factură</th>
+										<th class="text-right p-3 font-medium">Sumă</th>
+										<th class="text-left p-3 font-medium">Data</th>
+										<th class="text-left p-3 font-medium">Status</th>
+										<th class="text-left p-3 font-medium">Tip</th>
+										<th class="text-right p-3 font-medium">Acțiuni</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each paginatedInvoices as invoice (invoice.id)}
+										<tr class="border-b hover:bg-muted/25">
+											<td class="w-10 p-3">
+												<Checkbox
+													checked={selectedIds.has(invoice.id)}
+													onCheckedChange={() => toggleSelect(invoice.id)}
+												/>
+											</td>
+											<td class="p-3">
+												<div class="font-medium">
+													{invoice.supplierName || invoice.emailFrom || '-'}
+												</div>
+												<div class="text-xs text-muted-foreground truncate max-w-[200px]">
+													{invoice.emailSubject || ''}
+												</div>
+											</td>
+											<td class="p-3">{invoice.invoiceNumber || '-'}</td>
+											<td class="p-3 text-right font-mono">
+												{#if invoice.amount}
+													{formatAmount(invoice.amount, invoice.currency as Currency)}
+												{:else}
+													-
+												{/if}
+											</td>
+											<td class="p-3">{formatDate(invoice.issueDate)}</td>
+											<td class="p-3">
+												<Badge variant={statusBadgeVariant(invoice.status)}>
+													{statusLabel(invoice.status)}
+												</Badge>
+											</td>
+											<td class="p-3">
+												<Badge variant="outline">{supplierTypeLabel(invoice.supplierType)}</Badge>
+											</td>
+											<td class="p-3 text-right">
+												<div class="flex items-center justify-end gap-1">
+													{#if invoice.pdfPath}
+														<Button
+															variant="ghost"
+															size="sm"
+															title="Vezi factura"
+															href="/{tenantSlug}/banking/supplier-invoices/{invoice.id}/pdf"
+															target="_blank"
+														>
+															<Eye class="h-4 w-4" />
+														</Button>
+													{/if}
+													{#if invoice.expenseId}
+														<Badge variant="secondary" class="text-xs cursor-pointer" onclick={() => goto(`/${tenantSlug}/banking/expenses`)}>
+															Cheltuială
+														</Badge>
+													{:else}
+														<Button
+															variant="ghost"
+															size="sm"
+															title="Creează cheltuială"
+															onclick={() => handleCreateExpense(invoice.id)}
+															disabled={creatingExpense === invoice.id}
+														>
+															<Receipt class="h-4 w-4" />
+														</Button>
+													{/if}
+													<Button
+														variant="ghost"
+														size="sm"
+														onclick={() => handleDelete(invoice.id)}
+														disabled={deleting === invoice.id}
+													>
+														<Trash2 class="h-4 w-4 text-destructive" />
+													</Button>
+												</div>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</CardContent>
+				</Card>
+
+				<!-- Pagination -->
+				<div class="flex items-center justify-between mt-4">
+					<p class="text-sm text-muted-foreground">
+						Afișare {(currentPage - 1) * pageSize + 1}-{Math.min(
+							currentPage * pageSize,
+							filteredInvoices.length
+						)} din {filteredInvoices.length} facturi
+						{#if filteredInvoices.length !== allInvoices.length}
+							(total: {allInvoices.length})
+						{/if}
+					</p>
+					{#if totalPages > 1}
+						<div class="flex items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={currentPage <= 1}
+								onclick={() => (currentPage = currentPage - 1)}
+							>
+								<ChevronLeft class="h-4 w-4" />
+								Anterior
+							</Button>
+							<span class="text-sm text-muted-foreground">
+								Pagina {currentPage} / {totalPages}
+							</span>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={currentPage >= totalPages}
+								onclick={() => (currentPage = currentPage + 1)}
+							>
+								Următor
+								<ChevronRight class="h-4 w-4" />
+							</Button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</Tabs.Content>
+		<Tabs.Content value="gmail">
+			<GmailSearchTab />
+		</Tabs.Content>
+	</Tabs.Root>
 </div>
