@@ -23,8 +23,7 @@ User flow: cron CRM creează tasks → PersonalOPS poller procesează → drafts
 │  ├── External API endpoints (X-API-Key auth)                      │
 │  │     ├── /api/external/ads-monitor/{targets,deviations,...}     │
 │  │     ├── /api/external/ads-optimization-tasks/...               │
-│  │     ├── /api/external/telegram/link-from-bot                   │
-│  │     └── /api/external/campaigns/...                            │
+│  │     └── /api/external/telegram/link-from-bot                   │
 │  ├── DB tables (Turso)                                            │
 │  │     ├── ad_monitor_target                                      │
 │  │     ├── ad_metric_snapshot (90d retention)                     │

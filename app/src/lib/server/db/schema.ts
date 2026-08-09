@@ -5417,23 +5417,8 @@ export type NewCampaignIdempotency = typeof campaignIdempotency.$inferInsert;
 export type MetaTargetingCache = typeof metaTargetingCache.$inferSelect;
 export type NewMetaTargetingCache = typeof metaTargetingCache.$inferInsert;
 
-export const CAMPAIGN_STATUSES = [
-	'draft',
-	'building',
-	'pending_approval',
-	'active',
-	'paused',
-	'archived',
-	'failed'
-] as const;
-export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
-
-export const CAMPAIGN_BUILD_STEPS = ['none', 'campaign', 'adset', 'creative', 'ad', 'done'] as const;
-export type CampaignBuildStep = (typeof CAMPAIGN_BUILD_STEPS)[number];
-
 export const API_KEY_SCOPES = [
 	'campaigns:read',
-	'campaigns:write',
 	'clients:read',
 	'integrations:read',
 	'ads_monitor:read',

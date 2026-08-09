@@ -1,227 +1,490 @@
 <script lang="ts">
-	import type { PageData } from './$types';
-	import { enhance } from '$app/forms';
-	import IconFacebook from '$lib/components/marketing/icon-facebook.svelte';
+	import { page } from '$app/state';
+	import { SvelteSet } from 'svelte/reactivity';
+	import { toast } from 'svelte-sonner';
+	import { getReportAdAccounts } from '$lib/remotes/reports.remote';
+	import {
+		listMetaCampaignRows,
+		toggleMetaCampaign,
+		refreshMetaCampaigns
+	} from '$lib/remotes/meta-campaigns.remote';
+	import { getDefaultDateRange } from '$lib/utils/report-helpers';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
+	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
+	import {
+		computeKpis,
+		filterCampaignRows,
+		sortCampaignRows,
+		buildCampaignsCsv,
+		objectiveLabel,
+		type CampaignFilters,
+		type CampaignRow,
+		type SortState
+	} from '$lib/utils/meta-campaigns';
+	import KpiCards from '$lib/components/campaigns-ads/kpi-cards.svelte';
+	import InsightsStrip from '$lib/components/campaigns-ads/insights-strip.svelte';
+	import FilterToolbar from '$lib/components/campaigns-ads/filter-toolbar.svelte';
+	import ActiveFilters from '$lib/components/campaigns-ads/active-filters.svelte';
+	import BulkBar from '$lib/components/campaigns-ads/bulk-bar.svelte';
+	import CampaignsTable, {
+		ALL_COLS,
+		DEFAULT_COLS
+	} from '$lib/components/campaigns-ads/campaigns-table.svelte';
+	import Pagination from '$lib/components/campaigns-ads/pagination.svelte';
+	import ConfirmDialog from '$lib/components/campaigns-ads/confirm-dialog.svelte';
 
-	let { data }: { data: PageData } = $props();
+	const tenantSlug = $derived(page.params.tenant as string);
 
-	const STATUS_OPTIONS = [
-		{ value: '', label: 'Toate' },
-		{ value: 'pending_approval', label: 'În așteptare' },
-		{ value: 'active', label: 'Active' },
-		{ value: 'paused', label: 'Pauzate' },
-		{ value: 'failed', label: 'Eșuate' },
-		{ value: 'archived', label: 'Arhivate' }
-	];
+	// ---- Perioadă ----
+	const defaults = getDefaultDateRange();
+	let since = $state(defaults.since);
+	let until = $state(defaults.until);
 
-	function formatBudget(cents: number, currency: string): string {
-		const major = (cents / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2 });
-		return `${major} ${currency}`;
+	const periodDays = $derived.by(() => {
+		const s = Date.parse(since + 'T00:00:00Z');
+		const u = Date.parse(until + 'T00:00:00Z');
+		if (!Number.isFinite(s) || !Number.isFinite(u) || u < s) return 0;
+		return Math.round((u - s) / 86400000) + 1;
+	});
+
+	// ---- Conturi ----
+	const accountsQuery = getReportAdAccounts();
+	const accounts = $derived(accountsQuery.current || []);
+	/** Contul ales explicit de user; gol = auto-select (URL sau primul din listă). */
+	let chosenAccountId = $state('');
+	const selectedAccountId = $derived.by(() => {
+		if (chosenAccountId) return chosenAccountId;
+		if (accounts.length === 0) return '';
+		const urlAccount = page.url.searchParams.get('account');
+		const match = urlAccount && accounts.find((a) => a.metaAdAccountId === urlAccount);
+		return (match || accounts[0]).metaAdAccountId;
+	});
+
+	const selectedAccount = $derived(accounts.find((a) => a.metaAdAccountId === selectedAccountId));
+	const currency = $derived(selectedAccount?.currency || 'RON');
+	const accountLabel = $derived(
+		selectedAccount
+			? [selectedAccount.clientName, selectedAccount.accountName].filter(Boolean).join(' — ')
+			: null
+	);
+	const accountOptions = $derived(
+		accounts.map((a) => ({
+			id: a.metaAdAccountId,
+			label: [a.clientName, a.accountName].filter(Boolean).join(' — ') || a.metaAdAccountId
+		}))
+	);
+
+	// ---- Avertizări cont (același pattern ca raportul FB) ----
+	const paymentWarning = $derived.by(() => {
+		const account = selectedAccount;
+		if (!account) return null;
+		if (account.disableReason === 3)
+			return {
+				level: 'error' as const,
+				text: 'Contul Meta Ads a fost dezactivat din cauza problemelor de plată. Verifică metoda de plată în Business Manager.'
+			};
+		if (account.accountStatus === 3)
+			return {
+				level: 'error' as const,
+				text: 'Contul Meta Ads are o factură neachitată (UNSETTLED). Reclamele pot fi oprite până la plată.'
+			};
+		if (account.accountStatus === 9)
+			return {
+				level: 'warning' as const,
+				text: 'Contul Meta Ads e în perioadă de grație pentru plată. Achită factura pentru a evita oprirea reclamelor.'
+			};
+		return null;
+	});
+	const tokenWarning = $derived.by(() => {
+		const account = selectedAccount;
+		if (!account) return null;
+		if (account.integrationActive === false)
+			return 'Conexiunea Meta Ads pentru acest cont a fost dezactivată (token revocat/invalid). Reconectează din Settings.';
+		if (account.isActive === false)
+			return 'Acest cont Meta Ads este dezactivat. Verifică starea în Business Manager sau reconectează din Settings.';
+		if (!account.tokenExpiresAt) return null;
+		const expiresAt = new Date(account.tokenExpiresAt);
+		const daysLeft = Math.floor((expiresAt.getTime() - Date.now()) / 86400000);
+		if (daysLeft < 0)
+			return `Tokenul Meta Ads a expirat pe ${expiresAt.toLocaleDateString('ro-RO')}. Reconectează din Settings.`;
+		if (daysLeft <= 7)
+			return `Tokenul Meta Ads expiră în ${daysLeft} zile (${expiresAt.toLocaleDateString('ro-RO')}). Reconectează din Settings.`;
+		return null;
+	});
+
+	// ---- Datele campaniilor ----
+	// Derived scriibil: se re-creează la schimbarea contului/perioadei.
+	// Comenzile împrospătează instanța live prin .updates()/.refresh() —
+	// re-instanțierea cu aceleași argumente NU reface fetch-ul (memoizare per-args).
+	let rowsQuery = $derived(
+		selectedAccountId && since && until
+			? listMetaCampaignRows({ adAccountId: selectedAccountId, since, until })
+			: null
+	);
+
+	const allRows = $derived(rowsQuery?.current?.rows ?? []);
+	const dailySpend = $derived(rowsQuery?.current?.dailySpend ?? []);
+	const loading = $derived(rowsQuery?.loading ?? false);
+	const loadError = $derived(rowsQuery?.error);
+
+	// Doar pentru retry după EROARE: kit-ul evacuează instanțele eșuate din
+	// cache-ul per-args, deci re-instanțierea aici chiar reface fetch-ul.
+	function retryLoad() {
+		if (selectedAccountId && since && until) {
+			rowsQuery = listMetaCampaignRows({ adAccountId: selectedAccountId, since, until });
+		}
 	}
 
-	function statusColor(status: string): string {
-		switch (status) {
-			case 'pending_approval':
-				return 'bg-yellow-100 text-yellow-800';
-			case 'active':
-				return 'bg-green-100 text-green-800';
-			case 'paused':
-				return 'bg-gray-100 text-gray-800';
-			case 'failed':
-				return 'bg-red-100 text-red-800';
-			case 'building':
-				return 'bg-blue-100 text-blue-800';
-			default:
-				return 'bg-gray-100 text-gray-700';
+	// ---- Filtre, sortare, paginare, selecție ----
+	let filters = $state<CampaignFilters>({ q: '', status: '', objective: '', insight: '' });
+	let sort = $state<SortState>({ key: 'spend', dir: 'desc' });
+	let pageNo = $state(1);
+	let pageSize = $state(15);
+	const visibleCols = new SvelteSet<string>(DEFAULT_COLS);
+	const selected = new SvelteSet<string>();
+	const busyIds = new SvelteSet<string>();
+	let expandedId = $state<string | null>(null);
+	let refreshing = $state(false);
+	let bulkBusy = $state(false);
+	let confirmState = $state<{
+		title: string;
+		body: string;
+		confirmLabel: string;
+		tone: 'danger' | 'primary';
+		run: () => void;
+	} | null>(null);
+
+	const kpis = $derived(computeKpis(allRows, periodDays));
+	// Sortăm ÎNAINTE de filtrare: tastarea în căutare declanșează doar filtrul O(n),
+	// nu și re-sortarea (sort stabil + filtru care păstrează ordinea = același rezultat).
+	const sorted = $derived(sortCampaignRows(allRows, sort));
+	const filtered = $derived(filterCampaignRows(sorted, filters, periodDays));
+	const totalPages = $derived(Math.max(1, Math.ceil(filtered.length / pageSize)));
+	/** pageNo limitat când lista filtrată se micșorează sub pagina curentă. */
+	const currentPage = $derived(Math.min(pageNo, totalPages));
+	const paged = $derived(filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+	const objectives = $derived.by(() => {
+		const seen: Record<string, string> = {};
+		for (const r of allRows) {
+			if (r.objective && !(r.objective in seen)) seen[r.objective] = objectiveLabel(r.objective);
+		}
+		// filter-toolbar adaugă singur intrarea „Toate obiectivele"
+		return Object.entries(seen).map(([id, label]) => ({ id, label }));
+	});
+
+	function resetListState() {
+		pageNo = 1;
+		selected.clear();
+		expandedId = null;
+	}
+
+	function setFilters(f: CampaignFilters) {
+		filters = f;
+		resetListState();
+	}
+
+	function pickStatus(s: string) {
+		setFilters({ ...filters, status: filters.status === s ? '' : s });
+	}
+
+	function handleAccountChange(id: string) {
+		chosenAccountId = id;
+		setFilters({ q: '', status: '', objective: '', insight: '' });
+	}
+
+	function onSort(key: string) {
+		sort = sort.key === key ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' };
+	}
+
+	function onSelect(id: string) {
+		if (selected.has(id)) selected.delete(id);
+		else selected.add(id);
+	}
+
+	function onSelectAll(all: boolean) {
+		// Doar pagina curentă intră/iese din selecție — selecțiile de pe alte pagini rămân.
+		if (all) for (const c of paged) selected.add(c.id);
+		else for (const c of paged) selected.delete(c.id);
+	}
+
+	// ---- Acțiuni ----
+	async function runToggle(row: CampaignRow, target: 'ACTIVE' | 'PAUSED') {
+		busyIds.add(row.id);
+		try {
+			const cmd = toggleMetaCampaign({
+				adAccountId: selectedAccountId,
+				campaignId: row.id,
+				status: target
+			});
+			// .updates(instanța live) reîmprospătează lista în același roundtrip.
+			await (rowsQuery ? cmd.updates(rowsQuery) : cmd);
+			if (target === 'ACTIVE') toast.success('Campanie pornită', { description: row.name });
+			else toast.warning('Campanie pauzată', { description: row.name });
+		} catch (e) {
+			toast.error('Acțiunea a eșuat', { description: remoteErrorMessage(e, 'Încearcă din nou.') });
+		} finally {
+			busyIds.delete(row.id);
+		}
+	}
+
+	function onToggleStatus(row: CampaignRow) {
+		const target = row.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+		confirmState = {
+			title: target === 'PAUSED' ? 'Pauzezi campania?' : 'Pornești campania?',
+			body: `„${row.name}" va fi ${target === 'PAUSED' ? 'pauzată' : 'pornită'} în Meta Ads.`,
+			confirmLabel: target === 'PAUSED' ? 'Pauzează' : 'Pornește',
+			tone: target === 'PAUSED' ? 'danger' : 'primary',
+			run: () => void runToggle(row, target)
+		};
+	}
+
+	function onBulk(kind: 'activate' | 'pause') {
+		const ids = [...selected];
+		const target = kind === 'pause' ? 'PAUSED' : 'ACTIVE';
+		confirmState = {
+			title: kind === 'pause' ? `Pauzezi ${ids.length} campanii?` : `Pornești ${ids.length} campanii?`,
+			body: 'Acțiunea se aplică în Meta Ads pentru toate campaniile selectate.',
+			confirmLabel: kind === 'pause' ? 'Pauzează tot' : 'Pornește tot',
+			tone: kind === 'pause' ? 'danger' : 'primary',
+			run: async () => {
+				bulkBusy = true;
+				let ok = 0;
+				let failed = 0;
+				for (const id of ids) {
+					try {
+						await toggleMetaCampaign({ adAccountId: selectedAccountId, campaignId: id, status: target });
+						ok++;
+					} catch {
+						failed++;
+					}
+				}
+				// Un singur refresh la final, nu N (comenzile din buclă nu au .updates()).
+				await rowsQuery?.refresh();
+				bulkBusy = false;
+				selected.clear();
+				const verb = target === 'ACTIVE' ? 'pornite' : 'pauzate';
+				if (failed === 0) toast.success(`${ok} campanii ${verb}`);
+				else toast.warning(`${ok} campanii ${verb}, ${failed} eșuate`);
+			}
+		};
+	}
+
+	function exportCsv() {
+		const csv = buildCampaignsCsv(filtered, currency);
+		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = 'campanii-meta.csv';
+		a.click();
+		setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+		toast.success('Export CSV generat', {
+			description: `${filtered.length} campanii (exact ce e filtrat acum).`
+		});
+	}
+
+	async function refresh() {
+		if (!selectedAccountId) return;
+		refreshing = true;
+		try {
+			// Golește cache-ul serverului, apoi reîmprospătează instanța live.
+			await refreshMetaCampaigns({ adAccountId: selectedAccountId });
+			await rowsQuery?.refresh();
+		} catch (e) {
+			toast.error('Refresh eșuat', { description: remoteErrorMessage(e, 'Încearcă din nou.') });
+		} finally {
+			refreshing = false;
 		}
 	}
 </script>
 
-<div class="p-6 space-y-4">
-	<div class="flex items-center justify-between">
-		<div class="flex items-center gap-3">
-			<IconFacebook class="h-7 w-7" />
-			<h1 class="text-2xl font-semibold">Facebook / Meta Ads</h1>
-		</div>
-		<form method="get" class="flex gap-2 items-center">
-			<label for="status" class="text-sm text-gray-600">Filtru:</label>
-			<select
-				id="status"
-				name="status"
-				class="border rounded px-2 py-1"
-				onchange={(e) => (e.currentTarget as HTMLSelectElement).form?.submit()}
-			>
-				{#each STATUS_OPTIONS as opt}
-					<option value={opt.value} selected={data.statusFilter === opt.value}>{opt.label}</option>
-				{/each}
-			</select>
-		</form>
+<div class="fb-page">
+	{#if paymentWarning}
+		<div class={['banner', paymentWarning.level]}>{paymentWarning.text}</div>
+	{/if}
+	{#if tokenWarning}
+		<div class="banner warning">{tokenWarning}</div>
+	{/if}
+
+	<KpiCards
+		{kpis}
+		{currency}
+		{dailySpend}
+		statusFilter={filters.status}
+		onPickStatus={pickStatus}
+	/>
+
+	{#if !loadError}
+		<InsightsStrip
+			rows={allRows}
+			{periodDays}
+			active={filters.insight}
+			onPick={(id) => setFilters({ ...filters, insight: id })}
+		/>
+	{/if}
+
+	<div class="toolbar-row">
+		<FilterToolbar
+			{filters}
+			onFilters={setFilters}
+			{objectives}
+			accounts={accountOptions}
+			{selectedAccountId}
+			onSelectAccount={handleAccountChange}
+			allCols={ALL_COLS}
+			{visibleCols}
+			onToggleCol={(id) => (visibleCols.has(id) ? visibleCols.delete(id) : visibleCols.add(id))}
+			onResetCols={() => {
+				visibleCols.clear();
+				for (const c of DEFAULT_COLS) visibleCols.add(c);
+			}}
+			onExport={exportCsv}
+			onRefresh={refresh}
+			{refreshing}
+		/>
+		<DateRangePicker bind:since bind:until onchange={resetListState} />
 	</div>
 
-	<!-- Counts summary -->
-	<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-		<div class="bg-yellow-50 border border-yellow-200 rounded p-3">
-			<div class="text-xs uppercase text-yellow-800 font-semibold">În așteptare</div>
-			<div class="text-2xl font-bold text-yellow-900">{data.counts['pending_approval'] ?? 0}</div>
-		</div>
-		<div class="bg-green-50 border border-green-200 rounded p-3">
-			<div class="text-xs uppercase text-green-800 font-semibold">Active</div>
-			<div class="text-2xl font-bold text-green-900">{data.counts['active'] ?? 0}</div>
-		</div>
-		<div class="bg-gray-50 border border-gray-200 rounded p-3">
-			<div class="text-xs uppercase text-gray-700 font-semibold">Pauzate</div>
-			<div class="text-2xl font-bold text-gray-800">{data.counts['paused'] ?? 0}</div>
-		</div>
-		<div class="bg-red-50 border border-red-200 rounded p-3">
-			<div class="text-xs uppercase text-red-800 font-semibold">Eșuate</div>
-			<div class="text-2xl font-bold text-red-900">{data.counts['failed'] ?? 0}</div>
-		</div>
-	</div>
+	<ActiveFilters
+		{filters}
+		{accountLabel}
+		resultCount={filtered.length}
+		total={allRows.length}
+		onRemove={(key) => setFilters({ ...filters, [key]: '' })}
+		onClearAll={() => setFilters({ q: '', status: '', objective: '', insight: '' })}
+	/>
 
-	{#if data.campaigns.length === 0}
-		<div class="bg-white border rounded p-8 text-center text-gray-500">
-			Nicio campanie Meta {data.statusFilter ? `cu status "${data.statusFilter}"` : ''}.<br />
-			<span class="text-xs text-gray-400">
-				Workerii din PersonalOPS creează drafturi automat aici prin
-				<code class="bg-gray-100 px-1 py-0.5 rounded">POST /api/external/campaigns/draft</code>.
-			</span>
+	{#if selected.size > 0}
+		<BulkBar count={selected.size} busy={bulkBusy} onClear={() => selected.clear()} {onBulk} />
+	{/if}
+
+	{#if loadError}
+		<div class="error-card">
+			<p>{remoteErrorMessage(loadError, 'Nu s-au putut încărca campaniile Meta.')}</p>
+			<button class="btn primary" onclick={retryLoad}>Încearcă din nou</button>
 		</div>
-	{:else}
-		<div class="space-y-3">
-			{#each data.campaigns as c}
-				<div class="bg-white border rounded p-4 shadow-sm">
-					<div class="flex items-start justify-between gap-4">
-						<div class="flex-1 min-w-0">
-							<div class="flex items-center gap-2 flex-wrap">
-								<span class="text-xs font-mono uppercase {statusColor(c.status)} px-2 py-0.5 rounded">
-									{c.status}
-								</span>
-								{#if c.createdByWorkerId}
-									<span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
-										worker {c.createdByWorkerId.slice(0, 8)}
-									</span>
-								{/if}
-								{#if c.buildStep && c.buildStep !== 'done' && c.status === 'building'}
-									<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-										step: {c.buildStep}
-									</span>
-								{/if}
-							</div>
-							<h3 class="text-lg font-medium mt-1">{c.name}</h3>
-							<p class="text-sm text-gray-600">
-								<strong>{c.clientName ?? c.clientId}</strong> ·
-								{c.objective} · {formatBudget(c.budgetCents, c.currencyCode)} / {c.budgetType}
-							</p>
-							{#if c.adAccountName || c.externalAdAccountId}
-								<p class="text-xs text-gray-500 mt-1 flex items-center gap-1.5 flex-wrap">
-									<svg
-										class="h-3.5 w-3.5 text-gray-400 shrink-0"
-										fill="currentColor"
-										viewBox="0 0 20 20"
-									>
-										<path
-											d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm0 2h12v2H4V6zm0 4h12v4H4v-4z"
-										/>
-									</svg>
-									<span>Ad account:</span>
-									{#if c.adAccountName}
-										<strong class="text-gray-700 font-medium">{c.adAccountName}</strong>
-									{/if}
-									{#if c.externalAdAccountId}
-										<code
-											class="font-mono text-[11px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-600"
-										>
-											{c.externalAdAccountId.replace(/^act_/, '')}
-										</code>
-									{/if}
-								</p>
-							{/if}
-							{#if c.lastError}
-								<p class="text-sm text-red-700 mt-1">⚠ {c.lastError}</p>
-							{/if}
-							{#if c.brief}
-								<details class="mt-2">
-									<summary class="text-sm text-gray-500 cursor-pointer"
-										>Brief / Audience / Creative</summary
-									>
-									<pre
-										class="text-xs bg-gray-50 p-2 rounded overflow-x-auto mt-1">{JSON.stringify(
-											{ brief: c.brief, audience: c.audience, creative: c.creative },
-											null,
-											2
-										)}</pre>
-								</details>
-							{/if}
-							{#if c.externalCampaignId}
-								<p class="text-xs text-gray-500 mt-1 font-mono">Meta: {c.externalCampaignId}</p>
-							{/if}
-						</div>
-						<div class="flex flex-col gap-2 shrink-0">
-							{#if c.status === 'pending_approval'}
-								<form method="POST" action="?/patch" use:enhance>
-									<input type="hidden" name="id" value={c.id} />
-									<input type="hidden" name="action" value="approve" />
-									<button
-										class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm w-full"
-										>Aprobă</button
-									>
-								</form>
-								<form
-									method="POST"
-									action="?/patch"
-									use:enhance
-									onsubmit={(e) => {
-										if (
-											!confirm(
-												'Respinge și șterge entitățile din Meta? (campaign + adset + creative + ad). Acțiunea nu poate fi anulată.'
-											)
-										)
-											e.preventDefault();
-									}}
-								>
-									<input type="hidden" name="id" value={c.id} />
-									<input type="hidden" name="action" value="archive" />
-									<input type="hidden" name="deleteFromPlatform" value="1" />
-									<button
-										class="bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1 rounded text-sm w-full"
-										title="Marchează archived în CRM ȘI șterge entitățile din Meta">Respinge + curăță Meta</button
-									>
-								</form>
-								<form method="POST" action="?/patch" use:enhance>
-									<input type="hidden" name="id" value={c.id} />
-									<input type="hidden" name="action" value="archive" />
-									<button
-										class="bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded text-xs w-full text-gray-700"
-										title="Doar archived în CRM; entitățile rămân PAUSED în Meta"
-										>Respinge (păstrează în Meta)</button
-									>
-								</form>
-							{:else if c.status === 'active'}
-								<form method="POST" action="?/patch" use:enhance>
-									<input type="hidden" name="id" value={c.id} />
-									<input type="hidden" name="action" value="pause" />
-									<button
-										class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-sm w-full"
-										>Pauzează</button
-									>
-								</form>
-							{:else if c.status === 'paused'}
-								<form method="POST" action="?/patch" use:enhance>
-									<input type="hidden" name="id" value={c.id} />
-									<input type="hidden" name="action" value="approve" />
-									<button
-										class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm w-full"
-										>Reactivează</button
-									>
-								</form>
-							{/if}
-							<span class="text-xs text-gray-400 text-right">
-								{new Date(c.createdAt).toLocaleString('ro-RO')}
-							</span>
-						</div>
-					</div>
-				</div>
+	{:else if loading && allRows.length === 0}
+		<div class="skeleton" aria-busy="true">
+			{#each Array.from({ length: 6 }, (_, i) => i) as i (i)}
+				<div class="skeleton-row"></div>
 			{/each}
 		</div>
+	{:else}
+		<CampaignsTable
+			rows={paged}
+			cols={visibleCols}
+			totalsRows={filtered}
+			{currency}
+			{periodDays}
+			{selected}
+			{expandedId}
+			{sort}
+			adAccountId={selectedAccountId}
+			{tenantSlug}
+			{busyIds}
+			{onSort}
+			{onSelect}
+			{onSelectAll}
+			onExpand={(id) => (expandedId = expandedId === id ? null : id)}
+			{onToggleStatus}
+		/>
+
+		<Pagination
+			total={filtered.length}
+			page={currentPage}
+			{pageSize}
+			onPage={(n) => (pageNo = n)}
+			onPageSize={(n) => {
+				pageSize = n;
+				pageNo = 1;
+			}}
+		/>
 	{/if}
 </div>
+
+{#if confirmState}
+	{@const c = confirmState}
+	<ConfirmDialog
+		title={c.title}
+		body={c.body}
+		confirmLabel={c.confirmLabel}
+		tone={c.tone}
+		onConfirm={() => {
+			confirmState = null;
+			c.run();
+		}}
+		onCancel={() => (confirmState = null)}
+	/>
+{/if}
+
+<style>
+	.fb-page {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	.toolbar-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.toolbar-row > :global(:first-child) {
+		flex: 1;
+		min-width: 0;
+	}
+	.banner {
+		border-radius: var(--ca-radius);
+		padding: 10px 14px;
+		font-size: 13px;
+		border: 1px solid;
+	}
+	.banner.warning {
+		background: var(--ca-warning-50);
+		border-color: var(--ca-warning);
+		color: #92400e;
+	}
+	.banner.error {
+		background: var(--ca-danger-50);
+		border-color: var(--ca-danger);
+		color: #991b1b;
+	}
+	.error-card {
+		background: var(--ca-surface);
+		border: 1px solid var(--ca-danger);
+		border-radius: var(--ca-radius);
+		padding: 22px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		align-items: flex-start;
+		font-size: 13px;
+		color: var(--ca-text-2);
+	}
+	.error-card p {
+		margin: 0;
+	}
+	.skeleton {
+		background: var(--ca-surface);
+		border: 1px solid var(--ca-border);
+		border-radius: var(--ca-radius);
+		padding: 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.skeleton-row {
+		height: 44px;
+		border-radius: 8px;
+		background: linear-gradient(90deg, var(--ca-surface-2) 25%, var(--ca-border) 50%, var(--ca-surface-2) 75%);
+		background-size: 200% 100%;
+		animation: shimmer 1.4s infinite;
+	}
+	@keyframes shimmer {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
+		}
+	}
+</style>
