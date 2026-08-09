@@ -1,39 +1,51 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
+
+	const tenantSlug = $derived(page.params.tenant as string);
 </script>
 
-<div class="p-6 space-y-4">
-	<div class="flex items-center gap-3">
+<div class="soon-card">
+	<div class="soon-head">
 		<IconTiktok class="h-7 w-7" />
-		<h1 class="text-2xl font-semibold">TikTok Ads</h1>
-		<span class="text-xs uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded">În curând</span>
+		<h2>TikTok</h2>
+		<span class="badge warn">În curând</span>
 	</div>
-
-	<div class="bg-white border rounded p-8 space-y-3">
-		<h2 class="text-lg font-medium">Crearea campaniilor TikTok nu este încă implementată</h2>
-		<p class="text-sm text-gray-600">
-			MVP-ul actual susține doar <strong>Meta Ads</strong> (Facebook + Instagram). API-ul TikTok
-			pentru sincronizarea conturilor și citirea datelor este deja conectat (vezi
-			<code class="bg-gray-100 px-1 py-0.5 rounded text-xs">/{'{tenant}'}/settings/tiktok-ads</code>),
-			dar metodele de creare a campaniilor (<code
-				class="bg-gray-100 px-1 py-0.5 rounded text-xs">createCampaign</code
-			>, <code class="bg-gray-100 px-1 py-0.5 rounded text-xs">createAdGroup</code>,
-			<code class="bg-gray-100 px-1 py-0.5 rounded text-xs">createAd</code>) trebuie adăugate în
-			<code class="bg-gray-100 px-1 py-0.5 rounded text-xs"
-				>app/src/lib/server/tiktok-ads/client.ts</code
-			>.
-		</p>
-		<p class="text-sm text-gray-600">
-			Workerul din PersonalOPS deja acceptă <code class="bg-gray-100 px-1 py-0.5 rounded text-xs"
-				>platform: 'tiktok'</code
-			> ca tip, dar API-ul CRM returnează 422 <code
-				class="bg-gray-100 px-1 py-0.5 rounded text-xs">platform_not_implemented</code
-			>
-			pentru orice request care nu e Meta.
-		</p>
-		<div class="text-xs text-gray-500 pt-2 border-t">
-			📋 Roadmap: vezi <code class="bg-gray-100 px-1 py-0.5 rounded">TIKTOK_ADS_AUDIT.md</code> în
-			rădăcina repo-ului CRM.
-		</div>
-	</div>
+	<p>
+		Gestionarea campaniilor TikTok din CRM se conectează la API-ul intern într-o iterație
+		viitoare. Datele de performanță sunt deja sincronizate și disponibile în rapoarte.
+	</p>
+	<a class="btn primary" href={`/${tenantSlug}/reports/tiktok-ads`}>Vezi raportul TikTok</a>
 </div>
+
+<style>
+	.soon-card {
+		background: var(--ca-surface);
+		border: 1px solid var(--ca-border);
+		border-radius: var(--ca-radius-lg);
+		box-shadow: var(--ca-shadow-sm);
+		padding: 28px;
+		max-width: 640px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		align-items: flex-start;
+	}
+	.soon-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.soon-head h2 {
+		margin: 0;
+		font-size: 18px;
+		font-weight: 600;
+		color: var(--ca-text);
+	}
+	.soon-card p {
+		margin: 0;
+		font-size: 13px;
+		color: var(--ca-text-2);
+		line-height: 1.6;
+	}
+</style>

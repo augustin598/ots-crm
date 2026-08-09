@@ -109,7 +109,7 @@ async function resolveAccountIntegration(adAccountId: string, tenantId: string):
 
 function throwMetaApiError(err: unknown, context?: { adAccountId?: string; integrationId?: string }): never {
 	const msg = err instanceof Error ? err.message : String(err);
-	logError('meta-campaigns', `API error${context?.adAccountId ? ` for account ${context.adAccountId}` : ''}`, {
+	logError('meta-ads', `API error${context?.adAccountId ? ` for account ${context.adAccountId}` : ''}`, {
 		metadata: { error: msg, ...context }
 	});
 	if (msg.includes('validating access token') || msg.includes('session has been invalidated') || msg.includes('Session has expired')) {
