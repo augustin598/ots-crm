@@ -1,5 +1,13 @@
 # Multi-Platform Ads Automation Plan
 
+> **Notă (2026-08-09):** Fluxul PersonalOPS campaigns a fost ELIMINAT din CRM
+> (`/api/external/campaigns/*`, `src/lib/server/campaigns/`,
+> `src/lib/server/meta-ads/campaign-create.ts`). Pagina
+> `/[tenant]/campaigns-ads/facebook` folosește acum direct API-ul Meta al
+> CRM-ului prin remote functions (`meta-campaigns.remote.ts`). Secțiunile de
+> mai jos care se bazează pe `buildMetaCampaign`, `ads_campaign_creator` sau
+> draft-urile PersonalOPS sunt istorice și nu mai reflectă codul.
+
 **Status:** DRAFT v1 (plan-mode, no execution)
 **Author:** Piticu (CEO agent) + Gemini consult + read-only investigation worker `w_mot46koh_c`
 **Date:** 2026-05-06
@@ -301,7 +309,7 @@ Sprint 6+ = Phase 1 Google write.
 ## 8. Reference Files (existing)
 
 - Meta optimizer: `src/services/workers/ads-optimizer/` (PersonalOPS)
-- Meta campaign creator: `src/lib/server/meta-ads/campaign-create.ts:481` (`buildMetaCampaign`)
+- Meta campaign creator: eliminat 2026-08 (fostul `campaign-create.ts` / `buildMetaCampaign`)
 - Meta client: `src/lib/server/meta-ads/client.ts`
 - Google client (read-only): `src/lib/server/google-ads/client.ts`
 - TikTok client (read-only): `src/lib/server/tiktok-ads/client.ts`
