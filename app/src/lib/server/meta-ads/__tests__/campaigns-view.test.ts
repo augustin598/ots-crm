@@ -55,6 +55,7 @@ const camp = (over: Partial<MetaAdsCampaignInfo> = {}): MetaAdsCampaignInfo => (
 	campaignId: 'c1',
 	campaignName: 'C1',
 	status: 'ACTIVE',
+	effectiveStatus: 'ACTIVE',
 	objective: 'OUTCOME_SALES',
 	optimizationGoal: 'OFFSITE_CONVERSIONS',
 	dailyBudget: '10000',
@@ -107,7 +108,7 @@ describe('buildCampaignRows', () => {
 	it('campaniile ACTIVE fără insights apar ca zero-rows; PAUSED fără insights nu apar', () => {
 		const { rows } = buildCampaignRows(
 			[],
-			[camp(), camp({ campaignId: 'c2', campaignName: 'C2', status: 'PAUSED' })],
+			[camp(), camp({ campaignId: 'c2', campaignName: 'C2', status: 'PAUSED', effectiveStatus: 'PAUSED' })],
 			new Map(),
 			'2026-08-01',
 			'2026-08-03'
@@ -117,18 +118,29 @@ describe('buildCampaignRows', () => {
 		expect(rows[0].spark).toEqual([0, 0, 0]);
 	});
 
-	it('WITH_ISSUES și IN_PROCESS fără insights apar și ele', () => {
+	it('WITH_ISSUES și IN_PROCESS (effective) fără insights apar și ele', () => {
 		const { rows } = buildCampaignRows(
 			[],
 			[
-				camp({ campaignId: 'c3', status: 'WITH_ISSUES' }),
-				camp({ campaignId: 'c4', status: 'IN_PROCESS' })
+				camp({ campaignId: 'c3', status: 'ACTIVE', effectiveStatus: 'WITH_ISSUES' }),
+				camp({ campaignId: 'c4', status: 'ACTIVE', effectiveStatus: 'IN_PROCESS' })
 			],
 			new Map(),
 			'2026-08-01',
 			'2026-08-01'
 		);
 		expect(rows.map((r) => r.status).sort()).toEqual(['IN_PROCESS', 'WITH_ISSUES']);
+	});
+
+	it('statusul rândului e cel EFECTIV, nu cel configurat', () => {
+		const { rows } = buildCampaignRows(
+			[insight()],
+			[camp({ status: 'ACTIVE', effectiveStatus: 'WITH_ISSUES' })],
+			new Map(),
+			'2026-08-01',
+			'2026-08-01'
+		);
+		expect(rows[0].status).toBe('WITH_ISSUES');
 	});
 
 	it('insight-urile orfane devin status UNKNOWN', () => {

@@ -11,10 +11,12 @@
 	const max = $derived(Math.max(...data, 1));
 	const min = $derived(Math.min(...data, 0));
 	const range = $derived(max - min || 1);
+	// Math.max(..., 1) evită 0/0 = NaN pe serii de un singur punct (Azi/1 ale lunii).
+	const denom = $derived(Math.max(data.length - 1, 1));
 	const pts = $derived(
 		data
 			.map((v, i) => {
-				const x = (i / (data.length - 1)) * w;
+				const x = (i / denom) * w;
 				const y = h - ((v - min) / range) * h;
 				return `${x},${y}`;
 			})

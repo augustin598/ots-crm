@@ -12,17 +12,9 @@
 		dailySpend: Array<{ date: string; spend: number }>;
 		statusFilter: string;
 		onPickStatus: (s: string) => void;
-		showSparkline?: boolean;
 	}
 
-	let {
-		kpis,
-		currency,
-		dailySpend,
-		statusFilter,
-		onPickStatus,
-		showSparkline = true
-	}: Props = $props();
+	let { kpis, currency, dailySpend, statusFilter, onPickStatus }: Props = $props();
 
 	const sparkData = $derived(dailySpend.map((d) => d.spend));
 	const paceTone = $derived(kpis.pace >= 0.95 ? 'danger' : kpis.pace >= 0.8 ? 'warn' : 'ok');
@@ -60,9 +52,7 @@
 		<span class="kpi-value">{kpis.active}</span>
 		<span class="kpi-foot">
 			<span class="kpi-delta">{fmtMoneyRound(kpis.dailyBudgetActive, currency)} / zi alocat</span>
-			{#if showSparkline}
-				<Sparkline data={sparkData} color="#10b981" />
-			{/if}
+			<Sparkline data={sparkData} color="#10b981" />
 		</span>
 	</button>
 

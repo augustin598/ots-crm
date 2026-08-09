@@ -113,8 +113,9 @@
 	});
 
 	// ---- Datele campaniilor ----
-	// Derived scriibil: se re-creează la schimbarea contului/perioadei,
-	// iar refetch() îl re-instanțiază manual după comenzi (pattern reports).
+	// Derived scriibil: se re-creează la schimbarea contului/perioadei.
+	// Comenzile împrospătează instanța live prin .updates()/.refresh() —
+	// re-instanțierea cu aceleași argumente NU reface fetch-ul (memoizare per-args).
 	let rowsQuery = $derived(
 		selectedAccountId && since && until
 			? listMetaCampaignRows({ adAccountId: selectedAccountId, since, until })
@@ -126,7 +127,9 @@
 	const loading = $derived(rowsQuery?.loading ?? false);
 	const loadError = $derived(rowsQuery?.error);
 
-	function refetch() {
+	// Doar pentru retry după EROARE: kit-ul evacuează instanțele eșuate din
+	// cache-ul per-args, deci re-instanțierea aici chiar reface fetch-ul.
+	function retryLoad() {
 		if (selectedAccountId && since && until) {
 			rowsQuery = listMetaCampaignRows({ adAccountId: selectedAccountId, since, until });
 		}
@@ -150,11 +153,16 @@
 		tone: 'danger' | 'primary';
 		run: () => void;
 	} | null>(null);
-	let toolbarRef = $state<{ focusSearch: () => void } | null>(null);
 
 	const kpis = $derived(computeKpis(allRows, periodDays));
-	const filtered = $derived(sortCampaignRows(filterCampaignRows(allRows, filters, periodDays), sort));
-	const paged = $derived(filtered.slice((pageNo - 1) * pageSize, pageNo * pageSize));
+	// Sortăm ÎNAINTE de filtrare: tastarea în căutare declanșează doar filtrul O(n),
+	// nu și re-sortarea (sort stabil + filtru care păstrează ordinea = același rezultat).
+	const sorted = $derived(sortCampaignRows(allRows, sort));
+	const filtered = $derived(filterCampaignRows(sorted, filters, periodDays));
+	const totalPages = $derived(Math.max(1, Math.ceil(filtered.length / pageSize)));
+	/** pageNo limitat când lista filtrată se micșorează sub pagina curentă. */
+	const currentPage = $derived(Math.min(pageNo, totalPages));
+	const paged = $derived(filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize));
 	const objectives = $derived.by(() => {
 		const seen: Record<string, string> = {};
 		for (const r of allRows) {
@@ -194,18 +202,24 @@
 	}
 
 	function onSelectAll(all: boolean) {
-		selected.clear();
+		// Doar pagina curentă intră/iese din selecție — selecțiile de pe alte pagini rămân.
 		if (all) for (const c of paged) selected.add(c.id);
+		else for (const c of paged) selected.delete(c.id);
 	}
 
 	// ---- Acțiuni ----
 	async function runToggle(row: CampaignRow, target: 'ACTIVE' | 'PAUSED') {
 		busyIds.add(row.id);
 		try {
-			await toggleMetaCampaign({ adAccountId: selectedAccountId, campaignId: row.id, status: target });
+			const cmd = toggleMetaCampaign({
+				adAccountId: selectedAccountId,
+				campaignId: row.id,
+				status: target
+			});
+			// .updates(instanța live) reîmprospătează lista în același roundtrip.
+			await (rowsQuery ? cmd.updates(rowsQuery) : cmd);
 			if (target === 'ACTIVE') toast.success('Campanie pornită', { description: row.name });
 			else toast.warning('Campanie pauzată', { description: row.name });
-			refetch();
 		} catch (e) {
 			toast.error('Acțiunea a eșuat', { description: remoteErrorMessage(e, 'Încearcă din nou.') });
 		} finally {
@@ -244,12 +258,13 @@
 						failed++;
 					}
 				}
+				// Un singur refresh la final, nu N (comenzile din buclă nu au .updates()).
+				await rowsQuery?.refresh();
 				bulkBusy = false;
 				selected.clear();
 				const verb = target === 'ACTIVE' ? 'pornite' : 'pauzate';
 				if (failed === 0) toast.success(`${ok} campanii ${verb}`);
 				else toast.warning(`${ok} campanii ${verb}, ${failed} eșuate`);
-				refetch();
 			}
 		};
 	}
@@ -271,24 +286,16 @@
 		if (!selectedAccountId) return;
 		refreshing = true;
 		try {
+			// Golește cache-ul serverului, apoi reîmprospătează instanța live.
 			await refreshMetaCampaigns({ adAccountId: selectedAccountId });
-			refetch();
+			await rowsQuery?.refresh();
 		} catch (e) {
 			toast.error('Refresh eșuat', { description: remoteErrorMessage(e, 'Încearcă din nou.') });
 		} finally {
 			refreshing = false;
 		}
 	}
-
-	function onKeydown(e: KeyboardEvent) {
-		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-			e.preventDefault();
-			toolbarRef?.focusSearch();
-		}
-	}
 </script>
-
-<svelte:window onkeydown={onKeydown} />
 
 <div class="fb-page">
 	{#if paymentWarning}
@@ -317,7 +324,6 @@
 
 	<div class="toolbar-row">
 		<FilterToolbar
-			bind:this={toolbarRef}
 			{filters}
 			onFilters={setFilters}
 			{objectives}
@@ -354,7 +360,7 @@
 	{#if loadError}
 		<div class="error-card">
 			<p>{remoteErrorMessage(loadError, 'Nu s-au putut încărca campaniile Meta.')}</p>
-			<button class="btn primary" onclick={refetch}>Încearcă din nou</button>
+			<button class="btn primary" onclick={retryLoad}>Încearcă din nou</button>
 		</div>
 	{:else if loading && allRows.length === 0}
 		<div class="skeleton" aria-busy="true">
@@ -384,7 +390,7 @@
 
 		<Pagination
 			total={filtered.length}
-			page={pageNo}
+			page={currentPage}
 			{pageSize}
 			onPage={(n) => (pageNo = n)}
 			onPageSize={(n) => {

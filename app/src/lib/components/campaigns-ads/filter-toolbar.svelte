@@ -49,12 +49,6 @@
 		refreshing
 	}: Props = $props();
 
-	let searchEl: HTMLInputElement | undefined;
-
-	export function focusSearch() {
-		searchEl?.focus();
-	}
-
 	const STATUS_OPTIONS: Option[] = [
 		{ id: '', label: 'Toate' },
 		{ id: 'ACTIVE', label: 'Active' },
@@ -82,11 +76,8 @@
 <div class="toolbar">
 	<div class="search-input">
 		<IconSearch />
+		<!-- Fără shortcut ⌘K: e deja folosit de paleta globală din sidebar. -->
 		<input
-			{@attach (el) => {
-				searchEl = el;
-				return () => (searchEl = undefined);
-			}}
 			placeholder="Caută campanie, ID…"
 			value={filters.q}
 			oninput={(e) => onFilters({ ...filters, q: e.currentTarget.value })}
@@ -97,7 +88,6 @@
 				}
 			}}
 		/>
-		<span class="search-kbd">⌘K</span>
 	</div>
 
 	<DropdownChip

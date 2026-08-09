@@ -63,7 +63,6 @@ async function main() {
 	const name = `PersonalOPS — ads automation (${new Date().toISOString().slice(0, 10)})`;
 	const scopes = JSON.stringify([
 		'campaigns:read',
-		'campaigns:write',
 		'clients:read',
 		'integrations:read',
 		'ads_monitor:read',

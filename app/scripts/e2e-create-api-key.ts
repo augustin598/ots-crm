@@ -17,7 +17,7 @@ config({ path: resolve(import.meta.dir, '..', '.env') });
 
 const TENANT_SLUG = 'ots';
 const KEY_NAME = 'e2e-test';
-const SCOPES = ['campaigns:read', 'campaigns:write', 'clients:read', 'integrations:read'];
+const SCOPES = ['campaigns:read', 'clients:read', 'integrations:read'];
 
 const url = process.env.SQLITE_URI;
 const authToken = process.env.SQLITE_AUTH_TOKEN;

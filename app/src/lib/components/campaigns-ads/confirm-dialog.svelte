@@ -12,9 +12,28 @@
 
 	let { title, body, confirmLabel = 'Confirmă', tone = 'danger', onConfirm, onCancel }: Props = $props();
 
+	let submitted = false;
+	function confirmOnce() {
+		// Gardă anti-dublare: Enter pe window + activarea nativă a butonului focusat
+		// ar executa altfel acțiunea de două ori.
+		if (submitted) return;
+		submitted = true;
+		onConfirm();
+	}
+
 	function onKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') onCancel();
-		if (e.key === 'Enter') onConfirm();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			onCancel();
+			return;
+		}
+		if (e.key === 'Enter') {
+			// Cu focus pe un buton (ex. Anulează), lasă butonul să decidă —
+			// altfel Enter pe Anulează ar CONFIRMA acțiunea.
+			if (document.activeElement instanceof HTMLButtonElement) return;
+			e.preventDefault();
+			confirmOnce();
+		}
 	}
 </script>
 
@@ -38,7 +57,7 @@
 			<button class="btn" onclick={onCancel}>Anulează</button>
 			<button
 				class={['btn', tone === 'danger' ? 'danger solid' : 'primary']}
-				onclick={onConfirm}
+				onclick={confirmOnce}
 				{@attach (node) => node.focus()}
 			>
 				{confirmLabel}

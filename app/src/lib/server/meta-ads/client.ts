@@ -66,7 +66,10 @@ export interface MetaAdsCampaignInsight {
 export interface MetaAdsCampaignInfo {
 	campaignId: string;
 	campaignName: string;
+	/** Statusul CONFIGURAT (ACTIVE/PAUSED/ARCHIVED) — ce a setat advertiserul. */
 	status: string;
+	/** Statusul EFECTIV de livrare (poate fi WITH_ISSUES/IN_PROCESS/CAMPAIGN_PAUSED). */
+	effectiveStatus: string;
 	objective: string;
 	optimizationGoal: string;
 	dailyBudget: string | null;
@@ -310,6 +313,24 @@ export function getActionCount(actions: any[] | undefined, actionType: string): 
 	const action = actions.find((a: any) => a.action_type === actionType);
 	return action ? parseFloat(action.value || '0') : 0;
 }
+
+/**
+ * Map actionType → câmpul numeric pre-extras de pe MetaAdsCampaignInsight.
+ * Partajat de agregările care aliniază conversiile la optimization_goal
+ * (campaigns-view.ts; reports.remote.ts are încă copii inline istorice).
+ */
+export const INSIGHT_ACTION_TO_FIELD: Record<string, keyof MetaAdsCampaignInsight> = {
+	'offsite_conversion.fb_pixel_purchase': 'purchases',
+	purchase: 'purchases',
+	'offsite_conversion.fb_pixel_lead': 'leads',
+	lead: 'leads',
+	click_to_call_native_call_placed: 'callsPlaced',
+	link_click: 'linkClicks',
+	landing_page_view: 'landingPageViews',
+	video_view: 'videoViews',
+	post_engagement: 'pageEngagement',
+	page_engagement: 'pageEngagement'
+};
 
 /** Map optimization_goal (from ad set) → action type + labels */
 export const OPTIMIZATION_GOAL_MAP: Record<string, { actionType: string; label: string; cpaLabel: string }> = {
@@ -949,7 +970,7 @@ export async function listActiveCampaigns(
 	logInfo('meta-ads', `Fetching campaigns for ${adAccountId}`);
 
 	const proof = generateAppSecretProof(accessToken, appSecret);
-	const fields = 'id,name,status,objective,daily_budget,lifetime_budget,start_time,stop_time';
+	const fields = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time';
 
 	const campaigns: MetaAdsCampaignInfo[] = [];
 	let url: string | null = `${META_GRAPH_URL}/${adAccountId}/campaigns?${new URLSearchParams({
@@ -977,6 +998,7 @@ export async function listActiveCampaigns(
 					campaignId: c.id || '',
 					campaignName: c.name || '',
 					status: c.status || 'UNKNOWN',
+					effectiveStatus: c.effective_status || c.status || 'UNKNOWN',
 					objective: c.objective || '',
 					optimizationGoal: '',
 					dailyBudget: c.daily_budget || null,
@@ -1112,8 +1134,9 @@ export async function getCampaignWithAdsets(
 	logInfo('meta-ads', `Fetching campaign+adsets for ${campaignId}`);
 
 	const proof = generateAppSecretProof(accessToken, appSecret);
-	// `account_currency` nu există pe nodul Campaign în Graph v25 — cererea lui
-	// arunca (#100) și pica tot apelul; valuta vine din fallback-urile apelanților.
+	// `account_currency` nu e un câmp al nodului Campaign (e de nivel insights) —
+	// cererea lui aici arunca (#100) și pica tot apelul. Valuta se ia mai jos din
+	// subcall-ul de insights, unde câmpul chiar există.
 	const fields = 'id,name,daily_budget,lifetime_budget,adsets{id,name,daily_budget,lifetime_budget,status}';
 	const params = new URLSearchParams({ fields, access_token: accessToken, appsecret_proof: proof });
 
@@ -1147,6 +1170,7 @@ export async function getCampaignWithAdsets(
 	}));
 
 	// Fetch last-7d adset insights from the campaign (level=adset)
+	let accountCurrency: string | null = null;
 	if (adsets.length > 0) {
 		try {
 			const today = new Date();
@@ -1154,7 +1178,7 @@ export async function getCampaignWithAdsets(
 			const pad = (n: number) => String(n).padStart(2, '0');
 			const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 			const insightParams = new URLSearchParams({
-				fields: 'adset_id,spend,cost_per_action_type',
+				fields: 'adset_id,spend,cost_per_action_type,account_currency',
 				level: 'adset',
 				time_range: JSON.stringify({ since: fmt(since7), until: fmt(today) }),
 				access_token: accessToken,
@@ -1170,6 +1194,9 @@ export async function getCampaignWithAdsets(
 			if (!insightData.error) {
 				const insightMap = new Map<string, { spend: number; cpl: number | null }>();
 				for (const row of insightData.data ?? []) {
+					if (!accountCurrency && typeof row.account_currency === 'string') {
+						accountCurrency = row.account_currency;
+					}
 					const spend = parseFloat(row.spend ?? '0');
 					let cpl: number | null = null;
 					for (const cpa of row.cost_per_action_type ?? []) {
@@ -1208,9 +1235,38 @@ export async function getCampaignWithAdsets(
 		name: data.name ?? '',
 		daily_budget: data.daily_budget ? Number(data.daily_budget) : null,
 		lifetime_budget: data.lifetime_budget ? Number(data.lifetime_budget) : null,
-		accountCurrency: typeof data.account_currency === 'string' ? data.account_currency : null,
+		// null când campania nu are adsets sau n-are insights în ultimele 7 zile —
+		// apelanții cad pe valuta din DB / 'RON'.
+		accountCurrency,
 		adsets
 	};
+}
+
+/**
+ * Contul (fără prefixul act_) căruia îi aparține o campanie — pentru verificarea
+ * scoping-ului înainte de mutații: un campaignId venit de la client nu trebuie
+ * acceptat doar pentru că tokenul tenantului îl poate atinge.
+ */
+export async function getCampaignAccountId(
+	campaignId: string,
+	accessToken: string,
+	appSecret: string
+): Promise<string | null> {
+	const proof = generateAppSecretProof(accessToken, appSecret);
+	const params = new URLSearchParams({
+		fields: 'account_id',
+		access_token: accessToken,
+		appsecret_proof: proof
+	});
+	const res: Response = await fetch(`${META_GRAPH_URL}/${campaignId}?${params}`, {
+		signal: AbortSignal.timeout(30_000)
+	});
+	const data: any = await res.json();
+	if (!res.ok || data.error) {
+		const errorBody = data.error ?? {};
+		throw new Error(JSON.stringify({ code: errorBody.code, message: errorBody.message, full: errorBody }));
+	}
+	return typeof data.account_id === 'string' ? data.account_id : null;
 }
 
 /**

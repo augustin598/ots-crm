@@ -14,10 +14,7 @@ export interface CampaignRow {
 	dailyBudget: number | null;
 	lifetimeBudget: number | null;
 	budgetSource: 'campaign' | 'adset' | null;
-	adsetId: string | null;
 	previewUrl: string | null;
-	startTime: string | null;
-	stopTime: string | null;
 	spend: number;
 	impressions: number;
 	reach: number;
@@ -250,23 +247,30 @@ export function buildCampaignsCsv(rows: CampaignRow[], currency: string): string
 		`CPA (${currency})`,
 		'ROAS'
 	];
+	// Separator „;" + zecimale cu virgulă = dialectul pe care Excel ro-RO îl
+	// deschide corect fără import wizard.
+	const num = (n: number, decimals = 2) =>
+		Number.isInteger(n) ? String(n) : n.toFixed(decimals).replace('.', ',');
 	const body = rows.map((c) => [
 		c.id,
 		c.name,
 		statusMeta(c.status).label,
 		objectiveLabel(c.objective),
-		c.dailyBudget ?? '',
-		c.spend,
+		c.dailyBudget == null ? '' : num(c.dailyBudget),
+		num(c.spend),
 		c.impressions,
 		c.clicks,
-		c.ctr,
+		num(c.ctr),
 		c.conversions,
-		c.cpa,
-		c.roas
+		num(c.cpa),
+		num(c.roas, 1)
 	]);
 	const esc = (v: unknown) => {
-		const s = String(v ?? '');
-		return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+		let s = String(v ?? '');
+		// Gardă anti-injecție de formule: numele campaniilor vin din Meta și pot
+		// începe cu = + - @ (orice colaborator BM le poate seta).
+		if (/^[=+\-@]/.test(s)) s = "'" + s;
+		return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	};
 	return '﻿' + [head, ...body].map((r) => r.map(esc).join(';')).join('\r\n');
 }

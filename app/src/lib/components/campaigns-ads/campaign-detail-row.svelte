@@ -31,7 +31,7 @@
 	<td colspan={span}>
 		<div class="expand-content">
 			<div class="expand-section">
-				<h4>Ad seturi & buget</h4>
+				<h4>Ad seturi & buget <span class="detail-window">(ultimele 7 zile)</span></h4>
 				{#if adsetsQuery.error}
 					<p class="detail-note">Ad seturile nu au putut fi încărcate. Încearcă din nou mai târziu.</p>
 				{:else if adsetsQuery.current}
@@ -97,6 +97,14 @@
 </tr>
 
 <style>
+	.detail-window {
+		font-weight: 400;
+		font-size: 11px;
+		color: var(--ca-text-3);
+		text-transform: none;
+		letter-spacing: 0;
+	}
+
 	.detail-note {
 		font-size: 12px;
 		color: var(--ca-text-3);

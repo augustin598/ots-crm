@@ -22,10 +22,7 @@ const row = (over: Partial<CampaignRow> = {}): CampaignRow => ({
 	dailyBudget: 100,
 	lifetimeBudget: null,
 	budgetSource: 'campaign',
-	adsetId: null,
 	previewUrl: null,
-	startTime: null,
-	stopTime: null,
 	spend: 500,
 	impressions: 50000,
 	reach: 20000,
@@ -176,5 +173,16 @@ describe('buildCampaignsCsv', () => {
 		expect(csv).toContain('"Cu ""ghilimele""; test"');
 		expect(csv.split('\r\n')[0]).toContain('Campanie;Status');
 		expect(csv.split('\r\n')[0]).toContain('(EUR)');
+	});
+	it('gardă anti-injecție de formule Excel pe nume periculoase', () => {
+		const csv = buildCampaignsCsv([row({ name: '=HYPERLINK("http://x")' })], 'EUR');
+		expect(csv).toContain('\'=HYPERLINK');
+		expect(csv).not.toMatch(/;\s*=HYPERLINK/);
+	});
+	it('zecimalele folosesc virgulă (dialect Excel ro-RO)', () => {
+		const csv = buildCampaignsCsv([row({ spend: 1234.56, ctr: 2.93, cpa: 10.5, roas: 4.2 })], 'EUR');
+		expect(csv).toContain('1234,56');
+		expect(csv).toContain('2,93');
+		expect(csv).toContain('4,2');
 	});
 });

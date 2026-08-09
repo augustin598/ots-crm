@@ -24,6 +24,7 @@ import {
 	listCampaignReachFrequency,
 	toggleCampaignStatus as toggleCampaignStatusApi,
 	getCampaignWithAdsets,
+	getCampaignAccountId,
 	type CampaignWithAdsets
 } from '$lib/server/meta-ads/client';
 import { buildCampaignRows } from '$lib/server/meta-ads/campaigns-view';
@@ -42,6 +43,10 @@ function getCached<T>(key: string): T | null {
 		cache.delete(key);
 		return null;
 	}
+	// LRU: reinserarea mută cheia la coada Map-ului, deci evicția FIFO de mai jos
+	// lovește cheile reci, nu listing-ul consultat la fiecare interacțiune.
+	cache.delete(key);
+	cache.set(key, entry);
 	return entry.data as T;
 }
 
@@ -124,7 +129,8 @@ function throwMetaApiError(err: unknown, context?: { adAccountId?: string; integ
 	if (msg.includes('Invalid OAuth') || msg.includes('OAuthException')) {
 		throw error(401, 'Token OAuth invalid. Reconectează din Settings → Meta Ads.');
 	}
-	throw error(500, msg);
+	// Nu expune blob-ul JSON brut de la Meta în UI — detaliile sunt deja în log.
+	throw error(500, 'Meta Ads a răspuns cu o eroare neașteptată. Încearcă din nou în câteva minute.');
 }
 
 /** Guard comun: user + tenant + rol staff. Întoarce { event, tenantId }. */
@@ -148,6 +154,29 @@ async function resolveAuth(adAccountId: string, tenantId: string) {
 		throw error(500, 'META_APP_SECRET nu este configurat');
 	}
 	return { integrationId, accessToken: auth.accessToken, appSecret };
+}
+
+/**
+ * Verifică pe Graph că un campaignId venit de la client chiar aparține
+ * contului validat — tokenul tenantului poate atinge și conturi nemapate
+ * în CRM (același Business Manager), pe care nu vrem să operăm.
+ */
+async function assertCampaignInAccount(
+	campaignId: string,
+	adAccountId: string,
+	accessToken: string,
+	appSecret: string,
+	integrationId: string
+): Promise<void> {
+	let ownerAccountId: string | null;
+	try {
+		ownerAccountId = await getCampaignAccountId(campaignId, accessToken, appSecret);
+	} catch (err) {
+		throwMetaApiError(err, { adAccountId, integrationId });
+	}
+	if (!ownerAccountId || `act_${ownerAccountId}` !== adAccountId) {
+		throw error(403, 'Campania nu aparține contului Meta Ads selectat.');
+	}
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -203,6 +232,8 @@ export const getMetaCampaignAdsets = query(
 		const cached = getCached<CampaignWithAdsets>(cacheKey);
 		if (cached) return cached;
 
+		await assertCampaignInAccount(campaignId, adAccountId, accessToken, appSecret, integrationId);
+
 		try {
 			const detail = await getCampaignWithAdsets(campaignId, accessToken, appSecret);
 			setCache(cacheKey, detail);
@@ -226,13 +257,16 @@ export const toggleMetaCampaign = command(
 		const { tenantId } = await requireStaffEvent();
 		const { integrationId, accessToken, appSecret } = await resolveAuth(adAccountId, tenantId);
 
+		await assertCampaignInAccount(campaignId, adAccountId, accessToken, appSecret, integrationId);
+
 		try {
 			await toggleCampaignStatusApi(campaignId, accessToken, appSecret, status);
 		} catch (err) {
 			throwMetaApiError(err, { adAccountId, integrationId });
 		}
 
-		invalidateCache(`:${tenantId}:`);
+		// Doar cheile integrării afectate — nu tot cache-ul tenantului.
+		invalidateCache(`:${integrationId}:`);
 		return { success: true as const, campaignId, status };
 	}
 );
@@ -242,8 +276,8 @@ export const refreshMetaCampaigns = command(
 	v.object({ adAccountId: v.pipe(v.string(), v.minLength(1)) }),
 	async ({ adAccountId }) => {
 		const { tenantId } = await requireStaffEvent();
-		void adAccountId; // scoping-ul fin per cont ar cere integrationId; invalidăm pe tenant, ca reports
-		invalidateCache(`:${tenantId}:`);
+		const integrationId = await resolveAccountIntegration(adAccountId, tenantId);
+		invalidateCache(`:${integrationId}:`);
 		return { success: true as const };
 	}
 );

@@ -6,7 +6,7 @@
  * reach care NU se sumează pe zile), dar cu agregarea făcută aici, nu în pagină.
  */
 import type { MetaAdsCampaignInsight, MetaAdsCampaignInfo } from './client';
-import { OPTIMIZATION_GOAL_MAP } from './client';
+import { OPTIMIZATION_GOAL_MAP, INSIGHT_ACTION_TO_FIELD } from './client';
 import type { CampaignRow } from '$lib/utils/meta-campaigns';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,20 +22,6 @@ export function enumerateDays(since: string, until: string): string[] {
 	}
 	return days;
 }
-
-/** Maparea actionType → câmpul pre-extras de client.ts (identică cu reports.remote.ts). */
-const ACTION_TO_FIELD: Record<string, keyof MetaAdsCampaignInsight> = {
-	'offsite_conversion.fb_pixel_purchase': 'purchases',
-	purchase: 'purchases',
-	'offsite_conversion.fb_pixel_lead': 'leads',
-	lead: 'leads',
-	click_to_call_native_call_placed: 'callsPlaced',
-	link_click: 'linkClicks',
-	landing_page_view: 'landingPageViews',
-	video_view: 'videoViews',
-	post_engagement: 'pageEngagement',
-	page_engagement: 'pageEngagement'
-};
 
 /** Statusurile care apar în listă chiar și fără insights în fereastră. */
 const ALWAYS_VISIBLE_STATUSES = new Set(['ACTIVE', 'WITH_ISSUES', 'IN_PROCESS']);
@@ -80,7 +66,7 @@ export function buildCampaignRows(
 		const goalDef = goal ? OPTIMIZATION_GOAL_MAP[goal] : undefined;
 		if (goalDef) {
 			if (goalDef.actionType) {
-				const field = ACTION_TO_FIELD[goalDef.actionType];
+				const field = INSIGHT_ACTION_TO_FIELD[goalDef.actionType];
 				const count = field ? (row[field] as number) : row.conversions;
 				row.conversions = count;
 			}
@@ -141,15 +127,13 @@ export function buildCampaignRows(
 		return {
 			id,
 			name: a?.name ?? info?.campaignName ?? id,
-			status: info?.status ?? 'UNKNOWN',
+			// Statusul EFECTIV de livrare (WITH_ISSUES/IN_PROCESS/... ), nu cel configurat.
+			status: info?.effectiveStatus || info?.status || 'UNKNOWN',
 			objective: a?.objective ?? info?.objective ?? '',
 			dailyBudget: centsToMajor(info?.dailyBudget ?? null),
 			lifetimeBudget: centsToMajor(info?.lifetimeBudget ?? null),
 			budgetSource: info?.budgetSource ?? null,
-			adsetId: info?.adsetId ?? null,
 			previewUrl: info?.previewUrl ?? null,
-			startTime: info?.startTime ?? null,
-			stopTime: info?.stopTime ?? null,
 			spend,
 			impressions,
 			reach,
@@ -168,7 +152,7 @@ export function buildCampaignRows(
 	const ids = new Set<string>();
 	for (const id of acc.keys()) ids.add(id);
 	for (const c of campaigns) {
-		if (ALWAYS_VISIBLE_STATUSES.has(c.status)) ids.add(c.campaignId);
+		if (ALWAYS_VISIBLE_STATUSES.has(c.effectiveStatus || c.status)) ids.add(c.campaignId);
 	}
 
 	const rows = Array.from(ids, toRow);

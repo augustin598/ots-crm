@@ -5419,7 +5419,6 @@ export type NewMetaTargetingCache = typeof metaTargetingCache.$inferInsert;
 
 export const API_KEY_SCOPES = [
 	'campaigns:read',
-	'campaigns:write',
 	'clients:read',
 	'integrations:read',
 	'ads_monitor:read',
