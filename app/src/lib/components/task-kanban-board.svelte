@@ -113,9 +113,13 @@
 	let doneLoadedPages = $state(1);
 	let doneExpanded = $state(false);
 
-	// Reset done pagination when filters change
+	// Reset done pagination when filters change VALORIC. Cheia e string ($derived
+	// pe primitive nu propagă la valoare egală), altfel identitatea obiectului de
+	// filtre — nuqs re-parsează array-urile la orice schimbare de URL (ex.
+	// deschiderea unui task scrie ?taskId=) — ar colapsa paginarea degeaba.
+	const filtersValueKey = $derived(JSON.stringify(getFilters?.() ?? {}));
 	$effect(() => {
-		getFilters?.(); // reactive dependency
+		filtersValueKey; // reactive dependency
 		doneLoadedPages = 1;
 	});
 
@@ -131,6 +135,7 @@
 					milestoneId: fp?.milestoneId,
 					priority: fp?.priority,
 					assignee: fp?.assignee,
+					type: fp?.type,
 					search: fp?.search,
 					dueDate: fp?.dueDate,
 					createdDate: fp?.createdDate,
