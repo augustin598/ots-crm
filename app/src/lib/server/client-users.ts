@@ -182,6 +182,47 @@ export async function syncPrimaryClientUserLink(
 }
 
 /**
+ * Emails (lowercased) of everyone actually ON a task: every task_assignee row,
+ * every task_watcher row and the single assignedTo user. Client-company
+ * notifications must stay scoped to these — notify_tasks is a company-level
+ * flag, not task participation, and without this filter every flagged contact
+ * receives every task of the company, including ones they're not part of.
+ */
+export async function getTaskParticipantEmails(
+	taskId: string,
+	tenantId: string,
+	assignedToUserId: string | null
+): Promise<Set<string>> {
+	const assigneeRows = await db
+		.select({ email: table.user.email })
+		.from(table.taskAssignee)
+		.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
+		.where(and(eq(table.taskAssignee.taskId, taskId), eq(table.taskAssignee.tenantId, tenantId)));
+
+	const watcherRows = await db
+		.select({ email: table.user.email })
+		.from(table.taskWatcher)
+		.innerJoin(table.user, eq(table.taskWatcher.userId, table.user.id))
+		.where(and(eq(table.taskWatcher.taskId, taskId), eq(table.taskWatcher.tenantId, tenantId)));
+
+	const participants = new Set<string>();
+	for (const r of [...assigneeRows, ...watcherRows]) {
+		if (r.email) participants.add(r.email.toLowerCase().trim());
+	}
+
+	if (assignedToUserId) {
+		const [assigned] = await db
+			.select({ email: table.user.email })
+			.from(table.user)
+			.where(eq(table.user.id, assignedToUserId))
+			.limit(1);
+		if (assigned?.email) participants.add(assigned.email.toLowerCase().trim());
+	}
+
+	return participants;
+}
+
+/**
  * Task-eligible client users for a client: the primary contact (is_primary
  * flag OR user email matching client.email) plus secondary contacts whose
  * clientSecondaryEmail row grants accessFlags.tasks (legacy notifyTasks
