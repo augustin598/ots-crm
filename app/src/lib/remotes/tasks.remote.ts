@@ -14,6 +14,7 @@ import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
 import { createMeetEvent } from '$lib/server/google-calendar/meet';
 import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
 import { requireStaff } from '$lib/server/get-actor';
+import { getEligibleClientAssigneeIds } from '$lib/server/client-users';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -871,11 +872,21 @@ export const createTask = command(taskSchema, async (data) => {
 		)
 	];
 
-	// Deduplicate assignee IDs before insert
-	const uniqueAssigneeIds = [...new Set(data.assigneeUserIds || [])];
+	// Deduplicate assignee IDs before insert. assignedToUserId goes through the
+	// same validation — without it, a direct payload could assign an arbitrary
+	// userId (even cross-tenant) as the task's single assignee.
+	const uniqueAssigneeIds = [
+		...new Set([
+			...(data.assigneeUserIds || []),
+			...(data.assignedToUserId ? [data.assignedToUserId] : [])
+		])
+	];
 
-	// Validate every assignee is either a tenantUser (agency) OR a clientUser for
-	// the task's clientId (mirror addAssignee:2720-2753). Fail fast on bad IDs.
+	// Validate every assignee is either a tenantUser (agency) OR a TASK-ELIGIBLE
+	// clientUser for the task's clientId (mirror addAssignee). Eligibility uses
+	// the same rule as the picker (getAssignableClientUsers): primary contact or
+	// secondary with accessFlags.tasks — otherwise assignment silently escalates
+	// access for contacts the admin explicitly denied.
 	if (uniqueAssigneeIds.length > 0) {
 		const agencyRows = await db
 			.select({ userId: table.tenantUser.userId })
@@ -890,17 +901,7 @@ export const createTask = command(taskSchema, async (data) => {
 
 		let clientIds = new Set<string>();
 		if (clientId) {
-			const clientRows = await db
-				.select({ userId: table.clientUser.userId })
-				.from(table.clientUser)
-				.where(
-					and(
-						eq(table.clientUser.tenantId, targetTenantId),
-						eq(table.clientUser.clientId, clientId),
-						inArray(table.clientUser.userId, uniqueAssigneeIds)
-					)
-				);
-			clientIds = new Set(clientRows.map((r) => r.userId));
+			clientIds = await getEligibleClientAssigneeIds(targetTenantId, clientId);
 		}
 
 		for (const uid of uniqueAssigneeIds) {
@@ -1253,6 +1254,31 @@ export const updateTask = command(
 		const oldAssigneeId = existing.assignedToUserId;
 		const newAssigneeId = updateData.assignedToUserId;
 		const assigneeChanged = newAssigneeId && oldAssigneeId !== newAssigneeId;
+
+		// Validate the new assignee the same way createTask/addAssignee do:
+		// agency member of this tenant OR task-eligible client user of the task's
+		// client. Without this, updateTask could assign an arbitrary userId.
+		if (assigneeChanged) {
+			const [agencyMembership] = await db
+				.select({ userId: table.tenantUser.userId })
+				.from(table.tenantUser)
+				.where(
+					and(
+						eq(table.tenantUser.userId, newAssigneeId),
+						eq(table.tenantUser.tenantId, event.locals.tenant.id)
+					)
+				)
+				.limit(1);
+			if (!agencyMembership) {
+				const targetClientId = updateData.clientId ?? existing.clientId;
+				const eligible = targetClientId
+					? await getEligibleClientAssigneeIds(event.locals.tenant.id, targetClientId)
+					: new Set<string>();
+				if (!eligible.has(newAssigneeId)) {
+					throw new Error('Responsabilul nu este membru valid al tenantului sau clientului.');
+				}
+			}
+		}
 		const oldStatus = existing.status;
 		const newStatus = updateData.status;
 		const transitionedToDone = newStatus === 'done' && oldStatus !== 'done';
@@ -2901,22 +2927,15 @@ export const addAssignee = command(
 			.limit(1);
 
 		if (!agencyMembership) {
-			// Not an agency user — must be a valid client user for this task's client
+			// Not an agency user — must be a TASK-ELIGIBLE client user for this
+			// task's client (same rule as the picker: primary contact or secondary
+			// with accessFlags.tasks). Plain client_user membership is not enough —
+			// it would escalate access for contacts the admin explicitly denied.
 			if (!task.clientId) {
 				throw new Error('User is not a member of this tenant');
 			}
-			const [clientMembership] = await db
-				.select({ userId: table.clientUser.userId })
-				.from(table.clientUser)
-				.where(
-					and(
-						eq(table.clientUser.userId, userId),
-						eq(table.clientUser.clientId, task.clientId),
-						eq(table.clientUser.tenantId, tenantId)
-					)
-				)
-				.limit(1);
-			if (!clientMembership) {
+			const eligible = await getEligibleClientAssigneeIds(tenantId, task.clientId);
+			if (!eligible.has(userId)) {
 				throw new Error('User is not associated with this task\'s client');
 			}
 		}

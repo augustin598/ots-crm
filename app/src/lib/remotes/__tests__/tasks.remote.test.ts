@@ -207,7 +207,8 @@ const {
 	addSubtask,
 	toggleSubtask,
 	deleteSubtask,
-	scheduleMeet
+	scheduleMeet,
+	addAssignee
 } = await import('../tasks.remote');
 
 const {
@@ -1221,5 +1222,51 @@ describe('unwatchTask', () => {
 		queryQueue.push([]); // task not found in tenant-a
 
 		await expect(unwatchTask('task-from-tenant-b')).rejects.toThrow(/not found/i);
+	});
+});
+
+// ─── Group D: addAssignee — eligibilitate client users ────────────────────────
+
+describe('addAssignee — eligibilitate client users', () => {
+	beforeEach(() => {
+		queryQueue.length = 0;
+		currentEvent = makeEvent('tenant-a');
+	});
+
+	test('asignează un contact client CU acces la tasks', async () => {
+		queryQueue.push([{ id: 'task-a1', clientId: 'client-1' }]); // task
+		queryQueue.push([]); // nu e user de agenție
+		queryQueue.push([{ userId: 'cu-user-9', email: 'sec@heylux.ro', isPrimary: false }]); // client_user rows
+		queryQueue.push([{ email: 'sec@heylux.ro', accessFlags: '{"tasks":true}', notifyTasks: 1 }]); // cse
+		queryQueue.push([{ email: 'primar@heylux.ro' }]); // client.email
+		queryQueue.push([]); // niciun assignee existent
+
+		const result = await addAssignee({ taskId: 'task-a1', userId: 'cu-user-9' }) as any;
+		expect(result.success).toBe(true);
+	});
+
+	// SECURITY: paritate cu pickerul — fără escaladare de acces prin asignare
+	test('respinge un contact client FĂRĂ acces la tasks', async () => {
+		queryQueue.push([{ id: 'task-a1', clientId: 'client-1' }]);
+		queryQueue.push([]); // nu e agenție
+		queryQueue.push([{ userId: 'cu-user-9', email: 'conta@heylux.ro', isPrimary: false }]);
+		queryQueue.push([{ email: 'conta@heylux.ro', accessFlags: null, notifyTasks: 0 }]);
+		queryQueue.push([{ email: 'primar@heylux.ro' }]);
+
+		await expect(
+			addAssignee({ taskId: 'task-a1', userId: 'cu-user-9' })
+		).rejects.toThrow(/not associated/i);
+	});
+
+	test('contactul principal (după client.email, flag stale) rămâne asignabil', async () => {
+		queryQueue.push([{ id: 'task-a1', clientId: 'client-1' }]);
+		queryQueue.push([]); // nu e agenție
+		queryQueue.push([{ userId: 'u-george', email: 'george@heylux.ro', isPrimary: false }]);
+		queryQueue.push([]); // fără emailuri secundare
+		queryQueue.push([{ email: 'george@heylux.ro' }]); // client.email match
+		queryQueue.push([]); // niciun assignee existent
+
+		const result = await addAssignee({ taskId: 'task-a1', userId: 'u-george' }) as any;
+		expect(result.success).toBe(true);
 	});
 });

@@ -79,9 +79,15 @@ export const getInvoices = query(
 			// Secondary email users cannot see invoices
 			if (!event.locals.isClientUserPrimary) return [];
 			conditions = and(conditions, eq(table.invoice.clientId, event.locals.client.id)) as any;
-		} else if (filters.clientId) {
-			const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];
-			conditions = and(conditions, inArray(table.invoice.clientId, clientIds)) as any;
+		} else {
+			// F8: without this gate, any authenticated non-staff session (e.g. a
+			// client user whose client context failed to resolve) would read the
+			// whole tenant's invoices.
+			await requireStaff(event);
+			if (filters.clientId) {
+				const clientIds = Array.isArray(filters.clientId) ? filters.clientId : [filters.clientId];
+				conditions = and(conditions, inArray(table.invoice.clientId, clientIds)) as any;
+			}
 		}
 
 		// Project filter
