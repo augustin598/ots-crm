@@ -34,6 +34,13 @@
 }
 
 /* Tighter spacing for displayed comments (not editing) */
+/* URL-urile/stringurile lungi neîntrerupte nu ies din card — se sparg oriunde. */
+.comment-display,
+.rich-editor .ProseMirror {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
 .comment-display p {
 	margin-bottom: 0.25rem;
 }

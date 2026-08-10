@@ -96,7 +96,7 @@
 	<button
 		type="button"
 		class={cn(
-			'-mx-1 w-full cursor-text rounded px-1 text-left transition-colors hover:bg-accent/50 focus:bg-accent/50 focus:outline-none',
+			'-mx-1 w-full cursor-text rounded px-1 text-left break-words transition-colors hover:bg-accent/50 focus:bg-accent/50 focus:outline-none',
 			displayClass,
 			!value && 'text-muted-foreground italic'
 		)}
