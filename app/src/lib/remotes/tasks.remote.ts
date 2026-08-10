@@ -14,7 +14,7 @@ import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
 import { createMeetEvent } from '$lib/server/google-calendar/meet';
 import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
 import { requireStaff } from '$lib/server/get-actor';
-import { getEligibleClientAssigneeIds } from '$lib/server/client-users';
+import { getEligibleClientAssigneeIds, getTaskParticipantEmails } from '$lib/server/client-users';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -65,9 +65,22 @@ async function sendClientNotificationIfEnabled(
 		if (!client?.email) return;
 
 		const recipients = await getNotificationRecipients(task.clientId, 'tasks');
+
+		// Doar contactele care fac parte din task (responsabil/asignați/watcheri)
+		// primesc notificarea de client. notify_tasks e un flag la nivel de
+		// companie, nu de participare — fără filtrul ăsta fiecare contact cu
+		// flagul pornit primește TOATE taskurile companiei, inclusiv cele la
+		// care nu e implicat.
+		const participantEmails = await getTaskParticipantEmails(
+			taskId,
+			tenantId,
+			task.assignedToUserId ?? null
+		);
+
 		const errors: Array<{ email: string; error: string }> = [];
 		for (const recipient of recipients) {
 			const lower = recipient.email.toLowerCase().trim();
+			if (!participantEmails.has(lower)) continue;
 			// Skip the user who performed the action (don't notify yourself)
 			if (excludeEmail && lower === excludeEmail.toLowerCase().trim()) continue;
 			// Skip emails already covered by the personal-assignment path (dedup)

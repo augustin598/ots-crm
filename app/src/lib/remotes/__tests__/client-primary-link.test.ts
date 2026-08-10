@@ -92,7 +92,9 @@ mock.module('$lib/server/db', () => ({ db: makeDb() }));
 
 const { getAssignableClientUsers } = await import('../users.remote');
 const { updateClient, updateClientCompanyData } = await import('../clients.remote');
-const { getEligibleClientAssigneeIds } = await import('$lib/server/client-users');
+const { getEligibleClientAssigneeIds, getTaskParticipantEmails } = await import(
+	'$lib/server/client-users'
+);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -266,6 +268,32 @@ describe('getEligibleClientAssigneeIds — regula de eligibilitate', () => {
 		queryQueue.push([]);
 		const eligible = await getEligibleClientAssigneeIds(TENANT, CLIENT);
 		expect(eligible.size).toBe(0);
+		expect(queryQueue).toHaveLength(0);
+	});
+});
+
+// ─── getTaskParticipantEmails (filtrul notificărilor de client) ───────────────
+
+describe('getTaskParticipantEmails — participanții la task', () => {
+	test('adună asignații, watcherii și assignedTo, lowercased', async () => {
+		queryQueue.push(
+			[{ email: 'Birzu.Sergiu@gmail.com' }, { email: 'george@heylux.ro' }], // task_assignee
+			[{ email: 'office@onetopsolution.ro' }], // task_watcher
+			[{ email: 'Extra@Assigned.ro' }] // user-ul din assignedToUserId
+		);
+		const set = await getTaskParticipantEmails('task-1', TENANT, 'u-extra');
+		expect(set.has('birzu.sergiu@gmail.com')).toBe(true);
+		expect(set.has('george@heylux.ro')).toBe(true);
+		expect(set.has('office@onetopsolution.ro')).toBe(true);
+		expect(set.has('extra@assigned.ro')).toBe(true);
+		expect(set.size).toBe(4);
+	});
+
+	test('fără assignedTo: nu face lookup suplimentar și setul rămâne corect', async () => {
+		queryQueue.push([{ email: 'a@x.ro' }], []);
+		const set = await getTaskParticipantEmails('task-1', TENANT, null);
+		expect(set.has('a@x.ro')).toBe(true);
+		expect(set.size).toBe(1);
 		expect(queryQueue).toHaveLength(0);
 	});
 });
