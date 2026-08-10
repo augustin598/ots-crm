@@ -54,10 +54,11 @@
 		showSelectionCheckbox = false
 	}: Props = $props();
 
-	// Get filterParams from context (set by parent page) or use empty object as fallback
-	const filterParams = getTaskFilters();
-	// Instanțele live ale paginii gazdă (undefined pe paginile care nu le
-	// publică — atunci cădem pe vechea reconstrucție de argumente).
+	// Getter-ul de filtre din context (setat de pagina gazdă); apelul într-un
+	// $derived/$effect urmărește filtrele curente.
+	const getFilters = getTaskFilters();
+	// Registrul cu instanțele live ale paginii gazdă (undefined pe paginile care
+	// nu-l publică — atunci cădem pe vechea reconstrucție de argumente).
 	const liveTaskQueries = getTaskLiveQueries();
 
 	// Column order per design 1:1 (tasks-data.jsx STATUSES order):
@@ -112,15 +113,19 @@
 	let doneLoadedPages = $state(1);
 	let doneExpanded = $state(false);
 
-	// Reset done pagination when filters change
+	// Reset done pagination when filters change VALORIC. Cheia e string ($derived
+	// pe primitive nu propagă la valoare egală), altfel identitatea obiectului de
+	// filtre — nuqs re-parsează array-urile la orice schimbare de URL (ex.
+	// deschiderea unui task scrie ?taskId=) — ar colapsa paginarea degeaba.
+	const filtersValueKey = $derived(JSON.stringify(getFilters?.() ?? {}));
 	$effect(() => {
-		filterParams; // reactive dependency
+		filtersValueKey; // reactive dependency
 		doneLoadedPages = 1;
 	});
 
 	// Build one query per loaded page of completed tasks
 	const completedQueries = $derived.by(() => {
-		const fp = filterParams as any;
+		const fp = (getFilters?.() ?? {}) as any;
 		const queries = [];
 		for (let p = 1; p <= doneLoadedPages; p++) {
 			queries.push(
@@ -130,6 +135,7 @@
 					milestoneId: fp?.milestoneId,
 					priority: fp?.priority,
 					assignee: fp?.assignee,
+					type: fp?.type,
 					search: fp?.search,
 					dueDate: fp?.dueDate,
 					createdDate: fp?.createdDate,
@@ -142,6 +148,11 @@
 		}
 		return queries;
 	});
+
+	// Boardul își înscrie paginile Done afișate în registrul gazdei, ca mutațiile
+	// din panou/dialoguri (done, approve, delete) să le poată reîmprospăta.
+	// Corpul nu citește stare reactivă → rulează o dată; return = unregister.
+	$effect(() => liveTaskQueries?.register(() => completedQueries));
 
 	// Flatten all loaded pages of done tasks into one array
 	const doneTasks = $derived.by(() => {
@@ -264,7 +275,7 @@
 
 	// Build completed tasks query args from current filter context
 	function buildCompletedQueryArgs(page: number) {
-		const fp = filterParams as any;
+		const fp = (getFilters?.() ?? {}) as any;
 		return {
 			projectId: fp?.projectId,
 			clientId: fp?.clientId,
@@ -283,9 +294,10 @@
 
 	// Build the full .updates() list for position changes
 	function buildPositionUpdates(involvesDone: boolean) {
-		const updates: any[] = [
-			...(liveTaskQueries?.() ?? [getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })])
-		];
+		// Registrul include deja paginile Done înregistrate mai sus.
+		const collected = liveTaskQueries?.collect();
+		if (collected?.length) return collected;
+		const updates: any[] = [getTasks({ ...(getFilters?.() ?? {}), excludeCompleted: true })];
 		if (involvesDone) {
 			for (let p = 1; p <= doneLoadedPages; p++) {
 				updates.push(getCompletedTasks(buildCompletedQueryArgs(p)));

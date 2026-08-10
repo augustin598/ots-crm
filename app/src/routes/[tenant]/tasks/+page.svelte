@@ -2,7 +2,6 @@
 	import {
 		getTasks,
 		deleteTask,
-		getCompletedTasks,
 		getTaskClientIds,
 		bulkUpdateTaskStatus,
 		bulkDeleteTasks,
@@ -16,7 +15,6 @@
 	import { goto } from '$app/navigation';
 	import { useQueryState } from 'nuqs-svelte';
 	import { parseAsStringEnum, parseAsArrayOf, parseAsString } from 'nuqs-svelte';
-	import { setContext } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import TaskDetailPanel from '$lib/components/task-detail-panel.svelte';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
@@ -39,8 +37,8 @@
 	import type { Task } from '$lib/server/db/schema';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
-	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
-	import { setTaskLiveQueries } from '$lib/components/task-live-queries-context';
+	import { setTaskFilters } from '$lib/components/task-filters-context';
+	import { provideTaskLiveQueries } from '$lib/components/task-live-queries-context';
 
 	const tenantSlug = $derived(page.params.tenant || '');
 
@@ -93,10 +91,9 @@
 		sortDir: (sortDir.current as 'asc' | 'desc' | null) || undefined
 	});
 
-	// Provide filterParams via context so child components can access it without prop drilling
-	// Note: captures initial filterParams reference — context consumers get the derived object which updates reactively
-	// svelte-ignore state_referenced_locally
-	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
+	// Provide filters via context so child components can access them without prop
+	// drilling. Getter: consumers read the current $derived value at call time.
+	setTaskFilters(() => filterParams);
 
 	// Fetch data — in kanban view, exclude done/cancelled (they are loaded lazily by the kanban board)
 	// include.{subtasks,tags,assignees} hydrates TaskCard with the data it needs to render fully.
@@ -115,11 +112,11 @@
 	const statsTasksQuery = $derived(getTasks({ ...filterParams }));
 	const statsTasks = $derived(statsTasksQuery.current || []);
 
-	// Instanțele live pe care orice mutație (dialog, kanban, panel) trebuie să
-	// le reîmprospăteze. Getter — citește $derived-urile la momentul apelului,
-	// deci reflectă mereu filtrele/view-ul curent.
-	const liveTaskQueries = () => [tasksQuery, statsTasksQuery];
-	setTaskLiveQueries(liveTaskQueries);
+	// Registrul cu instanțele live pe care orice mutație (dialog, kanban, panel)
+	// trebuie să le reîmprospăteze. Getter-ele citesc $derived-urile la momentul
+	// apelului; boardul își înscrie și paginile Done afișate.
+	const liveQueryRegistry = provideTaskLiveQueries(() => [tasksQuery, statsTasksQuery]);
+	const liveTaskQueries = () => liveQueryRegistry.collect();
 
 	function isDueToday(d: Date | string | null | undefined): boolean {
 		if (!d) return false;
@@ -386,10 +383,7 @@
 		}
 
 		try {
-			await deleteTask(taskId).updates(
-				...liveTaskQueries(),
-				getCompletedTasks({ ...(filterParams as any), page: 1, pageSize: 20 })
-			);
+			await deleteTask(taskId).updates(...liveTaskQueries());
 			if (taskIdPanel.current === taskId) {
 				taskIdPanel.current = null;
 			}
