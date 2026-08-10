@@ -113,14 +113,18 @@
 			TaskItem.configure({ nested: true }),
 		];
 
-		if (users.length > 0) {
-			extensions.push(
-				Mention.configure({
-					HTMLAttributes: { class: 'mention' },
-					suggestion: createMentionSuggestion(users),
-				})
-			);
-		}
+		// Getter, nu snapshot: acțiunea initEditor rulează o singură dată, dar
+		// lista de mention-uri sosește async (remote queries). Un array capturat
+		// aici ar îngheța dropdown-ul pe valoarea de la mount (ex.: doar agenția,
+		// fără echipa clientului). Extensia se înregistrează necondiționat —
+		// gate-ul `users.length > 0` dezactiva mention-urile definitiv când lista
+		// era goală la init.
+		extensions.push(
+			Mention.configure({
+				HTMLAttributes: { class: 'mention' },
+				suggestion: createMentionSuggestion(() => users),
+			})
+		);
 
 		if (maxCharacters) {
 			extensions.push(CharacterCount.configure({ limit: maxCharacters }));

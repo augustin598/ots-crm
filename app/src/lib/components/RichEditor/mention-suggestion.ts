@@ -9,11 +9,17 @@ export type MentionUser = {
 	email: string;
 };
 
-export function createMentionSuggestion(users: MentionUser[]): Omit<SuggestionOptions, 'editor'> {
+export function createMentionSuggestion(
+	users: MentionUser[] | (() => MentionUser[])
+): Omit<SuggestionOptions, 'editor'> {
+	// Acceptă un getter: editorul TipTap se creează o singură dată, dar listele
+	// de mention-uri sosesc async (remote queries) — un array capturat la init
+	// ar rămâne permanent pe valoarea de la mount.
+	const resolveUsers = () => (typeof users === 'function' ? users() : users);
 	return {
 		items: ({ query }: { query: string }) => {
 			const q = query.toLowerCase();
-			return users
+			return resolveUsers()
 				.filter((u) => {
 					const name = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase();
 					return name.includes(q) || (u.email || '').toLowerCase().includes(q);
