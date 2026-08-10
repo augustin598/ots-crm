@@ -31,7 +31,7 @@ const taskDescription = 'Coordonare conținut și optimizări on-page pentru cel
 const taskUrl = `http://localhost:5173/${tenantSlug}/tasks/${taskId}`;
 
 const commentText =
-	'Pagina recenzii — Lucky: https://www.luckystudio.ro/pareri-si-recenzii-despre-lucky-studio/\n\nDacă doriți să mai adăugăm recenzii, vă rog să mi le trimiteți pe email sau vă generez unele cu cum doriți.';
+	'Ti-am acordat acces, esti editor acum - https://docs.google.com/document/d/1JRutZ02xktBm3yYvLwH6rRjM6iFbFSTa2mEpT1s0YSw/edit?tab=t.0\n\nPagina recenzii — Lucky: https://www.luckystudio.ro/pareri-si-recenzii-despre-lucky-studio/\n\nDacă doriți să mai adăugăm recenzii, vă rog să mi le trimiteți pe email sau vă generez unele cu cum doriți.';
 
 /** Două „poze" placeholder (SVG → data URI) pe post de atașamente de comentariu. */
 function placeholder(label: string, bg: string): string {
@@ -59,7 +59,7 @@ function renderCtaButton(url: string, label: string, color: string): string {
 
 /** Oglindește exact `buildCommentEmailBlock` din src/lib/server/email.ts. */
 function commentBlockHtml(): string {
-	const quoteHtml = `<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; margin: 0 0 16px 0;">
+	const quoteHtml = `<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; table-layout: fixed; margin: 0 0 16px 0;">
 			<tr>
 				<td style="padding: 12px 16px; background-color: #f9fafb; border-left: 3px solid ${themeColor}; border-radius: 0 8px 8px 0; color: #374151; font-size: 14px; line-height: 1.65;">
 					${escapeHtml(commentText).replace(/\n/g, '<br />')}
@@ -84,7 +84,7 @@ function badge(bg: string, fg: string, label: string): string {
 	return `<span style="display:inline-block; padding:3px 12px; border-radius:9999px; font-size:13px; font-weight:600; background:${bg}; color:${fg};">${label}</span>`;
 }
 
-const detailsTable = `<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
+const detailsTable = `<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; table-layout: fixed; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 		<tr>
 			<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
 				<div style="font-weight: 600; color: #111827; font-size: 15px; margin-bottom: 8px;">${escapeHtml(taskTitle)}</div>
@@ -137,7 +137,7 @@ const html = `<!doctype html>
 	<style>
 		body { margin: 0; padding: 24px; background: #f4f6fa; font-family: 'Inter', system-ui, sans-serif; }
 		h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; max-width: 600px; margin: 24px auto 8px auto; }
-		.email-card { max-width: 600px; margin: 0 auto; background: white; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(15,23,42,.06); }
+		.email-card { max-width: 600px; margin: 0 auto; background: white; word-break: break-word; overflow-wrap: break-word; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(15,23,42,.06); }
 		.email-header { background: ${themeColor}; padding: 18px 24px; color: white; }
 		.email-header h1 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
 		.email-body { padding: 24px; }
