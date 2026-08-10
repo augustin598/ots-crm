@@ -6,7 +6,7 @@
 		unlinkMaterialFromTask
 	} from '$lib/remotes/task-materials.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
-	import { getTenantUsers, getClientUsers, getAssignableClientUsers } from '$lib/remotes/users.remote';
+	import { getTenantUsers, getAssignableClientUsers } from '$lib/remotes/users.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import {
 		approveTask,
@@ -256,8 +256,8 @@
 		new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim() || u.email]))
 	);
 
-	const clientUsersQuery = $derived(task?.clientId ? getClientUsers(task.clientId) : null);
-	const mentionUsers = $derived(clientUsersQuery?.current || users);
+	// mentionUsers e definit mai jos, după assignableClientUsers — e uniunea
+	// agenție + echipa clientului eligibilă la taskuri, nu ori-ori.
 
 	const topLevelComments = $derived(comments.filter((c: any) => !c.parentCommentId));
 	const repliesMap = $derived(
@@ -303,6 +303,18 @@
 		task?.clientId ? getAssignableClientUsers(task.clientId) : null
 	);
 	const assignableClientUsers = $derived(assignableClientUsersQuery?.current ?? []);
+
+	// Mentionable = agenția + echipa clientului eligibilă la taskuri, dedupe pe id.
+	// Fostul `clientUsers || users` era ori-ori: ascundea agenția după ce se
+	// încărca echipa clientului și echipa clientului cât timp query-ul era pending.
+	const mentionUsers = $derived.by(() => {
+		const seen = new Set<string>();
+		return [...users, ...assignableClientUsers].filter((u: { id: string }) => {
+			if (seen.has(u.id)) return false;
+			seen.add(u.id);
+			return true;
+		});
+	});
 
 	type AssigneeOption = {
 		value: string;
