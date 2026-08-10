@@ -205,9 +205,12 @@ export const registerWithTenant = command(registerSchema, async (data) => {
 	try {
 		await db.transaction(async (tx) => {
 			// Create user
+			// Always store the NORMALIZED email — the uniqueness check above and
+			// every login flow compare on lowercase; a raw mixed-case insert slips
+			// past the check and later produces a duplicate user at portal login.
 			await tx.insert(table.user).values({
 				id: userId,
-				email: invitation ? invitation.email : email,
+				email: invitation ? invitation.email.trim().toLowerCase() : normalizedEmail,
 				firstName,
 				lastName,
 				passwordHash

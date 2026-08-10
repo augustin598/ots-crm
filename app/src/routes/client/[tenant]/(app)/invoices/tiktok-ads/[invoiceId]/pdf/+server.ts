@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getFileBuffer } from '$lib/server/storage';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 
 export const GET: RequestHandler = async (event) => {
 	if (!event.locals.user || !event.locals.tenant) {
@@ -22,8 +23,18 @@ export const GET: RequestHandler = async (event) => {
 		eq(table.tiktokAdsSpending.tenantId, tenantId)
 	);
 
-	// Client users can only access their own data
-	if (event.locals.isClientUser && event.locals.client) {
+	// Client users: require a resolved client, scope to it, and enforce the
+	// per-user invoices access flag. (app)/+layout.server.ts gates page routes;
+	// +server.ts endpoints must enforce explicitly (layouts don't run for them).
+	if (event.locals.isClientUser) {
+		if (!event.locals.client) throw error(403, 'Acces interzis');
+		const flags = await getRequestAccessFlags({
+			tenantId,
+			clientId: event.locals.client.id,
+			userEmail: event.locals.user.email,
+			isPrimary: event.locals.clientUser?.isPrimary ?? false
+		});
+		if (!flags.invoices) throw error(403, 'Nu ai acces la facturi.');
 		conditions = and(conditions, eq(table.tiktokAdsSpending.clientId, event.locals.client.id));
 	}
 

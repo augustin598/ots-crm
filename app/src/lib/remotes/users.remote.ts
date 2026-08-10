@@ -517,9 +517,22 @@ export const getAssignableClientUsers = query(
 			return { firstName: fnDb ?? '', lastName: lnDb ?? '' };
 		}
 
+		// client.email is the source of truth for who the primary contact is — the
+		// is_primary flag is written only at portal login and can go stale (e.g.
+		// after an admin changes the client's email while the contact stays logged
+		// in). Matching on email keeps the primary visible in the picker regardless.
+		const [cli] = await db
+			.select({ email: table.client.email })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		const primaryEmail = cli?.email?.trim().toLowerCase() || null;
+		const isPrimaryRow = (r: { isPrimary: boolean; email: string | null }) =>
+			r.isPrimary || (!!primaryEmail && r.email?.toLowerCase() === primaryEmail);
+
 		return rows
 			.filter((r) => {
-				if (r.isPrimary) return true;
+				if (isPrimaryRow(r)) return true;
 				return r.email ? secondaryAccessByEmail.get(r.email.toLowerCase()) === true : false;
 			})
 			.map((r) => {
@@ -529,7 +542,7 @@ export const getAssignableClientUsers = query(
 					email: r.email,
 					firstName,
 					lastName,
-					isPrimary: r.isPrimary,
+					isPrimary: isPrimaryRow(r),
 					// Per-user WhatsApp phone from user_whatsapp_link table (deterministic, admin-set).
 					// null when admin hasn't linked this user's phone yet → UI falls back to initials.
 					phone: phonesByUser.get(r.userId) ?? null

@@ -6,6 +6,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, ne, sql, getTableColumns } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { normalizePhoneE164 } from '$lib/utils/phone';
+import { deleteClientUserWithFKs, syncPrimaryClientUserLink } from '$lib/server/client-users';
 
 function isPrivateHost(hostname: string): boolean {
 	if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
@@ -363,19 +364,6 @@ export const createClient = command(clientSchema, async (data) => {
 	return { success: true, clientId };
 });
 
-/** Nullify FK references and delete a clientUser record */
-async function deleteClientUserWithFKs(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], clientUserId: string) {
-	await tx
-		.update(table.marketingMaterial)
-		.set({ uploadedByClientUserId: null })
-		.where(eq(table.marketingMaterial.uploadedByClientUserId, clientUserId));
-	await tx
-		.update(table.clientAccessData)
-		.set({ createdByClientUserId: null })
-		.where(eq(table.clientAccessData.createdByClientUserId, clientUserId));
-	await tx.delete(table.clientUser).where(eq(table.clientUser.id, clientUserId));
-}
-
 export const updateClient = command(
 	v.object({
 		clientId: v.pipe(v.string(), v.minLength(1)),
@@ -404,7 +392,13 @@ export const updateClient = command(
 
 		const oldEmail = (existing.email || '').toLowerCase().trim();
 		const newEmail = (rest.email || '').toLowerCase().trim();
-		const emailChanged = oldEmail !== newEmail && oldEmail !== '';
+		// Sync only when the payload explicitly carried an email: an omitted field
+		// leaves the client.email column untouched (partial update), so treating
+		// it as "cleared" would delete the primary link while the email stays set.
+		// Intentionally NOT guarded by oldEmail !== '': setting an email on a
+		// client that had none must still create the primary clientUser link below.
+		const emailProvided = typeof rest.email === 'string';
+		const emailChanged = emailProvided && oldEmail !== newEmail;
 
 		const oldPhone = (existing.phone || '').trim();
 		const newPhone = ('phone' in rest ? rest.phone || '' : oldPhone).trim();
@@ -443,74 +437,10 @@ export const updateClient = command(
 				})
 				.where(eq(table.client.id, clientId));
 
-			// 2. If primary email changed, sync clientUser association
+			// 2. If primary email changed, sync the primary clientUser association
+			// (migrate/promote/create/drop + demote stale primaries).
 			if (emailChanged) {
-				const [oldUser] = await tx
-					.select()
-					.from(table.user)
-					.where(eq(table.user.email, oldEmail))
-					.limit(1);
-
-				if (oldUser) {
-					const [oldClientUser] = await tx
-						.select()
-						.from(table.clientUser)
-						.where(
-							and(
-								eq(table.clientUser.userId, oldUser.id),
-								eq(table.clientUser.clientId, clientId),
-								eq(table.clientUser.tenantId, tenantId),
-								eq(table.clientUser.isPrimary, true)
-							)
-						)
-						.limit(1);
-
-					if (oldClientUser) {
-						if (newEmail) {
-							const [newUser] = await tx
-								.select()
-								.from(table.user)
-								.where(eq(table.user.email, newEmail))
-								.limit(1);
-
-							if (newUser) {
-								// Check if newUser already has a clientUser for this client
-								const [existingNewCU] = await tx
-									.select()
-									.from(table.clientUser)
-									.where(
-										and(
-											eq(table.clientUser.userId, newUser.id),
-											eq(table.clientUser.clientId, clientId),
-											eq(table.clientUser.tenantId, tenantId)
-										)
-									)
-									.limit(1);
-
-								if (existingNewCU) {
-									// Promote existing to primary, delete old
-									await tx
-										.update(table.clientUser)
-										.set({ isPrimary: true, updatedAt: new Date() })
-										.where(eq(table.clientUser.id, existingNewCU.id));
-									await deleteClientUserWithFKs(tx, oldClientUser.id);
-								} else {
-									// Re-link old clientUser to new user
-									await tx
-										.update(table.clientUser)
-										.set({ userId: newUser.id, updatedAt: new Date() })
-										.where(eq(table.clientUser.id, oldClientUser.id));
-								}
-							} else {
-								// No user for new email yet — remove old clientUser
-								await deleteClientUserWithFKs(tx, oldClientUser.id);
-							}
-						} else {
-							// Email cleared — remove old primary clientUser
-							await deleteClientUserWithFKs(tx, oldClientUser.id);
-						}
-					}
-				}
+				await syncPrimaryClientUserLink(tx, { clientId, tenantId, oldEmail, newEmail });
 			}
 		});
 
@@ -798,10 +728,38 @@ export const updateClientCompanyData = command(clientCompanyUpdateSchema, async 
 		cleanData[k] = val === '' ? null : val;
 	}
 
-	await db
-		.update(table.client)
-		.set({ ...cleanData, updatedAt: new Date() })
-		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
+	// Email changes must keep the primary client_user link in sync — same rule
+	// as the staff path (updateClient). A blank email is IGNORED here: the
+	// portal must not be able to clear the client's primary contact (it would
+	// lock that contact out of their own portal).
+	const emailProvided = typeof data.email === 'string' && data.email.trim() !== '';
+	if (!emailProvided) {
+		delete cleanData.email;
+	} else {
+		const emailCheck = v.safeParse(v.pipe(v.string(), v.trim(), v.email()), data.email);
+		if (!emailCheck.success) throw new Error('Adresa de email a companiei nu este validă.');
+		cleanData.email = emailCheck.output;
+	}
+
+	const [existing] = await db
+		.select({ email: table.client.email })
+		.from(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+		.limit(1);
+	if (!existing) throw new Error('Client not found');
+	const oldEmail = (existing.email || '').toLowerCase().trim();
+	const newEmail = emailProvided ? String(cleanData.email).toLowerCase().trim() : '';
+
+	await db.transaction(async (tx) => {
+		await tx
+			.update(table.client)
+			.set({ ...cleanData, updatedAt: new Date() })
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)));
+
+		if (emailProvided && newEmail !== oldEmail) {
+			await syncPrimaryClientUserLink(tx, { clientId, tenantId, oldEmail, newEmail });
+		}
+	});
 
 	return { success: true };
 });

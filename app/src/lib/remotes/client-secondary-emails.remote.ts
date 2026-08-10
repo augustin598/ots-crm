@@ -10,6 +10,7 @@ import { serializeError } from '$lib/server/error-serializer';
 import { requireStaff } from '$lib/server/get-actor';
 import { checkAuthRateLimit } from '$lib/server/rate-limiter';
 import { generateMagicLinkToken, hashToken } from '$lib/server/client-auth';
+import { deleteClientUserWithFKs } from '$lib/server/client-users';
 import {
 	ACCESS_CATEGORIES,
 	parseAccessFlags,
@@ -325,6 +326,46 @@ export const deleteClientSecondaryEmail = command(
 		await db
 			.delete(table.clientSecondaryEmail)
 			.where(and(eq(table.clientSecondaryEmail.id, secondaryEmailId), eq(table.clientSecondaryEmail.tenantId, tenantHint)));
+
+		// Revocation must also drop the contact's client_user link (created at
+		// their first portal login) — hooks authorize portal requests purely on
+		// that row's existence, so leaving it orphaned keeps portal access, team
+		// visibility and company selection alive indefinitely. The primary link
+		// (client.email holder) is never touched here.
+		const removedEmail = record.email.trim().toLowerCase();
+		const [linkedUser] = await db
+			.select({ id: table.user.id })
+			.from(table.user)
+			.where(eq(sql`lower(${table.user.email})`, removedEmail))
+			.limit(1);
+		if (linkedUser) {
+			const [clientRow] = await db
+				.select({ email: table.client.email })
+				.from(table.client)
+				.where(and(eq(table.client.id, record.clientId), eq(table.client.tenantId, tenantHint)))
+				.limit(1);
+			const isAlsoPrimaryEmail =
+				(clientRow?.email || '').trim().toLowerCase() === removedEmail;
+
+			if (!isAlsoPrimaryEmail) {
+				const [cu] = await db
+					.select({ id: table.clientUser.id, isPrimary: table.clientUser.isPrimary })
+					.from(table.clientUser)
+					.where(
+						and(
+							eq(table.clientUser.userId, linkedUser.id),
+							eq(table.clientUser.clientId, record.clientId),
+							eq(table.clientUser.tenantId, tenantHint)
+						)
+					)
+					.limit(1);
+				if (cu && !cu.isPrimary) {
+					await db.transaction(async (tx) => {
+						await deleteClientUserWithFKs(tx, cu.id);
+					});
+				}
+			}
+		}
 
 		return { success: true };
 	}
