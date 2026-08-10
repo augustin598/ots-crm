@@ -18,6 +18,7 @@
 	} from './task-kanban-utils';
 	import { updateTaskStatus, updateTaskPriority, getTasks } from '$lib/remotes/tasks.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
+	import { getTaskLiveQueries } from '$lib/components/task-live-queries-context';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import { avatarColor, avatarInitials } from '$lib/config/team';
@@ -78,7 +79,17 @@
 		showSelectionCheckbox = false
 	}: Props = $props();
 
-	const filterParams = getTaskFilters();
+	// Getter-ul de filtre din context (setat de pagina gazdă) — citit la momentul apelului.
+	const getFilters = getTaskFilters();
+	// Registrul cu instanțele live ale paginii gazdă (undefined pe paginile care
+	// nu-l publică — atunci cădem pe vechea reconstrucție de argumente).
+	const liveTaskQueries = getTaskLiveQueries();
+
+	function listRefreshTargets(): any[] {
+		const collected = liveTaskQueries?.collect();
+		if (collected?.length) return collected;
+		return [getTasks({ ...(getFilters?.() ?? {}) })];
+	}
 
 	// Optimistic state for inline edits.
 	let optimisticStatus = $state<Record<string, string>>({});
@@ -99,7 +110,7 @@
 		pendingTaskIds = { ...pendingTaskIds, [task.id]: true };
 		try {
 			await updateTaskStatus({ taskId: task.id, newStatus: newStatus as any }).updates(
-				getTasks({ ...(filterParams as any) })
+				...listRefreshTargets()
 			);
 			toast.success('Status actualizat');
 			const { [task.id]: _, ...restStatus } = optimisticStatus;
@@ -124,7 +135,7 @@
 			await updateTaskPriority({
 				taskId: task.id,
 				newPriority: newPriority as any
-			}).updates(getTasks({ ...(filterParams as any) }));
+			}).updates(...listRefreshTargets());
 			toast.success('Prioritate actualizată');
 			const { [task.id]: _, ...restPriority } = optimisticPriority;
 			optimisticPriority = restPriority;

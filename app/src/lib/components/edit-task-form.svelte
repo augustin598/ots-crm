@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { updateTask, getTasks, getTask, getCompletedTasks } from '$lib/remotes/tasks.remote';
+	import { updateTask, getTasks, getTask } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers } from '$lib/remotes/users.remote';
@@ -31,11 +31,17 @@
 
 	let { task, onSuccess, onCancel, additionalQueriesToUpdate = [] }: Props = $props();
 
-	// Get filterParams from context (set by parent page) or use empty object as fallback
-	const filterParams = getTaskFilters();
-	// Instanțele live ale paginii gazdă (undefined pe paginile care nu le
-	// publică — atunci cădem pe vechea reconstrucție de argumente).
+	// Getter-ul de filtre din context (setat de pagina gazdă) — citit la momentul apelului.
+	const getFilters = getTaskFilters();
+	// Registrul cu instanțele live ale paginii gazdă (undefined pe paginile care
+	// nu-l publică — atunci cădem pe vechea reconstrucție de argumente).
 	const liveTaskQueries = getTaskLiveQueries();
+
+	function listRefreshTargets(): any[] {
+		const collected = liveTaskQueries?.collect();
+		if (collected?.length) return collected;
+		return [getTasks({ ...(getFilters?.() ?? {}), excludeCompleted: true })];
+	}
 
 	const clientsQuery = getClients();
 	const clients = $derived(clientsQuery.current || []);
@@ -206,14 +212,7 @@
 				recurringType: isRecurring ? recurringType : undefined,
 				recurringInterval: isRecurring ? recurringInterval : undefined,
 				recurringEndDate: isRecurring && recurringEndDate ? recurringEndDate : undefined
-			}).updates(
-				...(liveTaskQueries?.() ?? [
-					getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })
-				]),
-				getTask(task.id),
-				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
-				...additionalQueriesToUpdate
-			);
+			}).updates(...listRefreshTargets(), getTask(task.id), ...additionalQueriesToUpdate);
 
 			onSuccess?.();
 		} catch (e) {

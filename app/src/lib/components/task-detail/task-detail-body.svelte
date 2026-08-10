@@ -14,7 +14,6 @@
 		reopenTask,
 		getTasks,
 		getTask,
-		getCompletedTasks,
 		updateTask,
 		toggleSubtask,
 		addSubtask,
@@ -103,15 +102,22 @@
 		isClient = false
 	}: Props = $props();
 
-	const filterParams = getTaskFilters();
+	const getFilters = getTaskFilters();
 	const liveTaskQueries = getTaskLiveQueries();
 
 	// Țintele de refresh pentru lista/statisticile paginii gazdă. Fallback pe
 	// vechea reconstrucție de argumente când pagina nu publică instanțele live.
 	function listRefreshTargets(): any[] {
-		return (
-			liveTaskQueries?.() ?? [getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })]
-		);
+		const collected = liveTaskQueries?.collect();
+		if (collected?.length) return collected;
+		return [getTasks({ ...(getFilters?.() ?? {}), excludeCompleted: true })];
+	}
+
+	// Toate mutațiile din panou care schimbă date vizibile pe board/listă trec
+	// pe aici: lista+statisticile gazdei, detaliul și query-urile pasate de gazdă.
+	function detailRefreshTargets(): any[] {
+		if (!task) return [];
+		return [...listRefreshTargets(), getTask(task.id), ...additionalQueriesToUpdate];
 	}
 
 	// Optimistic local overrides — reset only when task identity changes
@@ -401,12 +407,7 @@
 				const v = value === '' || value === null ? undefined : value;
 				if (v !== undefined) payload[field] = v;
 			}
-			await updateTask(payload).updates(
-				...listRefreshTargets(),
-				getTask(task.id),
-				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
-				...additionalQueriesToUpdate
-			);
+			await updateTask(payload).updates(...detailRefreshTargets());
 		} catch (e) {
 			localOverrides = { ...localOverrides, [field]: previous };
 			toast.error(`Nu s-a putut salva: ${e instanceof Error ? e.message : 'eroare'}`);
@@ -424,12 +425,7 @@
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await approveTask({ taskId: task.id }).updates(
-				...listRefreshTargets(),
-				getTask(task.id),
-				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
-				...additionalQueriesToUpdate
-			);
+			await approveTask({ taskId: task.id }).updates(...detailRefreshTargets());
 			toast.success('Task aprobat');
 			onClose();
 		} catch (e) {
@@ -443,12 +439,7 @@
 		if (!task || !confirm('Respingi acest task?')) return;
 		approvalLoading = true;
 		try {
-			await rejectTask(task.id).updates(
-				...listRefreshTargets(),
-				getTask(task.id),
-				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
-				...additionalQueriesToUpdate
-			);
+			await rejectTask(task.id).updates(...detailRefreshTargets());
 			toast.success('Task respins');
 			onClose();
 		} catch (e) {
@@ -462,12 +453,7 @@
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await reopenTask({ taskId: task.id }).updates(
-				...listRefreshTargets(),
-				getTask(task.id),
-				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
-				...additionalQueriesToUpdate
-			);
+			await reopenTask({ taskId: task.id }).updates(...detailRefreshTargets());
 			toast.success('Task redeschis');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
@@ -531,7 +517,7 @@
 		if (!task) return;
 		subtaskLoading = { ...subtaskLoading, [subtaskId]: true };
 		try {
-			await toggleSubtask({ subtaskId, done }).updates(getTask(task.id));
+			await toggleSubtask({ subtaskId, done }).updates(...detailRefreshTargets());
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
 		} finally {
@@ -542,7 +528,9 @@
 	async function handleAddSubtask() {
 		if (!task || !newSubtaskTitle.trim()) return;
 		try {
-			await addSubtask({ taskId: task.id, title: newSubtaskTitle.trim() }).updates(getTask(task.id));
+			await addSubtask({ taskId: task.id, title: newSubtaskTitle.trim() }).updates(
+				...detailRefreshTargets()
+			);
 			newSubtaskTitle = '';
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la adăugare subtask');
@@ -552,7 +540,7 @@
 	async function handleDeleteSubtask(subtaskId: string) {
 		if (!task) return;
 		try {
-			await deleteSubtask(subtaskId).updates(getTask(task.id));
+			await deleteSubtask(subtaskId).updates(...detailRefreshTargets());
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
 		}
@@ -562,7 +550,7 @@
 		if (!task) return;
 		addAssigneeOpen = false;
 		try {
-			await addAssignee({ taskId: task.id, userId }).updates(getTask(task.id));
+			await addAssignee({ taskId: task.id, userId }).updates(...detailRefreshTargets());
 			toast.success('Membru adăugat');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
@@ -572,10 +560,7 @@
 	async function handleRemoveAssignee(userId: string) {
 		if (!task) return;
 		try {
-			await removeAssignee({ taskId: task.id, userId }).updates(
-				getTask(task.id),
-				getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })
-			);
+			await removeAssignee({ taskId: task.id, userId }).updates(...detailRefreshTargets());
 			toast.success('Membru eliminat');
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
@@ -585,7 +570,7 @@
 	async function handleAddTag(tagName: string) {
 		if (!task) return;
 		try {
-			await addTag({ taskId: task.id, tagName }).updates(getTask(task.id));
+			await addTag({ taskId: task.id, tagName }).updates(...detailRefreshTargets());
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la adăugare tag');
 		}
@@ -594,7 +579,7 @@
 	async function handleRemoveTag(tagId: string) {
 		if (!task) return;
 		try {
-			await removeTag({ taskId: task.id, tagId }).updates(getTask(task.id));
+			await removeTag({ taskId: task.id, tagId }).updates(...detailRefreshTargets());
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
 		}
@@ -611,7 +596,7 @@
 					? `${meetDate || new Date().toISOString().split('T')[0]}T${meetTime}`
 					: undefined,
 				meetDurationMinutes: meetDuration ? parseInt(meetDuration) : undefined
-			}).updates(getTask(task.id));
+			}).updates(...detailRefreshTargets());
 			showMeetModal = false;
 			toast.success('Meeting programat');
 		} catch (e) {

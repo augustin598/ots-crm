@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createTask, getTasks, getCompletedTasks } from '$lib/remotes/tasks.remote';
+	import { createTask, getTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
 	import { getTenantUsers, getAssignableClientUsers } from '$lib/remotes/users.remote';
@@ -60,10 +60,17 @@
 		initialDay
 	}: Props = $props();
 
-	const filterParams = getTaskFilters();
-	// Instanțele live ale paginii gazdă (undefined pe paginile care nu le
-	// publică — atunci cădem pe vechea reconstrucție de argumente).
+	// Getter-ul de filtre din context (setat de pagina gazdă) — citit la momentul apelului.
+	const getFilters = getTaskFilters();
+	// Registrul cu instanțele live ale paginii gazdă (undefined pe paginile care
+	// nu-l publică — atunci cădem pe vechea reconstrucție de argumente).
 	const liveTaskQueries = getTaskLiveQueries();
+
+	function listRefreshTargets(): any[] {
+		const collected = liveTaskQueries?.collect();
+		if (collected?.length) return collected;
+		return [getTasks({ ...(getFilters?.() ?? {}), excludeCompleted: true })];
+	}
 
 	const clientsQuery = $derived(getClients());
 	const clients = $derived(clientsQuery.current || []);
@@ -457,13 +464,7 @@
 				meetDurationMinutes: isMeet ? draft.meetDurationMinutes : undefined,
 				subtasks: draft.subtasks.length ? draft.subtasks : undefined,
 				tagNames: tagNames.length ? tagNames : undefined
-			}).updates(
-				...(liveTaskQueries?.() ?? [
-					getTasks({ ...((filterParams as any) || {}), excludeCompleted: true })
-				]),
-				getCompletedTasks({ ...((filterParams as any) || {}), page: 1, pageSize: 20 }),
-				...additionalQueriesToUpdate
-			);
+			}).updates(...listRefreshTargets(), ...additionalQueriesToUpdate);
 			onOpenChange(false);
 			onSuccess?.();
 		} catch (e) {

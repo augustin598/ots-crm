@@ -8,7 +8,6 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { useQueryState, parseAsStringEnum, parseAsArrayOf, parseAsString } from 'nuqs-svelte';
-	import { setContext } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import TaskDetailPanel from '$lib/components/task-detail-panel.svelte';
 	import EditTaskDialog from '$lib/components/edit-task-dialog.svelte';
@@ -21,7 +20,8 @@
 	import type { Task } from '$lib/server/db/schema';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
-	import { TASK_FILTERS_CONTEXT_KEY } from '$lib/components/task-filters-context';
+	import { setTaskFilters } from '$lib/components/task-filters-context';
+	import { provideTaskLiveQueries } from '$lib/components/task-live-queries-context';
 
 	const tenantSlug = $derived(page.params.tenant || '');
 
@@ -92,9 +92,9 @@
 		dueDate: dueDate.current || undefined
 	});
 
-	// Provide filter context for child components (CreateTaskDialog reads it for default values)
-	// svelte-ignore state_referenced_locally
-	setContext(TASK_FILTERS_CONTEXT_KEY, filterParams);
+	// Provide filter context for child components (CreateTaskDialog reads it for
+	// default values). Getter: consumers read the current $derived value at call time.
+	setTaskFilters(() => filterParams);
 
 	const tasksQuery = $derived(
 		getTasks({
@@ -104,6 +104,10 @@
 	);
 	const tasks = $derived(tasksQuery.current || []);
 	const loading = $derived(tasksQuery.loading);
+
+	// Registrul cu instanța live a listei — mutațiile din panou/dialoguri o
+	// reîmprospătează prin context, fără să reconstruiască argumentele.
+	const liveQueryRegistry = provideTaskLiveQueries(() => [tasksQuery]);
 
 	function isDueToday(d: Date | string | null | undefined): boolean {
 		if (!d) return false;
@@ -222,7 +226,7 @@
 	async function handleDeleteTask(taskId: string) {
 		if (!confirm('Sigur ștergi acest task?')) return;
 		try {
-			await deleteTask(taskId).updates(getTasks({ ...filterParams }));
+			await deleteTask(taskId).updates(...liveQueryRegistry.collect());
 			if (taskIdPanel.current === taskId) taskIdPanel.current = null;
 			toast.success('Task șters');
 		} catch (e) {
