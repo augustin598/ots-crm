@@ -217,9 +217,11 @@ export const CATEGORIES: Category[] = [
 			{ id: 'seo-19', label: 'Optimizare PageSpeed 80+', values: { bronze: false, silver: false, gold: true, platinum: true } },
 			{ id: 'seo-20', label: 'Strategie backlink-uri din advertoriale', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'seo-21', label: 'E-E-A-T signals (autor, bio, trust)', values: { bronze: false, silver: false, gold: true, platinum: true } },
-			{ id: 'seo-22', label: 'AI Overviews și SGE optimization', values: { bronze: false, silver: false, gold: true, platinum: true } },
 			{ id: 'seo-23', label: 'Local SEO multi-listing (3+ orașe)', values: { bronze: false, silver: false, gold: false, platinum: true } },
 			{ id: 'seo-24', label: 'Mentenanță website (ore/lună)', values: { bronze: 0, silver: 1, gold: 2, platinum: 3 } }
+		],
+		notes: [
+			'Vizibilitatea în răspunsurile AI (AI Overviews, ChatGPT, Perplexity) e acoperită de serviciul dedicat AEO & GEO. SEO rămâne fundația: fără indexare corectă, motoarele generative nu au ce cita.'
 		]
 	},
 	{
@@ -598,9 +600,10 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 	},
 	{
 		id: 'organic',
-		label: 'Organic & SEO',
-		description: 'Trafic organic pe termen lung, fără buget media.',
-		slugs: ['seo']
+		label: 'Organic, SEO & AI Search',
+		description:
+			'Trafic organic pe termen lung, fără buget media — din Google și din motoarele de răspuns AI.',
+		slugs: ['seo', 'aeo-geo']
 	},
 	{
 		id: 'web-dev-apps',
