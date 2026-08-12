@@ -4,6 +4,7 @@
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
 	import IconGmail from '$lib/components/marketing/icon-gmail.svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import ZapIcon from '@lucide/svelte/icons/zap';
@@ -32,6 +33,8 @@
 	<IconGmail class={className} />
 {:else if slug === 'seo'}
 	<SearchIcon class={className} />
+{:else if slug === 'aeo-geo'}
+	<SparklesIcon class={className} />
 {:else if slug === 'wordpress-maintenance'}
 	<WrenchIcon class={className} />
 {:else if slug === 'cro'}
