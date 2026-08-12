@@ -223,6 +223,47 @@ export const CATEGORIES: Category[] = [
 		]
 	},
 	{
+		slug: 'aeo-geo',
+		name: 'AEO & GEO',
+		tagline: 'Vizibilitate în AI Search (AI Overviews, ChatGPT, Perplexity)',
+		icon: 'sparkles',
+		prices: { bronze: 350, silver: 500, gold: 750, platinum: 1100 },
+		setupFees: { bronze: 400, silver: 400, gold: 400, platinum: 400 },
+		setupDescription:
+			'Audit AI-visibility inițial: baseline citări brand pe platformele monitorizate, audit entități și schema markup, verificare acces boți AI (GPTBot, ClaudeBot, PerplexityBot, Google-Extended), implementare llms.txt, plan de acțiune pe 3-6 luni. GRATUIT la contractare minimă 6 luni.',
+		priceNote:
+			'Abonament lunar, EUR fără TVA. Audit inclus dacă contract 6+ luni. Rezultatele se măsoară în citări și share of voice, nu în poziții — primele mișcări apar tipic în 2-4 luni.',
+		features: [
+			{ id: 'aeo-1', label: 'Audit vizibilitate AI (baseline citări brand)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-2', label: 'Platforme monitorizate', values: { bronze: 'ChatGPT + AI Overviews', silver: '+ Perplexity', gold: '+ Gemini + Copilot', platinum: 'Toate + Claude + Grok' } },
+			{ id: 'aeo-3', label: 'Prompturi monitorizate lunar', values: { bronze: 10, silver: 25, gold: 50, platinum: 100 } },
+			{ id: 'aeo-4', label: 'Optimizare AI Overviews (Google SGE)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-5', label: 'Featured snippets și People Also Ask', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-6', label: 'Schema markup entități (Organization, Person, Product)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-7', label: 'llms.txt + acces boți AI (GPTBot, ClaudeBot, PerplexityBot)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-8', label: 'Restructurare conținut în format citabil (pagini/lună)', values: { bronze: 2, silver: 4, gold: 8, platinum: 15 } },
+			{ id: 'aeo-9', label: 'Conținut nou optimizat AEO (articole/lună)', values: { bronze: 'Nu', silver: '1/lună', gold: '3/lună', platinum: '6/lună' } },
+			{ id: 'aeo-10', label: 'Pagini FAQ + FAQPage schema', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-11', label: 'Statistici și date proprii (citation bait)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-12', label: 'E-E-A-T: autor, bio, credențiale, surse', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-13', label: 'Knowledge Graph / Wikidata entity building', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'aeo-14', label: 'Mențiuni pe surse citate de LLM-uri (Reddit, Quora, forumuri)', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'aeo-15', label: 'Prezență în listicle și comparații („best X")', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'aeo-16', label: 'Share of Voice vs. competiție în AI answers', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'aeo-17', label: 'Raport lunar citări în CRM', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'aeo-18', label: 'Raportare săptămânală în CRM', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'aeo-19', label: 'Alertă la pierderea unei citări', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'aeo-20', label: 'Optimizare AI shopping (Perplexity Shopping, Google AI)', values: { bronze: false, silver: false, gold: false, platinum: true } },
+			{ id: 'aeo-21', label: 'Suport clienți', values: { bronze: 'E-mail', silver: 'E-mail', gold: 'E-mail și telefon', platinum: 'E-mail și telefon' } },
+			{ id: 'aeo-22', label: 'Consultanță strategie AI Search', values: { bronze: false, silver: false, gold: true, platinum: true } },
+			{ id: 'aeo-23', label: 'Meeting lunar de strategie', values: { bronze: false, silver: false, gold: true, platinum: true } }
+		],
+		notes: [
+			'AEO & GEO nu înlocuiește SEO. Motoarele generative se alimentează din indexul clasic: fără un site indexabil corect, nu ai ce cita. Cele două servicii se rulează împreună.',
+			'Citările în LLM-uri nu se pot garanta contractual — modelele se reantrenează periodic, iar răspunsurile variază de la o sesiune la alta. Raportăm frecvența de apariție pe un set fix de prompturi, măsurată lunar.'
+		]
+	},
+	{
 		slug: 'wordpress-maintenance',
 		name: 'Mentenanță WordPress',
 		tagline: 'Administrare site WordPress',
