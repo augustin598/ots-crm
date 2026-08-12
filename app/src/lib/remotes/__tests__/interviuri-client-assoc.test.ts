@@ -178,12 +178,17 @@ describe('assignInterviewsClient', () => {
 });
 
 describe('acces portal client (isClientUser)', () => {
+	// Contact PRIMAR: `getRequestAccessFlags` îi dă toate flag-urile fără să
+	// atingă DB-ul, deci selectQueue rămâne aliniat cu ce cere codul.
+	// Testele de aici verifică SCOPAREA pe client, nu gate-ul de acces — pentru
+	// acela vezi testul cu contactul secundar de mai jos.
 	const clientEvent = () => ({
 		locals: {
-			user: { id: 'cu1' },
+			user: { id: 'cu1', email: 'primar@example.com' },
 			tenant: { id: 't1' },
 			isClientUser: true,
-			client: { id: 'lucky1' }
+			client: { id: 'lucky1' },
+			clientUser: { isPrimary: true }
 		}
 	});
 
@@ -257,6 +262,36 @@ describe('acces portal client (isClientUser)', () => {
 		currentEvent = clientEvent();
 		deleteReturns = [];
 		await expect(deleteInterview('i-altul')).rejects.toThrow(/nu a fost găsit/i);
+	});
+
+	// Gate-ul de acces în sine: contactul SECUNDAR fără flag-ul `interviuri` e
+	// respins de remote, nu doar ascuns din navigare. Layout-ul gate-uiește doar
+	// meniul — fără verificarea asta, flag-ul ar fi pur cosmetic.
+	test('contactul secundar FĂRĂ flag-ul interviuri e respins la citire și la scriere', async () => {
+		const secondaryEvent = () => ({
+			locals: {
+				user: { id: 'cu2', email: 'secundar@example.com' },
+				tenant: { id: 't1' },
+				isClientUser: true,
+				client: { id: 'lucky1' },
+				clientUser: { isPrimary: false }
+			}
+		});
+
+		// getRequestAccessFlags citește rândul de secondary email; gol = fără acces.
+		currentEvent = secondaryEvent();
+		selectQueue.push([]);
+		await expect(getInterviews(undefined as any)).rejects.toThrow(/nu ai acces/i);
+
+		currentEvent = secondaryEvent();
+		selectQueue.push([]);
+		await expect(
+			createInterview({
+				nume: 'X',
+				dataInterviu: '2026-07-01',
+				channelId: 'ch1'
+			} as any)
+		).rejects.toThrow(/nu ai acces/i);
 	});
 
 	test('staff nu primește filtru pe client în WHERE (vede tot tenantul)', async () => {

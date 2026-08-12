@@ -184,12 +184,17 @@ const { getClientAiAccess, setClientContentAiAccess } = await import('../client-
 const staffEvent = {
 	locals: { user: { id: 'staff1' }, tenant: { id: 't1' }, isClientUser: false }
 };
+// Contact PRIMAR: `getRequestAccessFlags` (apelat de contentAuth) îi dă toate
+// flag-urile fără să atingă DB-ul. Testele de aici verifică gate-ul PER-WEBSITE
+// (allowClientAi) și scoparea pe client, nu gate-ul per-user — pentru acela vezi
+// testul cu contactul secundar de la finalul fișierului.
 const clientEvent = {
 	locals: {
-		user: { id: 'cu1' },
+		user: { id: 'cu1', email: 'primar@example.com' },
 		tenant: { id: 't1' },
 		isClientUser: true,
-		client: { id: 'clientA' }
+		client: { id: 'clientA' },
+		clientUser: { isPrimary: true }
 	}
 };
 
@@ -653,5 +658,33 @@ describe('setClientContentAiAccess', () => {
 		expect(res.affected).toBe(0);
 		expect(updatePatches.length).toBe(0);
 		expect(insertedValues.length).toBe(0);
+	});
+});
+
+// ─── Gate-ul per-user (flag `content` pe contactul secundar) ──────────────────
+// Distinct de gate-ul per-website (allowClientAi) testat mai sus: layout-ul
+// ascunde doar navigarea, deci fără verificarea din contentAuth flag-ul ar fi
+// pur cosmetic — un secundar ar putea chema remote-ul direct.
+describe('acces per-user pentru contactul secundar', () => {
+	const secondaryEvent = () => ({
+		locals: {
+			user: { id: 'cu2', email: 'secundar@example.com' },
+			tenant: { id: 't1' },
+			isClientUser: true,
+			client: { id: 'clientA' },
+			clientUser: { isPrimary: false }
+		}
+	});
+
+	test('secundar FĂRĂ flag-ul content: 403 pe listarea website-urilor', async () => {
+		currentEvent = secondaryEvent();
+		queryQueue.push([]); // getRequestAccessFlags: niciun rând de secondary email
+		await expectStatus((getContentWebsites as any)(), 403);
+	});
+
+	test('secundar FĂRĂ flag-ul content: 403 și pe articolele unui website', async () => {
+		currentEvent = secondaryEvent();
+		queryQueue.push([]);
+		await expectStatus((getWebsiteArticles as any)({ websiteId: 'w1' }), 403);
 	});
 });
