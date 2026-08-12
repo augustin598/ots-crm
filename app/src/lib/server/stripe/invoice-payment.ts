@@ -52,10 +52,59 @@ export async function handleStripeInvoicePayment(params: {
 	// for one hosted session) must not re-emit the paid hooks (which advance the
 	// due date). Second delivery = no-op.
 	if (existing.status === 'paid') {
+		// ...dar dacă banii au venit prin ALT PaymentIntent decât cel înregistrat, nu
+		// e o redelivery: sunt două plăți reale pe aceeași factură (doi oameni cu
+		// același link public, în paralel). Nu putem restitui automat — alertăm.
+		if (
+			paymentIntentId &&
+			existing.stripePaymentIntentId &&
+			existing.stripePaymentIntentId !== paymentIntentId
+		) {
+			logError(
+				'directadmin',
+				`${eventLabel}: posibilă dublă încasare pe factura ${existing.invoiceNumber} — necesită refund manual`,
+				{
+					tenantId,
+					metadata: {
+						invoiceId,
+						recordedPaymentIntentId: existing.stripePaymentIntentId,
+						incomingPaymentIntentId: paymentIntentId,
+						paidAmountCents
+					}
+				}
+			);
+			return;
+		}
+
 		logInfo('directadmin', `${eventLabel}: invoice ${existing.invoiceNumber} deja 'paid' — skip idempotent`, {
 			tenantId,
 			metadata: { invoiceId, paymentIntentId }
 		});
+		return;
+	}
+
+	// Suma încasată trebuie să fie exact totalul facturii. Divergența apare când
+	// factura a fost editată după crearea PaymentIntent-ului. Marcarea „plătită" pe
+	// o sumă greșită ar strica reconcilierea contabilă, deci lăsăm factura
+	// neplătită și alertăm — banii sunt deja la Stripe, staff-ul decide.
+	if (
+		paidAmountCents != null &&
+		existing.totalAmount != null &&
+		paidAmountCents !== existing.totalAmount
+	) {
+		logError(
+			'directadmin',
+			`${eventLabel}: sumă încasată ≠ totalul facturii ${existing.invoiceNumber} — nu marcăm plătită`,
+			{
+				tenantId,
+				metadata: {
+					invoiceId,
+					paymentIntentId,
+					paidAmountCents,
+					invoiceTotalCents: existing.totalAmount
+				}
+			}
+		);
 		return;
 	}
 

@@ -25,6 +25,7 @@ import { processMetaAdsLeadsSync } from './tasks/meta-ads-leads-sync';
 import { processTokenRefresh } from './tasks/token-refresh';
 import { processDebugLogCleanup } from './tasks/debug-log-cleanup';
 import { processStripeEventCleanup } from './tasks/stripe-event-cleanup';
+import { processStripeInvoiceReconcile } from './tasks/stripe-invoice-reconcile';
 import { processTokenCleanup } from './tasks/token-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
 import { processPdfReportSend } from './tasks/pdf-report-send';
@@ -186,6 +187,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	token_refresh: processTokenRefresh,
 	debug_log_cleanup: processDebugLogCleanup,
 	stripe_event_cleanup: processStripeEventCleanup,
+	stripe_invoice_reconcile: processStripeInvoiceReconcile,
 	token_cleanup: processTokenCleanup,
 	db_write_health_check: processDbWriteHealthCheck,
 	pdf_report_send: processPdfReportSend,
@@ -341,7 +343,8 @@ export const startScheduler = async () => {
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
 		'meta-ads-invoice-sync', 'ads-session-keepalive', 'tiktok-ads-spending-sync', 'ads-status-monitor',
 		'ads-performance-monitor', 'ads-snapshot-retention', 'meta-ads-leads-sync',
-		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'stripe-event-cleanup', 'token-cleanup',
+		'token-refresh-frequent', 'token-refresh-daily', 'debug-log-cleanup', 'stripe-event-cleanup',
+		'stripe-invoice-reconcile', 'token-cleanup',
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
 		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
@@ -771,6 +774,25 @@ export const startScheduler = async () => {
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'stripe-event-cleanup'
+		}
+	);
+
+	// Stripe invoice reconcile — daily at 3:30 AM
+	// Plasă de siguranță pentru webhook-uri pierdute definitiv (Stripe renunță la
+	// redelivery după ~72h): factură cu PaymentIntent 'succeeded' dar rămasă
+	// neplătită în CRM → clientul a plătit și tot primește remindere.
+	await schedulerQueue.add(
+		'stripe-invoice-reconcile',
+		{
+			type: 'stripe_invoice_reconcile',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '30 3 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'stripe-invoice-reconcile'
 		}
 	);
 

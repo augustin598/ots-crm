@@ -3,6 +3,8 @@ import { error } from '@sveltejs/kit';
 import { validateInvoiceViewToken } from '$lib/server/invoice-token';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { logInfo } from '$lib/server/logger';
+import { checkCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
+import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const result = await validateInvoiceViewToken(params.tenant, params.token);
@@ -30,7 +32,16 @@ export const load: PageServerLoad = async ({ params }) => {
 
 	const displayInvoiceNumber = formatInvoiceNumberDisplay(invoice, invoiceSettings);
 
+	// Cardul de plată apare doar dacă factura e eligibilă ȘI tenantul are Stripe
+	// activ. Aceleași reguli le aplică și remote-ul (`checkCardPaymentEligibility`),
+	// ca butonul să nu poată duce la o eroare. Dacă verificarea Stripe aruncă,
+	// pagina se încarcă fără plata cu cardul — factura rămâne vizibilă.
+	const eligibility = checkCardPaymentEligibility(invoice);
+	const canPayByCard =
+		eligibility.eligible && (await isStripeConfiguredForTenant(tenant.id).catch(() => false));
+
 	return {
+		canPayByCard,
 		invoice: {
 			id: invoice.id,
 			invoiceNumber: displayInvoiceNumber,

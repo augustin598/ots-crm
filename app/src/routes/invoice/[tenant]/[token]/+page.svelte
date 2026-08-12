@@ -1,12 +1,21 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
+	import { createPublicInvoicePaymentIntent } from '$lib/remotes/public-invoice.remote';
+	import {
+		loadStripe,
+		type Stripe as StripeJS,
+		type StripeElements as StripeElementsT
+	} from '@stripe/stripe-js';
+	import { StripeElements } from '$lib/components/Stripe';
+	import { PaymentElement } from '$lib/components/Stripe/PaymentElement';
 
 	const data = $derived(page.data as any);
 	const invoice = $derived(data.invoice);
 	const lineItems = $derived(data.lineItems || []);
 	const tenant = $derived(data.tenant);
 	const client = $derived(data.client);
+	const canPayByCard = $derived(data.canPayByCard === true);
 
 	const tenantSlug = $derived(page.params.tenant);
 	const token = $derived(page.params.token);
@@ -45,6 +54,92 @@
 	}
 
 	let downloading = $state(false);
+
+	// ─── Plată cu cardul ──────────────────────────────────────────────────────
+	// `?paid=1` = întoarcere din redirectul 3DS; `?pay=1` = venit din butonul de email.
+	type PayStage = 'summary' | 'loadingIntent' | 'card' | 'confirming' | 'paid' | 'alreadyPaid';
+	let payStage = $state<PayStage>(page.url.searchParams.get('paid') === '1' ? 'paid' : 'summary');
+	let payError = $state<string | null>(null);
+	let stripeJs = $state<StripeJS | null>(null);
+	let stripeElements = $state<StripeElementsT | null>(null);
+	let clientSecret = $state<string | null>(null);
+	// Plain let, nu $state: e un latch, nu trebuie să retrigereze efectul.
+	let autoStarted = false;
+
+	async function startPayment() {
+		// Capturate local: `page.params` e `string | undefined`, iar narrowing-ul nu
+		// supraviețuiește peste await.
+		const slug = tenantSlug;
+		const tok = token;
+		if (!slug || !tok) {
+			payError = 'Link invalid. Reincarcati pagina din emailul primit.';
+			return;
+		}
+		payError = null;
+		payStage = 'loadingIntent';
+		try {
+			const res = await createPublicInvoicePaymentIntent({ tenantSlug: slug, token: tok });
+			if (res.alreadyPaid) {
+				payStage = 'alreadyPaid';
+				return;
+			}
+			clientSecret = res.clientSecret;
+			const stripe = await loadStripe(res.publishableKey);
+			if (!stripe) throw new Error('Nu s-a putut incarca formularul de plata.');
+			stripeJs = stripe;
+			payStage = 'card';
+		} catch (e) {
+			payError = e instanceof Error ? e.message : 'A aparut o eroare. Incercati din nou.';
+			payStage = 'summary';
+		}
+	}
+
+	async function confirmPayment() {
+		if (!stripeJs || !stripeElements || !clientSecret) {
+			payError = 'Formularul de plata nu este pregatit. Reincarcati pagina.';
+			return;
+		}
+		payError = null;
+		payStage = 'confirming';
+		try {
+			const returnUrl = `${window.location.origin}/invoice/${tenantSlug}/${token}?paid=1`;
+			const { error: confirmErr, paymentIntent } = await stripeJs.confirmPayment({
+				elements: stripeElements,
+				confirmParams: { return_url: returnUrl },
+				redirect: 'if_required'
+			});
+			if (confirmErr) {
+				// Al doilea tab care încearcă același PaymentIntent primește o eroare de
+				// stare — pentru client asta înseamnă „s-a plătit deja", nu o defecțiune.
+				payError =
+					confirmErr.code === 'payment_intent_unexpected_state'
+						? 'Aceasta factura pare sa fi fost deja platita.'
+						: confirmErr.message ||
+							'Plata nu a putut fi confirmata. Verificati datele cardului si incercati din nou.';
+				payStage = 'card';
+				return;
+			}
+			if (paymentIntent?.status === 'succeeded' || paymentIntent?.status === 'processing') {
+				payStage = 'paid';
+				return;
+			}
+			// requires_action → Stripe redirectează browserul prin return_url.
+		} catch (e) {
+			payError = e instanceof Error ? e.message : 'A aparut o eroare la confirmarea platii.';
+			payStage = 'card';
+		}
+	}
+
+	$effect(() => {
+		// Butonul din email (`?pay=1`) duce direct în formularul de card. Latch-ul
+		// `autoStarted` face efectul one-shot; nu citim `payStage` aici, tocmai ca
+		// efectul să nu depindă de starea pe care o scrie.
+		if (autoStarted) return;
+		if (canPayByCard && page.url.searchParams.get('pay') === '1') {
+			autoStarted = true;
+			startPayment();
+		}
+	});
 
 	async function handleDownloadPDF() {
 		downloading = true;
@@ -143,7 +238,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each lineItems as item}
+								{#each lineItems as item, i (i)}
 									{@const vatRate = item.taxRate ? item.taxRate / 100 : 0}
 									{@const itemNet = item.amount || item.rate * item.quantity}
 									{@const itemVat = hasTax ? Math.round(itemNet * vatRate / 100) : 0}
@@ -228,10 +323,93 @@
 			</div>
 		</div>
 
+		<!-- Card payment -->
+		{#if canPayByCard || payStage === 'paid' || payStage === 'alreadyPaid'}
+			<div class="mt-6 rounded-lg border bg-white p-6 shadow-sm print:hidden">
+				{#if payStage === 'paid'}
+					<div class="flex items-start gap-3">
+						<svg
+							class="mt-0.5 h-6 w-6 shrink-0 text-green-600"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+							<path d="M22 4L12 14.01l-3-3"></path>
+						</svg>
+						<div>
+							<h3 class="text-base font-semibold text-gray-900">Plata a fost inregistrata</h3>
+							<p class="mt-1 text-sm text-gray-600">
+								Va multumim! Factura va aparea ca achitata in scurt timp.
+							</p>
+						</div>
+					</div>
+				{:else if payStage === 'alreadyPaid'}
+					<h3 class="text-base font-semibold text-gray-900">Factura este deja achitata</h3>
+					<p class="mt-1 text-sm text-gray-600">
+						Nu mai este nimic de plata pentru aceasta factura.
+					</p>
+				{:else}
+					<h3 class="mb-1 text-base font-semibold text-gray-900">Plata cu cardul</h3>
+					<p class="mb-4 text-sm text-gray-500">
+						Plata securizata prin Stripe. Datele cardului nu ajung pe serverele noastre.
+					</p>
+
+					{#if payError}
+						<div
+							class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+							role="alert"
+						>
+							{payError}
+						</div>
+					{/if}
+
+					{#if payStage === 'summary' || payStage === 'loadingIntent'}
+						<button
+							onclick={startPayment}
+							disabled={payStage === 'loadingIntent'}
+							class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 sm:w-auto"
+						>
+							{#if payStage === 'loadingIntent'}
+								<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+									<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle>
+									<path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path>
+								</svg>
+								Se pregateste plata...
+							{:else}
+								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+									<rect x="2" y="5" width="20" height="14" rx="2"></rect>
+									<path d="M2 10h20"></path>
+								</svg>
+								Plateste cu cardul {formatAmount(invoice.totalAmount, invoice.currency as Currency)}
+							{/if}
+						</button>
+					{:else if payStage === 'card' || payStage === 'confirming'}
+						<StripeElements bind:elements={stripeElements} stripe={stripeJs} {clientSecret}>
+							<PaymentElement />
+						</StripeElements>
+						<button
+							onclick={confirmPayment}
+							disabled={payStage === 'confirming'}
+							class="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
+						>
+							{payStage === 'confirming'
+								? 'Se proceseaza...'
+								: `Confirma plata ${formatAmount(invoice.totalAmount, invoice.currency as Currency)}`}
+						</button>
+					{/if}
+				{/if}
+			</div>
+		{/if}
+
 		<!-- Payment Info -->
 		{#if displayIban}
 			<div class="mt-6 rounded-lg border bg-white p-6 shadow-sm">
-				<h3 class="mb-3 text-sm font-medium uppercase text-gray-500">Date plata</h3>
+				<h3 class="mb-3 text-sm font-medium uppercase text-gray-500">
+					{canPayByCard ? 'Sau plata prin transfer bancar' : 'Date plata'}
+				</h3>
 				<div class="space-y-1 text-sm text-gray-700">
 					<p><span class="font-medium">Beneficiar:</span> {tenant.name}</p>
 					<p><span class="font-medium">IBAN ({ibanLabel}):</span> {displayIban}</p>

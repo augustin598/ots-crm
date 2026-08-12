@@ -96,6 +96,7 @@ describe('handleStripeInvoicePayment', () => {
 				tenantId: 't1',
 				status: 'sent',
 				invoiceNumber: '8',
+				totalAmount: 90629,
 				hostingAccountId: 'acc-1',
 				stripePaymentIntentId: null,
 				externalTransactionId: null
@@ -107,6 +108,7 @@ describe('handleStripeInvoicePayment', () => {
 				tenantId: 't1',
 				status: 'paid',
 				invoiceNumber: '8',
+				totalAmount: 90629,
 				hostingAccountId: 'acc-1'
 			}
 		]);
@@ -128,7 +130,15 @@ describe('handleStripeInvoicePayment', () => {
 
 	test('is idempotent: already-paid invoice does NOT update or emit', async () => {
 		pushSelect([
-			{ id: 'inv-1', tenantId: 't1', status: 'paid', invoiceNumber: '8', hostingAccountId: 'acc-1' }
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'paid',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: 'acc-1',
+				stripePaymentIntentId: 'pi_123'
+			}
 		]);
 
 		await handleStripeInvoicePayment({
@@ -157,5 +167,86 @@ describe('handleStripeInvoicePayment', () => {
 		expect(updateCalls).toBe(0);
 		expect(emitted).toHaveLength(0);
 		expect(errorLogs.some((m) => m.includes('negăsit'))).toBe(true);
+	});
+
+	test('suma încasată diferă de totalul facturii → NU marchează plătită, loghează critic', async () => {
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: 'acc-1',
+				stripePaymentIntentId: 'pi_123',
+				externalTransactionId: null
+			}
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_123',
+			paidAmountCents: 50000, // factura a fost editată între timp
+			eventLabel: 'payment_intent.succeeded'
+		});
+
+		expect(updateCalls).toBe(0);
+		expect(emitted).toHaveLength(0);
+		expect(errorLogs.some((m) => m.includes('sumă'))).toBe(true);
+	});
+
+	test('sumă necunoscută (null) nu blochează marcarea plătită', async () => {
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: 'acc-1',
+				stripePaymentIntentId: null,
+				externalTransactionId: null
+			}
+		]);
+		pushSelect([
+			{ id: 'inv-1', tenantId: 't1', status: 'paid', invoiceNumber: '8', totalAmount: 90629 }
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_123',
+			paidAmountCents: null,
+			eventLabel: 'checkout.session.completed'
+		});
+
+		expect(updateCalls).toBe(1);
+	});
+
+	test('factură deja plătită cu ALT PaymentIntent → alertă de dublă încasare', async () => {
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'paid',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: 'acc-1',
+				stripePaymentIntentId: 'pi_PRIMUL'
+			}
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_AL_DOILEA',
+			paidAmountCents: 90629,
+			eventLabel: 'payment_intent.succeeded'
+		});
+
+		expect(updateCalls).toBe(0);
+		expect(emitted).toHaveLength(0);
+		expect(errorLogs.some((m) => m.includes('dublă încasare'))).toBe(true);
 	});
 });
