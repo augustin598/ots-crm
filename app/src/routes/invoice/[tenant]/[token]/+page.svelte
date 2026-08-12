@@ -66,6 +66,42 @@
 	// Plain let, nu $state: e un latch, nu trebuie să retrigereze efectul.
 	let autoStarted = false;
 
+	/**
+	 * Formularul Stripe are ~640px, deci după click îi rămâne doar marginea de sus
+	 * în viewport. Îl aducem în cadru — e continuarea propriului click al userului,
+	 * nu o navigare separată. Respectăm `prefers-reduced-motion`.
+	 *
+	 * Attachment, nu `bind:this` + tick: attachment-ul rulează garantat când nodul
+	 * intră în DOM. Cu `bind:this` ordinea de inițializare diferă între dev și
+	 * build-ul de producție (vezi bugul editorului de content, svelte#16582).
+	 */
+	function revealOnMount(node: HTMLElement) {
+		const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+		const behavior: ScrollBehavior = reduced ? 'auto' : 'smooth';
+		const bringIntoView = () => node.scrollIntoView({ behavior, block: 'start' });
+
+		bringIntoView();
+
+		// Formularul Stripe se randează într-un iframe și crește la ~640px DUPĂ
+		// mount. Cât timp documentul e scurt, browserul nu POATE derula până la
+		// capăt — se oprea la maximul disponibil și butonul „Confirma plata"
+		// rămânea sub fold. Re-derulăm o singură dată, când iframe-ul și-a luat
+		// înălțimea, apoi ne oprim ca să nu smucim pagina sub degetele userului.
+		const observer = new ResizeObserver(() => {
+			if (node.offsetHeight > 300) {
+				bringIntoView();
+				observer.disconnect();
+			}
+		});
+		observer.observe(node);
+		const safetyStop = setTimeout(() => observer.disconnect(), 8000);
+
+		return () => {
+			clearTimeout(safetyStop);
+			observer.disconnect();
+		};
+	}
+
 	async function startPayment() {
 		// Capturate local: `page.params` e `string | undefined`, iar narrowing-ul nu
 		// supraviețuiește peste await.
@@ -300,77 +336,17 @@
 				</div>
 			{/if}
 
-			<!-- Actions -->
+			<!-- Actions + plată cu cardul.
+			     Plata stă ÎN cardul facturii, imediat sub total: e acțiunea principală a
+			     paginii, iar formularul se deschide chiar aici. Într-un card separat mai
+			     jos rămânea sub fold și clientul nu-l vedea fără să deruleze. -->
 			<div class="p-6">
-				<button
-					onclick={handleDownloadPDF}
-					disabled={downloading}
-					class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-				>
-					{#if downloading}
-						<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-							<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle>
-							<path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path>
-						</svg>
-						Se descarca...
-					{:else}
-						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
-						</svg>
-						Descarca PDF
-					{/if}
-				</button>
-			</div>
-		</div>
-
-		<!-- Card payment -->
-		{#if canPayByCard || payStage === 'paid' || payStage === 'alreadyPaid'}
-			<div class="mt-6 rounded-lg border bg-white p-6 shadow-sm print:hidden">
-				{#if payStage === 'paid'}
-					<div class="flex items-start gap-3">
-						<svg
-							class="mt-0.5 h-6 w-6 shrink-0 text-green-600"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							aria-hidden="true"
-						>
-							<path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
-							<path d="M22 4L12 14.01l-3-3"></path>
-						</svg>
-						<div>
-							<h3 class="text-base font-semibold text-gray-900">Plata a fost inregistrata</h3>
-							<p class="mt-1 text-sm text-gray-600">
-								Va multumim! Factura va aparea ca achitata in scurt timp.
-							</p>
-						</div>
-					</div>
-				{:else if payStage === 'alreadyPaid'}
-					<h3 class="text-base font-semibold text-gray-900">Factura este deja achitata</h3>
-					<p class="mt-1 text-sm text-gray-600">
-						Nu mai este nimic de plata pentru aceasta factura.
-					</p>
-				{:else}
-					<h3 class="mb-1 text-base font-semibold text-gray-900">Plata cu cardul</h3>
-					<p class="mb-4 text-sm text-gray-500">
-						Plata securizata prin Stripe. Datele cardului nu ajung pe serverele noastre.
-					</p>
-
-					{#if payError}
-						<div
-							class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-							role="alert"
-						>
-							{payError}
-						</div>
-					{/if}
-
-					{#if payStage === 'summary' || payStage === 'loadingIntent'}
+				<div class="flex flex-col gap-3 sm:flex-row">
+					{#if canPayByCard && payStage !== 'paid' && payStage !== 'alreadyPaid'}
 						<button
 							onclick={startPayment}
-							disabled={payStage === 'loadingIntent'}
-							class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 sm:w-auto"
+							disabled={payStage === 'loadingIntent' || payStage === 'card' || payStage === 'confirming'}
+							class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 print:hidden"
 						>
 							{#if payStage === 'loadingIntent'}
 								<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -386,7 +362,43 @@
 								Plateste cu cardul {formatAmount(invoice.totalAmount, invoice.currency as Currency)}
 							{/if}
 						</button>
-					{:else if payStage === 'card' || payStage === 'confirming'}
+					{/if}
+
+					<!-- Secundar când există plata cu cardul: descărcarea PDF-ului nu mai e
+					     acțiunea pe care o vrem cea mai vizibilă. -->
+					<button
+						onclick={handleDownloadPDF}
+						disabled={downloading}
+						class="inline-flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-medium shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 {canPayByCard
+							? 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus-visible:outline-gray-500'
+							: 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:outline-blue-600'}"
+					>
+						{#if downloading}
+							<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+								<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle>
+								<path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path>
+							</svg>
+							Se descarca...
+						{:else}
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+								<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+							</svg>
+							Descarca PDF
+						{/if}
+					</button>
+				</div>
+
+				{#if payError}
+					<div
+						class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 print:hidden"
+						role="alert"
+					>
+						{payError}
+					</div>
+				{/if}
+
+				{#if payStage === 'card' || payStage === 'confirming'}
+					<div {@attach revealOnMount} class="mt-5 scroll-mt-4 border-t pt-5 print:hidden">
 						<StripeElements bind:elements={stripeElements} stripe={stripeJs} {clientSecret}>
 							<PaymentElement />
 						</StripeElements>
@@ -399,10 +411,42 @@
 								? 'Se proceseaza...'
 								: `Confirma plata ${formatAmount(invoice.totalAmount, invoice.currency as Currency)}`}
 						</button>
-					{/if}
+						<p class="mt-3 text-center text-xs text-gray-500">
+							Plata securizata prin Stripe. Datele cardului nu ajung pe serverele noastre.
+						</p>
+					</div>
+				{/if}
+
+				{#if payStage === 'paid'}
+					<div class="mt-5 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 print:hidden">
+						<svg
+							class="mt-0.5 h-6 w-6 shrink-0 text-green-600"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+							<path d="M22 4L12 14.01l-3-3"></path>
+						</svg>
+						<div>
+							<h3 class="text-base font-semibold text-green-900">Plata a fost inregistrata</h3>
+							<p class="mt-1 text-sm text-green-800">
+								Va multumim! Factura va aparea ca achitata in scurt timp.
+							</p>
+						</div>
+					</div>
+				{:else if payStage === 'alreadyPaid'}
+					<div class="mt-5 rounded-lg border bg-gray-50 p-4 print:hidden">
+						<h3 class="text-base font-semibold text-gray-900">Factura este deja achitata</h3>
+						<p class="mt-1 text-sm text-gray-600">
+							Nu mai este nimic de plata pentru aceasta factura.
+						</p>
+					</div>
 				{/if}
 			</div>
-		{/if}
+		</div>
 
 		<!-- Payment Info -->
 		{#if displayIban}
