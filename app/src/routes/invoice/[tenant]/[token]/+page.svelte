@@ -9,6 +9,7 @@
 	} from '@stripe/stripe-js';
 	import { StripeElements } from '$lib/components/Stripe';
 	import { PaymentElement } from '$lib/components/Stripe/PaymentElement';
+	import CheckoutModalShell from '$lib/components/checkout-modal-shell.svelte';
 
 	const data = $derived(page.data as any);
 	const invoice = $derived(data.invoice);
@@ -67,47 +68,44 @@
 	let autoStarted = false;
 
 	/**
-	 * Formularul Stripe are ~640px, deci după click îi rămâne doar marginea de sus
-	 * în viewport. Îl aducem în cadru — e continuarea propriului click al userului,
-	 * nu o navigare separată. Respectăm `prefers-reduced-motion`.
+	 * Plata stă într-un modal, nu inline în pagină.
 	 *
-	 * Attachment, nu `bind:this` + tick: attachment-ul rulează garantat când nodul
-	 * intră în DOM. Cu `bind:this` ordinea de inițializare diferă între dev și
-	 * build-ul de producție (vezi bugul editorului de content, svelte#16582).
+	 * Inline, formularul Stripe (~640px, randat în iframe care crește ÎN TREPTE
+	 * după mount) ajungea sub fold și nicio strategie de derulare nu-l aducea
+	 * fiabil în cadru — măsurat pe producție, butonul „Confirma plata" rămânea cu
+	 * 35px sub marginea ecranului. Modalul e centrat în viewport prin construcție,
+	 * deci problema dispare în loc să fie compensată.
+	 *
+	 * Același pattern ca la checkout-ul de hosting (`hosting-checkout-modal.svelte`).
 	 */
-	function revealOnMount(node: HTMLElement) {
-		const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-		const behavior: ScrollBehavior = reduced ? 'auto' : 'smooth';
-		const bringIntoView = () => node.scrollIntoView({ behavior, block: 'start' });
+	let showPayModal = $state(false);
 
-		bringIntoView();
+	/**
+	 * Blocăm închiderea DOAR cât Stripe procesează efectiv plata. În
+	 * `loadingIntent` nu s-a încasat nimic (PaymentIntent-ul doar așteaptă), iar
+	 * dacă ascundem butonul „Închide" în acel moment modalul se deschide fără
+	 * niciun element focusabil — focus trap-ul n-are ce focusa și focusul rămâne
+	 * în pagina de dedesubt.
+	 */
+	const canClosePayModal = $derived(payStage !== 'confirming');
 
-		// Formularul Stripe se randează într-un iframe care crește ÎN TREPTE după
-		// mount (până la ~640px). O re-derulare la prima treaptă cade scurt: măsurat
-		// pe producție, butonul „Confirma plata" rămânea cu 35px sub marginea
-		// ecranului. Așteptăm să se stabilizeze înălțimea (debounce), apoi derulăm o
-		// singură dată — tot blocul (~700px) încape într-un ecran obișnuit.
-		let settleTimer: ReturnType<typeof setTimeout> | undefined;
-		const observer = new ResizeObserver(() => {
-			clearTimeout(settleTimer);
-			settleTimer = setTimeout(() => {
-				bringIntoView();
-				observer.disconnect();
-			}, 250);
-		});
-		observer.observe(node);
-		// Plasă de siguranță: nu observăm la nesfârșit dacă iframe-ul se tot
-		// redimensionează (ex. userul comută metoda de plată).
-		const safetyStop = setTimeout(() => observer.disconnect(), 8000);
-
-		return () => {
-			clearTimeout(settleTimer);
-			clearTimeout(safetyStop);
-			observer.disconnect();
-		};
+	function closePayModal() {
+		if (!canClosePayModal) return;
+		showPayModal = false;
 	}
 
+	$effect(() => {
+		// Blocăm derularea paginii din spate cât timp modalul e deschis.
+		if (!showPayModal) return;
+		const previous = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.body.style.overflow = previous;
+		};
+	});
+
 	async function startPayment() {
+		showPayModal = true;
 		// Capturate local: `page.params` e `string | undefined`, iar narrowing-ul nu
 		// supraviețuiește peste await.
 		const slug = tenantSlug;
@@ -393,32 +391,12 @@
 					</button>
 				</div>
 
-				{#if payError}
+				{#if payError && !showPayModal}
 					<div
 						class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 print:hidden"
 						role="alert"
 					>
 						{payError}
-					</div>
-				{/if}
-
-				{#if payStage === 'card' || payStage === 'confirming'}
-					<div {@attach revealOnMount} class="mt-5 scroll-mt-4 border-t pt-5 print:hidden">
-						<StripeElements bind:elements={stripeElements} stripe={stripeJs} {clientSecret}>
-							<PaymentElement />
-						</StripeElements>
-						<button
-							onclick={confirmPayment}
-							disabled={payStage === 'confirming'}
-							class="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
-						>
-							{payStage === 'confirming'
-								? 'Se proceseaza...'
-								: `Confirma plata ${formatAmount(invoice.totalAmount, invoice.currency as Currency)}`}
-						</button>
-						<p class="mt-3 text-center text-xs text-gray-500">
-							Plata securizata prin Stripe. Datele cardului nu ajung pe serverele noastre.
-						</p>
 					</div>
 				{/if}
 
@@ -467,6 +445,99 @@
 					{/if}
 				</div>
 			</div>
+		{/if}
+
+		<!-- Modal de plată — aceeași coajă ca la checkout-ul de hosting. -->
+		{#if showPayModal}
+			<CheckoutModalShell onClose={closePayModal} canClose={canClosePayModal}>
+				<div class="mb-5">
+					<h2 class="text-lg font-semibold text-gray-900">
+						Plata factura {invoice.invoiceNumber}
+					</h2>
+					<p class="mt-1 text-sm text-gray-500">
+						Total de plata <span class="font-semibold text-gray-900"
+							>{formatAmount(invoice.totalAmount, invoice.currency as Currency)}</span
+						>
+					</p>
+				</div>
+
+				{#if payError}
+					<div
+						class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+						role="alert"
+					>
+						{payError}
+					</div>
+				{/if}
+
+				{#if payStage === 'loadingIntent'}
+					<div class="flex items-center justify-center gap-3 py-10 text-sm text-gray-500">
+						<svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+							<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle>
+							<path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path>
+						</svg>
+						Se pregateste plata...
+					</div>
+				{:else if payStage === 'card' || payStage === 'confirming'}
+					<StripeElements bind:elements={stripeElements} stripe={stripeJs} {clientSecret}>
+						<PaymentElement />
+					</StripeElements>
+				{:else if payStage === 'paid'}
+					<div class="flex flex-col items-center gap-3 py-6 text-center">
+						<svg
+							class="h-12 w-12 text-green-600"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+							<path d="M22 4L12 14.01l-3-3"></path>
+						</svg>
+						<h3 class="text-lg font-semibold text-gray-900">Plata a fost inregistrata</h3>
+						<p class="max-w-sm text-sm text-gray-600">
+							Va multumim! Factura va aparea ca achitata in scurt timp.
+						</p>
+						<button
+							onclick={closePayModal}
+							class="mt-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+						>
+							Inchide
+						</button>
+					</div>
+				{:else if payStage === 'alreadyPaid'}
+					<div class="py-6 text-center">
+						<h3 class="text-lg font-semibold text-gray-900">Factura este deja achitata</h3>
+						<p class="mt-1 text-sm text-gray-600">
+							Nu mai este nimic de plata pentru aceasta factura.
+						</p>
+						<button
+							onclick={closePayModal}
+							class="mt-4 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+						>
+							Inchide
+						</button>
+					</div>
+				{/if}
+
+				{#snippet footer()}
+					{#if payStage === 'card' || payStage === 'confirming'}
+						<button
+							onclick={confirmPayment}
+							disabled={payStage === 'confirming'}
+							class="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
+						>
+							{payStage === 'confirming'
+								? 'Se proceseaza...'
+								: `Confirma plata ${formatAmount(invoice.totalAmount, invoice.currency as Currency)}`}
+						</button>
+						<p class="mt-2 text-center text-xs text-gray-500">
+							Datele cardului nu ajung pe serverele noastre.
+						</p>
+					{/if}
+				{/snippet}
+			</CheckoutModalShell>
 		{/if}
 
 		<!-- Footer -->
