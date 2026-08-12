@@ -26,6 +26,29 @@ import type { RequestHandler } from './$types';
  * Admin-only. Tenant-scoped pe locals.tenant.
  */
 
+/**
+ * Evenimentele pe care `dispatchStripeEvent` le tratează efectiv — lista trebuie
+ * să rămână sincronă cu `case`-urile din `webhook-handlers.ts`.
+ *
+ * `payment_intent.succeeded` lipsea din lista veche, deși e SINGURUL eveniment
+ * prin care fluxul cu PaymentElement embedded (portal reînnoire + plata facturii
+ * din linkul public) confirmă plata. Cine configura Stripe după lista aceea
+ * încasa banii fără ca factura să fie marcată plătită — descoperit 12 aug 2026.
+ */
+const REQUIRED_WEBHOOK_EVENTS = [
+	'checkout.session.completed',
+	'checkout.session.expired',
+	'payment_intent.succeeded',
+	'payment_intent.payment_failed',
+	'invoice.paid',
+	'invoice.payment_succeeded',
+	'invoice.payment_failed',
+	'customer.subscription.deleted',
+	'customer.updated',
+	'charge.refunded',
+	'charge.dispute.created'
+] as const;
+
 function requireAdmin(event: Parameters<RequestHandler>[0]) {
 	if (!event.locals.user || !event.locals.tenant) throw error(401, 'Unauthorized');
 	const role = event.locals.tenantUser?.role;
@@ -229,6 +252,28 @@ export const GET: RequestHandler = async (event) => {
 			.where(eq(table.stripeIntegration.tenantId, tenantId))
 			.limit(1);
 
+		// Ce evenimente sunt ABONATE de fapt în Stripe, nu ce recomandăm noi.
+		// Fără asta, o plată cu PaymentElement putea trece fără ca factura să fie
+		// marcată plătită, iar singurul indiciu era tăcerea.
+		let subscribedEvents: string[] | null = null;
+		let missingEvents: string[] = [];
+		let webhookLookupError: string | null = null;
+		try {
+			const stripe = await getStripeForTenant(tenantId);
+			const endpoints = await stripe.webhookEndpoints.list({ limit: 20 });
+			const ours = endpoints.data.filter((e) => e.url.includes('/api/stripe/webhook'));
+			if (ours.length > 0) {
+				// `enabled_events: ['*']` = toate evenimentele, deci nimic nu lipsește.
+				const all = new Set(ours.flatMap((e) => e.enabled_events));
+				subscribedEvents = [...all].sort();
+				missingEvents = all.has('*')
+					? []
+					: REQUIRED_WEBHOOK_EVENTS.filter((ev) => !all.has(ev));
+			}
+		} catch (err) {
+			webhookLookupError = serializeError(err).message;
+		}
+
 		return json({
 			ok: true,
 			tenantIntegration: integration ?? null,
@@ -241,18 +286,16 @@ export const GET: RequestHandler = async (event) => {
 			},
 			webhookEndpointHint:
 				'Configurează în Stripe Dashboard → Developers → Webhooks: <APP_URL>/api/stripe/webhook (per-tenant: webhook secret în stripe_integration.webhook_secret_encrypted)',
-			recommendedEvents: [
-				'checkout.session.completed',
-				'checkout.session.expired',
-				'invoice.paid',
-				'invoice.payment_succeeded',
-				'invoice.payment_failed',
-				'payment_intent.payment_failed',
-				'customer.subscription.deleted',
-				'customer.updated',
-				'charge.refunded',
-				'charge.dispute.created'
-			]
+			requiredEvents: REQUIRED_WEBHOOK_EVENTS,
+			subscribedEvents,
+			missingEvents,
+			webhookLookupError,
+			verdict:
+				subscribedEvents === null
+					? 'Nu am putut citi endpoint-urile din Stripe — verifică manual în Dashboard.'
+					: missingEvents.length === 0
+						? 'OK — toate evenimentele necesare sunt abonate.'
+						: `LIPSESC ${missingEvents.length} evenimente: ${missingEvents.join(', ')}. Plățile pot rămâne nereconciliate până la taskul zilnic de reconciliere.`
 		});
 	}
 
