@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import {
+	BUNDLES,
 	CATEGORIES,
 	CATEGORY_GROUPS,
 	TIERS,
@@ -91,5 +92,43 @@ describe('SEO fără suprapunere pe AI', () => {
 			gold: 950,
 			platinum: 1400
 		});
+	});
+});
+
+describe('bundle-uri cu AEO & GEO', () => {
+	it('AI Search Duo există cu seo + aeo-geo la −15%', () => {
+		const b = BUNDLES.find((x) => x.id === 'ai-search-duo');
+		expect(b).toBeDefined();
+		expect(b!.services).toEqual(['seo', 'aeo-geo']);
+		expect(b!.discountPct).toBe(15);
+	});
+
+	it('AI Search Duo costă 723 €/lună pe Bronze după discount', () => {
+		const b = BUNDLES.find((x) => x.id === 'ai-search-duo')!;
+		const list = b.services.reduce((sum, slug) => sum + (getCategory(slug)!.prices.bronze ?? 0), 0);
+		expect(list).toBe(850);
+		expect(Math.round(list * (1 - b.discountPct / 100))).toBe(723);
+	});
+
+	it('full-paid-organic și enterprise includ aeo-geo', () => {
+		for (const id of ['full-paid-organic', 'enterprise']) {
+			const b = BUNDLES.find((x) => x.id === id);
+			expect(b).toBeDefined();
+			expect(b!.services).toContain('aeo-geo');
+		}
+	});
+
+	it('fiecare slug din fiecare bundle există în CATEGORIES', () => {
+		const known = new Set(CATEGORIES.map((c) => c.slug));
+		for (const bundle of BUNDLES) {
+			for (const slug of bundle.services) {
+				expect(known.has(slug)).toBe(true);
+			}
+		}
+	});
+
+	it('nu există ID-uri de bundle duplicate', () => {
+		const ids = BUNDLES.map((b) => b.id);
+		expect(new Set(ids).size).toBe(ids.length);
 	});
 });

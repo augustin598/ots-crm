@@ -782,6 +782,17 @@ export const BUNDLES: Bundle[] = [
 		rationale:
 			'Mix între discovery plătit (social video) și descoperire organică (search). Recomandat când lansezi un brand nou și vrei să-l vadă lumea din mai multe direcții.'
 	},
+	{
+		id: 'ai-search-duo',
+		name: 'AI Search Duo',
+		tagline: 'SEO + AEO/GEO',
+		useCase: 'branding',
+		services: ['seo', 'aeo-geo'],
+		discountPct: 15,
+		badge: 'new',
+		rationale:
+			'Aceeași fundație tehnică, două destinații: Google clasic și motoarele de răspuns AI. Schema, entitățile și conținutul citabil se lucrează o singură dată și lucrează pentru ambele, de aceea combinația costă mai puțin decât suma serviciilor.'
+	},
 
 	// -------- E-commerce --------
 	{
@@ -929,9 +940,9 @@ export const BUNDLES: Bundle[] = [
 	{
 		id: 'full-paid-organic',
 		name: 'Full Paid + Organic',
-		tagline: 'Google + Meta + TikTok + SEO',
+		tagline: 'Google + Meta + TikTok + SEO + AI Search',
 		useCase: 'full-stack',
-		services: ['google-ads', 'meta-ads', 'tiktok-ads', 'seo'],
+		services: ['google-ads', 'meta-ads', 'tiktok-ads', 'seo', 'aeo-geo'],
 		discountPct: 20,
 		badge: 'best-value',
 		rationale:
@@ -950,9 +961,17 @@ export const BUNDLES: Bundle[] = [
 	{
 		id: 'enterprise',
 		name: 'Enterprise',
-		tagline: 'Ads + SEO + CRO + Email + Automation',
+		tagline: 'Ads + SEO + AI Search + CRO + Email + Automation',
 		useCase: 'full-stack',
-		services: ['google-ads', 'meta-ads', 'seo', 'cro', 'email-marketing', 'marketing-automation'],
+		services: [
+			'google-ads',
+			'meta-ads',
+			'seo',
+			'aeo-geo',
+			'cro',
+			'email-marketing',
+			'marketing-automation'
+		],
 		discountPct: 22,
 		badge: 'new',
 		rationale:
