@@ -304,7 +304,7 @@ function funnelCoverageScore(bundle: Bundle, goal: Goal | null): number {
 	const hasRetention = bundle.services.some((s) =>
 		['email-marketing', 'marketing-automation'].includes(s)
 	);
-	const hasOrganic = bundle.services.includes('seo');
+	const hasOrganic = bundle.services.some((s) => ['seo', 'aeo-geo'].includes(s));
 	const hasInfrastructure = bundle.services.some((s) =>
 		['website-dev', 'website-custom', 'woocommerce-dev', 'mobile-app'].includes(s)
 	);
@@ -378,6 +378,10 @@ function platformBonus(
 	if (goal === 'leads' && businessType === 'b2b-services' && has('tiktok-ads')) bonus -= 25;
 	if (bundle.services.length === 1 && has('cro')) bonus -= 20;
 
+	// AI Search ajută mai ales notorietatea de brand și lead gen-ul B2B,
+	// unde deciziile încep tot mai des cu o întrebare pusă unui LLM.
+	if ((goal === 'brand-awareness' || goal === 'leads') && has('aeo-geo')) bonus += 8;
+
 	return bonus;
 }
 
@@ -402,7 +406,7 @@ const WEIGHTS = {
 	projectStatus: 0.05
 };
 
-function scoreBundleNuanced(bundle: Bundle, answers: WizardAnswers): ScoringVector {
+export function scoreBundleNuanced(bundle: Bundle, answers: WizardAnswers): ScoringVector {
 	const useCase = mapToUseCase(answers.businessType, answers.goal);
 	const tier = budgetToTier(answers.mediaBudget);
 
