@@ -82,21 +82,26 @@
 
 		bringIntoView();
 
-		// Formularul Stripe se randează într-un iframe și crește la ~640px DUPĂ
-		// mount. Cât timp documentul e scurt, browserul nu POATE derula până la
-		// capăt — se oprea la maximul disponibil și butonul „Confirma plata"
-		// rămânea sub fold. Re-derulăm o singură dată, când iframe-ul și-a luat
-		// înălțimea, apoi ne oprim ca să nu smucim pagina sub degetele userului.
+		// Formularul Stripe se randează într-un iframe care crește ÎN TREPTE după
+		// mount (până la ~640px). O re-derulare la prima treaptă cade scurt: măsurat
+		// pe producție, butonul „Confirma plata" rămânea cu 35px sub marginea
+		// ecranului. Așteptăm să se stabilizeze înălțimea (debounce), apoi derulăm o
+		// singură dată — tot blocul (~700px) încape într-un ecran obișnuit.
+		let settleTimer: ReturnType<typeof setTimeout> | undefined;
 		const observer = new ResizeObserver(() => {
-			if (node.offsetHeight > 300) {
+			clearTimeout(settleTimer);
+			settleTimer = setTimeout(() => {
 				bringIntoView();
 				observer.disconnect();
-			}
+			}, 250);
 		});
 		observer.observe(node);
+		// Plasă de siguranță: nu observăm la nesfârșit dacă iframe-ul se tot
+		// redimensionează (ex. userul comută metoda de plată).
 		const safetyStop = setTimeout(() => observer.disconnect(), 8000);
 
 		return () => {
+			clearTimeout(settleTimer);
 			clearTimeout(safetyStop);
 			observer.disconnect();
 		};
