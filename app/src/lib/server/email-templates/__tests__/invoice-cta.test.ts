@@ -30,4 +30,14 @@ describe('renderInvoiceCtaBlock', () => {
 		const html = renderInvoiceCtaBlock(URL, THEME, true);
 		expect(html.match(/\?pay=1/g)).toHaveLength(1);
 	});
+
+	test('CTA-ul e aliniat la stânga, nu centrat, în ambele variante', () => {
+		const withCard = renderInvoiceCtaBlock(URL, THEME, true);
+		const withoutCard = renderInvoiceCtaBlock(URL, THEME, false);
+		expect(withCard).not.toContain('text-align: center');
+		expect(withoutCard).not.toContain('text-align: center');
+		// butonul + linkul secundar
+		expect(withCard.match(/text-align: left/g)).toHaveLength(2);
+		expect(withoutCard.match(/text-align: left/g)).toHaveLength(1);
+	});
 });
