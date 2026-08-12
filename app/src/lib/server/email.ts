@@ -20,7 +20,10 @@ import { createGmailTransporter, isGmailOAuthError, isGmailRateLimitError } from
 import { generateInvoicePDF } from '$lib/server/invoice-pdf-generator';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 import { createInvoiceViewToken } from '$lib/server/invoice-token';
+import { checkCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
+import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
 import { renderInvoicePaidEmailHtml } from './email-templates/invoice-paid';
+import { renderInvoiceCtaBlock } from './email-templates/invoice-cta';
 import { htmlToPlainText } from './html-text';
 import * as storage from '$lib/server/storage';
 import { getAppBaseUrl } from '$lib/server/app-url';
@@ -371,6 +374,7 @@ export function renderCtaButton(href: string, label: string, themeColor: string)
 		<a href="${href}" style="background-color: ${themeColor}; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; font-size: 14px;">${label}</a>
 	</div>`;
 }
+
 
 /**
  * Fetch tenant brand bundle: name, themeColor, logo attachment, header logo HTML.
@@ -1278,6 +1282,13 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
 			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
 
+			// Butonul de card apare doar dacă factura e plătibilă ȘI tenantul are Stripe
+			// activ. Degradare grațioasă: dacă verificarea aruncă, trimitem emailul fără
+			// buton — un email fără buton bate un email netrimis.
+			const canPayByCard =
+				checkCardPaymentEligibility(invoice).eligible &&
+				(await isStripeConfiguredForTenant(invoice.tenantId).catch(() => false));
+
 			// Get invoice settings for logo and PDF
 			const [invoiceSettings] = await db
 				.select()
@@ -1364,7 +1375,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 				</table>
 				${ibanHtml}
 				${pdfAttachment ? '<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 12px 0;">📎 Factura este atașată în format PDF la acest email.</p>' : ''}
-				${renderCtaButton(invoiceUrl, 'Vezi factura online', themeColor)}
+				${renderInvoiceCtaBlock(invoiceUrl, themeColor, canPayByCard)}
 				${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 8px 0;">Plata este scadentă la ${formatDateRo(invoice.dueDate)}.</p>` : ''}
 			`;
 
@@ -1392,6 +1403,7 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			${invoice.dueDate ? `Data scadenta: ${formatDateRo(invoice.dueDate)}\n` : ''}
 			Total de plata: ${formatAmount(invoice.totalAmount, invoice.currency)}
 			${ibanText}
+			${canPayByCard ? `Plateste cu cardul: ${invoiceUrl}?pay=1\n` : ''}
 			Vezi factura: ${invoiceUrl}
 
 			${invoice.dueDate && invoice.status !== 'paid' && invoice.status !== 'partially_paid' ? `Plata este scadenta la ${formatDateRo(invoice.dueDate)}.\n` : ''}
@@ -2354,6 +2366,12 @@ export async function sendOverdueReminderEmail(
 			const rawToken = await createInvoiceViewToken(invoiceId, invoice.tenantId);
 			const invoiceUrl = `${baseUrl}/invoice/${tenant?.slug || 'tenant'}/${encodeURIComponent(rawToken)}`;
 
+			// Vezi nota din sendInvoiceEmail: butonul apare doar cu Stripe activ, iar
+			// o eroare de verificare nu blochează trimiterea reminderului.
+			const canPayByCard =
+				checkCardPaymentEligibility(invoice).eligible &&
+				(await isStripeConfiguredForTenant(invoice.tenantId).catch(() => false));
+
 			const [invoiceSettings] = await db
 				.select()
 				.from(table.invoiceSettings)
@@ -2433,7 +2451,7 @@ export async function sendOverdueReminderEmail(
 				${ibanHtml}
 				<p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Vă rugăm să efectuați plata cât mai curând posibil.</p>
 				${pdfAttachment ? '<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 12px 0;">📎 Factura este atașată în format PDF la acest email.</p>' : ''}
-				${renderCtaButton(invoiceUrl, 'Vezi factura online', themeColor)}
+				${renderInvoiceCtaBlock(invoiceUrl, themeColor, canPayByCard)}
 				<p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0;">Dacă ați efectuat deja plata, vă rugăm să ignorați acest email.</p>
 			`;
 
@@ -2465,6 +2483,7 @@ export async function sendOverdueReminderEmail(
 			${ibanText}
 			Va rugam sa efectuati plata cat mai curand posibil.
 
+			${canPayByCard ? `Plateste cu cardul: ${invoiceUrl}?pay=1\n` : ''}
 			Vezi factura: ${invoiceUrl}
 
 			Daca ati efectuat deja plata, va rugam sa ignorati acest email.
