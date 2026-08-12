@@ -1,6 +1,6 @@
 # Stripe Module — OTS CRM
 
-**Ultima actualizare:** 2026-05-13
+**Ultima actualizare:** 2026-08-12
 **Branch / commits:** `main`
 - `fb247f2` Sprint 9 per-tenant Stripe Connect plugin
 - `9ece6ca` audit hardening + post-payment pipeline + debug endpoint
@@ -18,6 +18,58 @@ Plată online prin Stripe pentru pachete hosting publice (`/pachete-hosting/coma
 - **Debug endpoint** admin pentru ping/replay/events visibility
 
 **Current state:** Test mode 100% funcțional. Keez emission e implementat (prima plată + reînnoiri).
+
+---
+
+## Plată card pe pagina publică de factură (2026-08-12)
+
+Clientul care primește linkul public al unei facturi (`/invoice/{slug}/{token}`,
+din emailul de factură sau de reminder) poate plăti cu cardul fără login.
+
+**Model de securitate:** tokenul din URL e SINGURA autorizare — la fel ca la
+vizualizarea facturii și la PDF. Fără sesiune, fără legătură cu magic link-ul
+portalului. Oricine are linkul poate plăti; acceptat conștient, pentru că suma
+vine mereu din DB, tokenul e 32 de octeți aleatori (hashed, 90 zile), iar frauda
+de card o acoperă Stripe/3DS.
+
+| Fișier | Rol |
+|---|---|
+| `src/lib/server/stripe/invoice-payable.ts` | Reguli PURE de eligibilitate, partajate de pagină + remote + email ca să nu poată diverge. `partially_paid` exclus intenționat. Praguri Stripe: RON 200, EUR/USD 50. |
+| `src/lib/remotes/public-invoice.remote.ts` | `createPublicInvoicePaymentIntent({tenantSlug, token})`. Rate limit dublu: IP (10/h) + factură (30/h, cheie `${tenantId}:${invoiceId}`). |
+| `src/lib/components/checkout-modal-shell.svelte` | Coaja vizuală a modalelor de plată. |
+| `src/lib/server/email-templates/invoice-cta.ts` | CTA aliniat la STÂNGA (cerut explicit); `renderCtaButton` din `email.ts` rămâne centrat pentru hosting. |
+| `src/lib/server/scheduler/tasks/stripe-invoice-reconcile.ts` | 3:30 AM zilnic — plasă pentru webhook-uri pierdute. |
+
+**Reuse de PaymentIntent = apărare anti-dublă-încasare.** Dacă factura are deja un
+PaymentIntent în `requires_*` cu aceeași sumă și monedă, îl refolosim. Două taburi
+primesc astfel ACELAȘI intent, iar Stripe confirmă un PaymentIntent o singură
+dată. Nu elimina acest reuse „ca optimizare inversă" — e o măsură de siguranță.
+
+**Plata stă în modal, nu inline.** Formularul Stripe (~700-750px, randat în iframe
+care crește ÎN TREPTE după mount) ajungea sub fold și nicio strategie de derulare
+nu-l aducea fiabil în cadru — măsurat pe producție, butonul „Confirma plata"
+rămânea cu 35px sub marginea ecranului. Sheet-ul modalului e flex column cu antet
+și bară de acțiuni fixe, corp derulabil între ele.
+
+**Guard-uri noi în `handleStripeInvoicePayment`:**
+- sumă încasată ≠ `totalAmount` → NU marchează plătită + log critic. Cauza reală:
+  staff editează factura cât timp PaymentIntent-ul e deschis.
+- factură deja `paid` cu ALT PaymentIntent → alertă „posibilă dublă încasare,
+  necesită refund manual". Transformă o pierdere tăcută într-o alertă.
+
+**Evenimente webhook — `payment_intent.succeeded` e OBLIGATORIU.** E singura cale
+prin care fluxul cu PaymentElement embedded (portal reînnoire + plata facturii din
+linkul public) confirmă plata. Lipsea din lista afișată de
+`?action=webhook-config`; lista e acum derivată din `case`-urile reale ale
+dispatcher-ului (`REQUIRED_WEBHOOK_EVENTS`), iar endpointul citește din Stripe
+evenimentele ABONATE efectiv (`webhookEndpoints.list`) și dă verdict explicit.
+Verificat pe tenantul `ots` (12 aug 2026): `missingEvents: []`.
+
+**Restanțe cunoscute:**
+- `hosting-checkout-modal.svelte` are încă propria copie a stilurilor de modal;
+  ar trebui migrat pe `checkout-modal-shell.svelte` ca să existe o singură sursă.
+- O plată reală, cap-coadă, n-a fost executată — tenantul e pe chei live, deci ar
+  însemna o încasare pe un card real.
 
 ---
 
@@ -272,6 +324,7 @@ Admin-only (tenantUser.role === 'owner' | 'admin'). Tenant-scoped automat pe `lo
 | Task | Cron | Scop |
 |---|---|---|
 | `stripe_event_cleanup` | `15 2 * * *` Europe/Bucharest | Cleanup `processed_stripe_event`: completed/failed >90d + stuck 'processing' >1h |
+| `stripe_invoice_reconcile` | `30 3 * * *` Europe/Bucharest | Facturi cu PaymentIntent atașat, neplătite, neatinse de 24h → întreabă Stripe; dacă `succeeded`, trece prin același `handleStripeInvoicePayment` ca webhook-ul. Acoperă webhook-ul pierdut definitiv (Stripe renunță după ~72h). Max 100/rulare. |
 
 ---
 
