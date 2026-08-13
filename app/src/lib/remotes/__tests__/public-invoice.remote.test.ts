@@ -62,6 +62,9 @@ let createdIntents: any[] = [];
 let retrievedIntent: any = null;
 mock.module('$lib/server/plugins/stripe/factory', () => ({
 	isStripeConfiguredForTenant: async () => stripeConfigured,
+	// Pe localhost cu chei de test helperul sare peste Stripe Customer; testele
+	// verifică fluxul de producție, deci modul dev-test e mereu oprit aici.
+	isStripeDevTestMode: () => false,
 	getPublishableKeyForTenant: async () => 'pk_test_123',
 	getStripeForTenant: async () => ({
 		paymentIntents: {

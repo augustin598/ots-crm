@@ -1,19 +1,11 @@
 import { command, getRequestEvent } from '$app/server';
 import { error } from '@sveltejs/kit';
-import type Stripe from 'stripe';
 import * as v from 'valibot';
-import { db } from '$lib/server/db';
-import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
+import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { validateInvoiceViewToken } from '$lib/server/invoice-token';
 import { checkCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
-import {
-	isStripeConfiguredForTenant,
-	getStripeForTenant,
-	getPublishableKeyForTenant
-} from '$lib/server/plugins/stripe/factory';
-import { getOrCreateStripeCustomer } from '$lib/server/stripe/customer';
+import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
+import { getOrCreateInvoicePaymentIntent } from '$lib/server/stripe/payment-intent';
 import { rateLimit } from '$lib/server/redis';
 import { formatInvoiceNumberDisplay } from '$lib/utils/invoice';
 
@@ -40,18 +32,6 @@ const PAY_ATTEMPTS_PER_IP_HOUR = 10;
  */
 const PAY_ATTEMPTS_PER_INVOICE_HOUR = 30;
 const WINDOW_SEC = 3600;
-
-/**
- * Stări în care un PaymentIntent mai poate fi confirmat. Refolosirea lui e
- * intenționată, nu o optimizare: două taburi deschise primesc ACELAȘI
- * PaymentIntent, iar Stripe confirmă un PaymentIntent o singură dată → nu se
- * poate încasa de două ori pentru aceeași factură.
- */
-const REUSABLE_PI_STATUSES = new Set([
-	'requires_payment_method',
-	'requires_confirmation',
-	'requires_action'
-]);
 
 const PayIntentInput = v.object({
 	tenantSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
@@ -119,88 +99,22 @@ export const createPublicInvoicePaymentIntent = command(
 		const invoiceLabel = formatInvoiceNumberDisplay(invoice, invoiceSettings);
 
 		try {
-			const stripe = await getStripeForTenant(tenant.id);
-			const publishableKey = await getPublishableKeyForTenant(tenant.id);
-			if (!publishableKey) {
-				throw new Error('Configurare Stripe incompletă (lipsește publishable key).');
-			}
-
-			let intent: Stripe.PaymentIntent | null = null;
-
-			if (invoice.stripePaymentIntentId) {
-				try {
-					const existing = await stripe.paymentIntents.retrieve(invoice.stripePaymentIntentId);
-					if (
-						REUSABLE_PI_STATUSES.has(existing.status) &&
-						existing.amount === totalCents &&
-						existing.currency === currency.toLowerCase() &&
-						existing.client_secret
-					) {
-						intent = existing;
-					}
-				} catch (err) {
-					// PaymentIntent șters, cheie Stripe rotită etc. — creăm unul nou.
-					logWarning(
-						'invoice-view',
-						`PaymentIntent ${invoice.stripePaymentIntentId} nerecuperabil, creăm altul`,
-						{
-							tenantId: tenant.id,
-							metadata: { invoiceId: invoice.id, error: serializeError(err).message }
-						}
-					);
-				}
-			}
-
-			if (!intent) {
-				// `getOrCreateStripeCustomer` aruncă dacă lipsește emailul — plata nu
-				// depinde de existența unui Customer, deci continuăm fără el.
-				let customerId: string | undefined;
-				if (client?.email) {
-					try {
-						customerId = await getOrCreateStripeCustomer(client);
-					} catch (err) {
-						logWarning(
-							'invoice-view',
-							`Nu am putut crea Stripe Customer: ${serializeError(err).message}`,
-							{
-								tenantId: tenant.id,
-								metadata: { invoiceId: invoice.id, clientId: client.id }
-							}
-						);
-					}
-				}
-
-				// `totalAmount` e deja brut (net + TVA), iar factura fiscală există deja
-				// → încasăm exact totalul, fără tax rate atașat.
-				intent = await stripe.paymentIntents.create({
-					amount: totalCents,
-					currency: currency.toLowerCase(),
-					...(customerId ? { customer: customerId } : {}),
-					automatic_payment_methods: { enabled: true },
-					metadata: {
-						crmPurpose: 'invoice_payment',
-						crmTenantId: tenant.id,
-						crmInvoiceId: invoice.id
-					},
-					description: `Factura ${invoiceLabel}`
-				});
-
-				await db
-					.update(table.invoice)
-					.set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
-					.where(and(eq(table.invoice.id, invoice.id), eq(table.invoice.tenantId, tenant.id)));
-			}
-
-			if (!intent.client_secret) throw new Error('Stripe nu a returnat clientSecret.');
+			const { clientSecret, publishableKey } = await getOrCreateInvoicePaymentIntent({
+				tenantId: tenant.id,
+				invoice,
+				client,
+				invoiceLabel,
+				logScope: 'invoice-view'
+			});
 
 			logInfo('invoice-view', `PaymentIntent public pentru factura ${invoiceLabel}`, {
 				tenantId: tenant.id,
-				metadata: { invoiceId: invoice.id, paymentIntentId: intent.id, ip }
+				metadata: { invoiceId: invoice.id, ip }
 			});
 
 			return {
 				alreadyPaid: false as const,
-				clientSecret: intent.client_secret,
+				clientSecret,
 				publishableKey,
 				total: totalCents,
 				currency,
