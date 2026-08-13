@@ -4,6 +4,7 @@ import { describe, test, expect, mock, beforeEach, afterAll } from 'bun:test';
 // (which transitively imports $lib/server/db → $env/dynamic/private). We
 // also need $env/dynamic/public because the eager-capture of $lib/server/email
 // below pulls in that virtual module transitively.
+mock.module('$app/environment', () => ({ dev: false, browser: false, building: false }));
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
 mock.module('$env/dynamic/public', () => ({ env: {} }));

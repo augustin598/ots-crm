@@ -1,5 +1,7 @@
 import Stripe from 'stripe';
+import { dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -27,6 +29,23 @@ export class StripeNotConfiguredError extends Error {
 		super(`Stripe nu e configurat pentru tenantul ${tenantId}. Accesează /settings/stripe să-l setezi.`);
 		this.name = 'StripeNotConfiguredError';
 	}
+}
+
+/**
+ * Pe localhost (`vite dev`) plățile nu ating NICIODATĂ Stripe live: dacă `.env`
+ * are o cheie de TEST în `STRIPE_SECRET_KEY`, ea câștigă în fața integrării din
+ * DB (care pe tenantul `ots` e live). Pe build-ul de producție `dev` e false,
+ * deci comportamentul rămâne exact cel de azi.
+ *
+ * Atenție la consumatori: în modul ăsta NU folosiți `client.stripe_customer_id`
+ * (e un `cus_` din contul live — test mode nu-l cunoaște) și NU apelați
+ * `getOrCreateStripeCustomer` (ar suprascrie cache-ul live cu un customer de
+ * test și ar strica checkout-ul din producție, pentru că DB-ul e partajat).
+ */
+export function isStripeDevTestMode(): boolean {
+	if (!dev) return false;
+	const k = env.STRIPE_SECRET_KEY;
+	return !!k && (k.startsWith('sk_test_') || k.startsWith('rk_test_'));
 }
 
 interface CachedStripe {
@@ -76,6 +95,11 @@ function buildClient(secret: string): Stripe {
 async function resolveStripeSecret(
 	tenantId: string
 ): Promise<{ secret: string; cacheKey: string }> {
+	// Localhost = doar chei de test, indiferent ce e configurat în DB.
+	if (isStripeDevTestMode()) {
+		return { secret: env.STRIPE_SECRET_KEY!, cacheKey: `${tenantId}:dev-test` };
+	}
+
 	const [integration] = await db
 		.select()
 		.from(table.stripeIntegration)
@@ -234,6 +258,7 @@ export async function isStripeConfiguredForTenant(tenantId: string): Promise<boo
 export function clearStripeCache(tenantId: string) {
 	cache.delete(tenantId);
 	cache.delete(`${tenantId}:env`);
+	cache.delete(`${tenantId}:dev-test`);
 	for (const key of taxRateCache.keys()) {
 		if (key.startsWith(`${tenantId}:`)) taxRateCache.delete(key);
 	}
@@ -299,6 +324,12 @@ export async function getOrCreateStripeTaxRate(
  * afișeze un warning + prompt configure).
  */
 export async function getWebhookSecretForTenant(tenantId: string): Promise<string | null> {
+	// Localhost cu chei de test: secretul vine din env (`stripe listen` local),
+	// nu din DB — secretul din DB aparține endpoint-ului live din producție.
+	if (isStripeDevTestMode() && env.STRIPE_WEBHOOK_SECRET && !env.STRIPE_WEBHOOK_SECRET.includes('REPLACE_ME')) {
+		return env.STRIPE_WEBHOOK_SECRET;
+	}
+
 	const [integration] = await db
 		.select({
 			webhookSecretEncrypted: table.stripeIntegration.webhookSecretEncrypted,
@@ -337,6 +368,13 @@ export async function getWebhookSecretForTenant(tenantId: string): Promise<strin
  * Used pentru a injecta în page data pentru Stripe.js Elements în viitor.
  */
 export async function getPublishableKeyForTenant(tenantId: string): Promise<string | null> {
+	// Perechea publică a override-ului de localhost — fără ea, Elements ar primi
+	// un clientSecret de test cu o cheie publishable live și ar eșua criptic.
+	const devPublishable = publicEnv.PUBLIC_STRIPE_PUBLISHABLE_KEY;
+	if (isStripeDevTestMode() && devPublishable?.startsWith('pk_test_')) {
+		return devPublishable;
+	}
+
 	const [integration] = await db
 		.select({ publishableKey: table.stripeIntegration.publishableKey })
 		.from(table.stripeIntegration)
