@@ -78,9 +78,10 @@ mock.module('$lib/server/redis', () => ({
 let stripeConfigured = true;
 let createdIntents: any[] = [];
 let retrievedIntent: any = null;
+let devTestMode = false;
 mock.module('$lib/server/plugins/stripe/factory', () => ({
 	isStripeConfiguredForTenant: async () => stripeConfigured,
-	isStripeDevTestMode: () => false,
+	isStripeDevTestMode: () => devTestMode,
 	getPublishableKeyForTenant: async () => 'pk_test_123',
 	getStripeForTenant: async () => ({
 		paymentIntents: {
@@ -145,6 +146,7 @@ beforeEach(() => {
 	createdIntents = [];
 	retrievedIntent = null;
 	customerCalls = 0;
+	devTestMode = false;
 });
 
 describe('createClientInvoicePaymentIntent — autorizare', () => {
@@ -204,6 +206,12 @@ describe('createClientInvoicePaymentIntent — eligibilitate', () => {
 
 	test('factură parțial plătită → refuz', async () => {
 		invoiceRow = validInvoice({ status: 'partially_paid' });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		expect(createdIntents).toHaveLength(0);
+	});
+
+	test('CIORNĂ → refuz — staff-ul încă o editează, portalul nu are gate de token', async () => {
+		invoiceRow = validInvoice({ status: 'draft' });
 		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
@@ -284,5 +292,14 @@ describe('createClientInvoicePaymentIntent — PaymentIntent', () => {
 	test('eticheta facturii folosește seria (OTSH 8)', async () => {
 		const res = await createClientInvoicePaymentIntent(INPUT);
 		expect(res).toMatchObject({ invoiceLabel: 'OTSH 8' });
+	});
+
+	test('dev-test: NU salvează PI-ul pe factură și NU creează Stripe Customer (DB partajat cu prod)', async () => {
+		devTestMode = true;
+		const res = await createClientInvoicePaymentIntent(INPUT);
+		expect(res).toMatchObject({ alreadyPaid: false, clientSecret: 'cs_new' });
+		expect(updateCalls).toBe(0);
+		expect(customerCalls).toBe(0);
+		expect(createdIntents[0].customer).toBeUndefined();
 	});
 });

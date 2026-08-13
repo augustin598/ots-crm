@@ -61,3 +61,23 @@ export function checkCardPaymentEligibility(invoice: {
 
 	return { eligible: true };
 }
+
+/**
+ * Varianta pentru PORTAL (sesiune de client, fără token): exclude ciornele.
+ *
+ * Pe fluxul public `draft` e tolerat pentru că tokenul de vizualizare se emite
+ * DOAR la trimiterea facturii prin email (deci o ciornă nu are link de plată).
+ * Portalul însă listează TOATE facturile clientului, inclusiv ciornele pe care
+ * staff-ul încă le editează — o ciornă plătită ar deveni „paid" fără factură
+ * fiscală Keez și cu o sumă posibil neterminată. Folosit și de `getInvoices`
+ * (butonul din UI) și de `createClientInvoicePaymentIntent` (acceptarea plății),
+ * ca cele două să nu poată diverge.
+ */
+export function checkPortalCardPaymentEligibility(invoice: {
+	status: string | null | undefined;
+	totalAmount: number | null | undefined;
+	currency: string | null | undefined;
+}): CardPaymentEligibility {
+	if (invoice.status === 'draft') return { eligible: false, reason: 'status' };
+	return checkCardPaymentEligibility(invoice);
+}

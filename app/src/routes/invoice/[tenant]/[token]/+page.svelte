@@ -58,6 +58,9 @@
 	let pageOutcome = $state<'paid' | 'alreadyPaid' | null>(
 		page.url.searchParams.get('paid') === '1' ? 'paid' : null
 	);
+	// Eroarea rămasă după o închidere din stadiul `failed` — persistă pe pagină
+	// (paritate cu vechiul banner de eroare), ca clientul să știe de ce a eșuat.
+	let pageError = $state<string | null>(null);
 	// Plain let, nu $state: e un latch, nu trebuie să retrigereze efectul.
 	let autoStarted = false;
 
@@ -248,7 +251,10 @@
 				<div class="flex flex-col gap-3 sm:flex-row">
 					{#if canPayByCard && pageOutcome === null}
 						<button
-							onclick={() => (showPayModal = true)}
+							onclick={() => {
+								pageError = null;
+								showPayModal = true;
+							}}
 							disabled={showPayModal}
 							class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 print:hidden"
 						>
@@ -283,6 +289,15 @@
 						{/if}
 					</button>
 				</div>
+
+				{#if pageError && !showPayModal}
+					<div
+						class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 print:hidden"
+						role="alert"
+					>
+						{pageError}
+					</div>
+				{/if}
 
 				{#if pageOutcome === 'paid'}
 					<div class="mt-5 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 print:hidden">
@@ -339,8 +354,11 @@
 				currency={invoice.currency as Currency}
 				{createIntent}
 				returnUrl={`${window.location.origin}/invoice/${tenantSlug}/${token}?paid=1`}
-				onClose={() => (showPayModal = false)}
+				onClose={() => {
+					showPayModal = false;
+				}}
 				onOutcome={(o) => (pageOutcome = o)}
+				onFailedClose={(message) => (pageError = message)}
 			/>
 		{/if}
 

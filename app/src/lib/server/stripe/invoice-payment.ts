@@ -1,8 +1,9 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
+import { isStripeDevTestMode } from '$lib/server/plugins/stripe/factory';
 
 /**
  * Reconcile a card payment for an ALREADY-EMITTED hosting invoice (renewal or
@@ -45,6 +46,20 @@ export async function handleStripeInvoicePayment(params: {
 			tenantId,
 			metadata: { invoiceId, paymentIntentId }
 		});
+		return;
+	}
+
+	// Pe localhost cu chei de TEST (`stripe listen` local) DB-ul e cel de
+	// PRODUCȚIE: o plată cu 4242 ar marca o factură reală „paid" fără bani reali
+	// și ar emite hook-urile de plată (DA avansează next_due_date). Permitem
+	// bucla completă doar pe facturi marcate explicit de test (număr `TEST-…`),
+	// cum folosesc scripturile E2E; restul sunt refuzate cu warning vizibil.
+	if (isStripeDevTestMode() && !existing.invoiceNumber?.startsWith('TEST-')) {
+		logWarning(
+			'directadmin',
+			`${eventLabel}: DEV-TEST — refuz să marchez plătită factura reală ${existing.invoiceNumber} (DB partajat cu producția). Folosește o factură cu numărul prefixat TEST- pentru bucla completă.`,
+			{ tenantId, metadata: { invoiceId, paymentIntentId } }
+		);
 		return;
 	}
 

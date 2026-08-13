@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
 	checkCardPaymentEligibility,
+	checkPortalCardPaymentEligibility,
 	isPayableInvoiceStatus,
 	minCardAmountCents
 } from '../invoice-payable';
@@ -102,5 +103,34 @@ describe('checkCardPaymentEligibility', () => {
 		expect(
 			checkCardPaymentEligibility({ status: 'sent', totalAmount: 100, currency: null })
 		).toEqual({ eligible: false, reason: 'amount' });
+	});
+});
+
+describe('checkPortalCardPaymentEligibility', () => {
+	test('CIORNA e respinsă în portal (deși fluxul public cu token o acceptă)', () => {
+		expect(
+			checkPortalCardPaymentEligibility({ status: 'draft', totalAmount: 10000, currency: 'RON' })
+		).toEqual({ eligible: false, reason: 'status' });
+		expect(
+			checkCardPaymentEligibility({ status: 'draft', totalAmount: 10000, currency: 'RON' })
+		).toEqual({ eligible: true });
+	});
+
+	test('sent și overdue rămân eligibile, cu aceleași reguli de sumă', () => {
+		expect(
+			checkPortalCardPaymentEligibility({ status: 'sent', totalAmount: 10000, currency: 'RON' })
+		).toEqual({ eligible: true });
+		expect(
+			checkPortalCardPaymentEligibility({ status: 'overdue', totalAmount: 10000, currency: 'RON' })
+		).toEqual({ eligible: true });
+		expect(
+			checkPortalCardPaymentEligibility({ status: 'sent', totalAmount: 150, currency: 'RON' })
+		).toEqual({ eligible: false, reason: 'amount' });
+	});
+
+	test('paid → alreadyPaid, ca în varianta publică', () => {
+		expect(
+			checkPortalCardPaymentEligibility({ status: 'paid', totalAmount: 10000, currency: 'RON' })
+		).toEqual({ eligible: false, reason: 'already_paid' });
 	});
 });

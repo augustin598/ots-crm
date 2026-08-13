@@ -65,13 +65,22 @@ mock.module('$lib/server/plugins/hooks', () => ({
 
 // Capture logger calls.
 let errorLogs: string[] = [];
+let warningLogs: string[] = [];
 mock.module('$lib/server/logger', () => ({
 	logInfo: () => {},
 	logError: (_scope: string, message: string) => {
 		errorLogs.push(message);
 	},
-	logWarning: () => {},
+	logWarning: (_scope: string, message: string) => {
+		warningLogs.push(message);
+	},
 	serializeError: (e: unknown) => ({ message: e instanceof Error ? e.message : String(e), stack: '' })
+}));
+
+// Modul dev-test (chei Stripe de TEST pe localhost) — controlabil per test.
+let devTestMode = false;
+mock.module('$lib/server/plugins/stripe/factory', () => ({
+	isStripeDevTestMode: () => devTestMode
 }));
 
 const { handleStripeInvoicePayment } = await import('../invoice-payment');
@@ -85,6 +94,75 @@ beforeEach(() => {
 	updateCalls = 0;
 	emitted = [];
 	errorLogs = [];
+	warningLogs = [];
+	devTestMode = false;
+});
+
+describe('handleStripeInvoicePayment — dev-test guard (DB partajat cu producția)', () => {
+	test('dev-test: refuză să marcheze plătită o factură reală (fără prefix TEST-)', async () => {
+		devTestMode = true;
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: null,
+				stripePaymentIntentId: null,
+				externalTransactionId: null
+			}
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_test_1',
+			paidAmountCents: 90629,
+			eventLabel: 'payment_intent.succeeded'
+		});
+
+		expect(updateCalls).toBe(0);
+		expect(emitted).toHaveLength(0);
+		expect(warningLogs.some((m) => m.includes('DEV-TEST'))).toBe(true);
+	});
+
+	test('dev-test: factura cu numărul prefixat TEST- trece (bucla E2E locală)', async () => {
+		devTestMode = true;
+		pushSelect([
+			{
+				id: 'inv-t',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: 'TEST-E2E-PLATA',
+				totalAmount: 1000,
+				hostingAccountId: null,
+				stripePaymentIntentId: null,
+				externalTransactionId: null
+			}
+		]);
+		pushSelect([
+			{
+				id: 'inv-t',
+				tenantId: 't1',
+				status: 'paid',
+				invoiceNumber: 'TEST-E2E-PLATA',
+				totalAmount: 1000,
+				hostingAccountId: null
+			}
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-t',
+			paymentIntentId: 'pi_test_2',
+			paidAmountCents: 1000,
+			eventLabel: 'payment_intent.succeeded'
+		});
+
+		expect(updateCalls).toBe(1);
+		expect(emitted.map((e) => e.type)).toContain('invoice.paid');
+	});
 });
 
 describe('handleStripeInvoicePayment', () => {

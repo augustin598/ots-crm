@@ -5,7 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
-import { checkCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
+import { checkPortalCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
 import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
 import { getOrCreateInvoicePaymentIntent } from '$lib/server/stripe/payment-intent';
 import { rateLimit } from '$lib/server/redis';
@@ -93,7 +93,7 @@ export const createClientInvoicePaymentIntent = command(
 			);
 		}
 
-		const eligibility = checkCardPaymentEligibility(invoice);
+		const eligibility = checkPortalCardPaymentEligibility(invoice);
 		if (!eligibility.eligible) {
 			if (eligibility.reason === 'already_paid') return { alreadyPaid: true as const };
 			throw error(

@@ -37,7 +37,8 @@
 		createIntent,
 		returnUrl,
 		onClose,
-		onOutcome
+		onOutcome,
+		onFailedClose
 	}: {
 		/** Eticheta afișată („OTSH 8") — doar pentru UI, suma reală vine din server. */
 		invoiceLabel: string;
@@ -52,6 +53,12 @@
 		onClose: () => void;
 		/** Anunță pagina că factura e plătită / era deja plătită. */
 		onOutcome?: (outcome: 'paid' | 'alreadyPaid') => void;
+		/**
+		 * Închidere din stadiul `failed`: pagina primește mesajul ca să-l poată
+		 * afișa persistent (altfel eroarea ar dispărea odată cu modalul, iar
+		 * clientul ar rămâne fără explicație — ex. rate limit 429).
+		 */
+		onFailedClose?: (message: string) => void;
 	} = $props();
 
 	type PayStage = 'loadingIntent' | 'card' | 'confirming' | 'paid' | 'alreadyPaid' | 'failed';
@@ -71,6 +78,7 @@
 
 	function requestClose() {
 		if (!canClose) return;
+		if (stage === 'failed' && payError) onFailedClose?.(payError);
 		onClose();
 	}
 
@@ -105,6 +113,11 @@
 	}
 
 	async function confirmPayment() {
+		// Guard în loc de `disabled` pe buton: dezactivarea elementului focusat îl
+		// blurează pe `document.body`, iar focus trap-ul (care ascultă pe overlay)
+		// ar înceta să prindă Tab — focusul ar evada în pagina din spate exact cât
+		// timp „Închide" e și el ascuns. Butonul rămâne focusabil, dublu-click = no-op.
+		if (stage === 'confirming') return;
 		if (!stripeJs || !stripeElements || !clientSecret) {
 			payError = 'Formularul de plata nu este pregatit. Reincarcati pagina.';
 			return;
@@ -228,8 +241,9 @@
 		{#if stage === 'card' || stage === 'confirming'}
 			<button
 				onclick={confirmPayment}
-				disabled={stage === 'confirming'}
-				class="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
+				aria-disabled={stage === 'confirming'}
+				aria-busy={stage === 'confirming'}
+				class="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 {stage === 'confirming' ? 'opacity-50' : ''}"
 			>
 				{stage === 'confirming'
 					? 'Se proceseaza...'

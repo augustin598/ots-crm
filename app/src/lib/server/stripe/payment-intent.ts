@@ -117,10 +117,17 @@ export async function getOrCreateInvoicePaymentIntent(opts: {
 			description: `Factura ${invoiceLabel}`
 		});
 
-		await db
-			.update(table.invoice)
-			.set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
-			.where(and(eq(table.invoice.id, invoice.id), eq(table.invoice.tenantId, tenantId)));
+		// În dev-test NU salvăm id-ul: DB-ul e partajat cu producția, iar un PI de
+		// TEST ștampilat pe o factură reală ar strica apărarea anti-dublă-încasare
+		// pe live (retrieve-ul cu cheia live eșuează → prod ar crea PI nou, iar cel
+		// live deschis anterior ar rămâne confirmabil separat). Costul: în dev nu
+		// există reuse între deschideri de modal — acceptat.
+		if (!isStripeDevTestMode()) {
+			await db
+				.update(table.invoice)
+				.set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
+				.where(and(eq(table.invoice.id, invoice.id), eq(table.invoice.tenantId, tenantId)));
+		}
 	}
 
 	if (!intent.client_secret) throw new Error('Stripe nu a returnat clientSecret.');

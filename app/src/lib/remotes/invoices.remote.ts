@@ -9,7 +9,7 @@ import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 import { logInfo } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
-import { checkCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
+import { checkPortalCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
 import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
 import { resolveVatPercent, resolveVatBps } from '$lib/server/vat/rate';
 import { classifyClientVat } from '$lib/server/vat/classify-client';
@@ -222,7 +222,7 @@ export const getInvoices = query(
 			const stripeReady = await isStripeConfiguredForTenant(event.locals.tenant.id);
 			return rows.map((inv) => ({
 				...inv,
-				canPayByCard: stripeReady && checkCardPaymentEligibility(inv).eligible
+				canPayByCard: stripeReady && checkPortalCardPaymentEligibility(inv).eligible
 			}));
 		}
 		return rows.map((inv) => ({ ...inv, canPayByCard: false }));
