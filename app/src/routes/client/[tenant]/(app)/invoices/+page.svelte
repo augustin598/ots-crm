@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { page } from '$app/state';
+	import { invalidateAll } from '$app/navigation';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -76,6 +77,15 @@
 	function handlePayOutcome(outcome: 'paid' | 'alreadyPaid') {
 		if (payingInvoice) paidLocally = { ...paidLocally, [payingInvoice.id]: true };
 		if (outcome === 'paid') showPaidBanner = true;
+		// Recalculează datele layout-ului: dacă accesul era restricționat din cauza
+		// acestei facturi restante, overlay-ul „Acces Restricționat" dispare fără
+		// reload manual. Statusul devine `paid` prin webhook (async, de obicei în
+		// câteva secunde) → o singură reverificare întârziată, NU polling.
+		invalidateAll();
+		setTimeout(() => {
+			invalidateAll();
+			invoicesQuery.refresh();
+		}, 5000);
 	}
 
 	function closePayModal() {

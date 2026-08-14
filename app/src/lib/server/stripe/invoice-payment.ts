@@ -4,6 +4,10 @@ import { eq, and } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { isStripeDevTestMode } from '$lib/server/plugins/stripe/factory';
+import {
+	notifyPaymentSucceeded,
+	notifyAdminPaymentReceived
+} from '$lib/server/stripe/notifications';
 
 /**
  * Reconcile a card payment for an ALREADY-EMITTED hosting invoice (renewal or
@@ -157,6 +161,7 @@ export async function handleStripeInvoicePayment(params: {
 	// Non-fatal: a hook failure must NOT throw out of the webhook (Stripe would
 	// retry-storm) — the charge already settled and the invoice is already paid.
 	if (updated && previousStatus !== 'paid') {
+		let hooksOk = true;
 		try {
 			const hooks = getHooksManager();
 			await hooks.emit({
@@ -181,10 +186,38 @@ export async function handleStripeInvoicePayment(params: {
 				userId: 'system:stripe-invoice-payment'
 			});
 		} catch (err) {
+			hooksOk = false;
 			logError('directadmin', `${eventLabel}: invoice_payment hooks emit failed: ${serializeError(err).message}`, {
 				tenantId,
 				metadata: { invoiceId, paymentIntentId }
 			});
+		}
+
+		// Emailurile de confirmare — clientul („Plată primită", cu dedupe pe viață
+		// per factură + toggle-urile tenantului în notifyPaymentSucceeded) și
+		// adminul. Non-fatal: plata e deja încasată și factura marcată; un SMTP
+		// căzut nu are voie să arunce din webhook (Stripe ar intra în retry-storm),
+		// iar adminul poate retrimite manual din email logs.
+		try {
+			await notifyPaymentSucceeded(tenantId, invoiceId);
+		} catch (err) {
+			logError(
+				'directadmin',
+				`${eventLabel}: notificarea de plată către client a eșuat: ${serializeError(err).message}`,
+				{ tenantId, metadata: { invoiceId, paymentIntentId } }
+			);
+		}
+		try {
+			await notifyAdminPaymentReceived(tenantId, invoiceId, {
+				'factura-marcata-platita': 'success',
+				'hook-uri-hosting': hooksOk ? 'success' : 'failed'
+			});
+		} catch (err) {
+			logError(
+				'directadmin',
+				`${eventLabel}: notificarea de plată către admin a eșuat: ${serializeError(err).message}`,
+				{ tenantId, metadata: { invoiceId, paymentIntentId } }
+			);
 		}
 	}
 }
