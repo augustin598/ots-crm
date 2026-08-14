@@ -112,9 +112,16 @@ export const POST: RequestHandler = async ({ request }) => {
 	// Step 3: Verify signature
 	let event: Stripe.Event;
 	try {
-		// Use any Stripe instance to verify (webhooks.constructEvent e static-like)
+		// Use any Stripe instance to verify (webhooks.constructEvent e static-like).
+		//
+		// OBLIGATORIU varianta ASYNC: pe runtime-ul de producție SDK-ul Stripe
+		// alege SubtleCryptoProvider (Web Crypto), iar `constructEvent` sincron
+		// aruncă „SubtleCryptoProvider cannot be used in a synchronous context".
+		// Efectul a fost 400 la TOATE webhook-urile live între 12–14 aug 2026:
+		// plata facturii OTSH 8 nu a mai fost marcată, hostingul a rămas suspendat.
+		// `constructEventAsync` funcționează identic și pe Node/Bun (local).
 		const stripeForVerify = new Stripe('sk_test_dummy_for_verify_only', { typescript: true });
-		event = stripeForVerify.webhooks.constructEvent(rawBody, signature, webhookSecret);
+		event = await stripeForVerify.webhooks.constructEventAsync(rawBody, signature, webhookSecret);
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
 		logError('directadmin', `Webhook signature verification failed for tenant ${tenantId}: ${msg}`, {

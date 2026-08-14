@@ -129,7 +129,8 @@ export function renderInvoicePaidEmailHtml(input: InvoicePaidRenderInput): {
 				</td>
 			</tr>
 		</table>
-		<p style="color: #15803d; font-weight: 600; font-size: 15px; margin: 0 0 20px 0;">Vă mulțumim pentru plată!</p>
+		<p style="color: #15803d; font-weight: 600; font-size: 15px; margin: 0 0 12px 0;">Vă mulțumim pentru plată!</p>
+		<p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin: 0 0 20px 0;">Dacă accesul în portal sau serviciile asociate au fost limitate din cauza acestei facturi, ele se reactivează automat în câteva minute.</p>
 		${renderCtaButton(input.invoiceUrl, 'Vezi factura', input.themeColor)}
 	`;
 
@@ -154,6 +155,9 @@ export function renderInvoicePaidEmailHtml(input: InvoicePaidRenderInput): {
 		${input.issueDate ? `Data emitere: ${formatDateRo(input.issueDate)}\n` : ''}
 
 		Va multumim pentru plata!
+
+		Daca accesul in portal sau serviciile asociate au fost limitate din cauza
+		acestei facturi, ele se reactiveaza automat in cateva minute.
 
 		Vezi factura: ${input.invoiceUrl}
 

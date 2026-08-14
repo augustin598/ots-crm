@@ -1,8 +1,13 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
+import { isStripeDevTestMode } from '$lib/server/plugins/stripe/factory';
+import {
+	notifyPaymentSucceeded,
+	notifyAdminPaymentReceived
+} from '$lib/server/stripe/notifications';
 
 /**
  * Reconcile a card payment for an ALREADY-EMITTED hosting invoice (renewal or
@@ -45,6 +50,20 @@ export async function handleStripeInvoicePayment(params: {
 			tenantId,
 			metadata: { invoiceId, paymentIntentId }
 		});
+		return;
+	}
+
+	// Pe localhost cu chei de TEST (`stripe listen` local) DB-ul e cel de
+	// PRODUCȚIE: o plată cu 4242 ar marca o factură reală „paid" fără bani reali
+	// și ar emite hook-urile de plată (DA avansează next_due_date). Permitem
+	// bucla completă doar pe facturi marcate explicit de test (număr `TEST-…`),
+	// cum folosesc scripturile E2E; restul sunt refuzate cu warning vizibil.
+	if (isStripeDevTestMode() && !existing.invoiceNumber?.startsWith('TEST-')) {
+		logWarning(
+			'directadmin',
+			`${eventLabel}: DEV-TEST — refuz să marchez plătită factura reală ${existing.invoiceNumber} (DB partajat cu producția). Folosește o factură cu numărul prefixat TEST- pentru bucla completă.`,
+			{ tenantId, metadata: { invoiceId, paymentIntentId } }
+		);
 		return;
 	}
 
@@ -142,6 +161,7 @@ export async function handleStripeInvoicePayment(params: {
 	// Non-fatal: a hook failure must NOT throw out of the webhook (Stripe would
 	// retry-storm) — the charge already settled and the invoice is already paid.
 	if (updated && previousStatus !== 'paid') {
+		let hooksOk = true;
 		try {
 			const hooks = getHooksManager();
 			await hooks.emit({
@@ -166,10 +186,38 @@ export async function handleStripeInvoicePayment(params: {
 				userId: 'system:stripe-invoice-payment'
 			});
 		} catch (err) {
+			hooksOk = false;
 			logError('directadmin', `${eventLabel}: invoice_payment hooks emit failed: ${serializeError(err).message}`, {
 				tenantId,
 				metadata: { invoiceId, paymentIntentId }
 			});
+		}
+
+		// Emailurile de confirmare — clientul („Plată primită", cu dedupe pe viață
+		// per factură + toggle-urile tenantului în notifyPaymentSucceeded) și
+		// adminul. Non-fatal: plata e deja încasată și factura marcată; un SMTP
+		// căzut nu are voie să arunce din webhook (Stripe ar intra în retry-storm),
+		// iar adminul poate retrimite manual din email logs.
+		try {
+			await notifyPaymentSucceeded(tenantId, invoiceId);
+		} catch (err) {
+			logError(
+				'directadmin',
+				`${eventLabel}: notificarea de plată către client a eșuat: ${serializeError(err).message}`,
+				{ tenantId, metadata: { invoiceId, paymentIntentId } }
+			);
+		}
+		try {
+			await notifyAdminPaymentReceived(tenantId, invoiceId, {
+				'factura-marcata-platita': 'success',
+				'hook-uri-hosting': hooksOk ? 'success' : 'failed'
+			});
+		} catch (err) {
+			logError(
+				'directadmin',
+				`${eventLabel}: notificarea de plată către admin a eșuat: ${serializeError(err).message}`,
+				{ tenantId, metadata: { invoiceId, paymentIntentId } }
+			);
 		}
 	}
 }

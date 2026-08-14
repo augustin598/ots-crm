@@ -65,13 +65,41 @@ mock.module('$lib/server/plugins/hooks', () => ({
 
 // Capture logger calls.
 let errorLogs: string[] = [];
+let warningLogs: string[] = [];
 mock.module('$lib/server/logger', () => ({
 	logInfo: () => {},
 	logError: (_scope: string, message: string) => {
 		errorLogs.push(message);
 	},
-	logWarning: () => {},
+	logWarning: (_scope: string, message: string) => {
+		warningLogs.push(message);
+	},
 	serializeError: (e: unknown) => ({ message: e instanceof Error ? e.message : String(e), stack: '' })
+}));
+
+// Modul dev-test (chei Stripe de TEST pe localhost) — controlabil per test.
+let devTestMode = false;
+mock.module('$lib/server/plugins/stripe/factory', () => ({
+	isStripeDevTestMode: () => devTestMode
+}));
+
+// Notificările de plată (email client + alertă admin) — spioni.
+let paymentSucceededCalls: Array<{ tenantId: string; invoiceId: string }> = [];
+let adminReceivedCalls: Array<{ tenantId: string; invoiceId: string; steps: Record<string, string> }> = [];
+let notifyShouldThrow = false;
+mock.module('$lib/server/stripe/notifications', () => ({
+	notifyPaymentSucceeded: async (tenantId: string, invoiceId: string) => {
+		paymentSucceededCalls.push({ tenantId, invoiceId });
+		if (notifyShouldThrow) throw new Error('SMTP down');
+	},
+	notifyAdminPaymentReceived: async (
+		tenantId: string,
+		invoiceId: string,
+		steps: Record<string, string>
+	) => {
+		adminReceivedCalls.push({ tenantId, invoiceId, steps });
+		if (notifyShouldThrow) throw new Error('SMTP down');
+	}
 }));
 
 const { handleStripeInvoicePayment } = await import('../invoice-payment');
@@ -85,6 +113,172 @@ beforeEach(() => {
 	updateCalls = 0;
 	emitted = [];
 	errorLogs = [];
+	warningLogs = [];
+	devTestMode = false;
+	paymentSucceededCalls = [];
+	adminReceivedCalls = [];
+	notifyShouldThrow = false;
+});
+
+describe('handleStripeInvoicePayment — notificări de plată', () => {
+	function sentInvoiceThenPaid() {
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: null,
+				stripePaymentIntentId: null,
+				externalTransactionId: null
+			}
+		]);
+		pushSelect([
+			{ id: 'inv-1', tenantId: 't1', status: 'paid', invoiceNumber: '8', totalAmount: 90629, hostingAccountId: null }
+		]);
+	}
+
+	test('tranziție sent→paid: trimite confirmarea către client ȘI alerta admin', async () => {
+		sentInvoiceThenPaid();
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_123',
+			paidAmountCents: 90629,
+			eventLabel: 'payment_intent.succeeded'
+		});
+		expect(paymentSucceededCalls).toEqual([{ tenantId: 't1', invoiceId: 'inv-1' }]);
+		expect(adminReceivedCalls).toHaveLength(1);
+		expect(adminReceivedCalls[0]).toMatchObject({ tenantId: 't1', invoiceId: 'inv-1' });
+	});
+
+	test('redelivery idempotent (deja paid): NU trimite notificări', async () => {
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'paid',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				stripePaymentIntentId: 'pi_123'
+			}
+		]);
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_123',
+			paidAmountCents: 90629,
+			eventLabel: 'payment_intent.succeeded'
+		});
+		expect(paymentSucceededCalls).toHaveLength(0);
+		expect(adminReceivedCalls).toHaveLength(0);
+	});
+
+	test('sumă încasată ≠ total: NU marchează plătită și NU notifică', async () => {
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				stripePaymentIntentId: null
+			}
+		]);
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_123',
+			paidAmountCents: 50000,
+			eventLabel: 'payment_intent.succeeded'
+		});
+		expect(updateCalls).toBe(0);
+		expect(paymentSucceededCalls).toHaveLength(0);
+		expect(adminReceivedCalls).toHaveLength(0);
+	});
+
+	test('notificarea eșuează: handlerul NU aruncă (webhook-ul nu intră în retry-storm)', async () => {
+		notifyShouldThrow = true;
+		sentInvoiceThenPaid();
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_123',
+			paidAmountCents: 90629,
+			eventLabel: 'payment_intent.succeeded'
+		});
+		// factura A FOST marcată plătită, doar emailul a picat
+		expect(updateCalls).toBe(1);
+		expect(errorLogs.some((m) => m.includes('notific'))).toBe(true);
+	});
+});
+
+describe('handleStripeInvoicePayment — dev-test guard (DB partajat cu producția)', () => {
+	test('dev-test: refuză să marcheze plătită o factură reală (fără prefix TEST-)', async () => {
+		devTestMode = true;
+		pushSelect([
+			{
+				id: 'inv-1',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: '8',
+				totalAmount: 90629,
+				hostingAccountId: null,
+				stripePaymentIntentId: null,
+				externalTransactionId: null
+			}
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-1',
+			paymentIntentId: 'pi_test_1',
+			paidAmountCents: 90629,
+			eventLabel: 'payment_intent.succeeded'
+		});
+
+		expect(updateCalls).toBe(0);
+		expect(emitted).toHaveLength(0);
+		expect(warningLogs.some((m) => m.includes('DEV-TEST'))).toBe(true);
+	});
+
+	test('dev-test: factura cu numărul prefixat TEST- trece (bucla E2E locală)', async () => {
+		devTestMode = true;
+		pushSelect([
+			{
+				id: 'inv-t',
+				tenantId: 't1',
+				status: 'sent',
+				invoiceNumber: 'TEST-E2E-PLATA',
+				totalAmount: 1000,
+				hostingAccountId: null,
+				stripePaymentIntentId: null,
+				externalTransactionId: null
+			}
+		]);
+		pushSelect([
+			{
+				id: 'inv-t',
+				tenantId: 't1',
+				status: 'paid',
+				invoiceNumber: 'TEST-E2E-PLATA',
+				totalAmount: 1000,
+				hostingAccountId: null
+			}
+		]);
+
+		await handleStripeInvoicePayment({
+			tenantId: 't1',
+			invoiceId: 'inv-t',
+			paymentIntentId: 'pi_test_2',
+			paidAmountCents: 1000,
+			eventLabel: 'payment_intent.succeeded'
+		});
+
+		expect(updateCalls).toBe(1);
+		expect(emitted.map((e) => e.type)).toContain('invoice.paid');
+	});
 });
 
 describe('handleStripeInvoicePayment', () => {

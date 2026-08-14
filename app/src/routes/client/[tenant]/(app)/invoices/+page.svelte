@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getInvoices } from '$lib/remotes/invoices.remote';
 	import { page } from '$app/state';
+	import { invalidateAll } from '$app/navigation';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -9,12 +10,16 @@
 		FileText as FileTextIcon,
 		Coins as CoinsIcon,
 		Calendar as CalendarIcon,
+		CreditCard as CreditCardIcon,
 		Eye as EyeIcon,
 		Download as DownloadIcon,
 		Search,
-		RefreshCw as RefreshCwIcon
+		RefreshCw as RefreshCwIcon,
+		CheckCircle2 as CheckCircleIcon
 	} from '@lucide/svelte';
 	import { formatAmount, type Currency } from '$lib/utils/currency';
+	import { createClientInvoicePaymentIntent } from '$lib/remotes/portal-invoice-payment.remote';
+	import InvoicePayModal from '$lib/components/invoice-pay-modal.svelte';
 
 	const lastKeezSyncAt = $derived((page.data as any)?.lastKeezSyncAt as string | null);
 
@@ -51,6 +56,47 @@
 	const invoicesQuery = getInvoices({});
 	const invoices = $derived(invoicesQuery.current || []);
 	const loading = $derived(invoicesQuery.loading);
+
+	// ─── Plată cu cardul ──────────────────────────────────────────────────────
+	// Fluxul de plată trăiește în componenta partajată `invoice-pay-modal.svelte`
+	// (aceeași ca pe pagina publică de factură). `canPayByCard` vine calculat din
+	// server (`getInvoices`), cu ACELEAȘI reguli ca remote-ul care acceptă plata.
+	type PayableInvoice = {
+		id: string;
+		invoiceNumber: string;
+		totalAmount: number;
+		currency: string;
+	};
+	let payingInvoice = $state<PayableInvoice | null>(null);
+	// Webhook-ul marchează factura plătită async — ascundem butonul imediat local,
+	// fără să așteptăm sincronizarea statusului.
+	let paidLocally = $state<Record<string, true>>({});
+	// `?paid=1` = întoarcere din redirectul 3DS.
+	let showPaidBanner = $state(page.url.searchParams.get('paid') === '1');
+
+	function handlePayOutcome(outcome: 'paid' | 'alreadyPaid') {
+		if (payingInvoice) paidLocally = { ...paidLocally, [payingInvoice.id]: true };
+		if (outcome === 'paid') showPaidBanner = true;
+		// Recalculează datele layout-ului: dacă accesul era restricționat din cauza
+		// acestei facturi restante, overlay-ul „Acces Restricționat" dispare fără
+		// reload manual. Statusul devine `paid` prin webhook (async, de obicei în
+		// câteva secunde) → o singură reverificare întârziată, NU polling.
+		invalidateAll();
+		setTimeout(() => {
+			invalidateAll();
+			// La cădere de rețea refresh-ul respinge promisiunea; `current` păstrează
+			// oricum valoarea veche, deci doar o înghițim ca să nu apară unhandled
+			// rejection în consolă.
+			invoicesQuery.refresh().catch(() => {});
+		}, 5000);
+	}
+
+	function closePayModal() {
+		payingInvoice = null;
+		// Reîncarcă lista — dacă webhook-ul a apucat să marcheze factura plătită,
+		// statusul și data plății apar imediat.
+		invoicesQuery.refresh().catch(() => {});
+	}
 
 
 	// --- Table state ---
@@ -192,6 +238,21 @@
 		{/if}
 	</div>
 
+	{#if showPaidBanner}
+		<div
+			class="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/30"
+			role="status"
+		>
+			<CheckCircleIcon class="mt-0.5 h-5 w-5 shrink-0 text-green-600 dark:text-green-400" aria-hidden="true" />
+			<div>
+				<p class="text-sm font-semibold text-green-900 dark:text-green-200">Plata a fost înregistrată</p>
+				<p class="mt-0.5 text-sm text-green-800 dark:text-green-300">
+					Vă mulțumim! Factura va apărea ca achitată în scurt timp.
+				</p>
+			</div>
+		</div>
+	{/if}
+
 	{#if loading}
 		<p class="text-muted-foreground">Se încarcă facturile…</p>
 	{:else if invoices.length === 0}
@@ -286,6 +347,22 @@
 
 								<!-- Action buttons -->
 								<div class="flex items-center gap-2 flex-shrink-0">
+									{#if invoice.canPayByCard && !paidLocally[invoice.id]}
+										<Button
+											size="sm"
+											class="cursor-pointer"
+											onclick={() =>
+												(payingInvoice = {
+													id: invoice.id,
+													invoiceNumber: invoice.invoiceNumber,
+													totalAmount: invoice.totalAmount ?? 0,
+													currency: invoice.currency
+												})}
+										>
+											<CreditCardIcon class="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+											Plătește {formatAmount(invoice.totalAmount, invoice.currency as Currency)}
+										</Button>
+									{/if}
 									<Button
 										variant="outline"
 										size="sm"
@@ -430,6 +507,20 @@
 				</div>
 			</div>
 		{/if}
+	{/if}
+
+	<!-- Modal de plată — componenta partajată cu pagina publică de factură. -->
+	{#if payingInvoice}
+		{@const inv = payingInvoice}
+		<InvoicePayModal
+			invoiceLabel={inv.invoiceNumber}
+			totalAmount={inv.totalAmount}
+			currency={inv.currency as Currency}
+			createIntent={() => createClientInvoicePaymentIntent({ invoiceId: inv.id })}
+			returnUrl={`${window.location.origin}/client/${tenantSlug}/invoices?paid=1`}
+			onClose={closePayModal}
+			onOutcome={handlePayOutcome}
+		/>
 	{/if}
 </div>
 

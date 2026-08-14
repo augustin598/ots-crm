@@ -5,18 +5,37 @@ mock.module('$env/static/private', () => ({}));
 mock.module('$env/dynamic/public', () => ({ env: {} }));
 mock.module('$env/static/public', () => ({}));
 
-// ─── Request context ──────────────────────────────────────────────────────────
+// ─── Request context (portal client user) ─────────────────────────────────────
+let locals: any;
 mock.module('$app/server', () => ({
 	query: (schemaOrFn: any, fn?: Function) => fn ?? schemaOrFn,
 	command: (schemaOrFn: any, fn?: Function) => fn ?? schemaOrFn,
 	getRequestEvent: () => ({
+		locals,
 		getClientAddress: () => '10.0.0.1',
 		request: { headers: new Headers() }
 	})
 }));
 
-// ─── DB (doar UPDATE-ul de stripePaymentIntentId trece pe aici) ────────────────
+// ─── DB — select (factură + invoiceSettings) și update (stripePaymentIntentId) ─
+let invoiceRow: any = null;
+let settingsRow: any = null;
 let updateCalls = 0;
+
+const schema = await import('$lib/server/db/schema');
+
+function makeSelectChain(tbl: any): any {
+	const rows = async () => {
+		if (tbl === schema.invoice) return invoiceRow ? [invoiceRow] : [];
+		if (tbl === schema.invoiceSettings) return settingsRow ? [settingsRow] : [];
+		return [];
+	};
+	const chain: any = {};
+	chain.where = () => chain;
+	chain.limit = () => rows();
+	return chain;
+}
+
 function makeUpdateChain(): any {
 	const chain: any = {};
 	chain.set = () => chain;
@@ -26,8 +45,13 @@ function makeUpdateChain(): any {
 	};
 	return chain;
 }
-mock.module('$lib/server/db', () => ({ db: { update: () => makeUpdateChain() } }));
-await import('$lib/server/db/schema');
+
+mock.module('$lib/server/db', () => ({
+	db: {
+		select: () => ({ from: (tbl: any) => makeSelectChain(tbl) }),
+		update: () => makeUpdateChain()
+	}
+}));
 
 // ─── Logger ───────────────────────────────────────────────────────────────────
 mock.module('$lib/server/logger', () => ({
@@ -50,21 +74,14 @@ mock.module('$lib/server/redis', () => ({
 	}
 }));
 
-// ─── Token ────────────────────────────────────────────────────────────────────
-let tokenResult: any = null;
-mock.module('$lib/server/invoice-token', () => ({
-	validateInvoiceViewToken: async () => tokenResult
-}));
-
 // ─── Stripe ───────────────────────────────────────────────────────────────────
 let stripeConfigured = true;
 let createdIntents: any[] = [];
 let retrievedIntent: any = null;
+let devTestMode = false;
 mock.module('$lib/server/plugins/stripe/factory', () => ({
 	isStripeConfiguredForTenant: async () => stripeConfigured,
-	// Pe localhost cu chei de test helperul sare peste Stripe Customer; testele
-	// verifică fluxul de producție, deci modul dev-test e mereu oprit aici.
-	isStripeDevTestMode: () => false,
+	isStripeDevTestMode: () => devTestMode,
 	getPublishableKeyForTenant: async () => 'pk_test_123',
 	getStripeForTenant: async () => ({
 		paymentIntents: {
@@ -88,116 +105,140 @@ mock.module('$lib/server/stripe/customer', () => ({
 	}
 }));
 
-const { createPublicInvoicePaymentIntent } = await import('../public-invoice.remote');
+const { createClientInvoicePaymentIntent } = await import('../portal-invoice-payment.remote');
 
-function validToken(overrides: Record<string, unknown> = {}) {
+function clientLocals(overrides: Record<string, unknown> = {}) {
 	return {
+		user: { id: 'u1' },
 		tenant: { id: 't1', slug: 'ots' },
-		invoice: {
-			id: 'inv-1',
-			tenantId: 't1',
-			invoiceNumber: '8',
-			invoiceSeries: 'OTSH',
-			status: 'sent',
-			totalAmount: 90629,
-			currency: 'RON',
-			stripePaymentIntentId: null,
-			...overrides
-		},
-		lineItems: [],
+		isClientUser: true,
+		isClientUserPrimary: true,
 		client: { id: 'c1', tenantId: 't1', name: 'MADDIE', email: 'client@example.com' },
-		invoiceSettings: null
+		...overrides
 	};
 }
 
-const INPUT = { tenantSlug: 'ots', token: 'tok_123' };
+function validInvoice(overrides: Record<string, unknown> = {}) {
+	return {
+		id: 'inv-1',
+		tenantId: 't1',
+		clientId: 'c1',
+		invoiceNumber: '8',
+		invoiceSeries: 'OTSH',
+		status: 'sent',
+		totalAmount: 90629,
+		currency: 'RON',
+		stripePaymentIntentId: null,
+		...overrides
+	};
+}
+
+const INPUT = { invoiceId: 'inv-1' };
 
 beforeEach(() => {
+	locals = clientLocals();
+	invoiceRow = validInvoice();
+	settingsRow = null;
 	updateCalls = 0;
 	rateLimitAllowed = true;
 	rateLimitCalls.length = 0;
-	tokenResult = validToken();
 	stripeConfigured = true;
 	createdIntents = [];
 	retrievedIntent = null;
 	customerCalls = 0;
+	devTestMode = false;
 });
 
-describe('createPublicInvoicePaymentIntent — autorizare', () => {
-	test('token invalid → refuz, fără apel la Stripe', async () => {
-		tokenResult = null;
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+describe('createClientInvoicePaymentIntent — autorizare', () => {
+	test('fără user/tenant → refuz, fără apel la Stripe', async () => {
+		locals = {};
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 
-	test('token expirat → refuz, fără apel la Stripe', async () => {
-		tokenResult = { expired: true };
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+	test('sesiune staff (nu client user) → refuz', async () => {
+		locals = clientLocals({ isClientUser: false, client: null });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 
-	test('aplică rate limit pe IP ȘI pe factură', async () => {
-		await createPublicInvoicePaymentIntent(INPUT);
-		expect(rateLimitCalls.map((c) => c.kind)).toContain('invoice-pay-ip');
-		expect(rateLimitCalls.map((c) => c.kind)).toContain('invoice-pay-inv');
+	test('contact secundar (nu primar) → refuz — secundarii nu văd facturile', async () => {
+		locals = clientLocals({ isClientUserPrimary: false });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		expect(createdIntents).toHaveLength(0);
 	});
 
-	test('cheia de rate limit pe factură e prefixată cu tenantId', async () => {
-		await createPublicInvoicePaymentIntent(INPUT);
-		const invoiceRl = rateLimitCalls.find((c) => c.kind === 'invoice-pay-inv');
-		expect(invoiceRl?.ip).toBe('t1:inv-1');
+	test('factura altui client → refuz (selectul scoped nu o găsește)', async () => {
+		invoiceRow = null;
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		expect(createdIntents).toHaveLength(0);
+	});
+
+	test('aplică rate limit pe client ȘI pe factură, cu chei prefixate cu tenantId', async () => {
+		await createClientInvoicePaymentIntent(INPUT);
+		const kinds = rateLimitCalls.map((c) => c.kind);
+		expect(kinds).toContain('invoice-pay-portal');
+		expect(kinds).toContain('invoice-pay-inv');
+		expect(rateLimitCalls.find((c) => c.kind === 'invoice-pay-portal')?.ip).toBe('t1:c1');
+		expect(rateLimitCalls.find((c) => c.kind === 'invoice-pay-inv')?.ip).toBe('t1:inv-1');
 	});
 
 	test('rate limit depășit → refuz, fără apel la Stripe', async () => {
 		rateLimitAllowed = false;
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 });
 
-describe('createPublicInvoicePaymentIntent — eligibilitate', () => {
+describe('createClientInvoicePaymentIntent — eligibilitate', () => {
 	test('factură deja plătită → alreadyPaid, fără apel la Stripe', async () => {
-		tokenResult = validToken({ status: 'paid' });
-		const res = await createPublicInvoicePaymentIntent(INPUT);
+		invoiceRow = validInvoice({ status: 'paid' });
+		const res = await createClientInvoicePaymentIntent(INPUT);
 		expect(res).toEqual({ alreadyPaid: true });
 		expect(createdIntents).toHaveLength(0);
 	});
 
 	test('factură anulată → refuz', async () => {
-		tokenResult = validToken({ status: 'cancelled' });
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		invoiceRow = validInvoice({ status: 'cancelled' });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 
 	test('factură parțial plătită → refuz', async () => {
-		tokenResult = validToken({ status: 'partially_paid' });
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		invoiceRow = validInvoice({ status: 'partially_paid' });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		expect(createdIntents).toHaveLength(0);
+	});
+
+	test('CIORNĂ → refuz — staff-ul încă o editează, portalul nu are gate de token', async () => {
+		invoiceRow = validInvoice({ status: 'draft' });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 
 	test('sumă sub pragul Stripe → refuz', async () => {
-		tokenResult = validToken({ totalAmount: 150 });
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		invoiceRow = validInvoice({ totalAmount: 150 });
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 
 	test('Stripe neconfigurat pe tenant → refuz', async () => {
 		stripeConfigured = false;
-		await expect(createPublicInvoicePaymentIntent(INPUT)).rejects.toThrow();
+		await expect(createClientInvoicePaymentIntent(INPUT)).rejects.toThrow();
 		expect(createdIntents).toHaveLength(0);
 	});
 });
 
-describe('createPublicInvoicePaymentIntent — PaymentIntent', () => {
-	test('suma și moneda vin din factură, nu din request', async () => {
-		const res = await createPublicInvoicePaymentIntent(INPUT);
+describe('createClientInvoicePaymentIntent — PaymentIntent', () => {
+	test('suma și moneda vin din factură (DB), nu din request', async () => {
+		const res = await createClientInvoicePaymentIntent(INPUT);
 		expect(createdIntents[0].amount).toBe(90629);
 		expect(createdIntents[0].currency).toBe('ron');
 		expect(res).toMatchObject({ alreadyPaid: false, total: 90629, currency: 'RON' });
 	});
 
 	test('metadata conține contractul așteptat de webhook', async () => {
-		await createPublicInvoicePaymentIntent(INPUT);
+		await createClientInvoicePaymentIntent(INPUT);
 		expect(createdIntents[0].metadata).toEqual({
 			crmPurpose: 'invoice_payment',
 			crmTenantId: 't1',
@@ -206,27 +247,18 @@ describe('createPublicInvoicePaymentIntent — PaymentIntent', () => {
 	});
 
 	test('salvează PaymentIntent-ul pe factură', async () => {
-		await createPublicInvoicePaymentIntent(INPUT);
+		await createClientInvoicePaymentIntent(INPUT);
 		expect(updateCalls).toBe(1);
 	});
 
-	test('client fără email → PaymentIntent fără customer', async () => {
-		const t = validToken();
-		t.client.email = null as unknown as string;
-		tokenResult = t;
-		await createPublicInvoicePaymentIntent(INPUT);
-		expect(customerCalls).toBe(0);
-		expect(createdIntents[0].customer).toBeUndefined();
-	});
-
 	test('client cu email → PaymentIntent cu customer', async () => {
-		await createPublicInvoicePaymentIntent(INPUT);
+		await createClientInvoicePaymentIntent(INPUT);
 		expect(customerCalls).toBe(1);
 		expect(createdIntents[0].customer).toBe('cus_123');
 	});
 
 	test('refolosește un PaymentIntent deschis cu aceeași sumă și monedă', async () => {
-		tokenResult = validToken({ stripePaymentIntentId: 'pi_open' });
+		invoiceRow = validInvoice({ stripePaymentIntentId: 'pi_open' });
 		retrievedIntent = {
 			id: 'pi_open',
 			status: 'requires_payment_method',
@@ -235,14 +267,14 @@ describe('createPublicInvoicePaymentIntent — PaymentIntent', () => {
 			client_secret: 'cs_open'
 		};
 
-		const res = await createPublicInvoicePaymentIntent(INPUT);
+		const res = await createClientInvoicePaymentIntent(INPUT);
 		expect(createdIntents).toHaveLength(0);
 		expect(res).toMatchObject({ clientSecret: 'cs_open' });
 		expect(updateCalls).toBe(0);
 	});
 
 	test('NU refolosește un PaymentIntent cu altă sumă (factura a fost editată)', async () => {
-		tokenResult = validToken({ stripePaymentIntentId: 'pi_old' });
+		invoiceRow = validInvoice({ stripePaymentIntentId: 'pi_old' });
 		retrievedIntent = {
 			id: 'pi_old',
 			status: 'requires_payment_method',
@@ -251,30 +283,23 @@ describe('createPublicInvoicePaymentIntent — PaymentIntent', () => {
 			client_secret: 'cs_old'
 		};
 
-		const res = await createPublicInvoicePaymentIntent(INPUT);
+		const res = await createClientInvoicePaymentIntent(INPUT);
 		expect(createdIntents).toHaveLength(1);
 		expect(createdIntents[0].amount).toBe(90629);
 		expect(res).toMatchObject({ clientSecret: 'cs_new' });
 	});
 
-	test('NU refolosește un PaymentIntent deja reușit', async () => {
-		tokenResult = validToken({ stripePaymentIntentId: 'pi_done' });
-		retrievedIntent = {
-			id: 'pi_done',
-			status: 'succeeded',
-			amount: 90629,
-			currency: 'ron',
-			client_secret: 'cs_done'
-		};
-
-		await createPublicInvoicePaymentIntent(INPUT);
-		expect(createdIntents).toHaveLength(1);
+	test('eticheta facturii folosește seria (OTSH 8)', async () => {
+		const res = await createClientInvoicePaymentIntent(INPUT);
+		expect(res).toMatchObject({ invoiceLabel: 'OTSH 8' });
 	});
 
-	test('PaymentIntent dispărut din Stripe → creează unul nou', async () => {
-		tokenResult = validToken({ stripePaymentIntentId: 'pi_gone' });
-		retrievedIntent = null; // retrieve aruncă
-		await createPublicInvoicePaymentIntent(INPUT);
-		expect(createdIntents).toHaveLength(1);
+	test('dev-test: NU salvează PI-ul pe factură și NU creează Stripe Customer (DB partajat cu prod)', async () => {
+		devTestMode = true;
+		const res = await createClientInvoicePaymentIntent(INPUT);
+		expect(res).toMatchObject({ alreadyPaid: false, clientSecret: 'cs_new' });
+		expect(updateCalls).toBe(0);
+		expect(customerCalls).toBe(0);
+		expect(createdIntents[0].customer).toBeUndefined();
 	});
 });
