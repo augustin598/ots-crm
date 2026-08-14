@@ -28,7 +28,7 @@ const fixture = {
 	invoiceNumber: 'INV-2026-0123',
 	amountPaid: 9950, // in cents → 99.50
 	currency: 'RON',
-	daPanelUrl: 'https://srv1.onetopsolution.ro:2222'
+	daPanelUrl: 'https://example.ro:2222/evo/login'
 };
 
 const themeColor = '#0ea5e9';

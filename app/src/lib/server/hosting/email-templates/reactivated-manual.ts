@@ -6,7 +6,7 @@ export interface ReactivatedManualInput {
 	tenantId: string;
 	domain: string;
 	clientName: string;
-	/** Public DA panel URL — `https://${server.hostname}:2222`. */
+	/** Public DA panel URL — `https://${account.domain}:2222/evo/login` (fallback: hostname server). */
 	daPanelUrl: string;
 }
 

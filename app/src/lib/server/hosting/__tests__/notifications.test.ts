@@ -945,7 +945,9 @@ describe('notifyHostingReactivated', () => {
 		expect(renderInput.invoiceNumber).toBe('INV-2026-0123');
 		expect(renderInput.amountPaid).toBe(9950);
 		expect(renderInput.currency).toBe('RON');
-		expect(renderInput.daPanelUrl).toBe('https://srv1.example.com:2222');
+		// Panoul DA pe DOMENIUL clientului (nu pe hostname-ul serverului, care în
+		// producție e IP-ul brut) — bug raportat pe emailul reactivării OTSH 8.
+		expect(renderInput.daPanelUrl).toBe('https://example.ro:2222/evo/login');
 
 		// One email_log row pre-created
 		expect(logEmailAttemptCalls.length).toBe(1);

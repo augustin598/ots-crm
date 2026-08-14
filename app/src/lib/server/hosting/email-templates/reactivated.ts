@@ -10,7 +10,7 @@ export interface ReactivatedInput {
 	/** Amount in cents (per invoice.totalAmount schema convention). */
 	amountPaid: number;
 	currency: 'RON' | 'EUR' | 'USD';
-	/** Public DA panel URL — `https://${server.hostname}:2222`. */
+	/** Public DA panel URL — `https://${account.domain}:2222/evo/login` (fallback: hostname server). */
 	daPanelUrl: string;
 }
 
