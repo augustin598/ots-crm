@@ -993,7 +993,13 @@ export async function notifyHostingReactivated(
 		}
 
 		// 6. Build daPanelUrl + render template.
-		const daPanelUrl = `https://${server.hostname}:2222`;
+		// Panoul DA prin DOMENIUL clientului, nu prin hostname-ul serverului —
+		// la noi hostname-ul e IP-ul brut, iar un link `https://46.x.x.x:2222`
+		// arată dubios în emailul clientului. Domeniul e garantat live aici
+		// (tocmai a fost reactivat). Fallback pe server doar fără domeniu.
+		const daPanelUrl = account.domain
+			? `https://${account.domain}:2222/evo/login`
+			: `https://${server.hostname}:2222`;
 		// totalAmount stored in CENTS per schema. Fall back to 0 when null — the
 		// template renders `0.00 RON`.
 		const amountPaid = invoiceRow.totalAmount ?? 0;
@@ -2129,7 +2135,12 @@ export async function notifyHostingReactivatedManual(
 			.where(and(eq(daServer.id, account.daServerId), eq(daServer.tenantId, tenantId)))
 			.limit(1);
 
-		const daPanelUrl = server ? `https://${server.hostname}:2222` : '';
+		// Ca la reactivarea automată: linkul de panou pe domeniul clientului.
+		const daPanelUrl = account.domain
+			? `https://${account.domain}:2222/evo/login`
+			: server
+				? `https://${server.hostname}:2222`
+				: '';
 
 		const { subject, html } = await renderReactivatedManual({
 			tenantId,
