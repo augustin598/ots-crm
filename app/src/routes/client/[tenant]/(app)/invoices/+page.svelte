@@ -84,7 +84,10 @@
 		invalidateAll();
 		setTimeout(() => {
 			invalidateAll();
-			invoicesQuery.refresh();
+			// La cădere de rețea refresh-ul respinge promisiunea; `current` păstrează
+			// oricum valoarea veche, deci doar o înghițim ca să nu apară unhandled
+			// rejection în consolă.
+			invoicesQuery.refresh().catch(() => {});
 		}, 5000);
 	}
 
@@ -92,7 +95,7 @@
 		payingInvoice = null;
 		// Reîncarcă lista — dacă webhook-ul a apucat să marcheze factura plătită,
 		// statusul și data plății apar imediat.
-		invoicesQuery.refresh();
+		invoicesQuery.refresh().catch(() => {});
 	}
 
 
