@@ -1031,11 +1031,18 @@
 								{@const pill = invoiceStatusPill(inv.status)}
 								<label class="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-emerald-200/70 bg-white px-3 py-2 dark:border-emerald-900/60 dark:bg-slate-800">
 									<span class="flex min-w-0 items-center gap-2">
-										<input
-											type="checkbox"
-											bind:checked={markPaidSelection[inv.id]}
-											class="size-4 shrink-0 accent-emerald-600"
-										/>
+										<!-- appearance-none, nu checkbox nativ: nativul urmează color-scheme-ul
+										     sistemului (întunecat pe browser dark) și iese cu contrast prost. -->
+										<span class="relative inline-flex shrink-0">
+											<input
+												type="checkbox"
+												bind:checked={markPaidSelection[inv.id]}
+												class="peer size-4 cursor-pointer appearance-none rounded border border-slate-400 bg-white transition-colors checked:border-emerald-600 checked:bg-emerald-600 dark:border-slate-500 dark:bg-slate-900 dark:checked:border-emerald-500 dark:checked:bg-emerald-600"
+											/>
+											<CheckIcon
+												class="pointer-events-none absolute left-0.5 top-0.5 size-3 text-white opacity-0 peer-checked:opacity-100"
+											/>
+										</span>
 										<span class="truncate font-mono text-[12px] font-semibold text-slate-900 dark:text-slate-100">{inv.invoiceNumber}</span>
 										<span class="inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold {pill.cls}">{pill.label}</span>
 									</span>
