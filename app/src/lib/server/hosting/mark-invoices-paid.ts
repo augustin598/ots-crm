@@ -4,6 +4,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
+import { notifyPaymentSucceeded } from '$lib/server/stripe/notifications';
 
 /**
  * Marchează achitate facturile unui cont de hosting la înregistrarea unei plăți
@@ -217,6 +218,24 @@ export async function markHostingInvoicesPaid(
 			logError(
 				'directadmin',
 				`hook-urile de plată au eșuat pentru factura ${existing.invoiceNumber}: ${serializeError(err).message}`,
+				{
+					tenantId: params.tenantId,
+					metadata: { invoiceId, hostingAccountId: params.hostingAccountId }
+				}
+			);
+		}
+
+		// Emailul „Plată primită" către client — același wrapper ca fluxul card
+		// (toggle-urile tenantului + dedupe pe viață per factură se aplică acolo).
+		// Non-fatal: factura e deja marcată și hook-urile emise; un destinatar
+		// lipsă sau un SMTP căzut nu au voie să strice salvarea — adminul poate
+		// retrimite manual din email logs.
+		try {
+			await notifyPaymentSucceeded(params.tenantId, invoiceId);
+		} catch (err) {
+			logError(
+				'directadmin',
+				`emailul „Plată primită" a eșuat pentru factura ${existing.invoiceNumber}: ${serializeError(err).message}`,
 				{
 					tenantId: params.tenantId,
 					metadata: { invoiceId, hostingAccountId: params.hostingAccountId }
