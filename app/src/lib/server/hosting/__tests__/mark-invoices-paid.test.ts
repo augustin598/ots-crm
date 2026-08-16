@@ -67,6 +67,16 @@ mock.module('$lib/server/plugins/stripe/factory', () => ({
 	})
 }));
 
+// --- Email „Plată primită" capture (notifyPaymentSucceeded din fluxul Stripe) ---
+let paymentEmails: Array<{ tenantId: string; invoiceId: string }> = [];
+let paymentEmailShouldThrow = false;
+mock.module('$lib/server/stripe/notifications', () => ({
+	notifyPaymentSucceeded: async (tenantId: string, invoiceId: string) => {
+		if (paymentEmailShouldThrow) throw new Error('no recipient resolvable');
+		paymentEmails.push({ tenantId, invoiceId });
+	}
+}));
+
 // --- Logger capture ---
 let errorLogs: string[] = [];
 let warningLogs: string[] = [];
@@ -96,6 +106,8 @@ beforeEach(() => {
 	warningLogs = [];
 	cancelledPaymentIntents = [];
 	cancelShouldThrow = false;
+	paymentEmails = [];
+	paymentEmailShouldThrow = false;
 });
 
 const TENANT = 'ots';
@@ -279,6 +291,35 @@ describe('markHostingInvoicesPaid', () => {
 		const res = await markHostingInvoicesPaid(baseParams({ invoiceIds: [] }));
 		expect(res.marked).toEqual([]);
 		expect(res.skipped).toEqual([]);
+	});
+
+	test('factură marcată → clientul primește emailul „Plată primită"', async () => {
+		const existing = invoice();
+		selectQueue = [[existing], [{ ...existing, status: 'paid' }]];
+
+		await markHostingInvoicesPaid(baseParams());
+
+		expect(paymentEmails).toEqual([{ tenantId: TENANT, invoiceId: 'inv-1' }]);
+	});
+
+	test('factură sărită → NU se trimite email', async () => {
+		selectQueue = [[invoice({ status: 'paid' })]];
+
+		await markHostingInvoicesPaid(baseParams());
+
+		expect(paymentEmails).toEqual([]);
+	});
+
+	test('emailul eșuează (fără destinatar) → factura rămâne marcată, logError, fără throw', async () => {
+		const existing = invoice();
+		selectQueue = [[existing], [{ ...existing, status: 'paid' }]];
+		paymentEmailShouldThrow = true;
+
+		const res = await markHostingInvoicesPaid(baseParams());
+
+		expect(res.marked).toHaveLength(1);
+		expect(emitted).toHaveLength(3); // hook-urile s-au emis normal
+		expect(errorLogs.length).toBeGreaterThan(0);
 	});
 
 	test('id duplicat → procesat o singură dată', async () => {
