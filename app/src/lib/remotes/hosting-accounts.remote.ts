@@ -12,6 +12,7 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import type { DAUserUsage } from '$lib/server/plugins/directadmin/client';
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
 import { upsertRecurringInvoiceForHostingAccount } from '$lib/server/hosting/recurring-template';
+import { markHostingInvoicesPaid } from '$lib/server/hosting/mark-invoices-paid';
 import { logWarning } from '$lib/server/logger';
 // Imports below sit OUTSIDE the pre-existing merge conflict block so the
 // compiler can see them. Do NOT move them inside the markers.
@@ -788,7 +789,12 @@ const UpdateAccountSchema = v.object({
 	paymentReference: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(120)))),
 	paymentNote: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(500)))),
 	notes: v.optional(v.nullable(v.string())),
-	tags: v.optional(v.nullable(v.array(v.string())))
+	tags: v.optional(v.nullable(v.array(v.string()))),
+	// Facturi bifate în tab-ul „Plată & Factură" pentru marcare ca achitate la
+	// salvare (plată offline OP/cash înregistrată de staff, cu referință).
+	markInvoicesPaid: v.optional(
+		v.pipe(v.array(v.pipe(v.string(), v.minLength(1))), v.maxLength(20))
+	)
 });
 
 export const updateHostingAccount = command(UpdateAccountSchema, async (data) => {
@@ -906,11 +912,52 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 		});
 	}
 
+	// Plată offline înregistrată de staff: facturile bifate devin achitate, cu
+	// referința pe factură. Rulează ÎNAINTE de re-sync-ul template-ului recurent,
+	// pentru că hook-ul invoice.paid al plugin-ului DA avansează next_due_date și
+	// dez-suspendă contul — iar template-ul trebuie sincronizat cu starea DE DUPĂ
+	// plată. Altfel, pe un cont suspendat, upsert-ul ar fixa isActive=false, hook-ul
+	// ar dez-suspenda contul, și nimic n-ar mai reactiva template-ul: contul n-ar
+	// mai fi facturat niciodată.
+	let invoicesMarkedPaid: Array<{ id: string; invoiceNumber: string }> = [];
+	let invoicesSkipped: Array<{ id: string; invoiceNumber: string | null; reason: string }> = [];
+	if (data.markInvoicesPaid && data.markInvoicesPaid.length > 0) {
+		if (data.paymentMethod !== 'op' && data.paymentMethod !== 'cash') {
+			throw new Error(
+				'Facturile se pot marca achitate din acest formular doar pentru plăți OP sau cash — plățile cu cardul se reconciliază automat prin Stripe'
+			);
+		}
+		const outcome = await markHostingInvoicesPaid({
+			tenantId,
+			userId: event.locals.user.id,
+			hostingAccountId: data.id,
+			invoiceIds: data.markInvoicesPaid,
+			method: data.paymentMethod,
+			reference: data.paymentReference ?? ''
+		});
+		invoicesMarkedPaid = outcome.marked;
+		invoicesSkipped = outcome.skipped;
+	}
+
+	// Starea proaspătă a contului, DUPĂ eventualele hook-uri de plată (onInvoicePaid
+	// poate schimba status + next_due_date). O folosim la re-sync-ul template-ului
+	// și o întoarcem formularului — altfel draft-ul rămâne pe valorile vechi și un
+	// al doilea „Salvează" ar regresa scadența abia avansată.
+	const [fresh] = await db
+		.select({
+			status: table.hostingAccount.status,
+			nextDueDate: table.hostingAccount.nextDueDate
+		})
+		.from(table.hostingAccount)
+		.where(and(eq(table.hostingAccount.id, data.id), eq(table.hostingAccount.tenantId, tenantId)))
+		.limit(1);
+
 	// Re-sync the recurring-invoice template from the catalog and reconcile the
 	// snapshot — parity with createHostingAccount, which calls the upsert at
 	// creation. Without this, changing the package/cycle/price here leaves the OLD
 	// price billing at the next renewal (audit finding H2/DRIFT-1). Uses merged
-	// post-update values. Best-effort: a hiccup must not fail the save.
+	// post-update values (status/nextDueDate from the fresh post-hooks row).
+	// Best-effort: a hiccup must not fail the save.
 	try {
 		await upsertRecurringInvoiceForHostingAccount({
 			tenantId,
@@ -927,8 +974,10 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 			currency: data.currency !== undefined ? data.currency : account.currency,
 			billingCycle: data.billingCycle !== undefined ? data.billingCycle : account.billingCycle,
 			startDate: account.startDate,
-			nextDueDate: data.nextDueDate !== undefined ? data.nextDueDate : account.nextDueDate,
-			status: account.status
+			nextDueDate:
+				fresh?.nextDueDate ??
+				(data.nextDueDate !== undefined ? data.nextDueDate : account.nextDueDate),
+			status: fresh?.status ?? account.status
 		});
 	} catch (e) {
 		logWarning('directadmin', 'updateHostingAccount recurring re-sync failed', {
@@ -936,7 +985,15 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 		});
 	}
 
-	return { success: true };
+	return {
+		success: true,
+		invoicesMarkedPaid,
+		invoicesSkipped,
+		account: {
+			status: fresh?.status ?? account.status,
+			nextDueDate: fresh?.nextDueDate ?? null
+		}
+	};
 });
 
 // =============================================================================
@@ -954,6 +1011,11 @@ export type AccountPaymentHistoryRow = {
 	paymentMethod: string | null;
 	stripePaymentIntentId: string | null;
 	externalTransactionId: string | null;
+	/**
+	 * true = factura are FK explicit pe acest cont (poate fi marcată achitată de
+	 * aici); false = atribuită doar euristic pentru afișare (attributeHostingInvoice).
+	 */
+	fkLinked: boolean;
 };
 
 export const getAccountPaymentHistory = query(IdSchema, async (accountId) => {
@@ -981,7 +1043,7 @@ export const getAccountPaymentHistory = query(IdSchema, async (accountId) => {
 	if (!account) throw new Error('Hosting account not found');
 
 	// --- Pass A: invoices with FK directly set to this account ---
-	const fkRows = await db
+	const fkRowsDb = await db
 		.select({
 			id: table.invoice.id,
 			invoiceNumber: table.invoice.invoiceNumber,
@@ -1003,9 +1065,10 @@ export const getAccountPaymentHistory = query(IdSchema, async (accountId) => {
 		)
 		.orderBy(desc(table.invoice.issueDate))
 		.limit(20);
+	const fkRows = fkRowsDb.map((r) => ({ ...r, fkLinked: true }));
 
 	// --- Pass B: candidates for the same client without FK, with hosting keyword ---
-	type RawRow = (typeof fkRows)[number] & {
+	type RawRow = (typeof fkRowsDb)[number] & {
 		clientId: string | null;
 		lineDescription: string | null;
 	};
@@ -1096,7 +1159,7 @@ export const getAccountPaymentHistory = query(IdSchema, async (accountId) => {
 		if (attribution?.accountId === accountId) {
 			const { descriptions: _d, ...rest } = inv;
 			void _d;
-			attributedRows.push(rest);
+			attributedRows.push({ ...rest, fkLinked: false });
 		}
 	}
 

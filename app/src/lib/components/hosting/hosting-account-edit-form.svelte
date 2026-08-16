@@ -126,6 +126,7 @@
 			// ar rămâne cea a contului precedent.
 			paymentHistory = null;
 			paymentError = null;
+			markPaidSelection = {};
 			if (activeTab === 'payment') void loadPaymentHistory();
 		}
 	});
@@ -150,6 +151,11 @@
 		paymentError = null;
 		try {
 			paymentHistory = await getAccountPaymentHistory(account.id);
+			// Fără bifă implicită: marcarea unei facturi ca achitată e o acțiune cu
+			// consecințe (avans de scadență, dez-suspendare), deci cere gestul
+			// explicit al staff-ului — altfel metoda+referința PERSISTATE din plata
+			// precedentă ar marca silențios proforma următoare la orice salvare.
+			markPaidSelection = {};
 		} catch (e) {
 			paymentError = e instanceof Error ? e.message : 'Eroare la încărcare';
 			paymentHistory = [];
@@ -162,6 +168,28 @@
 		activeTab = t;
 		if (t === 'payment') void loadPaymentHistory();
 	}
+
+	// ---------- Marcare facturi achitate la salvare (plată OP/cash) ----------
+	// Card e exclus intenționat: plățile cu cardul se reconciliază automat prin
+	// webhook-ul Stripe, nu manual din acest formular.
+	const PAYABLE_INVOICE_STATUSES = new Set(['pending', 'sent', 'overdue', 'partially_paid']);
+	let markPaidSelection = $state<Record<string, boolean>>({});
+
+	// Doar facturile cu FK explicit pe cont — cele atribuite euristic (fkLinked
+	// false) sunt simple potriviri de afișare; serverul le-ar refuza oricum.
+	const payableInvoices = $derived(
+		(paymentHistory ?? []).filter((r) => r.fkLinked && PAYABLE_INVOICE_STATUSES.has(r.status))
+	);
+	const offlineMarkEligible = $derived(
+		(draft.paymentMethod === 'op' || draft.paymentMethod === 'cash') &&
+			draft.paymentReference.trim().length > 0 &&
+			payableInvoices.length > 0
+	);
+	const invoicesToMarkPaid = $derived(
+		offlineMarkEligible
+			? payableInvoices.filter((r) => markPaidSelection[r.id]).map((r) => r.id)
+			: []
+	);
 
 	// ---------- Referință & comentariu pe plată ----------
 	// Referința aparține metodei (nr. OP ≠ nr. chitanță ≠ id tranzacție card), deci
@@ -186,13 +214,14 @@
 
 	/**
 	 * Tranzacția cu cardul detectată din istoricul de facturi ale contului: primul
-	 * `stripePaymentIntentId` (sau `externalTransactionId`) găsit. Asocierea se face
-	 * automat — plățile prin Stripe nu se tastează de mână.
+	 * `stripePaymentIntentId` găsit. DOAR PI-ul Stripe — `externalTransactionId`
+	 * poate conține de-acum și referințe OP/chitanță scrise de staff, care nu sunt
+	 * tranzacții de card și nu trebuie prezentate (readonly) ca atare.
 	 */
 	const detectedCardTxn = $derived.by(() => {
 		for (const row of paymentHistory ?? []) {
-			const txn = row.stripePaymentIntentId ?? row.externalTransactionId;
-			if (txn) return { txn, invoiceNumber: row.invoiceNumber };
+			if (row.stripePaymentIntentId)
+				return { txn: row.stripePaymentIntentId, invoiceNumber: row.invoiceNumber };
 		}
 		return null;
 	});
@@ -446,7 +475,7 @@
 		saving = true;
 		const toastId = toast.loading('Se salvează...');
 		try {
-			await updateHostingAccount({
+			const result = await updateHostingAccount({
 				id: account.id,
 				clientId: draft.clientId,
 				daPackageId: draft.daPackageId,
@@ -471,9 +500,63 @@
 				paymentReference: draft.paymentReference.trim() || null,
 				paymentNote: draft.paymentNote.trim() || null,
 				notes: draft.notes || null,
-				tags: draft.tags
+				tags: draft.tags,
+				markInvoicesPaid: invoicesToMarkPaid
 			});
-			toast.success('Modificările au fost salvate', { id: toastId });
+
+			// Starea proaspătă a contului de pe server (hook-ul invoice.paid poate
+			// avansa scadența și dez-suspenda). Fără sincronizare, draft-ul stale ar
+			// REGRESA scadența la următorul „Salvează".
+			if (result?.account) {
+				draft.nextDueDate = result.account.nextDueDate ?? '';
+				currentStatus = result.account.status;
+			}
+
+			const marked = result?.invoicesMarkedPaid ?? [];
+			const skipped = result?.invoicesSkipped ?? [];
+			if (marked.length > 0) {
+				toast.success(
+					marked.length === 1
+						? `Modificările au fost salvate — factura ${marked[0].invoiceNumber} a fost marcată achitată`
+						: `Modificările au fost salvate — ${marked.length} facturi marcate achitate`,
+					{ id: toastId }
+				);
+			} else {
+				toast.success('Modificările au fost salvate', { id: toastId });
+			}
+			if (marked.length > 0 || skipped.length > 0) {
+				// Actualizare locală a istoricului: refetch-ul imediat poate servi
+				// cache-ul query-ului remote, iar rezultatul îl știm deja de la server.
+				// Rândurile sărite cu „already_paid" (plătite între timp, ex. card) se
+				// patch-uiesc și ele, altfel UI-ul rămâne blocat pe o bifă ce va fi
+				// sărită la fiecare salvare.
+				const markedIds = new Set(marked.map((m) => m.id));
+				const paidElsewhereIds = new Set(
+					skipped.filter((s) => s.reason === 'already_paid').map((s) => s.id)
+				);
+				const reference = draft.paymentReference.trim();
+				paymentHistory = (paymentHistory ?? []).map((r) => {
+					if (markedIds.has(r.id)) {
+						return {
+							...r,
+							status: 'paid',
+							paymentMethod: draft.paymentMethod === 'op' ? 'transfer' : 'cash',
+							externalTransactionId: reference,
+							paidDate: new Date().toISOString()
+						};
+					}
+					if (paidElsewhereIds.has(r.id)) return { ...r, status: 'paid' };
+					return r;
+				});
+				markPaidSelection = {};
+			}
+			if (skipped.length > 0) {
+				toast.warning(
+					`Nu s-au putut marca achitate: ${skipped
+						.map((s) => s.invoiceNumber ?? s.id)
+						.join(', ')} — verifică-le în Facturare`
+				);
+			}
 			notifySaved();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la salvare', { id: toastId });
@@ -933,6 +1016,39 @@
 						</p>
 					</div>
 				</div>
+
+				{#if offlineMarkEligible}
+					<!-- Plată offline cu referință: facturile bifate devin achitate la salvare -->
+					<div class="mt-1 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
+						<div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+							<CheckIcon class="size-3.5" /> Marchează achitate la salvare
+						</div>
+						<p class="text-[11px] leading-relaxed text-emerald-800/80 dark:text-emerald-300/80">
+							Bifează facturile acoperite de această plată — nimic nu se marchează fără bifă.
+						</p>
+						<div class="space-y-1">
+							{#each payableInvoices as inv (inv.id)}
+								{@const pill = invoiceStatusPill(inv.status)}
+								<label class="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-emerald-200/70 bg-white px-3 py-2 dark:border-emerald-900/60 dark:bg-slate-800">
+									<span class="flex min-w-0 items-center gap-2">
+										<input
+											type="checkbox"
+											bind:checked={markPaidSelection[inv.id]}
+											class="size-4 shrink-0 accent-emerald-600"
+										/>
+										<span class="truncate font-mono text-[12px] font-semibold text-slate-900 dark:text-slate-100">{inv.invoiceNumber}</span>
+										<span class="inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold {pill.cls}">{pill.label}</span>
+									</span>
+									<span class="shrink-0 text-[12px] font-semibold tabular-nums text-slate-900 dark:text-slate-100">{formatMoneyFromCents(inv.totalAmount, inv.currency)}</span>
+								</label>
+							{/each}
+						</div>
+						<p class="text-[11px] leading-relaxed text-emerald-800/80 dark:text-emerald-300/80">
+							Referința plății se trece pe facturile bifate, iar scadența contului avansează
+							automat cu un ciclu de facturare.
+						</p>
+					</div>
+				{/if}
 			</section>
 			<section class="space-y-2 pt-3">
 				<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ultimele facturi pentru acest cont</div>
@@ -974,6 +1090,7 @@
 									<th class="px-3 py-2 text-left font-medium">Factură</th>
 									<th class="px-3 py-2 text-left font-medium">Emisă</th>
 									<th class="px-3 py-2 text-left font-medium">Metodă</th>
+									<th class="px-3 py-2 text-left font-medium">Referință</th>
 									<th class="px-3 py-2 text-right font-medium">Sumă</th>
 									<th class="px-3 py-2 text-left font-medium">Status</th>
 								</tr>
@@ -995,6 +1112,18 @@
 												</span>
 											{:else if row.paymentMethod}
 												<span class="text-[11px] text-slate-500">{row.paymentMethod}</span>
+											{:else}
+												<span class="text-[11px] text-slate-400">—</span>
+											{/if}
+										</td>
+										<td class="max-w-[180px] px-3 py-2">
+											{#if row.stripePaymentIntentId ?? row.externalTransactionId}
+												<span
+													class="block truncate font-mono text-[11px] text-slate-600 dark:text-slate-300"
+													title={row.stripePaymentIntentId ?? row.externalTransactionId}
+												>
+													{row.stripePaymentIntentId ?? row.externalTransactionId}
+												</span>
 											{:else}
 												<span class="text-[11px] text-slate-400">—</span>
 											{/if}
@@ -1089,11 +1218,19 @@
 
 	<!-- Footer -->
 	<div class="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/50 px-5 py-3 dark:border-slate-700 dark:bg-slate-900">
-		<div class="text-[11px] text-slate-500">
+		<div class="min-w-0 text-[11px] text-slate-500">
 			Total pentru <span class="font-semibold text-slate-700 dark:text-slate-200">{totalDisplay.cycleLabel}</span>:
 			<span class="font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatMoney(totalDisplay.ron, draft.currency)}</span>
 			<span class="text-slate-300">·</span>
 			cu TVA: <span class="font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatMoney(totalDisplay.vat, draft.currency)}</span>
+			{#if invoicesToMarkPaid.length > 0}
+				<!-- Vizibil din ORICE tab: salvarea marchează facturi achitate. -->
+				<span class="mt-0.5 block font-semibold text-emerald-700 dark:text-emerald-400">
+					{invoicesToMarkPaid.length === 1
+						? 'La salvare: 1 factură va fi marcată achitată'
+						: `La salvare: ${invoicesToMarkPaid.length} facturi vor fi marcate achitate`}
+				</span>
+			{/if}
 		</div>
 		<button
 			type="button"
