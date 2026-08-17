@@ -9,11 +9,14 @@
 	let {
 		since = $bindable(''),
 		until = $bindable(''),
-		onchange
+		onchange,
+		triggerRef = $bindable(null)
 	}: {
 		since: string;
 		until: string;
 		onchange?: () => void;
+		/** Butonul-trigger (bind), ca părintele să poată readuce focusul pe el (ex. după „Șterge intervalul"). */
+		triggerRef?: HTMLButtonElement | null;
 	} = $props();
 
 	let open = $state(false);
@@ -43,6 +46,9 @@
 		const end = parseDateStr(until);
 		if (start && end) {
 			calendarValue = { start, end };
+		} else if (!since && !until) {
+			// Interval golit din exterior („Selectează perioada"): fără zile evidențiate în calendar
+			calendarValue = undefined;
 		}
 	});
 
@@ -62,7 +68,10 @@
 		return preset.since === since && preset.until === until;
 	}
 
-	const isCustomRange = $derived(!presets.some((p) => p.since === since && p.until === until));
+	// Interval selectat care nu e o presetare; starea goală (fără interval) nu e „Personalizat"
+	const isCustomRange = $derived(
+		!!since && !!until && !presets.some((p) => p.since === since && p.until === until)
+	);
 
 	function applyPreset(preset: { since: string; until: string }) {
 		fromPreset = true;
@@ -89,7 +98,7 @@
 <Popover bind:open>
 	<PopoverTrigger>
 		{#snippet child({ props })}
-			<Button {...props} variant="outline" size="sm" class="gap-2">
+			<Button {...props} bind:ref={triggerRef} variant="outline" size="sm" class="gap-2">
 				<CalendarIcon class="h-4 w-4" />
 				<span>{formatDisplay(since, until)}</span>
 			</Button>
@@ -99,7 +108,7 @@
 		<div class="flex">
 			<!-- Presets list -->
 			<div class="flex flex-col border-r py-2 min-w-[180px] max-h-[420px] overflow-y-auto">
-				{#each presets as preset}
+				{#each presets as preset (preset.label)}
 					<button
 						class="flex items-center gap-3 px-4 py-1.5 text-sm text-left hover:bg-muted transition-colors {isPresetActive(preset) ? 'font-medium text-primary' : 'text-foreground'}"
 						onclick={() => applyPreset(preset)}

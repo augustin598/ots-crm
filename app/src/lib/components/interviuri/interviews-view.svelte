@@ -46,6 +46,7 @@
 	import InterviewModal from './InterviewModal.svelte';
 	import ComparisonModal from './ComparisonModal.svelte';
 	import AssignClientModal from './AssignClientModal.svelte';
+	import DateRangePicker from '$lib/components/reports/date-range-picker.svelte';
 
 	// isClient = view-ul rulează în portalul clientului: serverul scopează datele
 	// pe clientul din sesiune (citire ȘI scriere). Clientul își gestionează
@@ -98,6 +99,9 @@
 	let clientFilter = $state('all'); // 'all' | 'none' | <clientId>
 	let from = $state('');
 	let to = $state('');
+	let dateRangeTrigger = $state<HTMLButtonElement | null>(null);
+	// id unic per instanță pentru aria-labelledby (view-ul e reutilizabil: admin + portal)
+	const uid = $props.id();
 	let search = $state('');
 	let sortKey = $state('data');
 	let sortDir = $state<'asc' | 'desc'>('desc');
@@ -445,11 +449,26 @@
 			</div>
 		{/if}
 		<div class="divider"></div>
-		<div class="iv-daterange">
-			<span class="cl-select-lbl">Interval:</span>
-			<input type="date" class="iv-date-input" bind:value={from} title="De la" />
-			<span class="cl-select-lbl">→</span>
-			<input type="date" class="iv-date-input" bind:value={to} title="Până la" />
+		<div class="iv-daterange" role="group" aria-labelledby="{uid}-interval-lbl">
+			<span class="cl-select-lbl" id="{uid}-interval-lbl">Interval:</span>
+			<!-- Același calendar (presetări + 2 luni) ca în Rapoarte; gol = fără filtru pe dată -->
+			<DateRangePicker bind:since={from} bind:until={to} bind:triggerRef={dateRangeTrigger} />
+			{#if from || to}
+				<button
+					type="button"
+					class="iv-daterange-clear"
+					aria-label="Șterge intervalul"
+					title="Șterge intervalul"
+					onclick={() => {
+						// butonul dispare după golire → focusul rămâne pe trigger, nu cade pe <body>
+						dateRangeTrigger?.focus();
+						from = '';
+						to = '';
+					}}
+				>
+					<XIcon size={12} aria-hidden="true" />
+				</button>
+			{/if}
 		</div>
 		{#if hasExtraFilters}
 			<button class="iv-clear-filters" onclick={clearAll}>
