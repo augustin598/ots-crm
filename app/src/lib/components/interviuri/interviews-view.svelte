@@ -100,6 +100,8 @@
 	let from = $state('');
 	let to = $state('');
 	let dateRangeTrigger = $state<HTMLButtonElement | null>(null);
+	// id unic per instanță pentru aria-labelledby (view-ul e reutilizabil: admin + portal)
+	const uid = $props.id();
 	let search = $state('');
 	let sortKey = $state('data');
 	let sortDir = $state<'asc' | 'desc'>('desc');
@@ -447,8 +449,8 @@
 			</div>
 		{/if}
 		<div class="divider"></div>
-		<div class="iv-daterange" role="group" aria-labelledby="iv-interval-lbl">
-			<span class="cl-select-lbl" id="iv-interval-lbl">Interval:</span>
+		<div class="iv-daterange" role="group" aria-labelledby="{uid}-interval-lbl">
+			<span class="cl-select-lbl" id="{uid}-interval-lbl">Interval:</span>
 			<!-- Același calendar (presetări + 2 luni) ca în Rapoarte; gol = fără filtru pe dată -->
 			<DateRangePicker bind:since={from} bind:until={to} bind:triggerRef={dateRangeTrigger} />
 			{#if from || to}
