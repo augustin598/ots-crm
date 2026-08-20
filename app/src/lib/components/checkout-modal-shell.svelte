@@ -2,7 +2,8 @@
 	/**
 	 * Coaja vizuală a modalelor de plată — aceeași cu checkout-ul de hosting
 	 * (`hosting-checkout-modal.svelte`), ca fluxurile de plată să arate identic
-	 * indiferent de unde pornesc.
+	 * indiferent de unde pornesc. O folosește și modalul de ofertă de pe
+	 * /servicii (cu alt badge și aria-label).
 	 *
 	 * Stilurile sunt copiate din acel fișier, nu importate: acolo trăiesc ca
 	 * `:global(.co-*)` în componenta lui de 3500 de linii, deci nu sunt
@@ -22,12 +23,23 @@
 		onClose,
 		canClose = true,
 		maxWidth = '560px',
+		badgeText = 'Plată securizată · SSL 256-bit',
+		ariaLabel = 'Plată cu cardul',
+		flush = false,
 		children,
 		footer
 	}: {
 		onClose: () => void;
 		canClose?: boolean;
 		maxWidth?: string;
+		/** Textul pastilei verzi din antet — modalul de ofertă /servicii nu e o plată. */
+		badgeText?: string;
+		ariaLabel?: string;
+		/**
+		 * Fără padding pe corp: modalul de ofertă își desenează singur coloana de
+		 * sumar până la margine, ca în checkout-ul de hosting.
+		 */
+		flush?: boolean;
 		children: Snippet;
 		/**
 		 * Bară de acțiuni lipită de baza modalului. Conținutul lung (formularul
@@ -47,7 +59,7 @@
 	class="co-overlay"
 	role="dialog"
 	aria-modal="true"
-	aria-label="Plată cu cardul"
+	aria-label={ariaLabel}
 	tabindex="-1"
 	use:focusTrap={{ onEscape: requestClose }}
 	onclick={(e) => {
@@ -64,7 +76,7 @@
 			</div>
 			<div class="co-secure">
 				<LockIcon size={13} />
-				<span>Plată securizată · SSL 256-bit</span>
+				<span>{badgeText}</span>
 			</div>
 			{#if canClose}
 				<button type="button" class="co-close" onclick={onClose}>
@@ -73,7 +85,7 @@
 			{/if}
 		</div>
 
-		<div class="co-body">
+		<div class={["co-body", flush && "co-body-flush"]}>
 			{@render children()}
 		</div>
 
@@ -208,6 +220,9 @@
 		flex: 1 1 auto;
 		min-height: 0;
 	}
+	.co-body.co-body-flush {
+		padding: 0;
+	}
 	.co-footer {
 		padding: 16px 28px 20px;
 		border-top: 1px solid #e5e9f0;
@@ -229,6 +244,9 @@
 		}
 		.co-body {
 			padding: 20px 18px 22px;
+		}
+		.co-body.co-body-flush {
+			padding: 0;
 		}
 		.co-footer {
 			padding: 12px 18px 16px;
