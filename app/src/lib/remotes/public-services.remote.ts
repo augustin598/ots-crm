@@ -14,12 +14,13 @@
  */
 
 import { command, getRequestEvent } from '$app/server';
-import { error } from '@sveltejs/kit';
+import { error, type RequestEvent } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { getCategory, TIERS } from '$lib/constants/ots-catalog';
+import { BUNDLE_TIERS_RULE, CATEGORIES, getCategory, TIERS } from '$lib/constants/ots-catalog';
+import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
 import {
 	PUBLIC_SERVICES_PAGE_KEY,
 	requireUnlockedPublicPage
@@ -47,9 +48,14 @@ function generateRequestId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 }
 
-export const submitPublicPackageRequest = command(requestSchema, async (data) => {
-	const event = getRequestEvent();
-
+/**
+ * Garda comună a formularelor publice: poarta cu parolă + rate-limit per IP.
+ * Ambele command-uri (serviciu simplu și ofertă multi-serviciu) împart aceeași
+ * găleată — altfel un vizitator ar avea dublul limitei doar alternând formularele.
+ */
+async function guardPublicSubmission(
+	event: RequestEvent
+): Promise<{ tenantId: string; ip: string }> {
 	const gate = await requireUnlockedPublicPage(event, PUBLIC_SERVICES_PAGE_KEY);
 	if (!gate) {
 		throw error(403, 'Sesiunea a expirat. Reîncarcă pagina și introdu parola din nou.');
@@ -74,6 +80,17 @@ export const submitPublicPackageRequest = command(requestSchema, async (data) =>
 		throw error(429, 'Prea multe cereri trimise. Te rugăm să încerci din nou peste o oră.');
 	}
 
+	return { tenantId: gate.tenantId, ip };
+}
+
+/**
+ * @deprecated UI-ul public folosește `submitPublicQuoteRequest` (coș multi-serviciu).
+ * Rămâne până se confirmă că nu mai există apelanți; se șterge într-un PR separat.
+ */
+export const submitPublicPackageRequest = command(requestSchema, async (data) => {
+	const event = getRequestEvent();
+	const { tenantId } = await guardPublicSubmission(event);
+
 	const category = getCategory(data.categorySlug);
 	if (!category) {
 		throw error(400, 'Serviciul selectat nu mai este disponibil.');
@@ -84,7 +101,7 @@ export const submitPublicPackageRequest = command(requestSchema, async (data) =>
 	try {
 		await db.insert(table.servicePackageRequest).values({
 			id: requestId,
-			tenantId: gate.tenantId,
+			tenantId,
 			clientId: null,
 			clientUserId: null,
 			categorySlug: category.slug,
@@ -102,7 +119,7 @@ export const submitPublicPackageRequest = command(requestSchema, async (data) =>
 	} catch (err) {
 		const { message, stack } = serializeError(err);
 		logError('packages', `cerere ofertă publică: INSERT eșuat — ${message}`, {
-			tenantId: gate.tenantId,
+			tenantId,
 			stackTrace: stack,
 			metadata: { categorySlug: category.slug, tier: data.tier }
 		});
@@ -110,7 +127,7 @@ export const submitPublicPackageRequest = command(requestSchema, async (data) =>
 	}
 
 	logInfo('packages', 'cerere ofertă publică primită', {
-		tenantId: gate.tenantId,
+		tenantId,
 		metadata: {
 			requestId,
 			categorySlug: category.slug,
@@ -119,7 +136,108 @@ export const submitPublicPackageRequest = command(requestSchema, async (data) =>
 		}
 	});
 
-	notifyAdminsOfPackageRequestInBackground(gate.tenantId, requestId);
+	notifyAdminsOfPackageRequestInBackground(tenantId, requestId);
+
+	return { success: true as const, requestId };
+});
+
+const quoteItemSchema = v.object({
+	categorySlug: v.pipe(v.string(), v.minLength(1), v.maxLength(80)),
+	tier: v.picklist(TIERS)
+});
+
+const quoteSchema = v.object({
+	// Plafonul e generos (catalogul are ~15 categorii), dar există ca payload-ul
+	// să nu poată fi umflat arbitrar.
+	items: v.pipe(v.array(quoteItemSchema), v.minLength(1), v.maxLength(20)),
+	contactName: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(120)),
+	contactEmail: v.pipe(v.string(), v.trim(), v.maxLength(255), v.regex(EMAIL_REGEX)),
+	contactPhone: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(40))),
+	companyName: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(160))),
+	note: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(2000)))
+});
+
+/**
+ * Cerere de ofertă pentru un coș de servicii (fiecare cu tier-ul lui).
+ *
+ * Un singur rând `service_package_request`:
+ *  - `categorySlug`/`tier` = primul serviciu (pivot) și `services` = toate
+ *    slug-urile — forma pe care o înțeleg deja admin-ul, emailul și portalul;
+ *  - `items` = tier-ul și prețurile fiecărui serviciu la momentul cererii;
+ *  - `discountPct` = calculat AICI, din aceleași reguli ca sumarul din browser,
+ *    nu preluat din payload.
+ */
+export const submitPublicQuoteRequest = command(quoteSchema, async (data) => {
+	const event = getRequestEvent();
+	const { tenantId } = await guardPublicSubmission(event);
+
+	const seen = new Set<string>();
+	for (const item of data.items) {
+		const category = getCategory(item.categorySlug);
+		if (!category) {
+			throw error(400, 'Unul dintre serviciile selectate nu mai este disponibil.');
+		}
+		if (!isTierOffered(category, item.tier)) {
+			throw error(400, `Pachetul ales nu este disponibil pentru ${category.name}.`);
+		}
+		if (seen.has(item.categorySlug)) {
+			throw error(400, 'Un serviciu apare de două ori în cerere.');
+		}
+		seen.add(item.categorySlug);
+	}
+
+	const summary = computeQuoteSummary(data.items, CATEGORIES, BUNDLE_TIERS_RULE);
+	const pivot = data.items[0];
+	const requestId = generateRequestId();
+
+	try {
+		await db.insert(table.servicePackageRequest).values({
+			id: requestId,
+			tenantId,
+			clientId: null,
+			clientUserId: null,
+			categorySlug: pivot.categorySlug,
+			bundleId: null,
+			services: JSON.stringify(data.items.map((i) => i.categorySlug)),
+			tier: pivot.tier,
+			items: JSON.stringify(
+				summary.lines.map((l) => ({
+					categorySlug: l.categorySlug,
+					tier: l.tier,
+					monthlyEur: l.monthlyEur,
+					setupEur: l.setupEur
+				}))
+			),
+			discountPct: summary.discountPct,
+			note: data.note || null,
+			source: 'public',
+			contactName: data.contactName,
+			contactEmail: data.contactEmail.toLowerCase(),
+			contactPhone: data.contactPhone || null,
+			companyName: data.companyName || null,
+			status: 'pending'
+		});
+	} catch (err) {
+		const { message, stack } = serializeError(err);
+		logError('packages', `cerere ofertă publică (coș): INSERT eșuat — ${message}`, {
+			tenantId,
+			stackTrace: stack,
+			metadata: { items: data.items }
+		});
+		throw error(500, 'Nu am putut salva cererea. Te rugăm să încerci din nou.');
+	}
+
+	logInfo('packages', 'cerere ofertă publică (coș) primită', {
+		tenantId,
+		metadata: {
+			requestId,
+			serviceCount: summary.serviceCount,
+			discountPct: summary.discountPct,
+			contactEmail: data.contactEmail
+		}
+	});
+
+	notifyAdminsOfPackageRequestInBackground(tenantId, requestId);
 
 	return { success: true as const, requestId };
 });
