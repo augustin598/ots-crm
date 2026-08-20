@@ -9,7 +9,11 @@ export const TIER_LABELS: Record<Tier, string> = {
 	platinum: 'Platinum'
 };
 
-export type FeatureValue = boolean | number | string;
+// Formatarea trăiește în modul separat, pur (fără date), ca pagina publică
+// /servicii să nu tragă catalogul cu prețuri în bundle-ul de client.
+export { formatFeatureValue, isBooleanFeature, formatEur } from './ots-catalog-format';
+export type { FeatureValue } from './ots-catalog-format';
+import type { FeatureValue } from './ots-catalog-format';
 
 export interface Feature {
 	id: string;
@@ -652,17 +656,6 @@ export function getCategoriesInGroup(groupId: string): Category[] {
 		.filter((c): c is Category => c !== undefined);
 }
 
-export function formatFeatureValue(value: FeatureValue): string {
-	if (value === true) return 'DA';
-	if (value === false) return 'NU';
-	if (typeof value === 'number') return String(value);
-	return value;
-}
-
-export function isBooleanFeature(value: FeatureValue): value is boolean {
-	return typeof value === 'boolean';
-}
-
 // Metallic-inspired palette with deliberate contrast between tiers:
 // bronze = copper/orange, silver = cool zinc, gold = warm yellow, platinum = violet (premium).
 // ---- Multi-service discount bundles --------------------------------------
@@ -1023,17 +1016,16 @@ export const BUNDLES: Bundle[] = [
 	}
 ];
 
-export const TIER_COLORS: Record<
-	Tier,
-	{
-		bg: string;
-		metallic: string;
-		text: string;
-		border: string;
-		ring: string;
-		dot: string;
-	}
-> = {
+export interface TierColors {
+	bg: string;
+	metallic: string;
+	text: string;
+	border: string;
+	ring: string;
+	dot: string;
+}
+
+export const TIER_COLORS: Record<Tier, TierColors> = {
 	bronze: {
 		bg: 'bg-orange-50 dark:bg-orange-950/30',
 		metallic:

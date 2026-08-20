@@ -14,6 +14,7 @@
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import PercentIcon from '@lucide/svelte/icons/percent';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import CategoryIcon from '$lib/components/services/CategoryIcon.svelte';
 	import DiscountsDialog from '$lib/components/services/DiscountsDialog.svelte';
 	import {
@@ -35,6 +36,7 @@
 		updatePackageRequestStatus
 	} from '$lib/remotes/packages.remote';
 	import InvoiceItemsPanel from './InvoiceItemsPanel.svelte';
+	import PublicPagePanel from './PublicPagePanel.svelte';
 	import PackageComparisonDialog from './PackageComparisonDialog.svelte';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import MinusIcon from '@lucide/svelte/icons/minus';
@@ -169,6 +171,10 @@
 		<TabsTrigger value="invoice-items">
 			<PackageIcon class="mr-2 h-4 w-4" />
 			Elemente de facturi
+		</TabsTrigger>
+		<TabsTrigger value="public">
+			<GlobeIcon class="mr-2 h-4 w-4" />
+			Pagina publică
 		</TabsTrigger>
 	</TabsList>
 
@@ -359,6 +365,8 @@
 				{#each filteredRequests as req (req.id)}
 					{@const tierColors = TIER_COLORS[req.tier as Tier]}
 					{@const isBundle = Array.isArray(req.services) && req.services.length > 1}
+					{@const displayName = req.clientName || req.contactName || '—'}
+					{@const displayEmail = req.clientEmail || req.contactEmail}
 					<Card class="p-4" id={`req-${req.id}`}>
 						<div class="flex items-start justify-between gap-4 flex-wrap">
 							<div class="flex-1 min-w-0">
@@ -383,6 +391,16 @@
 									<Badge class={statusBadgeClass(req.status)}>
 										{STATUS_LABEL[req.status] ?? req.status}
 									</Badge>
+									{#if req.source === 'public'}
+										<Badge
+											variant="outline"
+											class="gap-1 border-primary/30 text-primary"
+											title="Cerere venită de pe pagina publică /servicii"
+										>
+											<GlobeIcon class="h-3 w-3" />
+											Public
+										</Badge>
+									{/if}
 								</div>
 								{#if isBundle && req.services}
 									<div class="flex flex-wrap gap-1.5 mb-2">
@@ -397,10 +415,21 @@
 									</div>
 								{/if}
 								<p class="text-sm text-muted-foreground">
-									{req.clientName || '—'}
-									{#if req.clientEmail}
+									{displayName}
+									{#if req.companyName && req.companyName !== displayName}
 										<span class="mx-1">·</span>
-										<a href={`mailto:${req.clientEmail}`} class="hover:underline">{req.clientEmail}</a>
+										{req.companyName}
+									{/if}
+									{#if displayEmail}
+										<span class="mx-1">·</span>
+										<a href={`mailto:${displayEmail}`} class="hover:underline">{displayEmail}</a>
+									{/if}
+									{#if req.contactPhone}
+										<span class="mx-1">·</span>
+										<a
+											href={`tel:${req.contactPhone.replace(/\s+/g, '')}`}
+											class="hover:underline">{req.contactPhone}</a
+										>
 									{/if}
 									<span class="mx-1">·</span>
 									{formatDate(req.createdAt)}
@@ -447,6 +476,10 @@
 
 	<TabsContent value="invoice-items" class="mt-6">
 		<InvoiceItemsPanel />
+	</TabsContent>
+
+	<TabsContent value="public" class="mt-6">
+		<PublicPagePanel />
 	</TabsContent>
 </Tabs>
 

@@ -2302,6 +2302,14 @@ export const servicePackageRequest = sqliteTable('service_package_request', {
 	services: text('services'), // JSON array of slugs; non-null when row is a bundle
 	tier: text('tier').notNull(), // 'bronze' | 'silver' | 'gold' | 'platinum'
 	note: text('note'),
+	// 'portal' = cerere din portalul clientului (clientId/clientUserId populate)
+	// 'public' = cerere de pe pagina publica /servicii (fara cont; datele de contact
+	// vin din formular, clientId ramane null pana cand staff-ul leaga cererea de un client)
+	source: text('source').notNull().default('portal'),
+	contactName: text('contact_name'),
+	contactEmail: text('contact_email'),
+	contactPhone: text('contact_phone'),
+	companyName: text('company_name'),
 	status: text('status').notNull().default('pending'), // 'pending' | 'contacted' | 'accepted' | 'rejected'
 	contactedAt: timestamp('contacted_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
@@ -2311,6 +2319,33 @@ export const servicePackageRequest = sqliteTable('service_package_request', {
 		.notNull()
 		.default(sql`current_timestamp`)
 });
+
+// Acces cu parola pentru paginile publice (ex. catalogul de servicii de la /servicii).
+// O linie per (tenant, pageKey). `passwordHash` e argon2id; `cookieSecret` e secretul
+// HMAC folosit pentru cookie-ul de deblocare — se roteste la fiecare schimbare de parola,
+// deci schimbarea parolei invalideaza automat toate sesiunile publice deschise.
+export const publicPageAccess = sqliteTable(
+	'public_page_access',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		pageKey: text('page_key').notNull(), // 'services'
+		enabled: boolean('enabled').notNull().default(false),
+		passwordHash: text('password_hash'), // null = parola nesetata inca
+		cookieSecret: text('cookie_secret'), // base64url, 32 bytes
+		passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true, mode: 'date' }),
+		updatedByUserId: text('updated_by_user_id').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(table) => [uniqueIndex('public_page_access_tenant_page_uq').on(table.tenantId, table.pageKey)]
+);
 
 export const clientUserPreferences = sqliteTable('client_user_preferences', {
 	id: text('id').primaryKey(),

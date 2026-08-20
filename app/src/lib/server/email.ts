@@ -3123,8 +3123,15 @@ export async function sendPackageRequestEmail(
 				}
 			}
 
+			// Cererile publice (/servicii) n-au client în CRM — contactul vine din formular.
+			const isPublicRequest = request.source === 'public';
+			if (!clientName) clientName = request.contactName || '';
+			if (!clientEmail) clientEmail = request.contactEmail || '';
+
 			const safeClientName = escapeHtml(clientName || 'Client');
 			const safeClientEmail = escapeHtml(clientEmail);
+			const safeContactPhone = request.contactPhone ? escapeHtml(request.contactPhone) : '';
+			const safeCompanyName = request.companyName ? escapeHtml(request.companyName) : '';
 			const safeNote = request.note ? escapeHtml(request.note) : '';
 			const categoryLabel = escapeHtml(request.categorySlug);
 			const tierLabel = escapeHtml(request.tier.charAt(0).toUpperCase() + request.tier.slice(1));
@@ -3151,11 +3158,14 @@ export async function sendPackageRequestEmail(
 
 			const bodyHtml = `
 				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 12px 0;">Bună ziua${safeRecipientName ? ` ${safeRecipientName}` : ''},</p>
-				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">Un client a solicitat ${isBundle ? 'un bundle de servicii' : 'un serviciu'} din CRM:</p>
+				<p style="color: #111827; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">${isPublicRequest ? 'O cerere de ofertă a fost trimisă de pe pagina publică' : `Un client a solicitat ${isBundle ? 'un bundle de servicii' : 'un serviciu'} din CRM`}:</p>
 				<table role="presentation" cellpadding="0" cellspacing="0" class="ots-details" style="width: 100%; table-layout: fixed; background-color: #f9fafb; border-radius: 8px; margin: 0 0 20px 0;">
 					<tr>
 						<td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.8;">
-							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Client</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong>${safeClientEmail ? ` <span style="color:#6b7280;">(${safeClientEmail})</span>` : ''}</div>
+							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">${isPublicRequest ? 'Contact' : 'Client'}</span> &nbsp;·&nbsp; <strong>${safeClientName}</strong>${safeClientEmail ? ` <span style="color:#6b7280;">(${safeClientEmail})</span>` : ''}</div>
+							${safeCompanyName ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Companie</span> &nbsp;·&nbsp; <strong>${safeCompanyName}</strong></div>` : ''}
+							${safeContactPhone ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Telefon</span> &nbsp;·&nbsp; <strong>${safeContactPhone}</strong></div>` : ''}
+							${isPublicRequest ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Sursă</span> &nbsp;·&nbsp; <strong>Pagina publică /servicii</strong></div>` : ''}
 							${isBundle
 								? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Bundle</span> &nbsp;·&nbsp; <strong>${bundleIdLabel}</strong></div>${servicesListHtml}`
 								: `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Categorie</span> &nbsp;·&nbsp; <strong>${categoryLabel}</strong></div>`}
@@ -3189,8 +3199,8 @@ export async function sendPackageRequestEmail(
 
 					Un client a solicitat un pachet de servicii din CRM:
 
-					Client: ${clientName || 'Client'}${clientEmail ? ` (${clientEmail})` : ''}
-					Categorie: ${request.categorySlug}
+					${isPublicRequest ? 'Contact' : 'Client'}: ${clientName || 'Client'}${clientEmail ? ` (${clientEmail})` : ''}
+					${request.companyName ? `Companie: ${request.companyName}\n` : ''}${request.contactPhone ? `Telefon: ${request.contactPhone}\n` : ''}${isPublicRequest ? 'Sursa: pagina publica /servicii\n' : ''}Categorie: ${request.categorySlug}
 					Pachet: ${request.tier}
 					${request.note ? `\nNota client:\n${request.note}\n` : ''}
 

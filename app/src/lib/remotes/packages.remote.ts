@@ -2,10 +2,10 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, or, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
-import { sendPackageRequestEmail } from '$lib/server/email';
-import { logError, logInfo } from '$lib/server/logger';
+import { notifyAdminsOfPackageRequestInBackground } from '$lib/server/package-requests';
+import { logError } from '$lib/server/logger';
 import { getCategory, TIERS } from '$lib/constants/ots-catalog';
 import { requireStaff } from '$lib/server/get-actor';
 
@@ -50,7 +50,14 @@ export const getPackageRequests = query(async () => {
 				createdAt: table.servicePackageRequest.createdAt,
 				clientId: table.servicePackageRequest.clientId,
 				clientName: table.client.name,
-				clientEmail: table.client.email
+				clientEmail: table.client.email,
+				// Cererile de pe pagina publică /servicii n-au client în CRM — contactul
+				// vine din formular. UI-ul afișează clientul dacă există, altfel contactul.
+				source: table.servicePackageRequest.source,
+				contactName: table.servicePackageRequest.contactName,
+				contactEmail: table.servicePackageRequest.contactEmail,
+				contactPhone: table.servicePackageRequest.contactPhone,
+				companyName: table.servicePackageRequest.companyName
 			})
 			.from(table.servicePackageRequest)
 			.leftJoin(table.client, eq(table.servicePackageRequest.clientId, table.client.id))
@@ -104,6 +111,7 @@ export const createPackageRequest = command(createRequestSchema, async (data) =>
 			services: data.services && data.services.length > 0 ? JSON.stringify(data.services) : null,
 			tier: data.tier,
 			note: data.note?.trim() || null,
+			source: 'portal',
 			status: 'pending'
 		});
 	} catch (err) {
@@ -123,63 +131,9 @@ export const createPackageRequest = command(createRequestSchema, async (data) =>
 		throw raw;
 	}
 
-	// Fire-and-forget notification to tenant admins/owners — do not block client response
-	(async () => {
-		try {
-			const admins = await db
-				.select({
-					email: table.user.email,
-					firstName: table.user.firstName,
-					lastName: table.user.lastName
-				})
-				.from(table.tenantUser)
-				.innerJoin(table.user, eq(table.tenantUser.userId, table.user.id))
-				.where(
-					and(
-						eq(table.tenantUser.tenantId, tenantId),
-						or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
-					)
-				);
-
-			for (const admin of admins) {
-				if (!admin.email) continue;
-				const name = [admin.firstName, admin.lastName].filter(Boolean).join(' ');
-				try {
-					await sendPackageRequestEmail(requestId, admin.email, name || undefined);
-				} catch (err) {
-					logError('packages', 'sendPackageRequestEmail failed', {
-						metadata: {
-							requestId,
-							adminEmail: admin.email,
-							error: err instanceof Error ? err.message : String(err)
-						}
-					});
-				}
-			}
-			logInfo('packages', 'package request admins notified', {
-				metadata: {
-					requestId,
-					adminCount: admins.length
-				}
-			});
-		} catch (err) {
-			logError('packages', 'failed to enumerate admins for package request', {
-				metadata: {
-					requestId,
-					error: err instanceof Error ? err.message : String(err)
-				}
-			});
-		}
-	})().catch((err) => {
-		// Extra safety net: ensures the fire-and-forget promise never triggers
-		// an unhandled rejection that could abort the SvelteKit response.
-		logError('packages', 'package request notification IIFE crashed', {
-			metadata: {
-				requestId,
-				error: err instanceof Error ? err.message : String(err)
-			}
-		});
-	});
+	// Notificare fire-and-forget către owner/admin — nu blocăm răspunsul clientului.
+	// Aceeași funcție e folosită și de cererile publice (/servicii).
+	notifyAdminsOfPackageRequestInBackground(tenantId, requestId);
 
 	return { success: true, requestId };
 });

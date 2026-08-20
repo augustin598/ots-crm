@@ -1,3 +1,6 @@
 # allow crawling everything by default
 User-agent: *
-Disallow:
+Allow: /
+
+# pagina publica protejata cu parola — nu are ce cauta in index
+Disallow: /servicii

@@ -53,6 +53,24 @@ function isRateLimited(key: string, options: RateLimitOptions): boolean {
 }
 
 /**
+ * Generic fixed-window limiter for non-auth flows (ex. poarta cu parolă a
+ * paginii publice `/servicii`). Returns true when the request must be BLOCKED.
+ *
+ * În proces, deci per pod — folosește-l ca plasă de siguranță lângă limitarea
+ * distribuită din Redis (`$lib/server/redis` → `rateLimit`), care e fail-open
+ * dacă Redis pică.
+ */
+export function checkFixedWindowLimit(key: string, options: RateLimitOptions): boolean {
+	if (store.size > MAX_STORE_SIZE) {
+		const now = Date.now();
+		for (const [k, entry] of store) {
+			if (now > entry.resetAt) store.delete(k);
+		}
+	}
+	return isRateLimited(key, options);
+}
+
+/**
  * Check auth rate limits for both email and IP.
  * Returns null if allowed, or an error message if rate limited.
  */
