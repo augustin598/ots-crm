@@ -130,12 +130,83 @@ export async function getCalendarClient(tenantId: string) {
 		expiry_date: integration.tokenExpiresAt.getTime()
 	});
 
+	// googleapis refreshes the access token in-memory when it is stale, but that
+	// refresh is discarded once the request ends — so every single call was
+	// paying for a refresh round-trip. Persist it instead. Failures here are
+	// non-fatal: the in-memory token still works for the current request.
+	oauth2Client.on('tokens', (tokens) => {
+		if (!tokens.access_token) return;
+		void (async () => {
+			try {
+				const patch: Record<string, unknown> = {
+					accessTokenEncrypted: encryptVerified(tenantId, tokens.access_token as string),
+					tokenExpiresAt: new Date(tokens.expiry_date ?? Date.now() + 3600 * 1000),
+					updatedAt: new Date()
+				};
+				// Google only re-issues a refresh token on re-consent; never
+				// overwrite a good one with undefined.
+				if (tokens.refresh_token) {
+					patch.refreshTokenEncrypted = encryptVerified(tenantId, tokens.refresh_token);
+				}
+				await db
+					.update(table.googleCalendarIntegration)
+					.set(patch)
+					.where(eq(table.googleCalendarIntegration.tenantId, tenantId));
+			} catch (err) {
+				logWarning('google-calendar', 'Failed to persist refreshed token', {
+					tenantId,
+					metadata: { error: serializeError(err) }
+				});
+			}
+		})();
+	});
+
 	logInfo('google-calendar', 'Calendar client built', {
 		tenantId,
 		metadata: { email: integration.email }
 	});
 
 	return google.calendar({ version: 'v3', auth: oauth2Client });
+}
+
+/**
+ * Actively probe the Calendar API for a tenant.
+ *
+ * `getCalendarStatus` only proves a row exists in our DB — it said "connected"
+ * throughout the 2026-08-20 incident while every API call was rejected with
+ * `SERVICE_DISABLED`. This makes a real (read-only, quota-cheap) call so the UI
+ * and the debug endpoint can tell "we have a token" apart from "Google will
+ * actually accept our writes".
+ */
+export async function probeCalendarAccess(tenantId: string): Promise<{
+	ok: boolean;
+	email: string | null;
+	error: string | null;
+}> {
+	const status = await getCalendarStatus(tenantId);
+	if (!status.connected) {
+		return { ok: false, email: null, error: 'not_connected' };
+	}
+
+	try {
+		const calendar = await getCalendarClient(tenantId);
+		await calendar.events.list({
+			calendarId: 'primary',
+			maxResults: 1,
+			timeMin: new Date().toISOString()
+		});
+		return { ok: true, email: status.email, error: null };
+	} catch (err) {
+		logWarning('google-calendar', 'probeCalendarAccess failed', {
+			tenantId,
+			metadata: { error: serializeError(err) }
+		});
+		return {
+			ok: false,
+			email: status.email,
+			error: err instanceof Error ? err.message : String(err)
+		};
+	}
 }
 
 /**

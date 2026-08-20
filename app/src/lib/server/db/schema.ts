@@ -318,7 +318,9 @@ export const task = sqliteTable('task', {
 	recurringParentId: text('recurring_parent_id'),
 	recurringSpawnedAt: timestamp('recurring_spawned_at', { withTimezone: true, mode: 'date' }),
 	type: text('type'), // 'design' | 'video' | 'ads' | 'dev' | 'content' | 'meeting' | 'other' | null
-	meetTime: text('meet_time'), // e.g. "10:00" — only for type='meeting'
+	// Wall-clock local time in Europe/Bucharest, "YYYY-MM-DDTHH:mm" — deliberately
+	// NOT an instant. Never `new Date()` this; see google-calendar/time.ts.
+	meetTime: text('meet_time'),
 	meetDurationMinutes: integer('meet_duration_minutes'), // e.g. 30, 60
 	meetLink: text('meet_link'),
 	googleCalendarEventId: text('google_calendar_event_id'),

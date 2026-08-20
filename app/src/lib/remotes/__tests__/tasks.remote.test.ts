@@ -132,11 +132,18 @@ mock.module('$lib/server/logger', () => ({
 }));
 
 mock.module('$lib/server/google-calendar/meet', () => ({
-	createMeetEvent: async () => ({ eventId: 'evt_mock', hangoutLink: 'https://meet.google.com/mock' })
+	createMeetEvent: async () => ({ eventId: 'evt_mock', hangoutLink: 'https://meet.google.com/mock' }),
+	updateMeetEvent: async () => ({ ok: true, hangoutLink: 'https://meet.google.com/mock' }),
+	deleteMeetEvent: async () => true,
+	fetchMeetLink: async () => 'https://meet.google.com/mock'
 }));
 
 mock.module('$lib/server/google-calendar/auth', () => ({
 	getCalendarStatus: async () => ({ connected: false, email: null }),
+	probeCalendarAccess: async () => ({ ok: false, email: null, error: 'not_connected' }),
+	getCalendarClient: async () => {
+		throw new Error('not connected');
+	},
 	CalendarNotConnected: class extends Error {}
 }));
 
@@ -164,6 +171,8 @@ mock.module('sanitize-html', () => ({
 
 const deletedRowsQueue: Array<unknown[]> = [];
 
+const updatePayloads: Array<Record<string, unknown>> = [];
+
 mock.module('$lib/server/db', () => ({
 	db: {
 		select: () => makeChain(queryQueue.length > 0 ? (queryQueue.shift() as unknown[]) : []),
@@ -171,11 +180,18 @@ mock.module('$lib/server/db', () => ({
 			makeChain(queryQueue.length > 0 ? (queryQueue.shift() as unknown[]) : []),
 		insert: () => ({ values: () => Promise.resolve() }),
 		update: () => ({
-			set: () => ({
-				where: () => ({
-					returning: () => Promise.resolve(deletedRowsQueue.length > 0 ? deletedRowsQueue.shift() : [])
-				})
-			})
+			set: (payload: Record<string, unknown>) => {
+				// Captured so tests can assert *what* was written, not just that a
+				// write happened — the scheduleMeet regressions were all about the
+				// contents of this patch.
+				updatePayloads.push(payload);
+				return {
+					where: () => ({
+						returning: () =>
+							Promise.resolve(deletedRowsQueue.length > 0 ? deletedRowsQueue.shift() : [])
+					})
+				};
+			}
 		}),
 		delete: () => ({
 			where: () => ({
@@ -1077,6 +1093,68 @@ describe('scheduleMeet', () => {
 		});
 
 		expect((result as any).success).toBe(true);
+	});
+
+	// REGRESSION (2026-08-20): the patch was `meetLink: meetLink ?? null`, so a
+	// re-save from the modal — which sends no link — wiped the generated one. And
+	// because an event already existed, nothing ever regenerated it: the task was
+	// left with a time, no link, and no way back.
+	test('does not touch meetLink when the caller omits it', async () => {
+		updatePayloads.length = 0;
+		queryQueue.push([
+			{
+				id: 'task-a1',
+				title: 'Meeting',
+				meetLink: 'https://meet.google.com/existing',
+				googleCalendarEventId: 'evt_existing',
+				meetDurationMinutes: 30
+			}
+		]);
+
+		await scheduleMeet({ taskId: 'task-a1', meetTime: '2026-08-21T10:00' });
+
+		expect(updatePayloads.length).toBeGreaterThan(0);
+		expect(updatePayloads[0]).not.toHaveProperty('meetLink');
+	});
+
+	test('clears meetLink only when explicitly sent empty', async () => {
+		updatePayloads.length = 0;
+		queryQueue.push([{ id: 'task-a1', title: 'Meeting', meetLink: 'https://meet.google.com/x' }]);
+
+		await scheduleMeet({ taskId: 'task-a1', meetTime: '2026-08-21T10:00', meetLink: '' });
+
+		expect(updatePayloads[0]).toHaveProperty('meetLink', null);
+	});
+
+	test('stores the duration actually used for the calendar event', async () => {
+		updatePayloads.length = 0;
+		queryQueue.push([{ id: 'task-a1', title: 'Meeting', meetDurationMinutes: 45 }]);
+
+		// No duration sent → falls back to the stored 45, and persists that same
+		// value instead of nulling the column.
+		await scheduleMeet({ taskId: 'task-a1', meetTime: '2026-08-21T10:00' });
+
+		expect(updatePayloads[0]).toHaveProperty('meetDurationMinutes', 45);
+	});
+
+	// A bare time used to reach the Calendar call and surface as an opaque
+	// `RangeError: Invalid Date` (seen in production on 2026-06-01).
+	test('rejects a bare time before writing anything', async () => {
+		updatePayloads.length = 0;
+		queryQueue.push([{ id: 'task-a1', title: 'Meeting' }]);
+
+		await expect(scheduleMeet({ taskId: 'task-a1', meetTime: '10:00' })).rejects.toThrow();
+		expect(updatePayloads.length).toBe(0);
+	});
+
+	test('reports the calendar outcome instead of a bare success flag', async () => {
+		queryQueue.push([{ id: 'task-a1', title: 'Meeting' }]);
+
+		const result = await scheduleMeet({ taskId: 'task-a1', meetTime: '2026-08-21T10:00' });
+
+		// Calendar is mocked as disconnected, so the UI must be able to warn.
+		expect((result as any).meet?.status).toBe('not_connected');
+		expect((result as any).meet?.message).toBeTruthy();
 	});
 
 	test('rejects when isClientUser is true (gate enforced)', async () => {

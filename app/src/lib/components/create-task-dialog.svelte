@@ -6,6 +6,7 @@
 	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { whatsappAvatarUrl } from '$lib/utils/phone';
+	import { reportMeetOutcome } from '$lib/utils/meet-outcome';
 	import { Dialog, DialogContent } from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -440,7 +441,7 @@
 			const tagNames = draft.tags
 				.map((t) => (t.startsWith('#') ? t.slice(1) : t))
 				.filter(Boolean);
-			await createTask({
+			const res = await createTask({
 				title: draft.title,
 				description: draft.description || undefined,
 				clientId: draft.clientId || undefined,
@@ -466,6 +467,8 @@
 				tagNames: tagNames.length ? tagNames : undefined
 			}).updates(...listRefreshTargets(), ...additionalQueriesToUpdate);
 			onOpenChange(false);
+			// A meeting whose Calendar sync failed must not look like a clean success.
+			if (res?.meet) reportMeetOutcome(res.meet, 'Task creat');
 			onSuccess?.();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'A apărut o eroare';

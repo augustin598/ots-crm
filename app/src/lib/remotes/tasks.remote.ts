@@ -11,8 +11,14 @@ import { getHooksManager } from '$lib/server/plugins/hooks';
 import { logError, logWarning } from '$lib/server/logger';
 import { tenantUserPrefAllows, tenantUserPrefAllowsBatch } from '$lib/server/tenant-user-preferences';
 import { spawnNextRecurringTask } from '$lib/server/recurring-tasks';
-import { createMeetEvent } from '$lib/server/google-calendar/meet';
-import { getCalendarStatus, CalendarNotConnected } from '$lib/server/google-calendar/auth';
+import { getCalendarStatus } from '$lib/server/google-calendar/auth';
+import {
+	ensureTaskMeetEvent,
+	removeTaskMeetEvent,
+	MEET_TIMEZONE,
+	type MeetSyncOutcome
+} from '$lib/server/google-calendar/task-meet-sync';
+import { toNaiveDateTime } from '$lib/server/google-calendar/time';
 import { requireStaff } from '$lib/server/get-actor';
 import { getEligibleClientAssigneeIds, getTaskParticipantEmails } from '$lib/server/client-users';
 
@@ -122,18 +128,20 @@ const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
 const VALID_TASK_TYPES = ['design', 'video', 'ads', 'dev', 'content', 'meeting', 'other'] as const;
 
 /**
- * Parse a `meetTime` value into a valid Date for the Google Calendar/Meet flow.
- * Accepts a full ISO datetime like "2026-06-01T10:00". Throws a clear, logged
- * error on a bare time ("10:00") or any other unparseable value — otherwise
- * createMeetEvent's `.toISOString()` blows up deep in the Calendar call with an
- * opaque `RangeError: Invalid Date` (Bun/JSC) recorded as meet_event_failed.
+ * Validate a `meetTime` before it is written to the task row.
+ *
+ * `meetTime` is a wall-clock string ("2026-08-21T10:00") meaning "10:00 in
+ * Romania". It is deliberately NOT turned into a `Date` here: doing so used to
+ * pin it to the server's timezone, which silently shifted every production
+ * meeting by three hours. See `$lib/server/google-calendar/time.ts`.
+ *
+ * Rejecting a bare time ("10:00") up front also keeps the old opaque
+ * `RangeError: Invalid Date` from surfacing deep inside the Calendar call.
  */
-function parseMeetStartTime(raw: string): Date {
-	const d = new Date(raw);
-	if (Number.isNaN(d.getTime())) {
-		throw new Error(`Invalid meetTime: "${raw}" (expected ISO datetime like 2026-06-01T10:00)`);
-	}
-	return d;
+function normalizeMeetTime(raw: string): string {
+	// Throws a Romanian, user-facing message on anything unparseable.
+	toNaiveDateTime(raw, MEET_TIMEZONE);
+	return raw;
 }
 
 const taskSchema = v.object({
@@ -1112,66 +1120,23 @@ export const createTask = command(taskSchema, async (data) => {
 		personalAssignmentEmails
 	);
 
-	// Auto-generate Google Meet for type=meeting tasks (separate integration)
+	// Auto-generate Google Meet for type=meeting tasks (separate integration).
+	// The outcome is returned to the caller so the UI can warn instead of
+	// claiming success on a meeting that never reached anyone's calendar.
+	let meetOutcome: MeetSyncOutcome | null = null;
 	if (data.type === 'meeting' && data.meetTime) {
-		const calStatus = await getCalendarStatus(event.locals.tenant.id);
-		if (calStatus.connected) {
-			try {
-				const attendeeEmails: string[] = [];
-				if (data.assigneeUserIds?.length) {
-					const users = await db
-						.select({ email: table.user.email })
-						.from(table.user)
-						.where(inArray(table.user.id, data.assigneeUserIds));
-					attendeeEmails.push(...users.map((u) => u.email).filter((e): e is string => Boolean(e)));
-				}
-				if (clientId) {
-					const [clientRow] = await db
-						.select({ email: table.client.email })
-						.from(table.client)
-						.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, event.locals.tenant.id)))
-						.limit(1);
-					if (clientRow?.email) attendeeEmails.push(clientRow.email);
-				}
-
-				const meetResult = await createMeetEvent({
-					tenantId: event.locals.tenant.id,
-					title: data.title,
-					startTime: parseMeetStartTime(data.meetTime),
-					durationMinutes: data.meetDurationMinutes ?? 30,
-					timezone: 'Europe/Bucharest',
-					attendees: attendeeEmails,
-					description: data.description ?? undefined
-				});
-
-				await db
-					.update(table.task)
-					.set({
-						meetLink: meetResult.hangoutLink,
-						googleCalendarEventId: meetResult.eventId
-					})
-					.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
-
-				await recordTaskActivity({
-					taskId,
-					userId: event.locals.user.id,
-					tenantId: targetTenantId,
-					action: 'meet_event_created',
-					newValue: JSON.stringify({ eventId: meetResult.eventId, attendeeCount: attendeeEmails.length })
-				});
-			} catch (err) {
-				if (!(err instanceof CalendarNotConnected)) {
-					await recordTaskActivity({
-						taskId,
-						userId: event.locals.user.id,
-						tenantId: targetTenantId,
-						action: 'meet_event_failed',
-						newValue: JSON.stringify({ stage: 'create', error: err instanceof Error ? err.message : String(err) })
-					});
-				}
-				// Task succeeds regardless of Calendar failure
-			}
-		}
+		meetOutcome = await ensureTaskMeetEvent({
+			tenantId: event.locals.tenant.id,
+			taskId,
+			actorUserId: event.locals.user.id,
+			stage: 'create',
+			title: data.title,
+			description: data.description,
+			clientId,
+			meetTime: data.meetTime,
+			durationMinutes: data.meetDurationMinutes ?? 30,
+			explicitAssigneeUserIds: data.assigneeUserIds
+		});
 	}
 
 	// Emit approval.requested hook if task needs approval
@@ -1191,7 +1156,7 @@ export const createTask = command(taskSchema, async (data) => {
 		}
 	}
 
-	return { success: true, taskId };
+	return { success: true, taskId, meet: meetOutcome };
 });
 
 export const updateTask = command(
@@ -1331,11 +1296,23 @@ export const updateTask = command(
 			...restUpdateData
 		} = updateData;
 
+		// Validate before writing, so a bad value can't be persisted and then blow
+		// up later inside the Calendar sync.
+		if (_meetTime) normalizeMeetTime(_meetTime);
+
 		await db
 			.update(table.task)
 			.set({
 				...restUpdateData,
 				...recurringPatch,
+				// `meetTime` / `meetDurationMinutes` are destructured out of
+				// `restUpdateData` above and used to be dropped entirely: editing a
+				// meeting pushed the new time to Google but left the task row showing
+				// the old one. Write them back explicitly, only when sent.
+				...(_meetTime !== undefined ? { meetTime: _meetTime || null } : {}),
+				...(_meetDurationMinutes !== undefined
+					? { meetDurationMinutes: _meetDurationMinutes }
+					: {}),
 				dueDate: updateData.dueDate ? new Date(updateData.dueDate) : undefined,
 				milestoneId: updateData.milestoneId || undefined,
 				updatedAt: new Date()
@@ -1586,141 +1563,70 @@ export const updateTask = command(
 		}
 
 		// ── Calendar diff sync (3-case) ──────────────────────────────────────────
-		try {
-			const hadEvent = Boolean(existing.googleCalendarEventId);
-			const newType = updateData.type ?? existing.type;
-			const isStillMeeting = newType === 'meeting';
-			const newMeetTime = _meetTime ?? existing.meetTime;
-			const newDuration = _meetDurationMinutes ?? existing.meetDurationMinutes;
+		// `ensureTaskMeetEvent` / `removeTaskMeetEvent` never throw; they return an
+		// outcome we hand back to the caller so a failed sync can be shown instead
+		// of silently logged.
+		let meetOutcome: MeetSyncOutcome | null = null;
 
-			if (hadEvent && !isStillMeeting) {
-				// Case A: type changed away from meeting → delete Calendar event
-				const calStatus = await getCalendarStatus(event.locals.tenant.id);
-				if (calStatus.connected) {
-					const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
-					await deleteMeetEvent({ tenantId: event.locals.tenant.id, eventId: existing.googleCalendarEventId! });
-					await db
-						.update(table.task)
-						.set({ meetLink: null, googleCalendarEventId: null })
-						.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, existing.tenantId)));
-					await recordTaskActivity({
-						taskId,
-						userId: event.locals.user.id,
-						tenantId: existing.tenantId,
-						action: 'meet_event_deleted'
-					});
-				}
-			} else if (hadEvent && isStillMeeting) {
-				// Case B: still a meeting + event exists → update if relevant field changed
-				const titleChanged = updateData.title !== undefined && updateData.title !== existing.title;
-				const descChanged = updateData.description !== undefined && updateData.description !== existing.description;
-				const timeChanged = _meetTime !== undefined && _meetTime !== existing.meetTime;
-				const durationChanged = _meetDurationMinutes !== undefined && _meetDurationMinutes !== existing.meetDurationMinutes;
-				const clientChanged = updateData.clientId !== undefined && updateData.clientId !== existing.clientId;
-				const assigneeChanged2 = updateData.assigneeUserIds !== undefined;
+		const hadEvent = Boolean(existing.googleCalendarEventId);
+		const newType = updateData.type ?? existing.type;
+		const isStillMeeting = newType === 'meeting';
+		const newMeetTime = _meetTime ?? existing.meetTime;
+		const newDuration = _meetDurationMinutes ?? existing.meetDurationMinutes;
 
-				if (titleChanged || descChanged || timeChanged || durationChanged || clientChanged || assigneeChanged2) {
-					const calStatus = await getCalendarStatus(event.locals.tenant.id);
-					if (calStatus.connected) {
-						const { updateMeetEvent } = await import('$lib/server/google-calendar/meet');
+		if (hadEvent && !isStillMeeting) {
+			// Case A: type changed away from meeting → delete Calendar event
+			meetOutcome = await removeTaskMeetEvent({
+				tenantId: event.locals.tenant.id,
+				taskId,
+				actorUserId: event.locals.user.id,
+				eventId: existing.googleCalendarEventId!
+			});
+		} else if (isStillMeeting && newMeetTime) {
+			// Case B (event exists) and Case C (no event yet) both funnel into the
+			// same call — it creates or updates depending on `existingEventId`.
+			//
+			// Case C used to require `updateData.type === 'meeting'`, i.e. the type
+			// had to change *in this very request*. That left a meeting whose
+			// initial sync failed permanently without an event: it was already
+			// type=meeting, so editing it never retried. Keying off the resulting
+			// state instead makes any later edit self-heal such a task.
+			const titleChanged = updateData.title !== undefined && updateData.title !== existing.title;
+			const descChanged =
+				updateData.description !== undefined && updateData.description !== existing.description;
+			const timeChanged = _meetTime !== undefined && _meetTime !== existing.meetTime;
+			const durationChanged =
+				_meetDurationMinutes !== undefined &&
+				_meetDurationMinutes !== existing.meetDurationMinutes;
+			const clientChanged =
+				updateData.clientId !== undefined && updateData.clientId !== existing.clientId;
+			const assigneeChanged2 = updateData.assigneeUserIds !== undefined;
+			const needsSync =
+				!hadEvent ||
+				titleChanged ||
+				descChanged ||
+				timeChanged ||
+				durationChanged ||
+				clientChanged ||
+				assigneeChanged2;
 
-						// Build fresh attendee list
-						const assignees = await db
-							.select({ email: table.user.email })
-							.from(table.taskAssignee)
-							.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
-							.where(eq(table.taskAssignee.taskId, taskId));
-						const attendeeEmails: string[] = assignees.map((a) => a.email).filter((e): e is string => Boolean(e));
-						const effectiveClientId = updateData.clientId ?? existing.clientId;
-						if (effectiveClientId) {
-							const [clientRow] = await db
-								.select({ email: table.client.email })
-								.from(table.client)
-								.where(and(eq(table.client.id, effectiveClientId), eq(table.client.tenantId, event.locals.tenant.id)))
-								.limit(1);
-							if (clientRow?.email) attendeeEmails.push(clientRow.email);
-						}
-
-						const startTime = newMeetTime ? parseMeetStartTime(newMeetTime) : undefined;
-						await updateMeetEvent({
-							tenantId: event.locals.tenant.id,
-							eventId: existing.googleCalendarEventId!,
-							title: updateData.title,
-							description: updateData.description,
-							startTime,
-							durationMinutes: newDuration ?? undefined,
-							timezone: 'Europe/Bucharest',
-							attendees: attendeeEmails
-						});
-						await recordTaskActivity({
-							taskId,
-							userId: event.locals.user.id,
-							tenantId: existing.tenantId,
-							action: 'meet_event_updated',
-							newValue: JSON.stringify({ eventId: existing.googleCalendarEventId })
-						});
-					}
-				}
-			} else if (!hadEvent && isStillMeeting && newMeetTime && updateData.type === 'meeting') {
-				// Case C: just promoted to meeting type with a time → create Calendar event
-				const calStatus = await getCalendarStatus(event.locals.tenant.id);
-				if (calStatus.connected) {
-					const { createMeetEvent: createMeet } = await import('$lib/server/google-calendar/meet');
-
-					const assignees = await db
-						.select({ email: table.user.email })
-						.from(table.taskAssignee)
-						.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
-						.where(eq(table.taskAssignee.taskId, taskId));
-					const attendeeEmails: string[] = assignees.map((a) => a.email).filter((e): e is string => Boolean(e));
-					const effectiveClientId = updateData.clientId ?? existing.clientId;
-					if (effectiveClientId) {
-						const [clientRow] = await db
-							.select({ email: table.client.email })
-							.from(table.client)
-							.where(and(eq(table.client.id, effectiveClientId), eq(table.client.tenantId, event.locals.tenant.id)))
-							.limit(1);
-						if (clientRow?.email) attendeeEmails.push(clientRow.email);
-					}
-
-					const meetResult = await createMeet({
-						tenantId: event.locals.tenant.id,
-						title: updateData.title ?? existing.title,
-						startTime: parseMeetStartTime(newMeetTime),
-						durationMinutes: newDuration ?? 30,
-						timezone: 'Europe/Bucharest',
-						attendees: attendeeEmails,
-						description: updateData.description ?? existing.description ?? undefined
-					});
-
-					await db
-						.update(table.task)
-						.set({ meetLink: meetResult.hangoutLink, googleCalendarEventId: meetResult.eventId })
-						.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, existing.tenantId)));
-
-					await recordTaskActivity({
-						taskId,
-						userId: event.locals.user.id,
-						tenantId: existing.tenantId,
-						action: 'meet_event_created',
-						newValue: JSON.stringify({ eventId: meetResult.eventId, attendeeCount: attendeeEmails.length })
-					});
-				}
-			}
-		} catch (err) {
-			if (!(err instanceof CalendarNotConnected)) {
-				await recordTaskActivity({
+			if (needsSync) {
+				meetOutcome = await ensureTaskMeetEvent({
+					tenantId: event.locals.tenant.id,
 					taskId,
-					userId: event.locals.user.id,
-					tenantId: existing.tenantId,
-					action: 'meet_event_failed',
-					newValue: JSON.stringify({ stage: 'update', error: err instanceof Error ? err.message : String(err) })
+					actorUserId: event.locals.user.id,
+					stage: 'update',
+					title: updateData.title ?? existing.title,
+					description: updateData.description ?? existing.description,
+					clientId: updateData.clientId ?? existing.clientId,
+					meetTime: newMeetTime,
+					durationMinutes: newDuration ?? 30,
+					existingEventId: existing.googleCalendarEventId
 				});
 			}
-			// Calendar failure must not roll back the task update
 		}
 
-		return { success: true };
+		return { success: true, meet: meetOutcome };
 	}
 );
 
@@ -3107,91 +3013,80 @@ export const scheduleMeet = command(
 		if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
 		if (event.locals.isClientUser) throw new Error('Unauthorized');
 
-		const [task] = await db.select({ id: table.task.id })
+		const [task] = await db
+			.select({
+				id: table.task.id,
+				title: table.task.title,
+				description: table.task.description,
+				clientId: table.task.clientId,
+				meetTime: table.task.meetTime,
+				meetLink: table.task.meetLink,
+				meetDurationMinutes: table.task.meetDurationMinutes,
+				googleCalendarEventId: table.task.googleCalendarEventId
+			})
 			.from(table.task)
 			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
 			.limit(1);
 		if (!task) throw new Error('Task not found');
 
-		await db.update(table.task).set({
-			meetLink: meetLink ?? null,
+		// Reject a bad time before writing anything, so the task row can't end up
+		// holding a value the Calendar sync will choke on later.
+		if (meetTime) normalizeMeetTime(meetTime);
+
+		const effectiveDuration = meetDurationMinutes ?? task.meetDurationMinutes ?? 30;
+
+		const patch: Record<string, unknown> = {
 			meetTime: meetTime ?? null,
-			meetDurationMinutes: meetDurationMinutes ?? null,
+			// Keep the stored duration in step with the one sent to Google. Writing
+			// `null` here while the calendar used the old value left the chip and the
+			// event disagreeing about how long the meeting was.
+			meetDurationMinutes: meetTime ? effectiveDuration : null,
 			updatedAt: new Date()
-		}).where(eq(table.task.id, taskId));
-
-		// Auto-generate Calendar event when scheduling a time (and no event yet)
-		if (meetTime) {
-			const [taskRow] = await db
-				.select({
-					id: table.task.id,
-					title: table.task.title,
-					description: table.task.description,
-					clientId: table.task.clientId,
-					meetDurationMinutes: table.task.meetDurationMinutes,
-					googleCalendarEventId: table.task.googleCalendarEventId
-				})
-				.from(table.task)
-				.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)))
-				.limit(1);
-
-			if (taskRow && !taskRow.googleCalendarEventId) {
-				const calStatus = await getCalendarStatus(event.locals.tenant.id);
-				if (calStatus.connected) {
-					try {
-						const assignees = await db
-							.select({ email: table.user.email })
-							.from(table.taskAssignee)
-							.innerJoin(table.user, eq(table.taskAssignee.userId, table.user.id))
-							.where(eq(table.taskAssignee.taskId, taskId));
-						const attendeeEmails: string[] = assignees.map((a) => a.email).filter((e): e is string => Boolean(e));
-
-						if (taskRow.clientId) {
-							const [clientRow] = await db
-								.select({ email: table.client.email })
-								.from(table.client)
-								.where(and(eq(table.client.id, taskRow.clientId), eq(table.client.tenantId, event.locals.tenant.id)))
-								.limit(1);
-							if (clientRow?.email) attendeeEmails.push(clientRow.email);
-						}
-
-						const meetResult = await createMeetEvent({
-							tenantId: event.locals.tenant.id,
-							title: taskRow.title,
-							startTime: parseMeetStartTime(meetTime),
-							durationMinutes: meetDurationMinutes ?? taskRow.meetDurationMinutes ?? 30,
-							timezone: 'Europe/Bucharest',
-							attendees: attendeeEmails,
-							description: taskRow.description ?? undefined
-						});
-
-						await db
-							.update(table.task)
-							.set({ meetLink: meetResult.hangoutLink, googleCalendarEventId: meetResult.eventId })
-							.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
-
-						await recordTaskActivity({
-							taskId,
-							userId: event.locals.user.id,
-							tenantId: event.locals.tenant.id,
-							action: 'meet_event_created',
-							newValue: JSON.stringify({ eventId: meetResult.eventId, attendeeCount: attendeeEmails.length })
-						});
-					} catch (err) {
-						if (!(err instanceof CalendarNotConnected)) {
-							await recordTaskActivity({
-								taskId,
-								userId: event.locals.user.id,
-								tenantId: event.locals.tenant.id,
-								action: 'meet_event_failed',
-								newValue: JSON.stringify({ stage: 'schedule', error: err instanceof Error ? err.message : String(err) })
-							});
-						}
-					}
-				}
-			}
+		};
+		// Only touch meetLink when the caller actually sent one. The modal leaves
+		// this field empty unless Calendar is disconnected, so `meetLink ?? null`
+		// used to wipe a perfectly good generated link on every re-save — and
+		// since an event already existed, nothing regenerated it.
+		if (meetLink !== undefined) {
+			patch.meetLink = meetLink || null;
 		}
 
-		return { success: true };
+		await db
+			.update(table.task)
+			.set(patch)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
+
+		let meetOutcome: MeetSyncOutcome | null = null;
+
+		if (meetTime) {
+			meetOutcome = await ensureTaskMeetEvent({
+				tenantId: event.locals.tenant.id,
+				taskId,
+				actorUserId: event.locals.user.id,
+				stage: 'schedule',
+				title: task.title,
+				description: task.description,
+				clientId: task.clientId,
+				meetTime,
+				durationMinutes: effectiveDuration,
+				// Present → the event is moved/updated rather than skipped, so
+				// changing the time from the modal now actually reaches the calendar.
+				existingEventId: task.googleCalendarEventId,
+				// Scheduling a Meet makes this a meeting. Without it the task kept
+				// its old type and the next edit hit the "no longer a meeting"
+				// branch of updateTask, which deletes the event we just created.
+				markAsMeeting: true
+			});
+		} else if (task.googleCalendarEventId) {
+			// Clearing the time removes the meeting from everyone's calendar.
+			meetOutcome = await removeTaskMeetEvent({
+				tenantId: event.locals.tenant.id,
+				taskId,
+				actorUserId: event.locals.user.id,
+				eventId: task.googleCalendarEventId
+			});
+		}
+
+		return { success: true, meet: meetOutcome };
 	}
 );
