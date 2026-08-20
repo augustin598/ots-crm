@@ -3,15 +3,17 @@
   (`$lib/components/services/PackageWizard.svelte`) — diferă doar de unde vine
   catalogul și cum pleacă cererea.
 
-  Vizitatorul nu are cont, deci recomandarea nu se poate trimite direct: la
-  „Cere ofertă" deschidem formularul public de contact, cu nota wizardului
-  preîncărcată.
+  Vizitatorul nu are cont, deci recomandarea nu se trimite direct: serviciile
+  bundle-ului intră în coșul paginii /servicii (la tier-ul recomandat) și se
+  deschide modalul de ofertă, cu nota wizardului preîncărcată. Coșul e partajat
+  prin sessionStorage, deci întoarcerea la catalog arată aceleași servicii.
 -->
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import PackageWizard from '$lib/components/services/PackageWizard.svelte';
-	import RequestQuoteDialog from '../RequestQuoteDialog.svelte';
+	import ServicesQuoteModal from '../ServicesQuoteModal.svelte';
+	import { ServicesCart } from '../services-cart.svelte';
 	import type { Recommendation } from '$lib/logic/wizard-engine';
-	import type { Category } from '$lib/constants/ots-catalog';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -24,28 +26,24 @@
 		tierColors: data.catalog.tierColors
 	});
 
+	const cart = new ServicesCart();
+	const validSlugs = $derived(new Set(data.catalog.categories.map((c) => c.slug)));
+	onMount(() => {
+		cart.load(
+			(slug, tier) => validSlugs.has(slug) && (data.catalog.tiers as string[]).includes(tier)
+		);
+	});
+
 	let quoteOpen = $state(false);
-	let quoteCategory = $state<Category | null>(null);
-	let quoteTier = $state<Recommendation['tier'] | null>(null);
 	let quoteNote = $state('');
-	// Contorul remontează dialogul la fiecare cerere, ca a doua să nu pornească
-	// din ecranul de confirmare al primeia (același motiv ca în ServicesCatalog).
-	let quoteSeq = $state(0);
 
 	async function handleRequest(rec: Recommendation, note: string) {
-		// Backendul public acceptă un singur `categorySlug`; trimitem primul
-		// serviciu ca pivot, iar componența completă a bundle-ului stă în notă.
-		const pivot = data.catalog.categories.find((c) => c.slug === rec.bundle.services[0]);
-		if (!pivot) return;
-
-		const services = rec.bundle.services
-			.map((s) => data.catalog.categories.find((c) => c.slug === s)?.name ?? s)
-			.join(', ');
-
-		quoteCategory = pivot;
-		quoteTier = rec.tier;
-		quoteNote = `${note}\n\nServicii în pachet: ${services}`;
-		quoteSeq += 1;
+		// Recomandarea înlocuiește coșul: vizitatorul a cerut explicit acest bundle.
+		cart.clear();
+		for (const slug of rec.bundle.services) {
+			if (validSlugs.has(slug)) cart.set(slug, rec.tier);
+		}
+		quoteNote = note;
 		quoteOpen = true;
 	}
 </script>
@@ -57,13 +55,11 @@
 
 <PackageWizard {catalog} backHref="/servicii" onRequest={handleRequest} />
 
-{#key quoteSeq}
-	<RequestQuoteDialog
-		bind:open={quoteOpen}
-		category={quoteCategory}
-		tier={quoteTier}
-		tierLabels={data.catalog.tierLabels}
-		tierColors={data.catalog.tierColors}
-		bind:note={quoteNote}
+{#if quoteOpen}
+	<ServicesQuoteModal
+		{cart}
+		catalog={data.catalog}
+		initialNote={quoteNote}
+		onClose={() => (quoteOpen = false)}
 	/>
-{/key}
+{/if}
