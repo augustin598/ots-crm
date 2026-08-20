@@ -77,7 +77,8 @@
 				</div>
 			</DialogHeader>
 
-			<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 my-6">
+			<!-- Pe telefon o singură coloană: la două, prețurile („1.200 €/lună") și butoanele se rupeau pe rânduri. -->
+			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
 				{#each tiers as tier (tier)}
 					{@const colors = tierColors[tier]}
 					{@const price = category.prices[tier]}
@@ -162,11 +163,12 @@
 				<p class="text-sm text-muted-foreground italic mb-4">{category.priceNote}</p>
 			{/if}
 
+			<!-- Pe telefon tabelul derulează orizontal, cu coloana de funcționalități fixă în stânga. -->
 			<div class="overflow-x-auto rounded-lg border">
-				<table class="w-full text-sm">
+				<table class="w-full min-w-[540px] sm:min-w-0 text-sm">
 					<thead class="bg-muted/50">
 						<tr>
-							<th class="text-left p-3 font-medium">Funcționalitate</th>
+							<th class="sticky left-0 z-10 w-[150px] bg-muted text-left p-3 font-medium sm:static sm:w-auto sm:bg-transparent">Funcționalitate</th>
 							{#each tiers as tier (tier)}
 								{@const colors = tierColors[tier]}
 								<th class="p-3 font-semibold text-center {colors.text}">
@@ -181,7 +183,7 @@
 					<tbody>
 						{#each category.features as feature (feature.id)}
 							<tr class="border-t">
-								<td class="p-3 align-top">{feature.label}</td>
+								<td class="sticky left-0 z-10 bg-background p-3 align-top sm:static sm:bg-transparent">{feature.label}</td>
 								{#each tiers as tier (tier)}
 									{@const value = feature.values[tier]}
 									<td class="p-3 text-center align-top">

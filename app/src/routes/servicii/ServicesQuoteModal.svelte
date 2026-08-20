@@ -1235,6 +1235,48 @@
 			justify-content: center;
 			order: -1;
 		}
+		/* Recapitulare: numele pe un rând, tier-ul și prețul dedesubt — altfel numele lungi
+		   („Dezvoltare Website WordPress") se rupeau în jurul chip-ului. */
+		.sq-review-list li {
+			display: grid;
+			grid-template-columns: 34px minmax(0, 1fr) auto;
+			grid-template-areas:
+				'icon name name'
+				'icon chip price';
+			row-gap: 4px;
+			align-items: center;
+		}
+		.sq-review-list .sq-item-icon {
+			grid-area: icon;
+		}
+		.sq-review-list strong {
+			grid-area: name;
+		}
+		.sq-review-list .sq-chip {
+			grid-area: chip;
+			justify-self: start;
+		}
+		.sq-review-price {
+			grid-area: price;
+		}
+		.sq-review-dl {
+			grid-template-columns: 80px 1fr;
+		}
+		/* Selectorul de tier pe un singur rând, cu butoane egale (în loc de 3 + 1 pe rândul doi). */
+		.sq-segmented {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
+		}
+		.sq-segmented button {
+			justify-content: center;
+			gap: 4px;
+			padding: 7px 2px;
+			font-size: 11px;
+		}
+		.sq-segmented .sq-tierdot {
+			width: 6px;
+			height: 6px;
+		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.sq-btn-primary:not(:disabled):hover {

@@ -154,6 +154,9 @@
 			<p>Spend, conversii, poziții SEO, uptime, open rate — live, 24/7, în contul tău.</p>
 		</div>
 
+		<!-- Pe telefon tabelul derulează orizontal; fără indiciu, coloanele Silver–Platinum par să lipsească. -->
+		<p class="sv-scrollhint" aria-hidden="true">Glisează tabelul spre stânga pentru Silver, Gold și Platinum →</p>
+
 		<div class="sv-tablewrap">
 			<table class="sv-table">
 				<thead>
@@ -724,8 +727,17 @@
 	.sv-table {
 		width: 100%;
 		min-width: 640px;
-		border-collapse: collapse;
+		/* `separate` (nu `collapse`): cu coloana de etichete sticky pe mobil, bordurile
+		   „collapsed" rămân în urmă la derulare în Chrome. */
+		border-collapse: separate;
+		border-spacing: 0;
 		font-size: 13.5px;
+	}
+	.sv-scrollhint {
+		display: none;
+		margin: 0 0 10px;
+		font-size: 12.5px;
+		color: var(--ink2);
 	}
 	.sv-th-label,
 	.sv-th-tier {
@@ -1133,16 +1145,86 @@
 		.sv-section-head h2 {
 			font-size: 27px;
 		}
-		.sv-grid,
-		.sv-discounts {
+		.sv-grid {
 			grid-template-columns: 1fr;
+		}
+		/* Cele trei praguri de discount rămân pe un rând, compacte — stivuite ocupau un ecran întreg. */
+		.sv-discounts {
+			grid-template-columns: repeat(3, 1fr);
+			gap: 8px;
+		}
+		.sv-discount {
+			min-width: 0;
+			padding: 18px 6px;
+			border-radius: 14px;
+		}
+		.sv-discount-n {
+			/* Pe 320px cele trei carduri au ~64px utili: „−20%" la 28px nu încape. */
+			font-size: clamp(20px, 7.5vw, 28px);
+		}
+		.sv-discount-l {
+			font-size: 11.5px;
+			line-height: 1.35;
+			overflow-wrap: anywhere;
 		}
 		.sv-wizard {
 			flex-wrap: wrap;
+			padding: 20px;
+		}
+		.sv-wizard-cta {
+			width: 100%;
+			justify-content: center;
+		}
+		/* Filtrele: un rând derulabil, margine la margine, în loc de 5 rânduri de pastile. */
+		.sv-filters {
+			flex-wrap: nowrap;
+			justify-content: flex-start;
+			overflow-x: auto;
+			margin: 0 -24px 28px;
+			padding: 2px 24px 10px;
+			scrollbar-width: none;
+			-webkit-overflow-scrolling: touch;
+		}
+		.sv-filters::-webkit-scrollbar {
+			display: none;
+		}
+		.sv-filter {
+			flex-shrink: 0;
+		}
+		.sv-card {
+			padding: 22px 20px 20px;
 		}
 		.sv-logo span,
 		.sv-nav-secondary {
 			display: none;
+		}
+
+		/* Tabelul CRM: coloana de etichete rămâne vizibilă cât derulezi spre Platinum. */
+		.sv-scrollhint {
+			display: block;
+		}
+		.sv-table {
+			min-width: 560px;
+			font-size: 13px;
+		}
+		.sv-th-label,
+		.sv-td-label {
+			position: sticky;
+			left: 0;
+			z-index: 1;
+			max-width: 180px;
+			box-shadow: 6px 0 10px -8px rgba(11, 18, 32, 0.25);
+		}
+		.sv-td-label {
+			background: var(--bg);
+		}
+		.sv-th-label,
+		.sv-th-tier {
+			padding: 12px 14px;
+		}
+		.sv-td-label,
+		.sv-td-val {
+			padding: 10px 14px;
 		}
 	}
 
@@ -1249,22 +1331,32 @@
 	@media (max-width: 720px) {
 		/* Două rânduri: „N servicii … ×” și „total … Solicită oferta”. */
 		.sv-cartbar-inner {
-			flex-wrap: wrap;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'info clear'
+				'total cta';
 			gap: 10px 12px;
+			align-items: center;
 		}
 		.sv-cartbar-info {
-			order: 1;
-			flex: 1 1 auto;
+			grid-area: info;
 		}
 		.sv-cartbar-clear {
-			order: 2;
+			grid-area: clear;
 		}
 		.sv-cartbar-total {
-			order: 3;
-			flex: 1 1 auto;
+			grid-area: total;
+			min-width: 0;
+		}
+		/* Subtotalul tăiat nu încape lângă buton pe 375px; badge-ul −X% spune același lucru. */
+		.sv-cartbar-total s {
+			display: none;
 		}
 		.sv-cartbar-inner > .sv-btn-primary {
-			order: 4;
+			grid-area: cta;
+			padding-left: 16px;
+			padding-right: 16px;
 		}
 		.sv-cartbar-names {
 			display: none;
@@ -1280,6 +1372,22 @@
 		}
 		.sv-has-cart .sv-foot {
 			padding-bottom: calc(128px + env(safe-area-inset-bottom));
+		}
+	}
+	/* Telefoane înguste (320–360px): nav mai strâns și totalul din bară fără „/lună". */
+	@media (max-width: 360px) {
+		.sv-nav-inner {
+			gap: 10px;
+			padding: 12px 16px;
+		}
+		.sv-logo {
+			flex-shrink: 0;
+		}
+		.sv-cartbar-total strong {
+			font-size: 17px;
+		}
+		.sv-cartbar-total small {
+			display: none;
 		}
 	}
 	/* Bara acoperă ultimele rânduri ale paginii — lăsăm loc sub subsol. */
