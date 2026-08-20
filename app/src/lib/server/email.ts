@@ -27,6 +27,7 @@ import { renderInvoiceCtaBlock } from './email-templates/invoice-cta';
 import { htmlToPlainText } from './html-text';
 import * as storage from '$lib/server/storage';
 import { getAppBaseUrl } from '$lib/server/app-url';
+import { getCategory, TIER_LABELS, type Tier } from '$lib/constants/ots-catalog';
 
 // Re-export so existing callers can import the helper from `$lib/server/email`
 // alongside the production sender (`sendInvoicePaidEmail`). Demo scripts and
@@ -3066,6 +3067,20 @@ export async function sendPackageRequestEmail(
 		throw new Error('Package request not found');
 	}
 
+	// Oferta multi-serviciu de pe /servicii (coloana `items`): subiectul spune câte
+	// servicii sunt, nu pivotul — altfel „google-ads gold" ar ascunde restul coșului.
+	let quoteCount = 0;
+	try {
+		const parsed = request.items ? JSON.parse(request.items) : null;
+		if (Array.isArray(parsed)) quoteCount = parsed.length;
+	} catch {
+		// JSON stricat → subiectul clasic
+	}
+	const subject =
+		quoteCount > 0
+			? `Cerere ofertă nouă — ${quoteCount} ${quoteCount === 1 ? 'serviciu' : 'servicii'}`
+			: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`;
+
 	const [tenant] = await db
 		.select()
 		.from(table.tenant)
@@ -3076,7 +3091,7 @@ export async function sendPackageRequestEmail(
 		{
 			tenantId: request.tenantId,
 			toEmail: recipientEmail,
-			subject: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`,
+			subject,
 			emailType: 'package-request',
 			metadata: { requestId, categorySlug: request.categorySlug, tier: request.tier },
 			htmlBody: '',
@@ -3148,6 +3163,57 @@ export async function sendPackageRequestEmail(
 			}
 			const isBundle = bundleServices.length > 1;
 			const bundleIdLabel = request.bundleId ? escapeHtml(request.bundleId) : '';
+
+			// Ofertă multi-serviciu de pe /servicii: fiecare serviciu cu tier-ul și prețul lui
+			// (snapshot de la momentul cererii) + discountul pe abonamentul lunar.
+			type QuoteItem = { categorySlug: string; tier: Tier; monthlyEur: number | null; setupEur: number | null };
+			let quoteItems: QuoteItem[] = [];
+			if (request.items) {
+				try {
+					const parsed = JSON.parse(request.items);
+					if (Array.isArray(parsed)) quoteItems = parsed;
+				} catch {
+					// JSON stricat → cădem pe afișarea clasică (pivot)
+				}
+			}
+			const isQuote = quoteItems.length > 0;
+			const eur = (n: number) => `${n.toLocaleString('ro-RO')} €`;
+			const quoteMonthly = quoteItems.reduce((sum, i) => sum + (i.monthlyEur ?? 0), 0);
+			const quoteDiscountPct = request.discountPct ?? 0;
+			const quoteMonthlyTotal = Math.round((quoteMonthly * (100 - quoteDiscountPct)) / 100);
+			const quoteSetup = quoteItems.reduce((sum, i) => sum + (i.setupEur ?? 0), 0);
+			const quoteItemLabel = (i: QuoteItem) => ({
+				name: getCategory(i.categorySlug)?.name ?? i.categorySlug,
+				tier: TIER_LABELS[i.tier] ?? i.tier,
+				price:
+					i.monthlyEur !== null
+						? `${eur(i.monthlyEur)}/lună`
+						: i.setupEur
+							? `${eur(i.setupEur)} one-time`
+							: '—'
+			});
+			const quoteRowsHtml = quoteItems
+				.map((i) => {
+					const l = quoteItemLabel(i);
+					return `<tr><td style="padding: 4px 0; color: #111827;">${escapeHtml(l.name)}</td><td style="padding: 4px 10px; color: #6b7280;">${escapeHtml(l.tier)}</td><td style="padding: 4px 0; text-align: right; color: #111827; white-space: nowrap;">${escapeHtml(l.price)}</td></tr>`;
+				})
+				.join('');
+			const quoteHtml = isQuote
+				? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Servicii cerute</span></div>
+							<table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; font-size: 14px; margin-bottom: 8px;">${quoteRowsHtml}</table>
+							<div style="margin-bottom: 4px;"><span style="color: #6b7280;">Subtotal lunar</span> &nbsp;·&nbsp; <strong>${eur(quoteMonthly)}</strong></div>
+							${quoteDiscountPct > 0 ? `<div style="margin-bottom: 4px;"><span style="color: #6b7280;">Discount ${quoteItems.length} servicii</span> &nbsp;·&nbsp; <strong style="color: #047857;">−${quoteDiscountPct}%</strong></div>` : ''}
+							<div style="margin-bottom: 4px;"><span style="color: #6b7280;">Total lunar estimat</span> &nbsp;·&nbsp; <strong>${eur(quoteMonthlyTotal)}</strong></div>
+							${quoteSetup > 0 ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Setup one-time</span> &nbsp;·&nbsp; <strong>${eur(quoteSetup)}</strong></div>` : ''}`
+				: '';
+			const quoteText = isQuote
+				? `\nServicii cerute:\n${quoteItems
+						.map((i) => {
+							const l = quoteItemLabel(i);
+							return `- ${l.name} — ${l.tier} (${l.price})`;
+						})
+						.join('\n')}\nSubtotal lunar: ${eur(quoteMonthly)}${quoteDiscountPct > 0 ? `\nDiscount: -${quoteDiscountPct}%` : ''}\nTotal lunar estimat: ${eur(quoteMonthlyTotal)}${quoteSetup > 0 ? `\nSetup one-time: ${eur(quoteSetup)}` : ''}\n`
+				: '';
 			const servicesListHtml = isBundle
 				? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Servicii incluse</span> &nbsp;·&nbsp; <strong>${bundleServices
 						.map((s) => escapeHtml(s))
@@ -3166,10 +3232,11 @@ export async function sendPackageRequestEmail(
 							${safeCompanyName ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Companie</span> &nbsp;·&nbsp; <strong>${safeCompanyName}</strong></div>` : ''}
 							${safeContactPhone ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Telefon</span> &nbsp;·&nbsp; <strong>${safeContactPhone}</strong></div>` : ''}
 							${isPublicRequest ? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Sursă</span> &nbsp;·&nbsp; <strong>Pagina publică /servicii</strong></div>` : ''}
-							${isBundle
-								? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Bundle</span> &nbsp;·&nbsp; <strong>${bundleIdLabel}</strong></div>${servicesListHtml}`
-								: `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Categorie</span> &nbsp;·&nbsp; <strong>${categoryLabel}</strong></div>`}
-							<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Pachet</span> &nbsp;·&nbsp; <strong>${tierLabel}</strong></div>
+							${isQuote
+								? quoteHtml
+								: isBundle
+									? `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Bundle</span> &nbsp;·&nbsp; <strong>${bundleIdLabel}</strong></div>${servicesListHtml}<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Pachet</span> &nbsp;·&nbsp; <strong>${tierLabel}</strong></div>`
+									: `<div style="margin-bottom: 6px;"><span style="color: #6b7280;">Categorie</span> &nbsp;·&nbsp; <strong>${categoryLabel}</strong></div><div style="margin-bottom: 6px;"><span style="color: #6b7280;">Pachet</span> &nbsp;·&nbsp; <strong>${tierLabel}</strong></div>`}
 							${safeNote ? `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #d1d5db;"><span style="color: #6b7280;">Notă client:</span><div style="margin-top: 6px; color: #111827; white-space: pre-line;">${safeNote}</div></div>` : ''}
 						</td>
 					</tr>
@@ -3182,14 +3249,16 @@ export async function sendPackageRequestEmail(
 				headerLogoHtml: brand.headerLogoHtml,
 				title: 'Cerere pachet nouă',
 				bodyHtml,
-				previewTitle: `Cerere pachet — ${request.categorySlug} ${request.tier}`,
+				previewTitle: isQuote
+					? `Cerere ofertă — ${quoteItems.length} servicii`
+					: `Cerere pachet — ${request.categorySlug} ${request.tier}`,
 				footerHtml: `Trimis automat de ${escapeHtml(brand.tenantName)} când un client cere un pachet.`
 			});
 
 			return {
 				from: `"${brand.tenantName}" <${fromEmail}>`,
 				to: recipientEmail,
-				subject: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`,
+				subject,
 				...(brand.logoAttachment ? { attachments: [brand.logoAttachment] } : {}),
 				html,
 				text: trimPlainText(`
@@ -3201,7 +3270,7 @@ export async function sendPackageRequestEmail(
 
 					${isPublicRequest ? 'Contact' : 'Client'}: ${clientName || 'Client'}${clientEmail ? ` (${clientEmail})` : ''}
 					${request.companyName ? `Companie: ${request.companyName}\n` : ''}${request.contactPhone ? `Telefon: ${request.contactPhone}\n` : ''}${isPublicRequest ? 'Sursa: pagina publica /servicii\n' : ''}Categorie: ${request.categorySlug}
-					Pachet: ${request.tier}
+					Pachet: ${request.tier}${quoteText}
 					${request.note ? `\nNota client:\n${request.note}\n` : ''}
 
 					Vezi cererea in CRM: ${adminUrl}
