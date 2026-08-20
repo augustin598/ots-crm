@@ -355,7 +355,7 @@
 							></textarea>
 						</div>
 						<!-- Enter în orice câmp = „Continuă"; butonul vizibil e în footer. -->
-						<button type="submit" class="sq-sr" tabindex="-1">Continuă</button>
+						<button type="submit" class="sq-sr" tabindex="-1" aria-hidden="true">Continuă</button>
 					</form>
 				{:else}
 					<h2 class="sq-h2">Verifică și trimite</h2>
@@ -517,6 +517,10 @@
 
 	/* ===== Stepper ===== */
 	.sq-stepper {
+		/* Corpul coajei derulează; stepper-ul rămâne vizibil sus ca reper. */
+		position: sticky;
+		top: 0;
+		z-index: 2;
 		padding: 22px 28px;
 		border-bottom: 1px solid #e5e9f0;
 		display: flex;
@@ -596,10 +600,14 @@
 		display: grid;
 		grid-template-columns: 1fr 340px;
 		min-height: 440px;
+		/* Fundalul coloanei de sumar e pe layout, ca sumarul sticky să nu lase alb sub el. */
+		background: linear-gradient(to right, white calc(100% - 340px), #f7f8fa calc(100% - 340px));
 	}
 	.sq-content {
 		padding: 28px 32px 32px;
 		min-width: 0;
+		/* Formularul are un buton submit ascuns (absolute) — îl ținem în interiorul coloanei. */
+		position: relative;
 	}
 	.sq-summary {
 		background: #f7f8fa;
@@ -608,7 +616,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
-		align-self: stretch;
+		/* Totalul rămâne la vedere cât timp lista de servicii derulează în stânga. */
+		position: sticky;
+		top: 84px;
+		align-self: start;
 	}
 
 	.sq-h2 {
@@ -1125,10 +1136,12 @@
 	@media (max-width: 880px) {
 		.sq-layout {
 			grid-template-columns: 1fr;
+			background: white;
 		}
 		.sq-summary {
 			border-left: none;
 			border-top: 1px solid #e5e9f0;
+			position: static;
 		}
 		.sq-content {
 			padding: 22px 20px 24px;
@@ -1150,6 +1163,13 @@
 		}
 		.sq-foot-meta {
 			display: none;
+		}
+		/* Fără textul din mijloc, butonul principal stă la dreapta, ca pe desktop. */
+		.sq-foot > .sq-btn-primary {
+			margin-left: auto;
+		}
+		.sq-segmented button {
+			padding: 6px 9px;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

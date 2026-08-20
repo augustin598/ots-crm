@@ -106,7 +106,8 @@
 			{#if cart.count > 0}
 				<button type="button" class="sv-nav-cart" onclick={() => (quoteOpen = true)}>
 					<ShoppingBagIcon class="h-4 w-4" />
-					Oferta mea <i>{cart.count}</i>
+					<span>Oferta mea</span>
+					<i>{cart.count}</i>
 				</button>
 			{/if}
 			<a href="/servicii/configurator" class="sv-nav-secondary">Configurator</a>
@@ -336,6 +337,40 @@
 			</div>
 		</div>
 	</footer>
+
+	{#if cart.count > 0 && !quoteOpen}
+		<div class="sv-cartbar" role="region" aria-label="Oferta ta">
+			<div class="sv-cartbar-inner">
+				<div class="sv-cartbar-info">
+					<span class="sv-cartbar-count">
+						<ShoppingBagIcon class="h-4 w-4" />
+						{cart.count} {cart.count === 1 ? 'serviciu' : 'servicii'}
+					</span>
+					<span class="sv-cartbar-names">
+						{cartSummary.lines.map((l) => `${l.name} ${catalog.tierLabels[l.tier]}`).join(' · ')}
+					</span>
+				</div>
+				<div class="sv-cartbar-total">
+					{#if cartSummary.discountPct > 0}
+						<s>{formatEur(cartSummary.monthlySubtotal)}</s>
+						<span class="sv-cartbar-discount">−{cartSummary.discountPct}%</span>
+					{/if}
+					<strong>{formatEur(cartSummary.monthlyTotal)}</strong><small>/lună</small>
+				</div>
+				<button
+					type="button"
+					class="sv-cartbar-clear"
+					onclick={() => cart.clear()}
+					aria-label="Golește oferta"
+				>
+					<XIcon class="h-4 w-4" />
+				</button>
+				<button type="button" class="sv-btn sv-btn-primary" onclick={() => (quoteOpen = true)}>
+					Solicită oferta <ArrowRightIcon class="h-4 w-4" />
+				</button>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <PackageComparisonView
@@ -352,40 +387,6 @@
 	activeTier={selectedCategory ? cart.tierOf(selectedCategory.slug) : null}
 	activeLabel="În ofertă ✓"
 />
-
-{#if cart.count > 0 && !quoteOpen}
-	<div class="sv-cartbar" role="region" aria-label="Oferta ta">
-		<div class="sv-cartbar-inner">
-			<div class="sv-cartbar-info">
-				<span class="sv-cartbar-count">
-					<ShoppingBagIcon class="h-4 w-4" />
-					{cart.count} {cart.count === 1 ? 'serviciu' : 'servicii'}
-				</span>
-				<span class="sv-cartbar-names">
-					{cartSummary.lines.map((l) => `${l.name} ${catalog.tierLabels[l.tier]}`).join(' · ')}
-				</span>
-			</div>
-			<div class="sv-cartbar-total">
-				{#if cartSummary.discountPct > 0}
-					<s>{formatEur(cartSummary.monthlySubtotal)}</s>
-					<span class="sv-cartbar-discount">−{cartSummary.discountPct}%</span>
-				{/if}
-				<strong>{formatEur(cartSummary.monthlyTotal)}</strong><small>/lună</small>
-			</div>
-			<button
-				type="button"
-				class="sv-cartbar-clear"
-				onclick={() => cart.clear()}
-				aria-label="Golește oferta"
-			>
-				<XIcon class="h-4 w-4" />
-			</button>
-			<button type="button" class="sv-btn sv-btn-primary" onclick={() => (quoteOpen = true)}>
-				Solicită oferta <ArrowRightIcon class="h-4 w-4" />
-			</button>
-		</div>
-	</div>
-{/if}
 
 {#if quoteOpen}
 	<ServicesQuoteModal {cart} {catalog} onClose={() => (quoteOpen = false)} />
@@ -480,6 +481,7 @@
 		font-weight: 600;
 		color: var(--ink);
 		cursor: pointer;
+		white-space: nowrap;
 	}
 	.sv-nav-cart:hover {
 		border-color: var(--accent);
@@ -706,6 +708,9 @@
 
 	/* ===== Tabel CRM ===== */
 	.sv-tablewrap {
+		/* Poziționat, ca textul doar-pentru-screen-reader (.sv-sr, absolute) din celule să
+		   rămână în containerul de scroll — altfel pagina capătă scroll orizontal pe mobil. */
+		position: relative;
 		overflow-x: auto;
 		background: white;
 		border: 1px solid var(--border);
@@ -1236,18 +1241,30 @@
 		border-color: #fecaca;
 	}
 	@media (max-width: 720px) {
+		/* Două rânduri: „N servicii … ×” și „total … Solicită oferta”. */
 		.sv-cartbar-inner {
 			flex-wrap: wrap;
-			gap: 10px;
+			gap: 10px 12px;
 		}
 		.sv-cartbar-info {
-			flex-basis: 100%;
+			order: 1;
+			flex: 1 1 auto;
+		}
+		.sv-cartbar-clear {
+			order: 2;
+		}
+		.sv-cartbar-total {
+			order: 3;
+			flex: 1 1 auto;
+		}
+		.sv-cartbar-inner > .sv-btn-primary {
+			order: 4;
 		}
 		.sv-cartbar-names {
 			display: none;
 		}
-		.sv-cartbar-total {
-			flex: 1;
+		.sv-nav-cart span {
+			display: none;
 		}
 	}
 	/* Bara acoperă ultimele rânduri ale paginii — lăsăm loc sub subsol. */
