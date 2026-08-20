@@ -28,6 +28,7 @@
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
+	import { reportMeetOutcome } from '$lib/utils/meet-outcome';
 	import { getTaskComments } from '$lib/remotes/task-comments.remote';
 	import { getTaskFilters } from '$lib/components/task-filters-context';
 	import { getTaskLiveQueries } from '$lib/components/task-live-queries-context';
@@ -205,7 +206,9 @@
 				meetTime = storedMeet ?? '10:00';
 			}
 			meetDuration = String((task as any).meetDurationMinutes ?? 30);
-			meetLink = '';
+			// Prefill: sending an empty string used to clear a perfectly good
+			// generated link on every re-save.
+			meetLink = ((task as any).meetLink as string | null) ?? '';
 		}
 	});
 
@@ -589,7 +592,7 @@
 		if (!task) return;
 		meetSaving = true;
 		try {
-			await scheduleMeet({
+			const res = await scheduleMeet({
 				taskId: task.id,
 				meetLink: meetLink || undefined,
 				meetTime: meetTime
@@ -598,7 +601,7 @@
 				meetDurationMinutes: meetDuration ? parseInt(meetDuration) : undefined
 			}).updates(...detailRefreshTargets());
 			showMeetModal = false;
-			toast.success('Meeting programat');
+			reportMeetOutcome(res?.meet ?? null);
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare la salvare');
 		} finally {
@@ -734,11 +737,22 @@
 							{#if (currentTask as any).meetTime}
 								{@const mt = (currentTask as any).meetTime}
 								{@const mtTime = mt.includes('T') ? mt.split('T')[1].slice(0, 5) : mt}
+								{@const mtDate = mt.includes('T') ? mt.split('T')[0] : null}
 								{@const dur = (currentTask as any).meetDurationMinutes}
 								{@const ml = (currentTask as any).meetLink}
+								{@const hasEvent = Boolean((currentTask as any).googleCalendarEventId)}
 								{@const endHour = dur ? (() => { const [h, m] = mtTime.split(':').map(Number); const total = h * 60 + m + dur; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; })() : null}
-								<div class="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
-									📅 {mtTime}{endHour ? ` - ${endHour}` : ''}{#if ml} — <a href={ml} target="_blank" rel="noopener noreferrer" class="underline hover:text-emerald-600">{new URL(ml).hostname}</a>{/if}
+								<!-- The date used to be hidden, so a meeting on the wrong day looked
+								     identical to one on the right day. Show it next to the hour. -->
+								<div
+									class="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium {hasEvent
+										? 'bg-emerald-50 text-emerald-800'
+										: 'bg-amber-50 text-amber-800'}"
+									title={hasEvent
+										? 'Evenimentul există în Google Calendar'
+										: 'Meeting salvat local — nu există încă în Google Calendar'}
+								>
+									📅 {mtDate ? `${formatDate(mtDate as any)} · ` : ''}{mtTime}{endHour ? ` - ${endHour}` : ''}{#if ml} — <a href={ml} target="_blank" rel="noopener noreferrer" class="underline hover:text-emerald-600">{new URL(ml).hostname}</a>{:else if !hasEvent} — fără eveniment în Calendar{/if}
 								</div>
 							{/if}
 						</div>

@@ -92,7 +92,7 @@ describe('createMeetEvent', () => {
 		const result = await createMeetEvent({
 			tenantId: 'tenant-a',
 			title: 'Test Meeting',
-			startTime: new Date('2026-05-20T10:00:00Z'),
+			startTime: '2026-05-20T10:00:00',
 			durationMinutes: 30,
 			timezone: 'Europe/Bucharest',
 			attendees: ['user@example.com'],
@@ -101,6 +101,102 @@ describe('createMeetEvent', () => {
 
 		expect(result.eventId).toBe('evt_test_123');
 		expect(result.hangoutLink).toBe('https://meet.google.com/abc-defg-hij');
+	});
+
+	// Regression: production (UTC container) sent `10:00` as `10:00Z` and Google
+	// ignores `timeZone` when the dateTime carries an offset, so every Romanian
+	// meeting landed three hours late. The payload must stay offset-free.
+	it('sends offset-free local times so Google honours the timeZone field', async () => {
+		const insert = mock(async ({ requestBody }: { requestBody: Record<string, unknown> }) => ({
+			data: {
+				id: 'evt_tz',
+				hangoutLink: 'https://meet.google.com/tz',
+				start: requestBody.start,
+				end: requestBody.end
+			}
+		}));
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		mockGetCalendarClient.mockImplementationOnce(async (): Promise<any> => ({
+			events: { insert }
+		}));
+
+		await createMeetEvent({
+			tenantId: 'tenant-a',
+			title: 'TZ check',
+			startTime: '2026-08-21T10:00:00',
+			durationMinutes: 30,
+			timezone: 'Europe/Bucharest',
+			attendees: []
+		});
+
+		const body = insert.mock.calls[0][0].requestBody as {
+			start: { dateTime: string; timeZone: string };
+			end: { dateTime: string; timeZone: string };
+		};
+		expect(body.start.dateTime).toBe('2026-08-21T10:00:00');
+		expect(body.start.timeZone).toBe('Europe/Bucharest');
+		expect(body.end.dateTime).toBe('2026-08-21T10:30:00');
+		expect(body.start.dateTime).not.toContain('Z');
+		expect(body.end.dateTime).not.toContain('Z');
+	});
+
+	// The old code threw when hangoutLink was absent, *after* Google had already
+	// created the event — leaving an orphan nobody could update or delete.
+	it('keeps the eventId when the Meet link is still being provisioned', async () => {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		mockGetCalendarClient.mockImplementationOnce(async (): Promise<any> => ({
+			events: {
+				insert: async () => ({
+					data: {
+						id: 'evt_pending',
+						conferenceData: { createRequest: { status: { statusCode: 'pending' } } }
+					}
+				}),
+				get: async () => ({ data: { id: 'evt_pending' } })
+			}
+		}));
+
+		const result = await createMeetEvent({
+			tenantId: 'tenant-a',
+			title: 'Pending conference',
+			startTime: '2026-08-21T10:00:00',
+			durationMinutes: 30,
+			timezone: 'Europe/Bucharest',
+			attendees: []
+		});
+
+		expect(result.eventId).toBe('evt_pending');
+		expect(result.hangoutLink).toBeNull();
+	});
+
+	it('falls back to the video entry point when hangoutLink is absent', async () => {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		mockGetCalendarClient.mockImplementationOnce(async (): Promise<any> => ({
+			events: {
+				insert: async () => ({
+					data: {
+						id: 'evt_entry',
+						conferenceData: {
+							entryPoints: [
+								{ entryPointType: 'phone', uri: 'tel:+40000' },
+								{ entryPointType: 'video', uri: 'https://meet.google.com/xyz-abcd-efg' }
+							]
+						}
+					}
+				})
+			}
+		}));
+
+		const result = await createMeetEvent({
+			tenantId: 'tenant-a',
+			title: 'Entry point',
+			startTime: '2026-08-21T10:00:00',
+			durationMinutes: 30,
+			timezone: 'Europe/Bucharest',
+			attendees: []
+		});
+
+		expect(result.hangoutLink).toBe('https://meet.google.com/xyz-abcd-efg');
 	});
 
 	it('throws CalendarNotConnected when integration missing', async () => {
@@ -112,7 +208,7 @@ describe('createMeetEvent', () => {
 			createMeetEvent({
 				tenantId: 'tenant-x',
 				title: 'No connection',
-				startTime: new Date('2026-05-20T10:00:00Z'),
+				startTime: '2026-05-20T10:00:00',
 				durationMinutes: 30,
 				timezone: 'Europe/Bucharest',
 				attendees: []
@@ -126,13 +222,39 @@ describe('updateMeetEvent', () => {
 		const result = await updateMeetEvent({
 			tenantId: 'tenant-a',
 			eventId: 'evt_test_123',
-			startTime: new Date('2026-05-20T11:00:00Z'),
+			startTime: '2026-05-20T11:00:00',
 			durationMinutes: 60,
 			timezone: 'Europe/Bucharest',
 			attendees: ['user1@example.com', 'user2@example.com'],
 			title: 'Updated Meeting'
 		});
-		expect(result).toBe(true);
+		expect(result.ok).toBe(true);
+	});
+
+	it('patches offset-free local times', async () => {
+		const patch = mock(async ({ requestBody }: { requestBody: Record<string, unknown> }) => ({
+			data: { id: 'evt_test_123', ...requestBody }
+		}));
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		mockGetCalendarClient.mockImplementationOnce(async (): Promise<any> => ({
+			events: { patch }
+		}));
+
+		await updateMeetEvent({
+			tenantId: 'tenant-a',
+			eventId: 'evt_test_123',
+			startTime: '2026-08-21T14:00:00',
+			durationMinutes: 90,
+			timezone: 'Europe/Bucharest'
+		});
+
+		const body = patch.mock.calls[0][0].requestBody as {
+			start: { dateTime: string; timeZone: string };
+			end: { dateTime: string };
+		};
+		expect(body.start.dateTime).toBe('2026-08-21T14:00:00');
+		expect(body.start.timeZone).toBe('Europe/Bucharest');
+		expect(body.end.dateTime).toBe('2026-08-21T15:30:00');
 	});
 });
 

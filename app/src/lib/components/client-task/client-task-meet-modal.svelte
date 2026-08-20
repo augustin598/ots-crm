@@ -9,6 +9,7 @@
 	import { avatarColor, avatarInitials } from '$lib/config/team';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
+	import { reportMeetOutcome } from '$lib/utils/meet-outcome';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	type Person = {
@@ -76,12 +77,12 @@
 		try {
 			// Backend currently only stores meetTime + meetDurationMinutes.
 			// title/invitees/addToCalendar/sendEmail are UI-only (future backend extension).
-			await scheduleMeet({
+			const res = await scheduleMeet({
 				taskId,
 				meetTime: `${meetDate}T${meetTime}`,
 				meetDurationMinutes: meetDuration
 			}).updates(getTask(taskId));
-			toast.success('Meeting programat');
+			reportMeetOutcome(res?.meet ?? null);
 			onClose();
 		} catch (e) {
 			clientLogger.apiError('schedule_meet', e);
