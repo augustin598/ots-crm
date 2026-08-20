@@ -433,10 +433,16 @@ export const CATEGORIES: Category[] = [
 		setupDescription:
 			'Implementare one-time website WordPress: design, dezvoltare, SEO on-page, integrare tracking (GA4 + GTM), training administrare. Include mentenanță gratuită prima lună. Se plătește o singură dată.',
 		priceNote:
-			'Prețuri EUR fără TVA. Target OTS = Silver (pachetul standard recomandat). Hosting (10-20 €/lună) și mentenanță lunară (via abonament WP) se plătesc separat.',
+			'Prețuri EUR fără TVA. Target OTS = Silver (pachetul standard recomandat). Hosting (10-20 €/lună) și mentenanță lunară (via abonament WP) se plătesc separat. Conținutul (texte, poze) e furnizat de client; redactarea se tarifează separat.',
 		features: [
 			{ id: 'web-1', label: 'Pagini (nr. maxim)', values: { bronze: 5, silver: 10, gold: 15, platinum: '50+' } },
-			{ id: 'web-2', label: 'Design personalizat (Figma → WP, nu template)', values: { bronze: false, silver: true, gold: true, platinum: true } },
+			// Silver promitea „design personalizat (Figma → WP, nu template)" la
+			// 1.200 €, adică ~18 ore la tariful de 65 €/h — imposibil pentru design
+			// bespoke. Separat în două rânduri, ca oferta să descrie munca reală:
+			// personalizarea unei teme premium (ce se livrează efectiv la Silver) și
+			// designul de la zero în Figma (care începe cu adevărat de la Gold).
+			{ id: 'web-2', label: 'Temă premium personalizată la brand', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'web-2b', label: 'Design bespoke în Figma (nu temă)', values: { bronze: false, silver: false, gold: true, platinum: true } },
 			{ id: 'web-3', label: 'Responsive mobile-first', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'web-4', label: 'SEO on-page (meta, schema, sitemap, Yoast)', values: { bronze: false, silver: true, gold: true, platinum: true } },
 			{ id: 'web-5', label: 'Google Analytics 4 + GTM', values: { bronze: false, silver: true, gold: true, platinum: true } },
@@ -449,7 +455,8 @@ export const CATEGORIES: Category[] = [
 			{ id: 'web-12', label: 'Integrări CRM / Email Marketing', values: { bronze: false, silver: false, gold: true, platinum: true } },
 			{ id: 'web-13', label: 'SSL + banner GDPR', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'web-14', label: 'PageSpeed 80+ (Core Web Vitals)', values: { bronze: false, silver: true, gold: true, platinum: true } },
-			{ id: 'web-15', label: 'Revizii incluse (rounds)', values: { bronze: 1, silver: 3, gold: 5, platinum: '8+' } },
+			// 3 runde de revizii nu încap în bugetul de ore al Silver-ului; 2 da.
+			{ id: 'web-15', label: 'Revizii incluse (rounds)', values: { bronze: 1, silver: 2, gold: 5, platinum: '8+' } },
 			{ id: 'web-16', label: 'Durată livrare', values: { bronze: '1-2 săpt', silver: '2-3 săpt', gold: '3-4 săpt', platinum: '4-6 săpt' } }
 		]
 	},
@@ -631,11 +638,27 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 
 // Tarife orare pentru muncă peste scope-ul pachetelor fixed-price
 // (afișate în dialog pe serviciile din grupul `web-dev-apps`).
+//
+// Recalibrate 20 aug 2026 de la 80/85/90/100. Vechile tarife stăteau peste
+// vârful pieței românești (55-80 €/h la agențiile premium din Cluj și
+// București) și intrau în contradicție cu prețurile de proiect: la 80 €/h,
+// pachetul Silver de website WordPress (1.200 €) însemna 15 ore pentru un site
+// complet, ceea ce nu se susține. Noile valori așază tariful în jumătatea de
+// sus a benzii de agenție, iar Silver-ul de WooCommerce, aplicație mobilă,
+// landing page și website custom devin coerente cu orele pe care le implică.
+//
+// PM-ul era anomalia reală: se factura peste development, adică ședințele
+// costau mai mult decât programarea. În agenții e de regulă sub tariful de
+// dezvoltare sau inclus în proiect.
+//
+// Rămâne o singură necorelare cunoscută: website-dev Silver (1.200 €) iese la
+// ~18 ore, prea puțin pentru un site de prezentare complet. Se rezolvă din
+// scope (template, max 5 pagini, o rundă de design), nu din tarif.
 export const HOURLY_RATES: { label: string; rate: number }[] = [
-	{ label: 'Development', rate: 80 },
-	{ label: 'Design UI/UX', rate: 85 },
-	{ label: 'Project Management', rate: 90 },
-	{ label: 'DevOps / API', rate: 100 }
+	{ label: 'Development', rate: 65 },
+	{ label: 'Design UI/UX', rate: 70 },
+	{ label: 'Project Management', rate: 55 },
+	{ label: 'DevOps / API', rate: 80 }
 ];
 
 // Sluguri pentru care `PackageComparisonDialog` afișează
