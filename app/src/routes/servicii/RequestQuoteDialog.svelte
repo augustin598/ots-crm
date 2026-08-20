@@ -30,15 +30,27 @@
 		tier: Tier | null;
 		tierLabels: Record<Tier, string>;
 		tierColors: Record<Tier, TierColors>;
+		/**
+		 * Conținutul câmpului „Detalii". E bindable fiindcă wizardul de la
+		 * /servicii/configurator îl preîncarcă cu contextul răspunsurilor și
+		 * componența bundle-ului — valoarea aparține părintelui, nu dialogului.
+		 */
+		note?: string;
 	};
 
-	let { open = $bindable(), category, tier, tierLabels, tierColors }: Props = $props();
+	let {
+		open = $bindable(),
+		category,
+		tier,
+		tierLabels,
+		tierColors,
+		note = $bindable('')
+	}: Props = $props();
 
 	let contactName = $state('');
 	let contactEmail = $state('');
 	let contactPhone = $state('');
 	let companyName = $state('');
-	let note = $state('');
 
 	let submitting = $state(false);
 	let errorMessage = $state<string | null>(null);

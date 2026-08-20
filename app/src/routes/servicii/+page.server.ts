@@ -24,7 +24,8 @@ import {
 	HOURLY_RATES,
 	WEB_DEV_SLUGS,
 	SETUP_DEFAULT_DESCRIPTION,
-	BUNDLE_TIERS_RULE
+	BUNDLE_TIERS_RULE,
+	BUNDLES
 } from '$lib/constants/ots-catalog';
 import {
 	PUBLIC_SERVICES_PAGE_KEY,
@@ -43,6 +44,7 @@ import * as table from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { PublicCatalog, PublicCompany } from './types';
+import { buildPublicCatalog, loadPublicCompany } from './catalog.server';
 import type { Actions, PageServerLoad } from './$types';
 
 /** Încercări de parolă per IP: 10 / 15 min în proces, 40 / oră în Redis. */
@@ -57,39 +59,7 @@ function clientIp(event: RequestEvent): string {
 	}
 }
 
-function buildCatalog(): PublicCatalog {
-	return {
-		categories: CATEGORIES,
-		// Doar slug-urile: categoriile se trimit o singură dată și se rezolvă în pagină.
-		groups: CATEGORY_GROUPS.map((g) => ({
-			id: g.id,
-			label: g.label,
-			description: g.description,
-			slugs: g.slugs
-		})),
-		crmFeatures: CRM_FEATURES,
-		tiers: TIERS,
-		tierLabels: TIER_LABELS,
-		tierColors: TIER_COLORS,
-		hourlyRates: HOURLY_RATES,
-		webDevSlugs: [...WEB_DEV_SLUGS],
-		setupDefaultDescription: SETUP_DEFAULT_DESCRIPTION,
-		discountRules: BUNDLE_TIERS_RULE
-	};
-}
 
-async function loadCompanyInfo(tenantId: string): Promise<PublicCompany> {
-	const [row] = await db
-		.select({
-			name: table.tenant.name,
-			email: table.tenant.email,
-			phone: table.tenant.phone
-		})
-		.from(table.tenant)
-		.where(eq(table.tenant.id, tenantId))
-		.limit(1);
-	return row ?? null;
-}
 
 export const load: PageServerLoad = async (event) => {
 	const tenantId = await resolvePublicTenantId();
@@ -106,8 +76,8 @@ export const load: PageServerLoad = async (event) => {
 
 	return {
 		unlocked: true as const,
-		catalog: buildCatalog(),
-		company: await loadCompanyInfo(tenantId)
+		catalog: buildPublicCatalog(),
+		company: await loadPublicCompany(tenantId)
 	};
 };
 

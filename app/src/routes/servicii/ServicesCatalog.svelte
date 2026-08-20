@@ -17,6 +17,7 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import WandIcon from '@lucide/svelte/icons/wand';
 	import CategoryIcon from '$lib/components/services/CategoryIcon.svelte';
 	import PackageComparisonView from '$lib/components/services/PackageComparisonView.svelte';
 	import RequestQuoteDialog from './RequestQuoteDialog.svelte';
@@ -182,6 +183,30 @@
 				</div>
 			</section>
 		{/if}
+
+		<!-- Intrarea în wizard. Aceeași ofertă ca în portalul clientului, doar că
+		     aici cererea trece prin formularul public de contact. -->
+		<a
+			href="/servicii/configurator"
+			class="group block rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 via-primary/10 to-transparent p-5 transition-all hover:border-primary/40 hover:shadow-md"
+		>
+			<div class="flex items-center gap-4">
+				<div class="shrink-0 rounded-lg bg-primary/15 p-3">
+					<WandIcon class="h-5 w-5 text-primary" />
+				</div>
+				<div class="min-w-0 flex-1">
+					<span class="text-[11px] font-medium uppercase tracking-wider text-primary">Wizard</span>
+					<h2 class="font-semibold leading-tight">Nu știi ce pachet să alegi? Hai să te ghidăm.</h2>
+					<p class="mt-1 text-sm text-muted-foreground">
+						5 întrebări rapide (tip business, obiectiv, buget, canale) și îți spunem exact
+						combinația care funcționează — cu preț estimat și discount aplicat.
+					</p>
+				</div>
+				<ArrowRightIcon
+					class="h-5 w-5 shrink-0 text-primary transition-transform group-hover:translate-x-1"
+				/>
+			</div>
+		</a>
 
 		<!-- Categorii -->
 		<section>

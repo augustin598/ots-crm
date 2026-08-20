@@ -6,7 +6,7 @@
  * client. Valorile vin exclusiv din `+page.server.ts`, după deblocare.
  */
 
-import type { Category, Feature, Tier, TierColors } from '$lib/constants/ots-catalog';
+import type { Bundle, Category, Feature, Tier, TierColors } from '$lib/constants/ots-catalog';
 
 export type PublicCatalogGroup = {
 	id: string;
@@ -26,6 +26,8 @@ export type PublicCatalog = {
 	webDevSlugs: string[];
 	setupDefaultDescription: string;
 	discountRules: { minServices: number; discountPct: number; label: string }[];
+	/** Necesare wizardului de la /servicii/configurator. */
+	bundles: Bundle[];
 };
 
 export type PublicCompany = {
