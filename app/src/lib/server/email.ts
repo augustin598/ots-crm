@@ -3076,10 +3076,13 @@ export async function sendPackageRequestEmail(
 	} catch {
 		// JSON stricat → subiectul clasic
 	}
+	const pivotLabel = `${getCategory(request.categorySlug)?.name ?? request.categorySlug} ${TIER_LABELS[request.tier as Tier] ?? request.tier}`;
 	const subject =
-		quoteCount > 0
-			? `Cerere ofertă nouă — ${quoteCount} ${quoteCount === 1 ? 'serviciu' : 'servicii'}`
-			: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`;
+		quoteCount > 1
+			? `Cerere ofertă nouă — ${quoteCount} servicii`
+			: quoteCount === 1
+				? `Cerere ofertă nouă — ${pivotLabel}`
+				: `Cerere pachet nouă — ${request.categorySlug} ${request.tier}`;
 
 	const [tenant] = await db
 		.select()
@@ -3269,8 +3272,7 @@ export async function sendPackageRequestEmail(
 					Un client a solicitat un pachet de servicii din CRM:
 
 					${isPublicRequest ? 'Contact' : 'Client'}: ${clientName || 'Client'}${clientEmail ? ` (${clientEmail})` : ''}
-					${request.companyName ? `Companie: ${request.companyName}\n` : ''}${request.contactPhone ? `Telefon: ${request.contactPhone}\n` : ''}${isPublicRequest ? 'Sursa: pagina publica /servicii\n' : ''}Categorie: ${request.categorySlug}
-					Pachet: ${request.tier}${quoteText}
+					${request.companyName ? `Companie: ${request.companyName}\n` : ''}${request.contactPhone ? `Telefon: ${request.contactPhone}\n` : ''}${isPublicRequest ? 'Sursa: pagina publica /servicii\n' : ''}${isQuote ? quoteText.trimStart() : `Categorie: ${request.categorySlug}\nPachet: ${request.tier}`}
 					${request.note ? `\nNota client:\n${request.note}\n` : ''}
 
 					Vezi cererea in CRM: ${adminUrl}

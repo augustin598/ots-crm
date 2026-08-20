@@ -37,6 +37,17 @@ export type QuoteRequestItem = {
 	setupEur: number | null;
 };
 
+/** Un rând cu JSON stricat nu trebuie să dărâme toată lista din admin. */
+function parseJsonArray<T>(raw: string | null): T[] | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? (parsed as T[]) : null;
+	} catch {
+		return null;
+	}
+}
+
 export const getPackageRequests = query(async () => {
 	const event = getRequestEvent();
 	if (!event?.locals.user || !event?.locals.tenant) {
@@ -77,8 +88,8 @@ export const getPackageRequests = query(async () => {
 
 		return rows.map((r) => ({
 			...r,
-			services: r.services ? (JSON.parse(r.services) as string[]) : null,
-			items: r.items ? (JSON.parse(r.items) as QuoteRequestItem[]) : null
+			services: parseJsonArray<string>(r.services),
+			items: parseJsonArray<QuoteRequestItem>(r.items)
 		}));
 	} catch (err) {
 		const raw = err instanceof Error ? err : new Error(String(err));

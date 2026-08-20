@@ -4,6 +4,7 @@ import {
 	defaultTierFor,
 	discountPctForCount,
 	isTierOffered,
+	resolveOfferedTier,
 	type QuoteCategory
 } from '../quote-pricing';
 
@@ -183,5 +184,26 @@ describe('isTierOffered / defaultTierFor', () => {
 		expect(defaultTierFor(ads, [...TIERS])).toBe('silver');
 		expect(defaultTierFor({ ...web, setupFees: { gold: 3000 } }, [...TIERS])).toBe('gold');
 		expect(defaultTierFor({ ...web, setupFees: {} }, [...TIERS])).toBeNull();
+	});
+});
+
+describe('resolveOfferedTier', () => {
+	const TIERS = ['bronze', 'silver', 'gold', 'platinum'] as const;
+	const setupOnlyBronze: QuoteCategory = {
+		slug: 'google-ads-setup',
+		name: 'Google Ads Setup',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 500 }
+	};
+	it('păstrează preferința când e oferită', () => {
+		expect(resolveOfferedTier(ads, 'gold', [...TIERS])).toBe('gold');
+		expect(resolveOfferedTier(web, 'gold', [...TIERS])).toBe('gold');
+	});
+	it('cade pe tier-ul implicit când preferința nu e oferită', () => {
+		expect(resolveOfferedTier(setupOnlyBronze, 'gold', [...TIERS])).toBe('bronze');
+		expect(resolveOfferedTier(web, 'bronze', [...TIERS])).toBe('silver');
+	});
+	it('null când categoria nu oferă nimic', () => {
+		expect(resolveOfferedTier({ ...web, setupFees: {} }, 'gold', [...TIERS])).toBeNull();
 	});
 });

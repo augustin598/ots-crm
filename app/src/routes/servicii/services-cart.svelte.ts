@@ -68,6 +68,9 @@ export class ServicesCart {
 			// Safari privat / storage blocat: pornim cu coș gol.
 		}
 		this.items = parseStoredCart(raw, isValid);
+		// Rescriem forma curățată: intrările invalide (serviciu/tier care nu mai
+		// există) nu trebuie să reapară la următoarea încărcare.
+		this.persist();
 	}
 
 	private persist(): void {

@@ -20,6 +20,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import { cn } from '$lib/utils';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
@@ -57,7 +58,7 @@
 		onRequest,
 		requestLabel = 'Vreau {tier}',
 		activeTier = null,
-		activeLabel = 'În ofertă ✓'
+		activeLabel = 'În ofertă'
 	}: Props = $props();
 </script>
 
@@ -132,15 +133,24 @@
 							{/if}
 							{#if onRequest}
 								{@const isActive = activeTier === tier}
+								<!-- Toggle: a doua apăsare scoate serviciul din ofertă; numele spune asta, nu doar starea. -->
 								<Button
-									class="mt-4 w-full"
+									class={cn('mt-4 w-full', isActive && 'border-primary text-primary')}
 									size="sm"
-									variant={isActive ? 'secondary' : 'default'}
+									variant={isActive ? 'outline' : 'default'}
 									aria-pressed={isActive}
+									aria-label={isActive
+										? `${activeLabel}: ${tierLabels[tier]} — apasă pentru a scoate din ofertă`
+										: undefined}
 									onclick={() => onRequest(tier)}
 									disabled={price === null && !setup}
 								>
-									{isActive ? activeLabel : requestLabel.replace('{tier}', tierLabels[tier])}
+									{#if isActive}
+										<CheckIcon class="h-3.5 w-3.5" aria-hidden="true" />
+										{activeLabel}
+									{:else}
+										{requestLabel.replace('{tier}', tierLabels[tier])}
+									{/if}
 								</Button>
 							{/if}
 						</div>

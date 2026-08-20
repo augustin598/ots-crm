@@ -437,7 +437,7 @@
 										{/each}
 									</ul>
 									{#if req.discountPct}
-										<p class="text-xs text-emerald-700 mb-2">
+										<p class="text-xs text-emerald-700 dark:text-emerald-400 mb-2">
 											Discount multi-servicii afișat clientului: −{req.discountPct}% pe abonamentul lunar
 										</p>
 									{/if}

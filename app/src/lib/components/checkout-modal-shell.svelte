@@ -138,6 +138,8 @@
 		display: flex;
 		flex-direction: column;
 		max-height: calc(100vh - 80px);
+		/* iOS Safari: 100vh include bara de adrese; dvh e înălțimea chiar vizibilă. */
+		max-height: calc(100dvh - 80px);
 	}
 	@keyframes coPop {
 		from {
@@ -184,7 +186,8 @@
 		align-items: center;
 		gap: 6px;
 		font-size: 12px;
-		color: #10b981;
+		/* Verdele închis: 12px pe fundal verde deschis cere ≥ 4.5:1 (#10b981 dădea 2.3:1). */
+		color: #047857;
 		padding: 5px 10px;
 		background: rgba(16, 185, 129, 0.1);
 		border-radius: 999px;
@@ -217,6 +220,8 @@
 	.co-body {
 		padding: 26px 28px 28px;
 		overflow-y: auto;
+		/* Scroll-ul nu se propagă la pagina din spate când corpul ajunge la capăt. */
+		overscroll-behavior: contain;
 		flex: 1 1 auto;
 		min-height: 0;
 	}
@@ -253,6 +258,7 @@
 		}
 		.co-sheet {
 			max-height: calc(100vh - 32px);
+			max-height: calc(100dvh - 32px);
 		}
 	}
 </style>

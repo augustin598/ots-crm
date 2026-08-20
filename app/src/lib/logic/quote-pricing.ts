@@ -100,3 +100,17 @@ export function defaultTierFor(category: QuoteCategory, tiers: Tier[]): Tier | n
 	if (tiers.includes('silver') && isTierOffered(category, 'silver')) return 'silver';
 	return tiers.find((t) => isTierOffered(category, t)) ?? null;
 }
+
+/**
+ * Tier-ul cu care un serviciu intră în coș când vine cu o preferință (ex. tier-ul
+ * recomandat de wizard pentru tot bundle-ul): preferința dacă e oferită, altfel
+ * tier-ul implicit. Fără asta, „Google Ads Setup" (doar Bronze) ar ajunge în coș
+ * la Gold și serverul ar respinge cererea.
+ */
+export function resolveOfferedTier(
+	category: QuoteCategory,
+	preferred: Tier,
+	tiers: Tier[]
+): Tier | null {
+	return isTierOffered(category, preferred) ? preferred : defaultTierFor(category, tiers);
+}

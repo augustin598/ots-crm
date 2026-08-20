@@ -14,6 +14,7 @@
 	ca prețurile să nu ajungă în bundle-ul de client fără parolă.
 -->
 <script lang="ts">
+	import type { Attachment } from 'svelte/attachments';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -49,6 +50,16 @@
 	] as const;
 
 	let step = $state<1 | 2 | 3>(1);
+
+	/**
+	 * Titlul pasului (și butonul „Închide" de pe confirmare) primește focusul când
+	 * apare: la schimbarea pasului elementul apăsat poate fi demontat, iar focusul
+	 * ar cădea pe <body>, în afara capcanei de focus a modalului. La prima
+	 * deschidere, focus-trap-ul coajei îl mută apoi pe primul element interactiv.
+	 */
+	const focusOnMount: Attachment<HTMLElement> = (el) => {
+		el.focus();
+	};
 
 	const bySlug = $derived(new Map(catalog.categories.map((c) => [c.slug, c])));
 	const summary = $derived(
@@ -97,12 +108,20 @@
 		if (step === 1 && summary.serviceCount === 0) return;
 		if (step === 2) {
 			touched = true;
-			if (!contactValid) return;
+			if (!contactValid) {
+				// Cititorul de ecran și utilizatorul de tastatură ajung direct la primul câmp greșit.
+				document.getElementById(nameError ? 'sq-name' : 'sq-email')?.focus();
+				return;
+			}
 		}
 		if (step < 3) step = (step + 1) as 2 | 3;
 	}
 	function back() {
 		if (step > 1) step = (step - 1) as 1 | 2;
+	}
+	function primaryAction() {
+		if (step < 3) next();
+		else void submit();
 	}
 
 	function addCategory(cat: Category) {
@@ -128,13 +147,24 @@
 			sent = true;
 			cart.clear();
 		} catch (err) {
-			errorMessage =
-				err instanceof Error && err.message
-					? err.message
-					: 'Nu am putut trimite cererea. Te rugăm să încerci din nou.';
+			errorMessage = serverMessage(err) ?? 'Nu am putut trimite cererea. Te rugăm să încerci din nou.';
 		} finally {
 			submitting = false;
 		}
+	}
+
+	/**
+	 * Mesajul trimis de server prin `error(status, mesaj)`. Pe client, command-urile
+	 * remote aruncă `HttpError` din SvelteKit, care NU extinde `Error`: textul stă în
+	 * `body.message`. Fără asta, „Sesiunea a expirat…" (403) sau rate-limit-ul (429)
+	 * s-ar afișa ca eroare generică.
+	 */
+	function serverMessage(err: unknown): string | null {
+		if (!err || typeof err !== 'object') return null;
+		const e = err as { body?: { message?: unknown }; message?: unknown };
+		if (typeof e.body?.message === 'string' && e.body.message) return e.body.message;
+		if (err instanceof Error && err.message) return err.message;
+		return null;
 	}
 
 	function tierLabel(t: Tier) {
@@ -148,6 +178,36 @@
 	}
 </script>
 
+{#snippet footer()}
+	<div class="sq-foot">
+		{#if step > 1}
+			<button type="button" class="sq-btn-ghost" onclick={back} disabled={submitting}>
+				<ChevronLeftIcon size={14} aria-hidden="true" /> Înapoi
+			</button>
+		{:else}
+			<div></div>
+		{/if}
+		<div class={['sq-foot-meta', footerHint && 'sq-foot-warn']} aria-live="polite">
+			{footerHint ?? ''}
+		</div>
+		<!-- Un singur buton pentru Continuă/Trimite: elementul focalizat nu e demontat la schimbarea pasului. -->
+		<button
+			type="button"
+			class="sq-btn-primary"
+			onclick={primaryAction}
+			disabled={submitting || (step === 1 && summary.serviceCount === 0)}
+		>
+			{#if step < 3}
+				Continuă <ChevronRightIcon size={14} aria-hidden="true" />
+			{:else if submitting}
+				Se trimite…
+			{:else}
+				<SendIcon size={14} aria-hidden="true" /> Trimite cererea
+			{/if}
+		</button>
+	</div>
+{/snippet}
+
 <CheckoutModalShell
 	{onClose}
 	canClose={!submitting}
@@ -155,25 +215,28 @@
 	badgeText="Cerere fără obligații"
 	ariaLabel="Cerere de ofertă"
 	flush={!sent}
+	footer={sent ? undefined : footer}
 >
 	{#if sent}
-		<div class="sq-success">
-			<CheckCircleIcon class="sq-success-icon" />
+		<div class="sq-success" role="status">
+			<CheckCircleIcon class="sq-success-icon" aria-hidden="true" />
 			<h2>Cererea a fost trimisă</h2>
 			<p>
-				Am înregistrat oferta pentru <strong>{sentCount} {sentCount === 1 ? 'serviciu' : 'servicii'}</strong>.
+				Am înregistrat cererea pentru <strong>{sentCount} {sentCount === 1 ? 'serviciu' : 'servicii'}</strong>.
 				Echipa One Top Solution te contactează pe <strong>{sentTo}</strong> în cel mai scurt timp.
 			</p>
-			<button type="button" class="sq-btn-primary" onclick={onClose}>Închide</button>
+			<button type="button" class="sq-btn-primary" {@attach focusOnMount} onclick={onClose}>
+				Închide
+			</button>
 		</div>
 	{:else}
-		<div class="sq-stepper" aria-label="Pașii cererii">
+		<ol class="sq-stepper" aria-label="Pașii cererii">
 			{#each STEPS as s, i (s.n)}
-				<div
+				<li
 					class={['sq-step', step === s.n && 'active', step > s.n && 'done']}
 					aria-current={step === s.n ? 'step' : undefined}
 				>
-					<div class="sq-step-circle">
+					<div class="sq-step-circle" aria-hidden="true">
 						{#if step > s.n}
 							<CheckIcon size={14} />
 						{:else if s.n === 1}
@@ -188,17 +251,17 @@
 						<div class="sq-step-num">Pas {s.n}</div>
 						<div>{s.label}</div>
 					</div>
-				</div>
+				</li>
 				{#if i < STEPS.length - 1}
-					<div class={['sq-step-line', step > s.n && 'done']}></div>
+					<li class={['sq-step-line', step > s.n && 'done']} aria-hidden="true"></li>
 				{/if}
 			{/each}
-		</div>
+		</ol>
 
 		<div class="sq-layout">
 			<div class="sq-content">
 				{#if step === 1}
-					<h2 class="sq-h2">Alege serviciile</h2>
+					<h2 class="sq-h2" tabindex="-1" {@attach focusOnMount}>Alege serviciile</h2>
 					<p class="sq-sub">
 						Fiecare serviciu are pachetul lui — combină-le cum ai nevoie. Discountul se aplică
 						automat pe abonamentul lunar când alegi două sau mai multe.
@@ -228,7 +291,7 @@
 											aria-label={`Scoate ${line.name} din ofertă`}
 											onclick={() => cart.remove(line.categorySlug)}
 										>
-											<Trash2Icon size={14} />
+											<Trash2Icon size={14} aria-hidden="true" />
 										</button>
 									</div>
 									{#if cat}
@@ -269,14 +332,14 @@
 												{/if}
 											</span>
 										</span>
-										<span class="sq-add-cta"><PlusIcon size={14} /> Adaugă</span>
+										<span class="sq-add-cta"><PlusIcon size={14} aria-hidden="true" /> Adaugă</span>
 									</button>
 								</li>
 							{/each}
 						</ul>
 					{/if}
 				{:else if step === 2}
-					<h2 class="sq-h2">Datele tale de contact</h2>
+					<h2 class="sq-h2" tabindex="-1" {@attach focusOnMount}>Datele tale de contact</h2>
 					<p class="sq-sub">
 						Le folosim doar ca să-ți trimitem oferta și să te sunăm dacă avem întrebări.
 					</p>
@@ -315,6 +378,8 @@
 								required
 								maxlength="255"
 								autocomplete="email"
+								autocapitalize="off"
+								spellcheck="false"
 								aria-invalid={showEmailError ? 'true' : undefined}
 								aria-describedby={showEmailError ? 'sq-email-err' : undefined}
 							/>
@@ -351,14 +416,14 @@
 								bind:value={note}
 								rows="5"
 								maxlength="2000"
-								placeholder="Industrie, website, obiective, buget media estimat, dată de start..."
+								placeholder="Industrie, website, obiective, buget media estimat, dată de start…"
 							></textarea>
 						</div>
 						<!-- Enter în orice câmp = „Continuă"; butonul vizibil e în footer. -->
 						<button type="submit" class="sq-sr" tabindex="-1" aria-hidden="true">Continuă</button>
 					</form>
 				{:else}
-					<h2 class="sq-h2">Verifică și trimite</h2>
+					<h2 class="sq-h2" tabindex="-1" {@attach focusOnMount}>Verifică și trimite</h2>
 					<p class="sq-sub">
 						Îți pregătim o ofertă personalizată pentru serviciile de mai jos și revenim pe email.
 					</p>
@@ -405,7 +470,7 @@
 					{/if}
 
 					<p class="sq-consent">
-						Trimițând cererea ești de acord să te contactăm pe datele de mai sus. Nu le folosim
+						Trimițând cererea, ești de acord să te contactăm pe datele de mai sus. Nu le folosim
 						pentru altceva.
 					</p>
 				{/if}
@@ -466,41 +531,6 @@
 			</aside>
 		</div>
 	{/if}
-
-	{#snippet footer()}
-		{#if !sent}
-			<div class="sq-foot">
-				{#if step > 1}
-					<button type="button" class="sq-btn-ghost" onclick={back} disabled={submitting}>
-						<ChevronLeftIcon size={14} /> Înapoi
-					</button>
-				{:else}
-					<div></div>
-				{/if}
-				<div class={['sq-foot-meta', footerHint && 'sq-foot-warn']} aria-live="polite">
-					{footerHint ?? ''}
-				</div>
-				{#if step < 3}
-					<button
-						type="button"
-						class="sq-btn-primary"
-						onclick={next}
-						disabled={step === 1 && summary.serviceCount === 0}
-					>
-						Continuă <ChevronRightIcon size={14} />
-					</button>
-				{:else}
-					<button type="button" class="sq-btn-primary" onclick={submit} disabled={submitting}>
-						{#if submitting}
-							Se trimite...
-						{:else}
-							<SendIcon size={14} /> Trimite cererea de ofertă
-						{/if}
-					</button>
-				{/if}
-			</div>
-		{/if}
-	{/snippet}
 </CheckoutModalShell>
 
 <style>
@@ -516,12 +546,17 @@
 	}
 
 	/* ===== Stepper ===== */
+	/* Culorile stepper-ului sunt variantele „închise" ale tokenilor (albastru #0d5cc7,
+	   verde #047857, gri #5f6b7c): pe fundalul #f7f8fa textul de 10–13px are nevoie de
+	   ≥ 4.5:1, pe care #1877f2 / #10b981 / #94a3b8 nu-l ating. */
 	.sq-stepper {
 		/* Corpul coajei derulează; stepper-ul rămâne vizibil sus ca reper. */
 		position: sticky;
 		top: 0;
 		z-index: 2;
+		margin: 0;
 		padding: 22px 28px;
+		list-style: none;
 		border-bottom: 1px solid #e5e9f0;
 		display: flex;
 		align-items: center;
@@ -532,48 +567,44 @@
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		color: #94a3b8;
-	}
-	.sq-step.active {
-		color: #1877f2;
-	}
-	.sq-step.done {
-		color: #10b981;
 	}
 	.sq-step-circle {
 		width: 36px;
 		height: 36px;
 		border-radius: 50%;
 		background: white;
-		border: 2px solid #e5e9f0;
+		border: 2px solid #cbd5e1;
 		display: grid;
 		place-items: center;
-		color: #94a3b8;
-		transition: all 0.15s;
+		color: #5f6b7c;
+		transition:
+			background-color 0.15s,
+			border-color 0.15s,
+			color 0.15s;
 	}
 	.sq-step.active .sq-step-circle {
-		background: #1877f2;
-		border-color: #1877f2;
+		background: #0d5cc7;
+		border-color: #0d5cc7;
 		color: white;
 		box-shadow: 0 4px 12px rgba(24, 119, 242, 0.25);
 	}
 	.sq-step.done .sq-step-circle {
-		background: #10b981;
-		border-color: #10b981;
+		background: #047857;
+		border-color: #047857;
 		color: white;
 	}
 	.sq-step-num {
-		font-size: 10px;
+		font-size: 11px;
 		font-weight: 700;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #94a3b8;
+		color: #5f6b7c;
 	}
 	.sq-step.active .sq-step-num {
-		color: #1877f2;
+		color: #0d5cc7;
 	}
 	.sq-step.done .sq-step-num {
-		color: #10b981;
+		color: #047857;
 	}
 	.sq-step-label > div:last-child {
 		font-size: 13.5px;
@@ -582,7 +613,7 @@
 		margin-top: 1px;
 	}
 	.sq-step.active .sq-step-label > div:last-child {
-		color: #1877f2;
+		color: #0d5cc7;
 	}
 	.sq-step-line {
 		flex: 1;
@@ -592,7 +623,7 @@
 		border-radius: 2px;
 	}
 	.sq-step-line.done {
-		background: #10b981;
+		background: #047857;
 	}
 
 	/* ===== Layout ===== */
@@ -629,12 +660,17 @@
 		margin: 0 0 6px;
 		color: #0b1220;
 	}
+	.sq-h2:focus-visible {
+		outline: 2px solid #1877f2;
+		outline-offset: 4px;
+		border-radius: 4px;
+	}
 	.sq-h3 {
 		font-size: 12px;
 		font-weight: 800;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: #5f6b7c;
 		margin: 26px 0 10px;
 	}
 	.sq-sub {
@@ -754,24 +790,32 @@
 	.sq-segmented button.active {
 		background: white;
 		color: #0b1220;
-		box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+		/* Inelul albastru: starea „apăsat" nu se poate baza doar pe alb vs #f7f8fa. */
+		box-shadow:
+			inset 0 0 0 1.5px #1877f2,
+			0 1px 2px rgba(15, 23, 42, 0.08);
 	}
-	/* Aceleași culori pe tier ca în ServicesCatalog (.sv-tierdot[data-tier]). */
+	/* Aceleași culori pe tier ca în ServicesCatalog (.sv-tierdot[data-tier]) pentru punct
+	   și bordură; pentru TEXT (chip-ul de 11px) folosim variantele închise, ≥ 4.5:1. */
 	.sq-tierdot,
 	.sq-chip {
 		--tier: #94a3b8;
+		--tier-text: #475569;
 	}
 	.sq-tierdot[data-tier='bronze'],
 	.sq-chip[data-tier='bronze'] {
 		--tier: #c2823f;
+		--tier-text: #9a5b1f;
 	}
 	.sq-tierdot[data-tier='gold'],
 	.sq-chip[data-tier='gold'] {
 		--tier: #d4a017;
+		--tier-text: #a16207;
 	}
 	.sq-tierdot[data-tier='platinum'],
 	.sq-chip[data-tier='platinum'] {
 		--tier: #1877f2;
+		--tier-text: #0d5cc7;
 	}
 	.sq-tierdot {
 		width: 8px;
@@ -810,7 +854,7 @@
 		gap: 4px;
 		font-size: 12px;
 		font-weight: 700;
-		color: #1877f2;
+		color: #0d5cc7;
 		white-space: nowrap;
 	}
 
@@ -852,9 +896,17 @@
 		border-color: #1877f2;
 		box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.12);
 	}
+	/* Focus vizibil și pe câmpurile cu eroare (acolo bordura roșie ar masca inelul albastru). */
+	.sq-input:focus-visible {
+		outline: 2px solid #1877f2;
+		outline-offset: 2px;
+	}
 	.sq-input.sq-input-error {
 		border-color: #ef4444;
 		background: #fff5f5;
+	}
+	.sq-input.sq-input-error:focus-visible {
+		outline-color: #b91c1c;
 	}
 	.sq-textarea {
 		resize: vertical;
@@ -864,7 +916,7 @@
 	.sq-hint {
 		font-size: 11.5px;
 		margin-top: 4px;
-		color: #64748b;
+		color: #5f6b7c;
 	}
 	.sq-hint-err {
 		color: #b91c1c;
@@ -884,7 +936,7 @@
 		font-weight: 800;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: #5f6b7c;
 	}
 	.sq-review-list + .sq-review-head {
 		margin-top: 8px;
@@ -909,7 +961,7 @@
 		font-weight: 700;
 		padding: 2px 8px;
 		border-radius: 999px;
-		color: var(--tier);
+		color: var(--tier-text);
 		border: 1px solid color-mix(in srgb, var(--tier) 35%, transparent);
 		background: color-mix(in srgb, var(--tier) 10%, white);
 		white-space: nowrap;
@@ -922,7 +974,7 @@
 		font-size: 13.5px;
 	}
 	.sq-review-dl dt {
-		color: #64748b;
+		color: #5f6b7c;
 	}
 	.sq-review-dl dd {
 		margin: 0;
@@ -950,7 +1002,7 @@
 	.sq-consent {
 		margin: 16px 0 0;
 		font-size: 12px;
-		color: #64748b;
+		color: #5f6b7c;
 		line-height: 1.5;
 	}
 
@@ -958,7 +1010,7 @@
 	.sq-summary-head {
 		font-size: 11px;
 		font-weight: 800;
-		color: #64748b;
+		color: #5f6b7c;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		padding-bottom: 4px;
@@ -966,7 +1018,7 @@
 	.sq-summary-empty {
 		margin: 0;
 		font-size: 13px;
-		color: #64748b;
+		color: #5f6b7c;
 	}
 	.sq-cart-item {
 		padding: 10px 0;
@@ -996,7 +1048,7 @@
 	.sq-cart-price small {
 		font-size: 11px;
 		font-weight: 500;
-		color: #64748b;
+		color: #5f6b7c;
 	}
 	.sq-totals {
 		padding-top: 12px;
@@ -1039,7 +1091,7 @@
 		border-top: 1px solid #e5e9f0;
 		font-size: 11.5px;
 		line-height: 1.5;
-		color: #64748b;
+		color: #5f6b7c;
 	}
 
 	/* ===== Footer & butoane ===== */
@@ -1052,7 +1104,7 @@
 		flex: 1;
 		text-align: center;
 		font-size: 12.5px;
-		color: #64748b;
+		color: #5f6b7c;
 	}
 	.sq-foot-warn {
 		color: #b45309;
@@ -1155,14 +1207,15 @@
 		.sq-stepper {
 			padding: 16px 18px;
 		}
-		.sq-step-label {
-			display: none;
-		}
-		.sq-step.active .sq-step-label {
-			display: block;
-		}
+		/* Etichetele pașilor inactivi rămân pentru cititorul de ecran, doar vizual ascunse. */
+		.sq-step:not(.active) .sq-step-label,
 		.sq-foot-meta {
-			display: none;
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+			white-space: nowrap;
 		}
 		/* Fără textul din mijloc, butonul principal stă la dreapta, ca pe desktop. */
 		.sq-foot > .sq-btn-primary {
@@ -1170,6 +1223,17 @@
 		}
 		.sq-segmented button {
 			padding: 6px 9px;
+		}
+	}
+	@media (max-width: 480px) {
+		/* „Înapoi" + „Trimite cererea" nu încap pe un rând de ~330px. */
+		.sq-foot {
+			flex-wrap: wrap;
+		}
+		.sq-foot > .sq-btn-primary {
+			flex: 1 1 100%;
+			justify-content: center;
+			order: -1;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

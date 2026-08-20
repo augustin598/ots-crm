@@ -37,7 +37,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import ServicesQuoteModal from './ServicesQuoteModal.svelte';
 	import { ServicesCart } from './services-cart.svelte';
-	import { computeQuoteSummary } from '$lib/logic/quote-pricing';
+	import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
 	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
 	import type { Category, Tier } from '$lib/constants/ots-catalog';
 	import type { PublicCatalog, PublicCompany } from './types';
@@ -70,7 +70,11 @@
 	// Se încarcă după montare, ca prima randare să fie identică cu cea de pe server.
 	const cart = new ServicesCart();
 	onMount(() => {
-		cart.load((slug, tier) => bySlug.has(slug) && (catalog.tiers as string[]).includes(tier));
+		// Un item rămâne valid doar dacă tier-ul lui chiar e oferit de categorie.
+		cart.load((slug, tier) => {
+			const cat = bySlug.get(slug);
+			return !!cat && (catalog.tiers as string[]).includes(tier) && isTierOffered(cat, tier as never);
+		});
 	});
 	const cartSummary = $derived(
 		computeQuoteSummary(cart.items, catalog.categories, catalog.discountRules)
@@ -105,8 +109,8 @@
 			<div class="sv-nav-spacer"></div>
 			{#if cart.count > 0}
 				<button type="button" class="sv-nav-cart" onclick={() => (quoteOpen = true)}>
-					<ShoppingBagIcon class="h-4 w-4" />
-					<span>Oferta mea</span>
+					<ShoppingBagIcon class="h-4 w-4" aria-hidden="true" />
+					<span class="sv-nav-cart-label">Oferta mea</span>
 					<i>{cart.count}</i>
 				</button>
 			{/if}
@@ -338,12 +342,13 @@
 		</div>
 	</footer>
 
-	{#if cart.count > 0 && !quoteOpen}
+	<!-- Ascunsă și cât e deschisă comparația: dialogul bits-ui e z-50, bara ar sta peste el. -->
+	{#if cart.count > 0 && !quoteOpen && !compareOpen}
 		<div class="sv-cartbar" role="region" aria-label="Oferta ta">
 			<div class="sv-cartbar-inner">
 				<div class="sv-cartbar-info">
-					<span class="sv-cartbar-count">
-						<ShoppingBagIcon class="h-4 w-4" />
+					<span class="sv-cartbar-count" aria-live="polite">
+						<ShoppingBagIcon class="h-4 w-4" aria-hidden="true" />
 						{cart.count} {cart.count === 1 ? 'serviciu' : 'servicii'}
 					</span>
 					<span class="sv-cartbar-names">
@@ -363,7 +368,7 @@
 					onclick={() => cart.clear()}
 					aria-label="Golește oferta"
 				>
-					<XIcon class="h-4 w-4" />
+					<XIcon class="h-4 w-4" aria-hidden="true" />
 				</button>
 				<button type="button" class="sv-btn sv-btn-primary" onclick={() => (quoteOpen = true)}>
 					Solicită oferta <ArrowRightIcon class="h-4 w-4" />
@@ -1147,7 +1152,8 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		z-index: 60;
+		/* Sub dialogurile bits-ui (z-50), peste conținutul paginii. */
+		z-index: 40;
 		padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
 		background: rgba(255, 255, 255, 0.96);
 		backdrop-filter: blur(10px);
@@ -1263,12 +1269,21 @@
 		.sv-cartbar-names {
 			display: none;
 		}
-		.sv-nav-cart span {
-			display: none;
+		/* Eticheta rămâne în arborele de accesibilitate, doar vizual ascunsă. */
+		.sv-nav-cart-label {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+			white-space: nowrap;
+		}
+		.sv-has-cart .sv-foot {
+			padding-bottom: calc(128px + env(safe-area-inset-bottom));
 		}
 	}
 	/* Bara acoperă ultimele rânduri ale paginii — lăsăm loc sub subsol. */
 	.sv-has-cart .sv-foot {
-		padding-bottom: 96px;
+		padding-bottom: calc(96px + env(safe-area-inset-bottom));
 	}
 </style>

@@ -13,6 +13,7 @@
 	import PackageWizard from '$lib/components/services/PackageWizard.svelte';
 	import ServicesQuoteModal from '../ServicesQuoteModal.svelte';
 	import { ServicesCart } from '../services-cart.svelte';
+	import { isTierOffered, resolveOfferedTier } from '$lib/logic/quote-pricing';
 	import type { Recommendation } from '$lib/logic/wizard-engine';
 	import type { PageData } from './$types';
 
@@ -27,11 +28,13 @@
 	});
 
 	const cart = new ServicesCart();
-	const validSlugs = $derived(new Set(data.catalog.categories.map((c) => c.slug)));
+	const bySlug = $derived(new Map(data.catalog.categories.map((c) => [c.slug, c])));
 	onMount(() => {
-		cart.load(
-			(slug, tier) => validSlugs.has(slug) && (data.catalog.tiers as string[]).includes(tier)
-		);
+		// Un item rămâne valid doar dacă tier-ul lui chiar e oferit de categorie.
+		cart.load((slug, tier) => {
+			const cat = bySlug.get(slug);
+			return !!cat && (data.catalog.tiers as string[]).includes(tier) && isTierOffered(cat, tier as never);
+		});
 	});
 
 	let quoteOpen = $state(false);
@@ -41,7 +44,12 @@
 		// Recomandarea înlocuiește coșul: vizitatorul a cerut explicit acest bundle.
 		cart.clear();
 		for (const slug of rec.bundle.services) {
-			if (validSlugs.has(slug)) cart.set(slug, rec.tier);
+			const cat = bySlug.get(slug);
+			if (!cat) continue;
+			// Wizardul dă un singur tier pe tot bundle-ul, dar nu orice serviciu îl oferă
+			// (ex. Google Ads Setup există doar pe Bronze) — cădem pe tier-ul implicit.
+			const tier = resolveOfferedTier(cat, rec.tier, data.catalog.tiers);
+			if (tier) cart.set(slug, tier);
 		}
 		quoteNote = note;
 		quoteOpen = true;
