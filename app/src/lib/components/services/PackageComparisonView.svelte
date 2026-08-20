@@ -40,6 +40,9 @@
 		onRequest?: (tier: Tier) => void;
 		/** Textul butonului de cerere; `{tier}` e înlocuit cu numele pachetului. */
 		requestLabel?: string;
+		/** Tier-ul deja ales pentru această categorie (coșul de pe /servicii); butonul lui arată `activeLabel`. */
+		activeTier?: Tier | null;
+		activeLabel?: string;
 	};
 
 	let {
@@ -52,7 +55,9 @@
 		hourlyRates,
 		isWebDev = false,
 		onRequest,
-		requestLabel = 'Vreau {tier}'
+		requestLabel = 'Vreau {tier}',
+		activeTier = null,
+		activeLabel = 'În ofertă ✓'
 	}: Props = $props();
 </script>
 
@@ -126,13 +131,16 @@
 								</Popover>
 							{/if}
 							{#if onRequest}
+								{@const isActive = activeTier === tier}
 								<Button
 									class="mt-4 w-full"
 									size="sm"
+									variant={isActive ? 'secondary' : 'default'}
+									aria-pressed={isActive}
 									onclick={() => onRequest(tier)}
 									disabled={price === null && !setup}
 								>
-									{requestLabel.replace('{tier}', tierLabels[tier])}
+									{isActive ? activeLabel : requestLabel.replace('{tier}', tierLabels[tier])}
 								</Button>
 							{/if}
 						</div>
