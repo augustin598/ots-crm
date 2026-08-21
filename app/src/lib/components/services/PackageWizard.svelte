@@ -172,42 +172,37 @@
 	}
 </script>
 
-<div class="container mx-auto px-4 py-6 max-w-4xl">
+<div class="wz">
+	<div class="wz-inner">
 	<div class="mb-6">
-		<a
-			href={backHref}
-			class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-		>
+		<a href={backHref} class="wz-back">
 			<ChevronLeftIcon class="h-4 w-4" />
 			Înapoi la catalog
 		</a>
 	</div>
 
 	{#if step <= TOTAL_STEPS}
-		<div class="mb-8">
-			<div class="flex items-center gap-2 mb-1">
-				<SparklesIcon class="h-3.5 w-3.5 text-primary" />
-				<span class="text-[11px] font-medium uppercase tracking-wider text-primary">
-					Pas {step} din {TOTAL_STEPS}
-				</span>
-			</div>
-			<h1 class="text-3xl font-bold tracking-tight">Ce pachet ți se potrivește?</h1>
-			<p class="text-muted-foreground mt-2">
-				Răspunde la 5 întrebări rapide și primești recomandarea echipei OTS, cu preț estimat.
-			</p>
+		<div class="wz-head">
+			<span class="wz-kicker"><SparklesIcon class="h-3.5 w-3.5" /> Pas {step} din {TOTAL_STEPS}</span>
+			<h1>Ce pachet ți se potrivește?</h1>
+			<p>Răspunde la 5 întrebări rapide și primești recomandarea echipei OTS, cu preț estimat.</p>
 		</div>
 
-		<div class="h-1.5 rounded-full bg-muted mb-8 overflow-hidden">
-			<div
-				class="h-full bg-primary transition-all duration-300"
-				style="width: {progress}%"
-			></div>
+		<div
+			class="wz-progress"
+			role="progressbar"
+			aria-valuenow={step}
+			aria-valuemin={1}
+			aria-valuemax={TOTAL_STEPS}
+			aria-label="Progres wizard"
+		>
+			<div class="wz-progress-bar" style="width: {progress}%"></div>
 		</div>
 
-		<Card class="p-6 mb-6">
+		<div class="wz-card">
 			{#if step === 1}
-				<h2 class="text-xl font-semibold mb-1">Ce tip de business ai?</h2>
-				<p class="text-sm text-muted-foreground mb-5">
+				<h2 class="wz-q">Ce tip de business ai?</h2>
+				<p class="wz-q-hint">
 					Ne ajută să înțelegem contextul și să recomandăm canalele potrivite.
 				</p>
 				<div class="grid gap-2.5">
@@ -215,16 +210,11 @@
 						<button
 							type="button"
 							onclick={() => setBusinessType(opt.value)}
-							class="text-left p-4 rounded-lg border-2 transition-colors cursor-pointer {answers.businessType ===
-							opt.value
-								? 'border-primary bg-primary/5'
-								: 'border-border hover:border-primary/40'}"
+							class="wz-opt" class:is-on={answers.businessType === opt.value}
 						>
 							<div class="flex items-start gap-3">
 								<div
-									class="rounded-lg p-2 shrink-0 {answers.businessType === opt.value
-										? 'bg-primary/15 text-primary'
-										: 'bg-muted/60 text-foreground'}"
+									class="wz-opt-icon"
 								>
 									<WizardOptionIcon icon={opt.icon} class="h-5 w-5" />
 								</div>
@@ -233,7 +223,7 @@
 									<div class="text-xs text-muted-foreground mt-0.5">{opt.hint}</div>
 								</div>
 								{#if answers.businessType === opt.value}
-									<CheckIcon class="h-5 w-5 text-primary shrink-0 mt-0.5" />
+									<CheckIcon class="wz-opt-check" />
 								{/if}
 							</div>
 						</button>
@@ -253,8 +243,8 @@
 			{/if}
 
 			{#if step === 2}
-				<h2 class="text-xl font-semibold mb-1">Care e obiectivul principal?</h2>
-				<p class="text-sm text-muted-foreground mb-5">
+				<h2 class="wz-q">Care e obiectivul principal?</h2>
+				<p class="wz-q-hint">
 					Asta determină canalele și strategia — nu doar trafic, ci trafic care aduce rezultatul
 					dorit.
 				</p>
@@ -263,16 +253,11 @@
 						<button
 							type="button"
 							onclick={() => (answers.goal = opt.value)}
-							class="text-left p-4 rounded-lg border-2 transition-colors cursor-pointer {answers.goal ===
-							opt.value
-								? 'border-primary bg-primary/5'
-								: 'border-border hover:border-primary/40'}"
+							class="wz-opt" class:is-on={answers.goal === opt.value}
 						>
 							<div class="flex items-start gap-3">
 								<div
-									class="rounded-lg p-2 shrink-0 {answers.goal === opt.value
-										? 'bg-primary/15 text-primary'
-										: 'bg-muted/60 text-foreground'}"
+									class="wz-opt-icon"
 								>
 									<WizardOptionIcon icon={opt.icon} class="h-5 w-5" />
 								</div>
@@ -281,7 +266,7 @@
 									<div class="text-xs text-muted-foreground mt-0.5">{opt.description}</div>
 								</div>
 								{#if answers.goal === opt.value}
-									<CheckIcon class="h-5 w-5 text-primary shrink-0 mt-0.5" />
+									<CheckIcon class="wz-opt-check" />
 								{/if}
 							</div>
 						</button>
@@ -290,7 +275,7 @@
 			{/if}
 
 			{#if step === 3}
-				<h2 class="text-xl font-semibold mb-1">Cât alocă pentru buget media (Ads)?</h2>
+				<h2 class="wz-q">Cât alocă pentru buget media (Ads)?</h2>
 				<p class="text-sm text-muted-foreground mb-2">
 					Doar banii care merg către platforme (Google, Meta, TikTok) — managementul OTS se
 					plătește separat.
@@ -312,10 +297,7 @@
 						<button
 							type="button"
 							onclick={() => (answers.mediaBudget = opt.value)}
-							class="relative text-left p-4 rounded-lg border-2 transition-colors cursor-pointer {answers.mediaBudget ===
-							opt.value
-								? 'border-primary bg-primary/5'
-								: 'border-border hover:border-primary/40'}"
+							class="wz-opt" class:is-on={answers.mediaBudget === opt.value}
 						>
 							{#if opt.badge === 'recommended'}
 								<span
@@ -345,7 +327,7 @@
 									<div class="text-xs text-muted-foreground">{opt.note}</div>
 								</div>
 								{#if answers.mediaBudget === opt.value}
-									<CheckIcon class="h-5 w-5 text-primary shrink-0 mt-0.5" />
+									<CheckIcon class="wz-opt-check" />
 								{/if}
 							</div>
 						</button>
@@ -354,8 +336,8 @@
 			{/if}
 
 			{#if step === 4}
-				<h2 class="text-xl font-semibold mb-1">Ce canale te interesează? (opțional)</h2>
-				<p class="text-sm text-muted-foreground mb-5">
+				<h2 class="wz-q">Ce canale te interesează? (opțional)</h2>
+				<p class="wz-q-hint">
 					Bifează ce ai deja în minte. Dacă nu ești sigur, lasă gol — echipa OTS alege ce
 					funcționează pentru obiectivul tău.
 				</p>
@@ -365,9 +347,7 @@
 						<button
 							type="button"
 							onclick={() => toggleService(cat.slug)}
-							class="text-left p-3 rounded-lg border-2 transition-colors cursor-pointer flex items-start gap-3 {selected
-								? 'border-primary bg-primary/5'
-								: 'border-border hover:border-primary/40'}"
+							class="wz-opt wz-opt--row" class:is-on={selected}
 						>
 							<div class="rounded-md bg-muted/60 p-1.5 shrink-0">
 								<CategoryIcon slug={cat.slug} class="h-4 w-4" />
@@ -379,7 +359,7 @@
 								</div>
 							</div>
 							{#if selected}
-								<CheckIcon class="h-4 w-4 text-primary shrink-0 mt-0.5" />
+								<CheckIcon class="wz-opt-check wz-opt-check--sm" />
 							{/if}
 						</button>
 					{/each}
@@ -393,8 +373,8 @@
 			{/if}
 
 			{#if step === 5}
-				<h2 class="text-xl font-semibold mb-1">Status proiect</h2>
-				<p class="text-sm text-muted-foreground mb-5">
+				<h2 class="wz-q">Status proiect</h2>
+				<p class="wz-q-hint">
 					Dacă ai deja conturi configurate, nu plătești din nou setup-ul.
 				</p>
 				<div class="grid gap-2.5">
@@ -402,10 +382,7 @@
 						<button
 							type="button"
 							onclick={() => (answers.projectStatus = opt.value)}
-							class="text-left p-4 rounded-lg border-2 transition-colors cursor-pointer {answers.projectStatus ===
-							opt.value
-								? 'border-primary bg-primary/5'
-								: 'border-border hover:border-primary/40'}"
+							class="wz-opt" class:is-on={answers.projectStatus === opt.value}
 						>
 							<div class="flex items-start justify-between gap-3">
 								<div class="min-w-0">
@@ -413,24 +390,24 @@
 									<div class="text-xs text-muted-foreground mt-0.5">{opt.description}</div>
 								</div>
 								{#if answers.projectStatus === opt.value}
-									<CheckIcon class="h-5 w-5 text-primary shrink-0 mt-0.5" />
+									<CheckIcon class="wz-opt-check" />
 								{/if}
 							</div>
 						</button>
 					{/each}
 				</div>
 			{/if}
-		</Card>
+		</div>
 
-		<div class="flex items-center justify-between gap-3">
-			<Button variant="outline" onclick={prev} disabled={step === 1}>
-				<ChevronLeftIcon class="h-4 w-4 mr-1" />
+		<div class="wz-nav">
+			<button type="button" class="wz-btn wz-btn-ghost" onclick={prev} disabled={step === 1}>
+				<ChevronLeftIcon class="h-4 w-4" />
 				Înapoi
-			</Button>
-			<Button onclick={next} disabled={!canProceed}>
+			</button>
+			<button type="button" class="wz-btn wz-btn-primary" onclick={next} disabled={!canProceed}>
 				{step === TOTAL_STEPS ? 'Vezi recomandarea' : 'Continuă'}
-				<ChevronRightIcon class="h-4 w-4 ml-1" />
-			</Button>
+				<ChevronRightIcon class="h-4 w-4" />
+			</button>
 		</div>
 	{:else if result}
 		<!-- ============= RESULT PAGE ============== -->
@@ -681,7 +658,7 @@
 					<ul class="space-y-1.5">
 						{#each primary.reasonWhy as reason (reason)}
 							<li class="flex items-start gap-2 text-sm">
-								<CheckIcon class="h-4 w-4 text-primary shrink-0 mt-0.5" />
+								<CheckIcon class="wz-opt-check wz-opt-check--sm" />
 								<span>{reason}</span>
 							</li>
 						{/each}
@@ -730,7 +707,7 @@
 		<!-- ALTERNATIVES -->
 		{#if result.alternatives.length > 0}
 			<h2 class="text-xl font-semibold mb-1 mt-10">Alternative de explorat</h2>
-			<p class="text-sm text-muted-foreground mb-5">
+			<p class="wz-q-hint">
 				Dacă recomandarea principală nu e exact ce ai în minte, uite alte 2 variante.
 			</p>
 			<div class="grid gap-4 sm:grid-cols-2">
@@ -801,6 +778,245 @@
 			</p>
 		</section>
 	{/if}
+	</div>
 </div>
 
 <TierQuickGuide bind:open={tierGuideOpen} />
+
+<style>
+	/* Același sistem ca /pachete-hosting și /servicii: Inter, --accent #1877f2,
+	   borduri #e5e9f0, raze de 10px pe butoane și 18px pe carduri.
+
+	   Înainte, wizardul folosea tokenii aplicației (`border-border`,
+	   `text-muted-foreground`, `bg-primary/5`): borduri aproape invizibile și
+	   stare selectată la 5% opacitate, adică imposibil de distins de restul. */
+	.wz {
+		--ink: #0b1220;
+		--ink2: #475569;
+		--muted: #94a3b8;
+		--border: #e5e9f0;
+		--bg-soft: #f7f8fa;
+		--accent: #1877f2;
+		--accent-dark: #0d5cc7;
+		font-family: 'Inter', system-ui, sans-serif;
+		color: var(--ink);
+		background: white;
+		min-height: 100vh;
+		line-height: 1.5;
+	}
+	.wz-inner {
+		max-width: 780px;
+		margin: 0 auto;
+		padding: 28px 24px 72px;
+	}
+
+	.wz-back {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--ink2);
+		text-decoration: none;
+		transition: color 0.15s;
+	}
+	.wz-back:hover {
+		color: var(--accent);
+	}
+
+	/* ===== Antet + progres ===== */
+	.wz-head {
+		margin: 26px 0 22px;
+	}
+	.wz-kicker {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--accent);
+	}
+	.wz-head h1 {
+		margin: 10px 0 0;
+		font-size: 34px;
+		font-weight: 800;
+		letter-spacing: -0.03em;
+		line-height: 1.1;
+	}
+	.wz-head p {
+		margin: 10px 0 0;
+		font-size: 15px;
+		color: var(--ink2);
+		max-width: 60ch;
+	}
+	.wz-progress {
+		height: 6px;
+		border-radius: 999px;
+		background: var(--bg-soft);
+		border: 1px solid var(--border);
+		overflow: hidden;
+		margin-bottom: 26px;
+	}
+	.wz-progress-bar {
+		height: 100%;
+		background: var(--accent);
+		border-radius: 999px;
+		transition: width 0.3s ease;
+	}
+
+	/* ===== Cardul întrebării ===== */
+	.wz-card {
+		background: white;
+		border: 1px solid var(--border);
+		border-radius: 18px;
+		padding: 28px;
+		margin-bottom: 20px;
+	}
+	.wz-q {
+		margin: 0;
+		font-size: 20px;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+	}
+	.wz-q-hint {
+		margin: 8px 0 22px;
+		font-size: 14px;
+		color: var(--ink2);
+	}
+
+	/* ===== Opțiuni ===== */
+	.wz-opt {
+		position: relative;
+		display: block;
+		width: 100%;
+		padding: 16px;
+		text-align: left;
+		background: white;
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		font-family: inherit;
+		color: inherit;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.wz-opt--row {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+		padding: 14px;
+	}
+	.wz-opt:hover {
+		border-color: var(--accent);
+		background: #f6faff;
+	}
+	.wz-opt:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	/* Starea selectată trebuie să se vadă de la un metru: bordură plină de accent,
+	   fundal albastru pal și inel exterior. */
+	.wz-opt.is-on {
+		border-color: var(--accent);
+		background: #f6faff;
+		box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.14);
+	}
+	.wz-opt-icon {
+		display: grid;
+		place-items: center;
+		flex-shrink: 0;
+		width: 40px;
+		height: 40px;
+		border-radius: 10px;
+		background: var(--bg-soft);
+		border: 1px solid var(--border);
+		color: var(--ink2);
+		transition: all 0.15s;
+	}
+	.wz-opt.is-on .wz-opt-icon {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: white;
+	}
+	.wz :global(.wz-opt-check) {
+		flex-shrink: 0;
+		width: 20px;
+		height: 20px;
+		margin-top: 2px;
+		color: var(--accent);
+	}
+	.wz :global(.wz-opt-check--sm) {
+		width: 16px;
+		height: 16px;
+	}
+
+	/* ===== Navigare ===== */
+	.wz-nav {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.wz-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 12px 20px;
+		border-radius: 10px;
+		font-family: inherit;
+		font-size: 13.5px;
+		font-weight: 700;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.wz-btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.wz-btn-ghost {
+		background: white;
+		color: var(--ink);
+		border: 1px solid var(--border);
+	}
+	.wz-btn-ghost:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.wz-btn-primary {
+		background: var(--accent);
+		color: white;
+		border: 1px solid var(--accent);
+		box-shadow: 0 6px 18px rgba(24, 119, 242, 0.22);
+	}
+	.wz-btn-primary:hover:not(:disabled) {
+		background: var(--accent-dark);
+		border-color: var(--accent-dark);
+	}
+	.wz-btn-primary:disabled {
+		box-shadow: none;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.wz-opt,
+		.wz-btn,
+		.wz-progress-bar {
+			transition: none;
+		}
+	}
+	@media (max-width: 640px) {
+		.wz-inner {
+			padding: 20px 16px 56px;
+		}
+		.wz-head h1 {
+			font-size: 26px;
+		}
+		.wz-card {
+			padding: 20px;
+		}
+		.wz-nav .wz-btn {
+			flex: 1;
+			justify-content: center;
+		}
+	}
+</style>
