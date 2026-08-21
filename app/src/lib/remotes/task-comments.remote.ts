@@ -187,8 +187,15 @@ export const getTaskComments = query(
 			if (r.userId === event.locals.user!.id) byEmoji[r.emoji].mine = true;
 		}
 
+		// Telefonul e aici doar ca să se caute avatarul, iar ruta de avatar e
+		// inaccesibilă din portalul clientului. Pentru un utilizator de portal
+		// câmpul n-ar face nimic, dar i-ar da numerele personale ale angajaților
+		// care au comentat, vizibile în răspunsul cererii. Îl scoatem.
+		const isPortal = !!(event.locals.isClientUser && event.locals.client);
+
 		return comments.map(c => ({
 			...c,
+			authorPhone: isPortal ? null : c.authorPhone,
 			authorName: `${c.authorName || ''} ${c.authorLastName || ''}`.trim() || c.authorEmail || c.userId,
 			attachments: attachmentsByComment.get(c.id) || [],
 			reactions: reactionsByComment.get(c.id) || {}
