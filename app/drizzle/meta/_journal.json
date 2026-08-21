@@ -3366,6 +3366,34 @@
       "when": 1785398836928442,
       "tag": "0483_client_secondary_email_tenant_email_uidx",
       "breakpoints": true
+    },
+    {
+      "idx": 484,
+      "version": "6",
+      "when": 1785398836928458,
+      "tag": "0484_task_whatsapp_group_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 485,
+      "version": "6",
+      "when": 1785398836928459,
+      "tag": "0485_whatsapp_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 486,
+      "version": "6",
+      "when": 1785398836928460,
+      "tag": "0486_whatsapp_outbox_tenant_status_next_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 487,
+      "version": "6",
+      "when": 1785398836928461,
+      "tag": "0487_whatsapp_outbox_tenant_dedupe_idx",
+      "breakpoints": true
     }
   ]
 }

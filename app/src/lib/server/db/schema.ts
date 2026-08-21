@@ -324,6 +324,12 @@ export const task = sqliteTable('task', {
 	meetDurationMinutes: integer('meet_duration_minutes'), // e.g. 30, 60
 	meetLink: text('meet_link'),
 	googleCalendarEventId: text('google_calendar_event_id'),
+	/**
+	 * Grupul WhatsApp care primește schimbările de status și mențiunile
+	 * task-ului. Referință la rând (nu la JID) ca să avem subiect, membri,
+	 * avatar și `watched` dintr-un singur join. Doar owner/admin îl setează.
+	 */
+	whatsappGroupId: text('whatsapp_group_id').references(() => whatsappGroup.id),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -4883,6 +4889,44 @@ export const whatsappGroupRelations = relations(whatsappGroup, ({ one }) => ({
 		references: [client.id]
 	})
 }));
+
+/**
+ * Mesaje de trimis într-un grup WhatsApp, scrise de orice instanță și golite
+ * doar de instanța care ține socketul Baileys (vezi `whatsapp/outbox.ts`).
+ * `dedupe_key` leagă rândurile aceluiași task + grup + fel, pentru coalescere.
+ * Stări: queued → sending → sent | failed | expired.
+ */
+export const whatsappOutbox = sqliteTable(
+	'whatsapp_outbox',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		groupJid: text('group_jid').notNull(),
+		kind: text('kind').notNull(), // 'task.status' | 'task.mention'
+		dedupeKey: text('dedupe_key'),
+		taskId: text('task_id').references(() => task.id),
+		body: text('body').notNull(),
+		mentionsJson: jsonb('mentions_json').$type<string[]>(),
+		status: text('status').notNull().default('queued'),
+		attempts: integer('attempts').notNull().default(0),
+		nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true, mode: 'date' }).notNull(),
+		sentAt: timestamp('sent_at', { withTimezone: true, mode: 'date' }),
+		wamId: text('wam_id'),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantStatusNext: index('whatsapp_outbox_tenant_status_next_idx').on(t.tenantId, t.status, t.nextAttemptAt),
+		tenantDedupe: index('whatsapp_outbox_tenant_dedupe_idx').on(t.tenantId, t.dedupeKey)
+	})
+);
 
 export const whatsappSessionRelations = relations(whatsappSession, ({ one, many }) => ({
 	tenant: one(tenant, {
