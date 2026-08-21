@@ -17,7 +17,13 @@ import type { TaskStatusChangedEvent } from '$lib/server/plugins/types';
 import { enqueueGroupMessage } from './outbox';
 import { statusDedupeKey } from './outbox-policy';
 import { getUserWhatsappPhonesBatch } from './resolve-phone';
-import { buildLinkedTaskMessage, buildMentionMessage, buildStatusMessage, notifiesGroup } from './task-messages';
+import {
+	buildApprovalMessage,
+	buildLinkedTaskMessage,
+	buildMentionMessage,
+	buildStatusMessage,
+	notifiesGroup
+} from './task-messages';
 
 /**
  * Linkul din grup e cel din portalul clientului, nu din admin: în grup sunt
@@ -63,13 +69,22 @@ export async function notifyTaskStatusChangedInGroup(event: TaskStatusChangedEve
 	if (!groupJid) return;
 
 	const actorName = await userDisplayName(event.changedByUserId);
-	const body = buildStatusMessage({
-		taskTitle: event.taskTitle,
-		actorName,
-		oldStatus: event.oldStatus,
-		newStatus: event.newStatus,
-		taskUrl: taskUrl(event.tenantSlug, event.taskId)
-	});
+	// Aprobarea are mesaj propriu: „acceptat" + termenul, nu „a trecut în De făcut".
+	const body =
+		event.reason === 'approval'
+			? buildApprovalMessage({
+					taskTitle: event.taskTitle,
+					actorName,
+					dueDate: event.dueDate ?? null,
+					taskUrl: taskUrl(event.tenantSlug, event.taskId)
+				})
+			: buildStatusMessage({
+					taskTitle: event.taskTitle,
+					actorName,
+					oldStatus: event.oldStatus,
+					newStatus: event.newStatus,
+					taskUrl: taskUrl(event.tenantSlug, event.taskId)
+				});
 
 	await enqueueGroupMessage({
 		tenantId: event.tenantId,

@@ -140,6 +140,10 @@ export type TaskStatusChangedEvent = {
 	newStatus: string;
 	changedByUserId: string;
 	clientId: string | null;
+	/** `approval` cere un mesaj propriu („acceptat"), nu cel generic de status. */
+	reason?: 'approval';
+	/** Termenul pus chiar la aprobare, ca să ajungă în anunț. */
+	dueDate?: Date | null;
 	tenantId: string;
 	tenantSlug: string;
 };

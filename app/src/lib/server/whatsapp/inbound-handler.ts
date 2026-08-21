@@ -212,7 +212,7 @@ export async function handleInbound(
 				? new Date(Number(msg.messageTimestamp) * 1000)
 				: new Date();
 
-			await db
+			const inserted = await db
 				.insert(table.whatsappMessage)
 				.values({
 					id: generateId(),
@@ -240,6 +240,29 @@ export async function handleInbound(
 					updatedAt: new Date()
 				})
 				.onConflictDoNothing();
+
+			// Comanda „/task …" se execută o singură dată per mesaj: dacă rândul
+			// exista deja (Baileys livrează același `wamId` și cu type `append`,
+			// și la reconectare), insertul nu afectează nimic și sărim.
+			const isNewRow = (inserted as { rowsAffected?: number })?.rowsAffected !== 0;
+			if (isGroup && !isHistory && !fromMe && isNewRow) {
+				try {
+					const { handleTaskCommand } = await import('./task-command');
+					await handleTaskCommand({
+						tenantId,
+						groupJid: chatJid,
+						senderPhoneE164: sender.phoneE164,
+						wamId,
+						body
+					});
+				} catch (err) {
+					// O comandă picată nu trebuie să oprească procesarea mesajului.
+					logError('whatsapp', 'handleTaskCommand failed', {
+						tenantId,
+						metadata: { err: err instanceof Error ? err.message : String(err), wamId }
+					});
+				}
+			}
 
 			if (!isHistory) {
 				logInfo('whatsapp', `Message stored (${direction})`, {

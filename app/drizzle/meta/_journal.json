@@ -3394,6 +3394,20 @@
       "when": 1785398836928461,
       "tag": "0487_whatsapp_outbox_tenant_dedupe_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 488,
+      "version": "6",
+      "when": 1785398836928462,
+      "tag": "0488_task_source_wam_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 489,
+      "version": "6",
+      "when": 1785398836928463,
+      "tag": "0489_task_tenant_source_wam_uidx",
+      "breakpoints": true
     }
   ]
 }

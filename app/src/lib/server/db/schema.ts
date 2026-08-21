@@ -330,6 +330,13 @@ export const task = sqliteTable('task', {
 	 * avatar și `watched` dintr-un singur join. Doar owner/admin îl setează.
 	 */
 	whatsappGroupId: text('whatsapp_group_id').references(() => whatsappGroup.id),
+	/**
+	 * `wam_id`-ul mesajului WhatsApp „/task …" din care s-a născut task-ul.
+	 * Unic per tenant: Baileys poate livra același mesaj de două ori
+	 * (`messages.upsert` cu type `append`, reconectare), iar fără indexul ăsta
+	 * o retrimitere ar crea al doilea task identic.
+	 */
+	sourceWamId: text('source_wam_id'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -341,7 +348,8 @@ export const task = sqliteTable('task', {
 	index('task_tenant_client_idx').on(t.tenantId, t.clientId),
 	index('task_tenant_project_idx').on(t.tenantId, t.projectId),
 	index('task_tenant_created_idx').on(t.tenantId, t.createdAt),
-	index('task_client_idx').on(t.clientId)
+	index('task_client_idx').on(t.clientId),
+	uniqueIndex('task_tenant_source_wam_uidx').on(t.tenantId, t.sourceWamId)
 ]);
 
 // Emailuri Gmail asociate unui task. Metadatele (subiect/expeditor/dată/snippet)

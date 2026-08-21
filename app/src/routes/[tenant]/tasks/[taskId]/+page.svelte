@@ -12,6 +12,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import TaskWhatsappGroupCard from '$lib/components/task-detail/task-whatsapp-group-card.svelte';
+	import TaskApproveDialog from '$lib/components/task-detail/task-approve-dialog.svelte';
 	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Reply, Repeat } from '@lucide/svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { formatStatus, getStatusBadgeVariant, getPriorityColor, getPriorityDotColor, formatPriority, formatDate, getActivityValueColor } from '$lib/components/task-kanban-utils';
@@ -255,14 +256,26 @@
 		}
 	}
 
-	async function handleApprove() {
+	let showApproveDialog = $state(false);
+
+	const currentDueDateIso = $derived.by(() => {
+		const d = task?.dueDate;
+		if (!d) return null;
+		const date = typeof d === 'string' ? new Date(d) : d;
+		if (Number.isNaN(date.getTime())) return null;
+		return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	});
+
+	async function handleApprove(dueDate: string | null) {
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await approveTask({ taskId: task.id }).updates(getTask(taskId), getTasks({}));
-			toast.success('Task approved');
+			await approveTask({ taskId: task.id, dueDate }).updates(getTask(taskId), getTasks({}));
+			showApproveDialog = false;
+			toast.success(dueDate ? 'Task aprobat, cu termen' : 'Task aprobat');
 		} catch (e) {
 			clientLogger.apiError('task_approve', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la aprobare');
 		} finally {
 			approvalLoading = false;
 		}
@@ -319,9 +332,13 @@
 			</div>
 			<div class="flex items-center gap-2">
 				{#if task.status === 'pending-approval'}
-					<Button variant="default" onclick={handleApprove} disabled={approvalLoading}>
+					<Button
+						variant="default"
+						onclick={() => (showApproveDialog = true)}
+						disabled={approvalLoading}
+					>
 						<Check class="mr-2 h-4 w-4" />
-						Approve
+						Aprobă
 					</Button>
 					<Button variant="destructive" size="sm" onclick={handleReject} disabled={approvalLoading}>
 						<X class="mr-2 h-4 w-4" />
@@ -336,6 +353,15 @@
 				</Button>
 			</div>
 		</div>
+
+		<TaskApproveDialog
+			bind:open={showApproveDialog}
+			taskTitle={task.title}
+			currentDueDate={currentDueDateIso}
+			loading={approvalLoading}
+			onCancel={() => (showApproveDialog = false)}
+			onConfirm={handleApprove}
+		/>
 
 		<div class="grid gap-6 md:grid-cols-2">
 			<Card>

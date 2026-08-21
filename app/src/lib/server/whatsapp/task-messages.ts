@@ -16,13 +16,23 @@ const STATUS_RO: Record<string, { label: string; emoji: string }> = {
 	cancelled: { label: 'Anulat', emoji: '🚫' }
 };
 
+/**
+ * Etichete pentru statusuri care NU declanșează un mesaj propriu, dar pot
+ * apărea ca status vechi în „(din …)". Ținute separat de `STATUS_RO`, fiindcă
+ * `notifiesGroup` se uită acolo: mutate aici, ar face grupul să anunțe și
+ * intrarea în aprobare.
+ */
+const EXTRA_LABELS: Record<string, string> = {
+	'pending-approval': 'Așteaptă aprobare'
+};
+
 /** `pending-approval` e pas intern de aprobare; nu se anunță în grup. */
 export function notifiesGroup(status: string): boolean {
 	return status in STATUS_RO;
 }
 
 export function statusLabelRo(status: string): string {
-	return STATUS_RO[status]?.label ?? status;
+	return STATUS_RO[status]?.label ?? EXTRA_LABELS[status] ?? status;
 }
 
 function cleanInline(text: string): string {
@@ -138,4 +148,27 @@ export function buildMentionMessage(input: {
 		(snippet ? `„${snippet}"\n` : '') +
 		input.taskUrl;
 	return { text, mentions };
+}
+
+/** Confirmarea imediată în grup, ca omul să știe că mesajul a fost înregistrat. */
+export function buildTaskCommandAck(input: { taskTitle: string; authorName: string }): string {
+	return `📥 Am notat de la ${cleanInline(input.authorName)}: „${cleanInline(input.taskTitle)}". Așteaptă aprobare.`;
+}
+
+/**
+ * Aprobarea are mesaj propriu, nu cel generic de status: „acceptat" spune ce
+ * s-a întâmplat, iar termenul e informația pe care o așteaptă clientul.
+ */
+export function buildApprovalMessage(input: {
+	taskTitle: string;
+	actorName: string;
+	dueDate: Date | null;
+	taskUrl: string;
+}): string {
+	return (
+		`✅ *${cleanInline(input.taskTitle)}*\n` +
+		`${cleanInline(input.actorName)} a acceptat task-ul.\n` +
+		(input.dueDate ? `Termen: ${formatDateRo(input.dueDate)}\n` : '') +
+		input.taskUrl
+	);
 }

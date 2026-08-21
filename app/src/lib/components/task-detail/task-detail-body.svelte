@@ -84,6 +84,7 @@
 	import TaskActivityTimeline from './task-activity-timeline.svelte';
 	import TaskEmailSection from './task-email-section.svelte';
 	import TaskWhatsappGroupCard from './task-whatsapp-group-card.svelte';
+	import TaskApproveDialog from './task-approve-dialog.svelte';
 
 	interface Props {
 		task: (Task & { subtasks?: any[]; tags?: any[]; assignees?: any[] }) | null;
@@ -430,12 +431,25 @@
 		saveField('dueDate', iso as any);
 	}
 
-	async function handleApprove() {
+	// Aprobarea trece printr-un dialog, ca termenul („când va fi gata") să poată
+	// pleca odată cu anunțul în grupul WhatsApp al task-ului.
+	let showApproveDialog = $state(false);
+
+	const currentDueDateIso = $derived.by(() => {
+		const d = currentTask?.dueDate;
+		if (!d) return null;
+		const date = typeof d === 'string' ? new Date(d) : d;
+		if (Number.isNaN(date.getTime())) return null;
+		return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	});
+
+	async function handleApprove(dueDate: string | null) {
 		if (!task) return;
 		approvalLoading = true;
 		try {
-			await approveTask({ taskId: task.id }).updates(...detailRefreshTargets());
-			toast.success('Task aprobat');
+			await approveTask({ taskId: task.id, dueDate }).updates(...detailRefreshTargets());
+			showApproveDialog = false;
+			toast.success(dueDate ? 'Task aprobat, cu termen' : 'Task aprobat');
 			onClose();
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : 'Eroare');
@@ -1219,7 +1233,7 @@
 						Redeschide task
 					</Button>
 				{:else if !isClient && currentTask.status === 'pending-approval'}
-					<Button onclick={handleApprove} disabled={approvalLoading}>
+					<Button onclick={() => (showApproveDialog = true)} disabled={approvalLoading}>
 						<Check class="mr-2 h-4 w-4" />
 						Aprobă
 					</Button>
@@ -1240,6 +1254,15 @@
 		</div>
 
 		<!-- MEET MODAL (panel only) -->
+		<TaskApproveDialog
+			bind:open={showApproveDialog}
+			taskTitle={currentTask.title}
+			currentDueDate={currentDueDateIso}
+			loading={approvalLoading}
+			onCancel={() => (showApproveDialog = false)}
+			onConfirm={handleApprove}
+		/>
+
 		{#if showMeetModal}
 			<div
 				class="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
@@ -1445,7 +1468,12 @@
 					</div>
 					<div class="flex shrink-0 items-center gap-2">
 						{#if currentTask.status === 'pending-approval'}
-							<Button variant="default" size="sm" onclick={handleApprove} disabled={approvalLoading}>
+							<Button
+								variant="default"
+								size="sm"
+								onclick={() => (showApproveDialog = true)}
+								disabled={approvalLoading}
+							>
 								<Check class="mr-2 h-4 w-4" /> Aprobă
 							</Button>
 							<Button variant="destructive" size="sm" onclick={handleReject} disabled={approvalLoading}>

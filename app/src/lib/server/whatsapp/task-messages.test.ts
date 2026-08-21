@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
+	buildApprovalMessage,
 	buildLinkedTaskMessage,
+	buildTaskCommandAck,
 	buildMentionMessage,
 	buildStatusMessage,
 	notifiesGroup,
@@ -205,5 +207,61 @@ describe('mesajul de prezentare la legarea task-ului', () => {
 			taskUrl: url
 		});
 		expect(text.split('\n')[2]).toBe('Termen: 1 sept. 2026');
+	});
+});
+
+describe('confirmarea comenzii /task', () => {
+	it('spune ce a fost notat și că urmează aprobarea', () => {
+		expect(
+			buildTaskCommandAck({ taskTitle: 'Refacem bannerele', authorName: 'Claudia Darie' })
+		).toBe('📥 Am notat de la Claudia Darie: „Refacem bannerele". Așteaptă aprobare.');
+	});
+});
+
+describe('mesajul de acceptare', () => {
+	it('cu termen', () => {
+		expect(
+			buildApprovalMessage({
+				taskTitle: 'Refacem bannerele',
+				actorName: 'Augustin Constantin',
+				dueDate: new Date('2026-08-28T00:00:00Z'),
+				taskUrl: url
+			})
+		).toBe(
+			'✅ *Refacem bannerele*\n' +
+				'Augustin Constantin a acceptat task-ul.\n' +
+				'Termen: 28 aug. 2026\n' +
+				url
+		);
+	});
+
+	it('fără termen, rândul lipsește', () => {
+		expect(
+			buildApprovalMessage({
+				taskTitle: 'T',
+				actorName: 'A',
+				dueDate: null,
+				taskUrl: url
+			})
+		).toBe('✅ *T*\nA a acceptat task-ul.\n' + url);
+	});
+});
+
+describe('eticheta statusului de aprobare', () => {
+	it('pending-approval are nume în română, dar NU declanșează mesaj în grup', () => {
+		expect(statusLabelRo('pending-approval')).toBe('Așteaptă aprobare');
+		expect(notifiesGroup('pending-approval')).toBe(false);
+	});
+
+	it('la aprobare, rândul „din" nu mai arată slugul englezesc', () => {
+		const text = buildStatusMessage({
+			taskTitle: 'T',
+			actorName: 'A',
+			oldStatus: 'pending-approval',
+			newStatus: 'todo',
+			taskUrl: url
+		});
+		expect(text).toContain('(din Așteaptă aprobare)');
+		expect(text).not.toContain('pending-approval');
 	});
 });

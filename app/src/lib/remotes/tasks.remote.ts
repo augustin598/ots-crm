@@ -135,6 +135,8 @@ async function emitTaskStatusChanged(args: {
 	changedByUserId: string;
 	tenantId: string;
 	tenantSlug: string;
+	reason?: 'approval';
+	dueDate?: Date | null;
 }): Promise<void> {
 	if (!args.oldStatus || args.oldStatus === args.newStatus) return;
 	try {
@@ -152,6 +154,8 @@ async function emitTaskStatusChanged(args: {
 			newStatus: args.newStatus,
 			changedByUserId: args.changedByUserId,
 			clientId: row.clientId ?? null,
+			reason: args.reason,
+			dueDate: args.dueDate,
 			tenantId: args.tenantId,
 			tenantSlug: args.tenantSlug
 		});
@@ -2660,9 +2664,11 @@ export const isWatchingTask = query(v.pipe(v.string(), v.minLength(1)), async (t
 export const approveTask = command(
 	v.object({
 		taskId: v.pipe(v.string(), v.minLength(1)),
-		newStatus: v.optional(v.picklist(['todo', 'in-progress', 'review', 'done']))
+		newStatus: v.optional(v.picklist(['todo', 'in-progress', 'review', 'done'])),
+		/** „YYYY-MM-DD", opțional: dacă e pus, ajunge și în anunțul din grup. */
+		dueDate: v.optional(v.nullable(v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/))))
 	}),
-	async ({ taskId, newStatus }) => {
+	async ({ taskId, newStatus, dueDate }) => {
 		const event = getRequestEvent();
 		if (!event?.locals.user || !event?.locals.tenant) {
 			throw new Error('Unauthorized');
@@ -2690,10 +2696,20 @@ export const approveTask = command(
 		// Update status to newStatus or default to 'todo'
 		const status = newStatus || 'todo';
 
+		// Data vine ca zi calendaristică; o construim ca oră locală, ca filtrele
+		// pe `due_date` să n-o vadă decalată cu o zi.
+		const parsedDueDate = dueDate
+			? (() => {
+					const [y, m, d] = dueDate.split('-').map(Number);
+					return new Date(y, m - 1, d);
+				})()
+			: undefined;
+
 		await db
 			.update(table.task)
 			.set({
 				status,
+				...(parsedDueDate ? { dueDate: parsedDueDate } : {}),
 				updatedAt: new Date()
 			})
 			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
@@ -2718,7 +2734,9 @@ export const approveTask = command(
 			newStatus: status,
 			changedByUserId: event.locals.user.id,
 			tenantId: event.locals.tenant.id,
-			tenantSlug: event.locals.tenant.slug
+			tenantSlug: event.locals.tenant.slug,
+			reason: 'approval',
+			dueDate: parsedDueDate ?? existing.dueDate ?? null
 		});
 
 		return { success: true, taskId };
