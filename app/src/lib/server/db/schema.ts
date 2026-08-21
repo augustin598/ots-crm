@@ -4738,8 +4738,27 @@ export const whatsappMessage = sqliteTable('whatsapp_message', {
 		.references(() => whatsappSession.id),
 	clientId: text('client_id').references(() => client.id),
 	direction: text('direction').notNull(), // 'inbound' | 'outbound'
-	remoteJid: text('remote_jid').notNull(), // '40722123456@s.whatsapp.net'
-	remotePhoneE164: text('remote_phone_e164').notNull(), // '+40722123456'
+	remoteJid: text('remote_jid').notNull(), // '40722123456@s.whatsapp.net' sau '1203…@g.us'
+	/**
+	 * Adresa conversației, nu neapărat un telefon.
+	 *
+	 * La `chat_type = 'direct'` e telefonul celuilalt („+40722123456"). La
+	 * `chat_type = 'group'` e JID-ul grupului („1203…@g.us"), fiindcă un grup
+	 * n-are un singur număr. Coloana e NOT NULL de la început, iar SQLite nu poate
+	 * scoate un NOT NULL fără reconstruirea tabelei; runnerul de migrări rulează
+	 * câte un statement pe fișier, deci o cădere între DROP și RENAME ar lăsa baza
+	 * fără tabel. Coloana era oricum cheia de conversație în tot codul de citire.
+	 *
+	 * Nu o trece prin `jidToE164()` fără să verifici `chatType`: pe un JID de grup
+	 * funcția întoarce un telefon fals și plauzibil, „+1203…".
+	 */
+	remotePhoneE164: text('remote_phone_e164').notNull(),
+	chatType: text('chat_type').notNull().default('direct'), // 'direct' | 'group'
+	/** Expeditorul, doar la mesajele de grup. JID brut, poate fi LID („…@lid"). */
+	senderJid: text('sender_jid'),
+	/** Telefonul expeditorului, când s-a putut rezolva din LID sau din PN. */
+	senderPhoneE164: text('sender_phone_e164'),
+	senderPushName: text('sender_push_name'),
 	wamId: text('wam_id').notNull(), // Baileys key.id
 	messageType: text('message_type').notNull().default('text'),
 	body: text('body'),
@@ -4782,10 +4801,66 @@ export const whatsappContact = sqliteTable('whatsapp_contact', {
 		.default(sql`current_timestamp`)
 });
 
+/**
+ * Grupurile WhatsApp în care e contul conectat, cu cele bifate pentru inbox.
+ *
+ * De ce e nevoie de o listă bifată: contul e în zeci de grupuri, unele cu peste o
+ * mie de membri. Dacă le-am trage pe toate, inboxul ar deveni de necitit, iar
+ * media lor ar umple stocarea. Doar `watched = true` ajunge în `whatsapp_message`.
+ *
+ * `participantsJson` e fotografia membrilor de la ultimul `listGroups()`. O ținem
+ * ca să traducem LID-urile opace („84027092512961@lid") în telefon fără să mai
+ * cerem metadate de la WhatsApp la fiecare mesaj: traficul care arată a scanare
+ * riscă banarea sesiunii.
+ */
+export const whatsappGroup = sqliteTable(
+	'whatsapp_group',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		groupJid: text('group_jid').notNull(), // '120363…@g.us'
+		subject: text('subject').notNull().default(''),
+		participantCount: integer('participant_count').notNull().default(0),
+		/** Bifat de admin. Doar grupurile bifate se stochează și apar în inbox. */
+		watched: boolean('watched').notNull().default(false),
+		/** Legătură manuală, propusă după numerele membrilor, confirmată de om. */
+		clientId: text('client_id').references(() => client.id),
+		participantsJson: jsonb('participants_json').$type<
+			Array<{ rawId: string; phone: string | null; pushName: string | null }>
+		>(),
+		avatarPath: text('avatar_path'),
+		avatarMimeType: text('avatar_mime_type'),
+		avatarFetchedAt: timestamp('avatar_fetched_at', { withTimezone: true, mode: 'date' }),
+		lastSyncedAt: timestamp('last_synced_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		uniqJid: uniqueIndex('whatsapp_group_tenant_jid_uidx').on(t.tenantId, t.groupJid)
+	})
+);
+
 export const whatsappContactRelations = relations(whatsappContact, ({ one }) => ({
 	tenant: one(tenant, {
 		fields: [whatsappContact.tenantId],
 		references: [tenant.id]
+	})
+}));
+
+export const whatsappGroupRelations = relations(whatsappGroup, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [whatsappGroup.tenantId],
+		references: [tenant.id]
+	}),
+	client: one(client, {
+		fields: [whatsappGroup.clientId],
+		references: [client.id]
 	})
 }));
 
