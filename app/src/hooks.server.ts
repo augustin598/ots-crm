@@ -176,7 +176,9 @@ export const init = async () => {
 	await ensureSchedulerInitialized();
 	// Sync BNR rates if not already synced today (works even without Redis scheduler)
 	await ensureBnrRatesSynced();
-	// Restore WhatsApp sessions (Baileys) — guarded against HMR re-runs
+	// Preia socketul WhatsApp pentru sesiunile rămase fără stăpân viu și pornește
+	// bucla care repetă încercarea (vezi `session-lease.ts`). Instanța care are
+	// deja socketul ține lease-ul, deci pod-urile nu se mai bat pe el la rollout.
 	if (!gt[WHATSAPP_INIT_SYMBOL]) {
 		gt[WHATSAPP_INIT_SYMBOL] = true;
 		restoreWhatsappSessions().catch((e) => {

@@ -15,6 +15,15 @@ import { enqueueFetch, dropTenant } from './avatar-fetcher';
 import { humanizedDelay } from './rate-limiter';
 import { startOutboxLoop, stopOutboxLoop } from './outbox';
 import { e164ToJid, jidToE164 } from './phone';
+import {
+	ENSURE_INTERVAL_MS,
+	HEARTBEAT_INTERVAL_MS,
+	claimLease,
+	instanceId,
+	listOrphanSessions,
+	releaseLease,
+	renewLease
+} from './session-lease';
 
 const SILENT_LOGGER = pino({ level: 'silent' });
 
@@ -27,6 +36,8 @@ type ActiveSession = {
 
 const SESSIONS_SYMBOL = Symbol.for('ots_crm_whatsapp_sessions');
 const STARTING_SYMBOL = Symbol.for('ots_crm_whatsapp_starting');
+const HEARTBEATS_SYMBOL = Symbol.for('ots_crm_whatsapp_heartbeats');
+const ENSURE_SYMBOL = Symbol.for('ots_crm_whatsapp_ensure_loop');
 const GT = globalThis as unknown as Record<symbol, unknown>;
 
 const sessions: Map<string, ActiveSession> =
@@ -36,6 +47,59 @@ const sessions: Map<string, ActiveSession> =
 const starting: Map<string, Promise<ActiveSession>> =
 	(GT[STARTING_SYMBOL] as Map<string, Promise<ActiveSession>>) ??
 	(GT[STARTING_SYMBOL] = new Map<string, Promise<ActiveSession>>());
+
+const heartbeats: Map<string, ReturnType<typeof setInterval>> =
+	(GT[HEARTBEATS_SYMBOL] as Map<string, ReturnType<typeof setInterval>>) ??
+	(GT[HEARTBEATS_SYMBOL] = new Map());
+
+/**
+ * Bătaia de inimă pornește odată cu socketul, nu la `connection === 'open'`:
+ * împerecherea și prima conectare pot dura mai mult decât fereastra de
+ * expirare, iar în tot acel timp altă instanță ar crede sesiunea abandonată
+ * și ne-ar lua socketul de sub picioare.
+ */
+function startHeartbeat(tenantId: string): void {
+	if (heartbeats.has(tenantId)) return;
+	const handle = setInterval(() => {
+		// Urma trebuie să însemne „am socket", nu „am pornit cândva". Altfel un
+		// proces care a rămas cu lease-ul, dar fără socket, ar ține ceilalți
+		// deoparte la nesfârșit: exact tăcerea pe care o reparăm.
+		if (!sessions.has(tenantId) && !starting.has(tenantId)) {
+			stopHeartbeat(tenantId);
+			void releaseLease(tenantId, { status: 'disconnected', lastDisconnectedAt: new Date() }).catch(
+				() => {}
+			);
+			return;
+		}
+		void renewLease(tenantId)
+			.then((stillOurs) => {
+				if (stillOurs) return;
+				// Altcineva a luat sesiunea (tipic: cineva a apăsat „reconectează"
+				// pe alt pod). Ne retragem, altfel amândouă socket-urile intră în
+				// bucla de conflict 440 și niciunul nu mai livrează nimic.
+				logWarning('whatsapp', 'Lease-ul sesiunii a trecut la altă instanță; închid socketul local', {
+					tenantId,
+					metadata: { instanceId: instanceId() }
+				});
+				void stopSession(tenantId, false).catch(() => {});
+			})
+			.catch((err) => {
+				// O clipire a bazei nu e motiv să închidem socketul: pragul de
+				// expirare e de trei bătăi tocmai ca să treacă peste așa ceva.
+				logWarning('whatsapp', 'heartbeat: scrierea urmei a picat', {
+					tenantId,
+					metadata: { err: err instanceof Error ? err.message : String(err) }
+				});
+			});
+	}, HEARTBEAT_INTERVAL_MS);
+	heartbeats.set(tenantId, handle);
+}
+
+function stopHeartbeat(tenantId: string): void {
+	const handle = heartbeats.get(tenantId);
+	if (handle) clearInterval(handle);
+	heartbeats.delete(tenantId);
+}
 
 function generateSessionId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -133,6 +197,7 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 
 	const active: ActiveSession = { sessionId, tenantId, sock, auth };
 	sessions.set(tenantId, active);
+	startHeartbeat(tenantId);
 
 	sock.ev.on('creds.update', () => {
 		auth.saveCreds().catch((err) => {
@@ -191,6 +256,11 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 
 				sessions.delete(tenantId);
 				stopOutboxLoop(tenantId);
+				// Urma se oprește la fiecare închidere. Dacă ne reconectăm (515 sau
+				// picare trecătoare), `createSocket` o repornește; dacă nu reușim,
+				// lease-ul expiră singur și îl ia alt pod. Pauza de câteva secunde
+				// dintre ele nu deranjează: fereastra de expirare e de trei bătăi.
+				stopHeartbeat(tenantId);
 				dropTenant(tenantId);
 
 				if (code === DisconnectReason.loggedOut) {
@@ -201,6 +271,7 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 						lastDisconnectedAt: new Date(),
 						lastError: `loggedOut: ${message}`
 					});
+					await releaseLease(tenantId).catch(() => {});
 					publishQr(tenantId, 'disconnected', { reason: 'logged_out' });
 					return;
 				}
@@ -353,7 +424,31 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 	return active;
 }
 
-export async function startSession(tenantId: string): Promise<ActiveSession> {
+/**
+ * Aruncată când socketul e ținut de altă instanță, cu urmă proaspătă.
+ *
+ * Nu e o eroare de rulare, e răspunsul „nu tu": pod-ul care o primește trebuie
+ * să tacă, fiindcă socketul funcționează, doar că în altă parte.
+ */
+export class SessionHeldElsewhereError extends Error {
+	constructor(tenantId: string) {
+		super(`WhatsApp session for tenant ${tenantId} is held by another instance`);
+		this.name = 'SessionHeldElsewhereError';
+	}
+}
+
+/**
+ * Deschide socketul, dar numai dacă lease-ul e liber.
+ *
+ * `force` e pentru apăsările de buton ale unui om („Conectează",
+ * `_debug-whatsapp-reload`): acolo preluarea e intenția. Automatismele
+ * (restaurarea la pornire, bucla de preluare, reconectarea) nu forțează
+ * niciodată, altfel s-ar întoarce exact bătaia de la rollout.
+ */
+export async function startSession(
+	tenantId: string,
+	options: { force?: boolean } = {}
+): Promise<ActiveSession> {
 	console.log(`[WHATSAPP] startSession called for tenant=${tenantId}`);
 	const existing = sessions.get(tenantId);
 	if (existing) {
@@ -368,12 +463,26 @@ export async function startSession(tenantId: string): Promise<ActiveSession> {
 	}
 
 	const promise = (async () => {
+		let claimed = false;
 		try {
 			const sessionId = await upsertSessionRow(tenantId);
 			console.log(`[WHATSAPP] session row ready id=${sessionId}`);
+			claimed = await claimLease(tenantId, { force: options.force });
+			if (!claimed) {
+				console.log(`[WHATSAPP] lease ținut de altă instanță, nu deschid socket tenant=${tenantId}`);
+				throw new SessionHeldElsewhereError(tenantId);
+			}
 			return await createSocket(tenantId, sessionId);
 		} catch (err) {
-			console.error(`[WHATSAPP] startSession failed for tenant=${tenantId}:`, err);
+			if (claimed && !sessions.has(tenantId)) {
+				// Am luat lease-ul și n-am reușit să deschidem: îl dăm înapoi imediat,
+				// ca următoarea instanță să nu aștepte expirarea.
+				stopHeartbeat(tenantId);
+				await releaseLease(tenantId).catch(() => {});
+			}
+			if (!(err instanceof SessionHeldElsewhereError)) {
+				console.error(`[WHATSAPP] startSession failed for tenant=${tenantId}:`, err);
+			}
 			throw err;
 		} finally {
 			starting.delete(tenantId);
@@ -400,6 +509,7 @@ export async function stopSession(tenantId: string, logout = false): Promise<voi
 	}
 	sessions.delete(tenantId);
 	stopOutboxLoop(tenantId);
+	stopHeartbeat(tenantId);
 	if (logout) {
 		await active.auth.clear().catch(() => {});
 		await setSessionStatus(tenantId, {
@@ -409,6 +519,9 @@ export async function stopSession(tenantId: string, logout = false): Promise<voi
 			displayName: null
 		});
 	}
+	// Lease-ul se dă înapoi în ambele cazuri: fără socket aici, altă instanță
+	// are voie să încerce fără să aștepte expirarea urmei.
+	await releaseLease(tenantId).catch(() => {});
 }
 
 export function getActiveSession(tenantId: string): ActiveSession | null {
@@ -552,7 +665,17 @@ export async function sendMediaToJid(
 	}
 }
 
+/**
+ * La oprirea pod-ului (SIGTERM de la Kubernetes).
+ *
+ * Pe lângă închiderea socket-urilor, dă drumul lease-ului și scrie
+ * `disconnected`. Fără asta, rândul rămânea pe `connected` cu un proprietar
+ * mort, iar interfața și `loadSessionIdForTenant` spuneau mai departe că
+ * WhatsApp merge, deși nu mai avea nimeni socket. Eliberarea îl scutește pe
+ * următorul pod și de așteptarea celor trei minute de expirare.
+ */
 export async function shutdownAllSessions(): Promise<void> {
+	stopEnsureLoop();
 	const all = Array.from(sessions.entries());
 	await Promise.all(
 		all.map(async ([tenantId, active]) => {
@@ -567,33 +690,90 @@ export async function shutdownAllSessions(): Promise<void> {
 				// ignore
 			}
 			sessions.delete(tenantId);
+			stopHeartbeat(tenantId);
+			stopOutboxLoop(tenantId);
+			try {
+				await releaseLease(tenantId, {
+					status: 'disconnected',
+					lastDisconnectedAt: new Date(),
+					lastError: 'oprire planificată a instanței'
+				});
+			} catch {
+				// ignore: santinela vede oricum urma veche
+			}
 		})
 	);
 }
 
-export async function restoreAllSessions(): Promise<void> {
+/**
+ * Ia socketul pentru sesiunile rămase fără stăpân viu.
+ *
+ * Rulează la pornirea fiecărei instanțe și apoi periodic, pe fiecare instanță.
+ * Bucla e cea care repară cazul din 21 august: pod-ul care ținea socketul a
+ * fost oprit, iar restul nu aveau de unde ști. Nu forțează niciodată, deci
+ * două pod-uri pornite deodată nu se mai bat: al doilea vede urma proaspătă a
+ * primului și se retrage.
+ *
+ * `status = 'connected'` singur nu mai e criteriul de restaurare: un pod oprit
+ * curat lasă rândul pe `disconnected`, iar altfel nu l-ar mai porni nimeni.
+ */
+export async function ensureSessionsClaimed(): Promise<{ claimed: number; skipped: number }> {
+	let claimed = 0;
+	let skipped = 0;
 	try {
-		const rows = await db
-			.select({ tenantId: table.whatsappSession.tenantId })
-			.from(table.whatsappSession)
-			.where(eq(table.whatsappSession.status, 'connected'));
-
-		logInfo('whatsapp', `Restoring ${rows.length} WhatsApp session(s)`);
+		const rows = await listOrphanSessions();
 		for (const row of rows) {
+			if (sessions.has(row.tenantId) || starting.has(row.tenantId)) continue;
 			try {
 				await startSession(row.tenantId);
+				claimed++;
+				logInfo('whatsapp', 'Sesiune preluată de instanța curentă', {
+					tenantId: row.tenantId,
+					metadata: {
+						instanceId: instanceId(),
+						fostulProprietar: row.ownerInstanceId,
+						statusVechi: row.status
+					}
+				});
 			} catch (err) {
-				logError('whatsapp', 'Failed to restore session', {
+				if (err instanceof SessionHeldElsewhereError) {
+					skipped++;
+					continue;
+				}
+				logError('whatsapp', 'Preluarea sesiunii a picat', {
 					tenantId: row.tenantId,
 					metadata: { err: err instanceof Error ? err.message : String(err) }
 				});
 			}
 		}
 	} catch (err) {
-		logError('whatsapp', 'restoreAllSessions failed', {
+		logError('whatsapp', 'ensureSessionsClaimed failed', {
 			metadata: { err: err instanceof Error ? err.message : String(err) }
 		});
 	}
+	return { claimed, skipped };
+}
+
+export function startEnsureLoop(): void {
+	if (GT[ENSURE_SYMBOL]) return;
+	GT[ENSURE_SYMBOL] = setInterval(() => {
+		void ensureSessionsClaimed();
+	}, ENSURE_INTERVAL_MS);
+}
+
+export function stopEnsureLoop(): void {
+	const handle = GT[ENSURE_SYMBOL] as ReturnType<typeof setInterval> | undefined;
+	if (handle) clearInterval(handle);
+	GT[ENSURE_SYMBOL] = undefined;
+}
+
+/** Păstrat sub numele vechi: la pornire, restaurarea e o preluare ca oricare alta. */
+export async function restoreAllSessions(): Promise<void> {
+	const { claimed, skipped } = await ensureSessionsClaimed();
+	logInfo('whatsapp', `Restaurare sesiuni WhatsApp: ${claimed} preluate, ${skipped} ținute de altă instanță`, {
+		metadata: { instanceId: instanceId() }
+	});
+	startEnsureLoop();
 }
 
 export async function getSessionStatus(tenantId: string): Promise<{
@@ -602,6 +782,14 @@ export async function getSessionStatus(tenantId: string): Promise<{
 	displayName: string | null;
 	lastConnectedAt: Date | null;
 	lastError: string | null;
+	/**
+	 * Cât de proaspătă e urma instanței care ține socketul. Numele instanței NU
+	 * iese pe aici: pagina e vizibilă oricărui membru, iar numele pod-ului nu-i
+	 * spune nimic. Cine are nevoie de el are `_debug-whatsapp-reload`.
+	 */
+	heartbeatAt: Date | null;
+	/** Socketul e chiar în procesul care răspunde acum la cerere? */
+	activeHere: boolean;
 } | null> {
 	const [row] = await db
 		.select({
@@ -609,12 +797,14 @@ export async function getSessionStatus(tenantId: string): Promise<{
 			phoneE164: table.whatsappSession.phoneE164,
 			displayName: table.whatsappSession.displayName,
 			lastConnectedAt: table.whatsappSession.lastConnectedAt,
-			lastError: table.whatsappSession.lastError
+			lastError: table.whatsappSession.lastError,
+			heartbeatAt: table.whatsappSession.heartbeatAt
 		})
 		.from(table.whatsappSession)
 		.where(eq(table.whatsappSession.tenantId, tenantId))
 		.limit(1);
-	return row ?? null;
+	if (!row) return null;
+	return { ...row, activeHere: sessions.has(tenantId) };
 }
 
 export async function loadSessionIdForTenant(tenantId: string): Promise<string | null> {

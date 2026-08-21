@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { getActiveSession, startSession, stopSession, getSessionStatus } from '$lib/server/whatsapp/session-manager';
+import { instanceId, readLease } from '$lib/server/whatsapp/session-lease';
 import type { RequestHandler } from './$types';
 
 /**
@@ -35,6 +36,8 @@ export const GET: RequestHandler = async (event) => {
 		ok: true,
 		action: 'Trimite POST pe aceeași adresă ca să redeschizi conexiunea.',
 		activeInThisProcess: !!getActiveSession(tenantId),
+		instanceId: instanceId(),
+		lease: await readLease(tenantId),
 		status: await getSessionStatus(tenantId)
 	});
 };
@@ -45,7 +48,10 @@ export const POST: RequestHandler = async (event) => {
 
 	await stopSession(tenantId, false);
 	try {
-		await startSession(tenantId);
+		// `force`: aici omul cere explicit socketul pe instanța asta, chiar dacă
+		// îl ține alta. Instanța care pierde lease-ul își închide singură socketul
+		// la următoarea bătaie de inimă (vezi `session-lease.ts`).
+		await startSession(tenantId, { force: true });
 	} catch (err) {
 		return json(
 			{
@@ -65,6 +71,8 @@ export const POST: RequestHandler = async (event) => {
 		ok: true,
 		hadSession,
 		reconnected: !!getActiveSession(tenantId),
+		instanceId: instanceId(),
+		lease: await readLease(tenantId),
 		status: await getSessionStatus(tenantId)
 	});
 };

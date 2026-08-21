@@ -4754,6 +4754,19 @@ export const whatsappSession = sqliteTable('whatsapp_session', {
 	lastConnectedAt: timestamp('last_connected_at', { withTimezone: true, mode: 'date' }),
 	lastDisconnectedAt: timestamp('last_disconnected_at', { withTimezone: true, mode: 'date' }),
 	lastError: text('last_error'),
+	/**
+	 * Instanța (pod-ul) care ține acum socketul Baileys, plus urma ei proaspătă.
+	 *
+	 * Socketul trăiește într-un singur proces, dar în producție rulează mai
+	 * multe pod-uri. Fără proprietar, la fiecare rollout porneau două socket-uri
+	 * pe aceeași sesiune și se dădeau afară reciproc („Stream Errored
+	 * (conflict)"), iar dacă pica exact câștigătorul nu mai avea nimeni socket
+	 * și `status` rămânea `connected`, adică baza mințea. Vezi `session-lease.ts`.
+	 */
+	ownerInstanceId: text('owner_instance_id'),
+	heartbeatAt: timestamp('heartbeat_at', { withTimezone: true, mode: 'date' }),
+	/** Când s-a dat ultima dată alarma pe tăcere, ca să n-o repetăm la fiecare rulare. */
+	staleAlertAt: timestamp('stale_alert_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),

@@ -142,7 +142,10 @@ export const getWhatsappQr = query(async () => {
 
 export const startWhatsappConnection = command(async () => {
 	const { tenantId } = assertTenantAdmin();
-	void startSession(tenantId).catch((err) => {
+	// `force`: butonul „Conectează" e o cerere explicită a unui om. Dacă socketul
+	// e ținut de altă instanță, aceea îl închide singură când vede că a pierdut
+	// lease-ul, în loc să intre amândouă în conflictul 440.
+	void startSession(tenantId, { force: true }).catch((err) => {
 		logError('whatsapp', 'startSession failed', {
 			tenantId,
 			metadata: { err: err instanceof Error ? err.message : String(err) }

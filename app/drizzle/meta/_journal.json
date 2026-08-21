@@ -3408,6 +3408,13 @@
       "when": 1785398836928463,
       "tag": "0489_task_tenant_source_wam_uidx",
       "breakpoints": true
+    },
+    {
+      "idx": 490,
+      "version": "6",
+      "when": 1787342400000000,
+      "tag": "0490_whatsapp_session_lease",
+      "breakpoints": true
     }
   ]
 }
