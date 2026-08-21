@@ -14,7 +14,7 @@
 	import ActivityFeed from '$lib/components/dashboard/activity-feed.svelte';
 	import TasksWidget from '$lib/components/dashboard/tasks-widget.svelte';
 	import TeamActivity from '$lib/components/dashboard/team-activity.svelte';
-	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import TopbarActions from '$lib/components/ots-sidebar/TopbarActions.svelte';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-question-mark';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -33,18 +33,13 @@
 </svelte:head>
 
 <div class="dash-wrap -m-6">
-	<div class="dash-topbar">
-		<div class="dash-crumbs">
-			<span>Workspace</span>
-			<ChevronRightIcon size={11} />
-			<strong>Dashboard</strong>
-		</div>
-		<div class="dash-top-actions">
-			<button class="mock-btn-ghost" type="button" aria-label="Notificări"><BellIcon size={14} /></button>
-			<button class="mock-btn-ghost" type="button" aria-label="Ajutor"><CircleHelpIcon size={14} /></button>
-			<a class="mock-btn-primary" href={`${base}/tasks`}><PlusIcon size={14} /> Acțiune nouă</a>
-		</div>
-	</div>
+	<!-- Rândul „Workspace › Dashboard" cu butoane a fost scos: dubla bara albă de
+	     breadcrumbs a shell-ului. Butoanele urcă în ea prin <TopbarActions>. -->
+	<TopbarActions>
+		<button class="mock-btn-ghost" type="button" aria-label="Notificări"><BellIcon size={14} /></button>
+		<button class="mock-btn-ghost" type="button" aria-label="Ajutor"><CircleHelpIcon size={14} /></button>
+		<a class="mock-btn-primary" href={`${base}/tasks`}><PlusIcon size={14} /> Acțiune nouă</a>
+	</TopbarActions>
 
 	<div class="dash-hero">
 		<div class="dash-greeting">

@@ -28,31 +28,9 @@
 	font-feature-settings: 'tnum' 0;
 }
 
-/* Topbar */
-.dash-topbar {
-	background: var(--d-card);
-	border-bottom: 1px solid var(--d-border);
-	padding: 12px 24px;
-	display: flex;
-	align-items: center;
-	gap: 14px;
-}
-.dash-crumbs {
-	font-size: 12px;
-	color: var(--d-muted);
-	display: flex;
-	align-items: center;
-	gap: 6px;
-}
-.dash-crumbs strong {
-	color: var(--d-text);
-	font-weight: 600;
-}
-.dash-top-actions {
-	margin-left: auto;
-	display: flex;
-	gap: 8px;
-}
+/* Topbar-ul propriu al dashboard-ului a fost scos — breadcrumb-ul e cel global
+   (OtsTopbar), iar butoanele urcă în el prin <TopbarActions>. Stilurile de buton
+   rămân: sunt folosite exact de acele butoane, acum randate în bara albă. */
 .mock-btn-ghost,
 .mock-btn-primary {
 	display: inline-flex;

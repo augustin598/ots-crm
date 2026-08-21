@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
-	import { Breadcrumb } from '$lib/components/app/breadcrumb';
 	import { Button } from '$lib/components/ui/button';
 	import { getTask } from '$lib/remotes/tasks.remote';
 	import { page } from '$app/state';
@@ -17,11 +16,6 @@
 	const taskQuery = $derived(getTask(taskId));
 	const task = $derived(taskQuery.current);
 
-	const breadcrumbItems = $derived([
-		{ label: data.tenant?.name || 'Organization', href: `/${tenantSlug}` },
-		{ label: 'Tasks', href: `/${tenantSlug}/tasks` },
-		{ label: task?.title || 'Task', href: `/${tenantSlug}/tasks/${taskId}` }
-	]);
 
 	const tabs = $derived([
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/tasks/${taskId}` },
@@ -36,7 +30,6 @@
 </script>
 
 <div class="space-y-6">
-	<Breadcrumb items={breadcrumbItems} />
 
 	{#if task}
 		<div class="flex items-center justify-between">

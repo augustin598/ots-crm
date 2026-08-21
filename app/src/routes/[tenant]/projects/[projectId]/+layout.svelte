@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
-	import { Breadcrumb } from '$lib/components/app/breadcrumb';
 	import { Button } from '$lib/components/ui/button';
 	import { getProject } from '$lib/remotes/projects.remote';
 	import { page } from '$app/state';
@@ -17,11 +16,6 @@
 	const projectQuery = $derived(getProject(projectId));
 	const project = $derived(projectQuery.current);
 
-	const breadcrumbItems = $derived([
-		{ label: data.tenant?.name || 'Organization', href: `/${tenantSlug}` },
-		{ label: 'Projects', href: `/${tenantSlug}/projects` },
-		{ label: project?.name || 'Project', href: `/${tenantSlug}/projects/${projectId}` }
-	]);
 
 	const tabs = $derived([
 		{ id: 'overview', label: 'Overview', href: `/${tenantSlug}/projects/${projectId}` },
@@ -40,7 +34,6 @@
 </script>
 
 <div class="space-y-6">
-	<Breadcrumb items={breadcrumbItems} />
 
 	{#if project}
 		<div class="flex items-center justify-between">

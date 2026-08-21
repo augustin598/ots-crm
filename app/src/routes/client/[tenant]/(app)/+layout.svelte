@@ -13,6 +13,7 @@
 	import WhatsappPhonePrompt from '$lib/components/client/whatsapp-phone-prompt.svelte';
 	import OtsSidebar from '$lib/components/ots-sidebar/OtsSidebar.svelte';
 	import OtsTopbar from '$lib/components/ots-sidebar/OtsTopbar.svelte';
+	import { getTopbarActions } from '$lib/components/ots-sidebar/topbar-actions.svelte';
 	import type { NavGroup } from '$lib/config/sidebar-nav';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
@@ -312,7 +313,7 @@
 	</Sidebar>
 	<SidebarInset>
 		{#if !isBareRoute}
-			<OtsTopbar groups={clientGroups} {pathPrefix} />
+			<OtsTopbar groups={clientGroups} {pathPrefix} actions={getTopbarActions()} />
 		{/if}
 		<WhatsappPhonePrompt
 			promptState={data.whatsappPrompt?.state ?? 'none'}
