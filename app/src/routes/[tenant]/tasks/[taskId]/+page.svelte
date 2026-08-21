@@ -11,6 +11,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Label } from '$lib/components/ui/label';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
+	import TaskWhatsappGroupCard from '$lib/components/task-detail/task-whatsapp-group-card.svelte';
 	import { MessageSquare, User, Calendar, FolderKanban, Building2, Check, X, Pencil, Trash2, History, Plus, ArrowRight, UserCheck, RefreshCw, Reply, Repeat } from '@lucide/svelte';
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { formatStatus, getStatusBadgeVariant, getPriorityColor, getPriorityDotColor, formatPriority, formatDate, getActivityValueColor } from '$lib/components/task-kanban-utils';
@@ -408,6 +409,10 @@
 							</Button>
 						</div>
 					{/if}
+					<div class="border-t pt-4">
+						<p class="mb-2 text-sm font-medium">Grup WhatsApp</p>
+						<TaskWhatsappGroupCard taskId={task.id} tenantSlug={tenantSlug ?? ''} />
+					</div>
 				</CardContent>
 			</Card>
 

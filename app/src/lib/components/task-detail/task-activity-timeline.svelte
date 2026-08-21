@@ -66,6 +66,10 @@
 				return 'a creat evenimentul, dar linkul Meet încă se genera';
 			case 'meet_event_failed':
 				return 'nu a putut crea evenimentul în Google Calendar';
+			case 'whatsapp_group_linked':
+				return 'a legat task-ul de un grup WhatsApp';
+			case 'whatsapp_group_unlinked':
+				return 'a dezlegat task-ul de grupul WhatsApp';
 			default:
 				return activity.action;
 		}
@@ -133,6 +137,9 @@
 				return 'bg-red-100 text-red-600';
 			case 'meet_event_orphaned':
 				return 'bg-amber-100 text-amber-600';
+			case 'whatsapp_group_linked':
+			case 'whatsapp_group_unlinked':
+				return 'bg-green-100 text-green-700';
 			case 'meet_event_deleted':
 				return 'bg-gray-200 text-gray-600';
 			default:
