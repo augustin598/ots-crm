@@ -2395,6 +2395,13 @@ export const clientUserPreferences = sqliteTable('client_user_preferences', {
 	onboardingTourCompleted: integer('onboarding_tour_completed', { mode: 'boolean' }).notNull().default(false),
 	onboardingTourEnabled: integer('onboarding_tour_enabled', { mode: 'boolean' }).notNull().default(true),
 	onboardingChecklist: text('onboarding_checklist'), // JSON: {"dashboard":true,"tasks":false,...}
+	// Cererea numărului de WhatsApp: de câte ori a apăsat „Nu acum". De la 3 în sus
+	// modalul nu mai apare, rămâne doar bannerul discret.
+	whatsappPromptDismissedCount: integer('whatsapp_prompt_dismissed_count').notNull().default(0),
+	whatsappPromptLastDismissedAt: timestamp('whatsapp_prompt_last_dismissed_at', {
+		withTimezone: true,
+		mode: 'date'
+	}),
 	// Timestamps
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
@@ -5689,7 +5696,13 @@ export const userWhatsappLink = sqliteTable(
 			.notNull()
 			.references(() => user.id),
 		phoneE164: text('phone_e164').notNull(), // canonical E164 (+40xxxxxxxxx)
-		source: text('source').notNull(), // 'manual' | 'seed_client' | 'seed_tenant_user' | 'lead_form' | 'whatsapp_chat'
+		// 'self_service' = pus de utilizator din portal, restul de către agenție
+		source: text('source').notNull(), // 'manual' | 'seed_client' | 'seed_tenant_user' | 'lead_form' | 'whatsapp_chat' | 'self_service'
+		/** A trecut de onWhatsApp. False când sesiunea era deconectată la salvare. */
+		whatsappVerified: boolean('whatsapp_verified').notNull().default(false),
+		verifiedAt: timestamp('verified_at', { withTimezone: true, mode: 'date' }),
+		/** Când a apăsat „Salvează" în portal; gol pentru numerele puse de agenție. */
+		consentedAt: timestamp('consented_at', { withTimezone: true, mode: 'date' }),
 		linkedAt: timestamp('linked_at', { withTimezone: true, mode: 'date' })
 			.notNull()
 			.default(sql`current_timestamp`),

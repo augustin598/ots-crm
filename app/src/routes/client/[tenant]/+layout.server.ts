@@ -4,6 +4,10 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { getRequestAccessFlags, ALL_ACCESS_TRUE, NO_ACCESS, type AccessFlags } from '$lib/server/portal-access';
+import {
+	resolveWhatsappPromptState,
+	type WhatsappPromptState
+} from '$lib/server/whatsapp/phone-prompt';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (
@@ -188,10 +192,42 @@ export const load: LayoutServerLoad = async (event) => {
 			.orderBy(sql`${table.clientUser.lastSelectedAt} DESC NULLS LAST`, table.client.name);
 	}
 
+	// Cererea numărului de WhatsApp. Se decide aici, unde avem deja utilizatorul,
+	// ca modalul să se randeze din prima, fără o cerere în plus și fără să clipească.
+	let whatsappPrompt: { state: WhatsappPromptState; tenantName: string } = {
+		state: 'none',
+		tenantName: tenant.name
+	};
+	if (event.locals.isClientUser && event.locals.user && event.locals.clientUser) {
+		const [link] = await db
+			.select({ phoneE164: table.userWhatsappLink.phoneE164 })
+			.from(table.userWhatsappLink)
+			.where(
+				and(
+					eq(table.userWhatsappLink.tenantId, tenant.id),
+					eq(table.userWhatsappLink.userId, event.locals.user.id)
+				)
+			)
+			.limit(1);
+		const [prefs] = await db
+			.select({ dismissed: table.clientUserPreferences.whatsappPromptDismissedCount })
+			.from(table.clientUserPreferences)
+			.where(eq(table.clientUserPreferences.clientUserId, event.locals.clientUser.id))
+			.limit(1);
+		whatsappPrompt = {
+			state: resolveWhatsappPromptState({
+				linkedPhone: link?.phoneE164 ?? null,
+				dismissedCount: prefs?.dismissed ?? 0
+			}),
+			tenantName: tenant.name
+		};
+	}
+
 	return {
 		tenant,
 		client: event.locals.client,
 		clientUser: event.locals.clientUser,
+		whatsappPrompt,
 		isClientUserPrimary: event.locals.clientUser?.isPrimary ?? true,
 		userCompanies,
 		user: event.locals.user
