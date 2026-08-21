@@ -1,8 +1,8 @@
 # Task ↔ grup WhatsApp: notificări de status și mențiuni (etapa 2)
 
-Stare la 2026-08-21, seara: pe branch-ul `feat/whatsapp-task-notifications`,
-verificat în dev cu socketul luat temporar de la prod (mesaj real ajuns în
-grupul intern). Nu e încă pe `main`, nu e în producție.
+Stare la 2026-08-21, 20:30: pe `main` (merge `80de33e1` + fix `fdf2ff70`),
+în producție (build `#9574848f`), verificat live: schimbare de status pe task-ul
+de test → mesaj în grupul intern în ~1 s, cu linkul spre portalul clientului.
 
 Continuă harta din `2026-08-21-whatsapp-grupuri-in-inbox-IMPLEMENTAT.md`.
 
@@ -111,6 +111,9 @@ https://clients.onetopsolution.ro/client/ots/tasks/abc123
   neurmărite, contrar regulii casei. Scoate-le după ce rulează, sau nu-l rula.
 - Testul live de mențiune n-a fost posibil: tenantul are un singur utilizator,
   iar auto-mențiunea e sărită by design.
+- Primul „fix link" (`e5e3fa2e`) a schimbat doar documentul: un `cd app` picat
+  a oprit scriptul de editare, iar diff-ul n-a fost verificat. Fix-ul real e
+  `fdf2ff70`. Verifică `git show --stat` înainte de a declara un fix gata.
 
 ## Cum se verifică
 
