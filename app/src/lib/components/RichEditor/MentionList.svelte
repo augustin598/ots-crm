@@ -81,6 +81,6 @@
 	</div>
 {:else}
 	<div class="z-50 w-64 rounded-lg border bg-popover shadow-lg p-3">
-		<p class="text-sm text-muted-foreground text-center">No users found</p>
+		<p class="text-sm text-muted-foreground text-center">Niciun utilizator găsit</p>
 	</div>
 {/if}

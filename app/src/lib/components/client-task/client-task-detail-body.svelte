@@ -1,7 +1,11 @@
 <!-- src/lib/components/client-task/client-task-detail-body.svelte -->
 <script lang="ts">
 	import type { Task } from '$lib/server/db/schema';
-	import { getTenantUsers, getClientUsers } from '$lib/remotes/users.remote';
+	import {
+		getTenantUsers,
+		getClientUsers,
+		getAssignableClientUsers
+	} from '$lib/remotes/users.remote';
 	import { getClient } from '$lib/remotes/clients.remote';
 	import { getTaskEmails } from '$lib/remotes/task-emails.remote';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -37,6 +41,30 @@
 
 	const clientUsersQuery = $derived(task?.clientId ? getClientUsers(task.clientId) : null);
 	const clientUsers = $derived(clientUsersQuery?.current ?? []);
+
+	// Cine poate fi menționat din portal: echipa agenției plus echipa clientului
+	// care are acces la taskuri. Nu toate contactele clientului: pe cele fără
+	// acces linkul din notificare le-ar duce într-un 403.
+	const mentionableClientUsersQuery = $derived(
+		task?.clientId ? getAssignableClientUsers(task.clientId) : null
+	);
+	const mentionableClientUsers = $derived(mentionableClientUsersQuery?.current ?? []);
+
+	const mentionUsers = $derived.by(() => {
+		const seen = new Set<string>();
+		return [...tenantUsers, ...mentionableClientUsers]
+			.filter((u: { id: string }) => {
+				if (seen.has(u.id)) return false;
+				seen.add(u.id);
+				return true;
+			})
+			.map((u: { id: string; firstName?: string | null; lastName?: string | null; email: string }) => ({
+				id: u.id,
+				firstName: u.firstName ?? '',
+				lastName: u.lastName ?? '',
+				email: u.email
+			}));
+	});
 
 	const clientQuery = $derived(task?.clientId ? getClient(task.clientId) : null);
 	const client = $derived(clientQuery?.current);
@@ -154,7 +182,11 @@
 						<ClientTaskDescription description={task.description} />
 
 						<div class="ct-section mt-[26px]">
-							<ClientTaskComments taskId={task.id} onOpenLightbox={openLightbox} />
+							<ClientTaskComments
+								taskId={task.id}
+								{mentionUsers}
+								onOpenLightbox={openLightbox}
+							/>
 						</div>
 					</div>
 				</div>

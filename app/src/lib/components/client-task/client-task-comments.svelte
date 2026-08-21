@@ -29,12 +29,20 @@
 		previewUrl: string;
 	};
 
+	type MentionUser = { id: string; firstName: string; lastName: string; email: string };
+
 	type Props = {
 		taskId: string;
+		/**
+		 * Cine apare la „@". Fără lista asta, editorul cădea pe implicitul `[]`
+		 * și portalul arăta „Niciun utilizator găsit" la fiecare încercare, deși
+		 * backendul accepta mențiunile clientului.
+		 */
+		mentionUsers?: MentionUser[];
 		onOpenLightbox: (images: LightboxImage[], startIndex: number) => void;
 	};
 
-	let { taskId, onOpenLightbox }: Props = $props();
+	let { taskId, mentionUsers = [], onOpenLightbox }: Props = $props();
 
 	const tenantSlug = $derived(page.params.tenant ?? '');
 
@@ -426,6 +434,7 @@
 							<div class="mt-3 rounded-md border border-[#e5e9f0] bg-[#f7f8fa] p-2">
 								<RichEditor
 									bind:this={replyEditorRef}
+									users={mentionUsers}
 									placeholder="Scrie un răspuns..."
 									minHeight="100px"
 									showFooter={false}
@@ -467,6 +476,7 @@
 	<div class="ct-composer mt-4">
 		<RichEditor
 			bind:this={editorRef}
+			users={mentionUsers}
 			placeholder="Adaugă un comentariu... (paste imagine cu Ctrl+V)"
 			minHeight="120px"
 			showFooter={false}
