@@ -300,6 +300,12 @@ export interface DiscoveredDaAccountInput {
 	suspended?: boolean | undefined;
 	/** DA account email — stored in notes for reference (hosting_account has no email column). */
 	daEmail?: string | null | undefined;
+	/**
+	 * Client to attach at import time. Verified against the tenant before use —
+	 * an id from another tenant is a hard error, never a silent `null`.
+	 * Omit/`null` to import as „Neasignat" (the previous behaviour).
+	 */
+	clientId?: string | null | undefined;
 }
 
 export interface DiscoveredImportResult {
@@ -338,6 +344,17 @@ export interface DiscoveredImportResult {
  *
  * Caller MUST have authorized the actor (`assertCan(..., 'admin.hosting.manage')`).
  */
+/**
+ * Post-import to-do left on the row. Assigning the client during import removes
+ * the "atribuie client" step, so the note must not keep asking for it.
+ */
+function importIssue(hasClient: boolean, priced: boolean): string {
+	if (hasClient && priced) return 'Importat din DirectAdmin.';
+	if (hasClient) return 'Importat din DirectAdmin. Verifică prețul (fără produs mapat).';
+	if (priced) return 'Importat din DirectAdmin. Atribuie client.';
+	return 'Importat din DirectAdmin. Atribuie client + verifică prețul (fără produs mapat).';
+}
+
 export async function createHostingAccountFromDiscovery(
 	tenantId: string,
 	input: DiscoveredDaAccountInput
@@ -352,6 +369,18 @@ export async function createHostingAccountFromDiscovery(
 	const usernameNorm = input.daUsername.trim();
 	if (!usernameNorm) throw new Error('daUsername gol.');
 	if (!input.domain.trim()) throw new Error('domain gol.');
+
+	// Tenant-scope the client BEFORE the insert: a client id belonging to another
+	// tenant must fail loudly, not quietly land as an unassigned account.
+	const clientIdNorm = input.clientId?.trim() || null;
+	if (clientIdNorm) {
+		const [clientRow] = await db
+			.select({ id: table.client.id })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientIdNorm), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (!clientRow) throw new Error('Client inexistent sau aparține altui tenant.');
+	}
 
 	// Idempotency: one CRM row per (tenant, server, DA username). Case-insensitive —
 	// DA listings are lowercased but a stored value could differ in case.
@@ -445,7 +474,7 @@ export async function createHostingAccountFromDiscovery(
 			db.insert(table.hostingAccount).values({
 				id,
 				tenantId,
-				clientId: null,
+				clientId: clientIdNorm,
 				daServerId: input.daServerId,
 				daPackageId,
 				hostingProductId,
@@ -459,9 +488,7 @@ export async function createHostingAccountFromDiscovery(
 				daPackageName: input.daPackageName ?? null,
 				additionalDomains: additional.length ? additional : null,
 				daSyncStatus: 'da_only',
-				daSyncIssue: priced
-					? 'Importat din DirectAdmin. Atribuie client.'
-					: 'Importat din DirectAdmin. Atribuie client + verifică prețul (fără produs mapat).',
+				daSyncIssue: importIssue(clientIdNorm !== null, priced),
 				notes: input.daEmail ? `Email DA la import: ${input.daEmail}` : null,
 				lastSyncedAt: now.toISOString(),
 				suspendedAt: input.suspended ? now : null

@@ -225,4 +225,92 @@ describe('createHostingAccountFromDiscovery', () => {
 		).rejects.toThrow(/inexistent/);
 		expect(inserts.length).toBe(0);
 	});
+
+	test('attaches the client picked in the import dialog', async () => {
+		selectQueue = [
+			[{ id: SERVER }], // daServer exists
+			[{ id: 'client-beauty-one' }], // client belongs to this tenant
+			[], // no existing hosting_account
+			[{ id: 'pkg-1' }], // daPackage by name
+			[{ id: 'prod-1', price: 139900, currency: 'RON', billingCycle: 'annually' }]
+		];
+
+		const res = await createHostingAccountFromDiscovery(TENANT, {
+			daServerId: SERVER,
+			daUsername: 'topderma',
+			domain: 'topderma.ro',
+			daPackageName: 'Wordpress_Gold',
+			clientId: 'client-beauty-one'
+		});
+
+		expect(res.action).toBe('created');
+		const acct = inserts.find((i) => i.table === 'hostingAccount');
+		expect(acct!.values.clientId).toBe('client-beauty-one');
+		// The row must no longer nag about assigning a client — it has one.
+		expect(acct!.values.daSyncIssue).toBe('Importat din DirectAdmin.');
+		expect(daClientConstructions).toBe(0);
+	});
+
+	test('still asks for the price when a client is set but no product maps', async () => {
+		selectQueue = [
+			[{ id: SERVER }],
+			[{ id: 'client-beauty-one' }],
+			[],
+			[{ id: 'pkg-1' }],
+			[] // no catalog product → unpriced
+		];
+
+		await createHostingAccountFromDiscovery(TENANT, {
+			daServerId: SERVER,
+			daUsername: 'topderma',
+			domain: 'topderma.ro',
+			daPackageName: 'Wordpress_Gold',
+			clientId: 'client-beauty-one'
+		});
+
+		const acct = inserts.find((i) => i.table === 'hostingAccount');
+		expect(acct!.values.daSyncIssue).toMatch(/Verifică prețul/);
+		expect(acct!.values.daSyncIssue).not.toMatch(/Atribuie client/);
+	});
+
+	test('refuses a client from another tenant instead of importing it unassigned', async () => {
+		selectQueue = [
+			[{ id: SERVER }], // daServer exists
+			[] // client lookup scoped to this tenant finds nothing
+		];
+
+		await expect(
+			createHostingAccountFromDiscovery(TENANT, {
+				daServerId: SERVER,
+				daUsername: 'topderma',
+				domain: 'topderma.ro',
+				clientId: 'client-of-another-tenant'
+			})
+		).rejects.toThrow(/Client inexistent/);
+		// Silently falling back to clientId:null would cross-link tenants' data.
+		expect(inserts.length).toBe(0);
+	});
+
+	test('blank clientId imports as unassigned without a client lookup', async () => {
+		selectQueue = [
+			[{ id: SERVER }],
+			[], // no existing hosting_account  (NOTE: no client lookup consumed)
+			[{ id: 'pkg-1' }],
+			[{ id: 'prod-1', price: 5000, currency: 'RON', billingCycle: 'monthly' }]
+		];
+
+		const res = await createHostingAccountFromDiscovery(TENANT, {
+			daServerId: SERVER,
+			daUsername: 'topderma',
+			domain: 'topderma.ro',
+			daPackageName: 'Wordpress_Gold',
+			clientId: '   '
+		});
+
+		expect(res.action).toBe('created');
+		const acct = inserts.find((i) => i.table === 'hostingAccount');
+		expect(acct!.values.clientId).toBeNull();
+		expect(acct!.values.recurringAmount).toBe(5000);
+		expect(acct!.values.daSyncIssue).toMatch(/Atribuie client/);
+	});
 });
