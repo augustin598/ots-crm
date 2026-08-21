@@ -83,14 +83,14 @@ Un task poate fi legat de un grup WhatsApp bifat în inbox. După legare:
 ```
 🔧 *Raport lunar Beautyone*
 Andrei Pop a trecut task-ul în *În lucru* (din De făcut).
-https://clients.onetopsolution.ro/ots/tasks/abc123
+https://clients.onetopsolution.ro/client/ots/tasks/abc123
 ```
 
 ```
 💬 *Raport lunar Beautyone*
 Mențiune de la Andrei Pop pentru @Ana Pop:
 „Ana, poți verifica bugetul de septembrie până mâine?"
-https://clients.onetopsolution.ro/ots/tasks/abc123
+https://clients.onetopsolution.ro/client/ots/tasks/abc123
 ```
 
 ## Capcane întâlnite
