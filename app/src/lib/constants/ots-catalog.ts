@@ -35,7 +35,7 @@ export interface Category {
 }
 
 export const SETUP_DEFAULT_DESCRIPTION =
-	'Taxă plătită o singură dată (one-time), pentru implementarea tehnică inițială. Nu se repetă lunar — doar la start.';
+	'Taxă plătită o singură dată (one-time), pentru implementarea tehnică inițială. Nu se repetă lunar, o plătești doar la start.';
 
 export const CRM_FEATURES: Feature[] = [
 	{
@@ -238,7 +238,7 @@ export const CATEGORIES: Category[] = [
 		setupDescription:
 			'Audit AI-visibility inițial: baseline citări brand pe platformele monitorizate, audit entități și schema markup, verificare acces boți AI (GPTBot, ClaudeBot, PerplexityBot, Google-Extended), implementare llms.txt, plan de acțiune pe 3-6 luni. GRATUIT la contractare minimă 6 luni.',
 		priceNote:
-			'Abonament lunar, EUR fără TVA. Audit inclus dacă contract 6+ luni. Rezultatele se măsoară în citări și share of voice, nu în poziții — primele mișcări apar tipic în 2-4 luni.',
+			'Abonament lunar, EUR fără TVA. Auditul e inclus la contracte de cel puțin 6 luni. Rezultatele se măsoară în citări și share of voice, nu în poziții; primele mișcări apar de obicei în 2–4 luni.',
 		features: [
 			{ id: 'aeo-1', label: 'Audit vizibilitate AI (baseline citări brand)', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'aeo-2', label: 'Platforme monitorizate', values: { bronze: 'ChatGPT + AI Overviews', silver: '+ Perplexity', gold: '+ Gemini + Copilot', platinum: 'Toate + Claude + Grok' } },
@@ -266,7 +266,7 @@ export const CATEGORIES: Category[] = [
 		],
 		notes: [
 			'AEO & GEO nu înlocuiește SEO. Motoarele generative se alimentează din indexul clasic: fără un site indexabil corect, nu ai ce cita. Cele două servicii se rulează împreună.',
-			'Citările în LLM-uri nu se pot garanta contractual — modelele se reantrenează periodic, iar răspunsurile variază de la o sesiune la alta. Raportăm frecvența de apariție pe un set fix de prompturi, măsurată lunar.'
+			'Citările în LLM-uri nu se pot garanta contractual: modelele se reantrenează periodic, iar răspunsurile variază de la o sesiune la alta. Raportăm lunar frecvența de apariție pe un set fix de prompturi.'
 		]
 	},
 	{
@@ -403,8 +403,8 @@ export const CATEGORIES: Category[] = [
 		tagline: 'Implementare tehnică one-time (GTM, GA4, conversii, Consent Mode)',
 		icon: 'settings',
 		prices: { bronze: null, silver: null, gold: null, platinum: null },
-		setupFees: { bronze: 500 },
-		priceNote: 'Tarif unic 500 € + TVA. Se facturează separat de abonamentul lunar Google Ads. Include configurare GTM, GA4, Enhanced Conversions, Consent Mode v2, structurare campanii, extensii, remarketing.',
+		setupFees: { bronze: 700 },
+		priceNote: 'Tarif unic 700 € + TVA, facturat separat de abonamentul lunar Google Ads. Include configurarea GTM, GA4, Enhanced Conversions, Consent Mode v2, structurarea campaniilor, extensiile și remarketingul.',
 		features: [
 			{ id: 'gs-1', label: 'Configurare Google Tag Manager (event-uri: apel, formular, WhatsApp, Messenger)', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'gs-2', label: 'Configurare Google Analytics 4 (conectare GTM, măsurare avansată, import conversii)', values: { bronze: true, silver: true, gold: true, platinum: true } },
@@ -463,12 +463,12 @@ export const CATEGORIES: Category[] = [
 	{
 		slug: 'website-custom',
 		name: 'Dezvoltare Website Custom',
-		tagline: 'Next.js / Astro / React — fără CMS, cod propriu',
+		tagline: 'Next.js / Astro / React, fără CMS, cod propriu',
 		icon: 'code',
 		prices: { bronze: null, silver: null, gold: null, platinum: null },
 		setupFees: { bronze: 2500, silver: 5000, gold: 9000, platinum: 18000 },
 		setupDescription:
-			'Dezvoltare one-time website custom cu framework modern (Next.js / Astro / SvelteKit / Vue). Fără CMS gata-făcut — cod propriu optimizat pentru performanță și scalabilitate. Recomandat pentru SaaS landing, marketing sites complexe, aplicații web cu logică particulară.',
+			'Dezvoltare one-time a unui website custom cu un framework modern (Next.js / Astro / SvelteKit / Vue). Fără CMS de-a gata: cod propriu, optimizat pentru performanță și scalare. Potrivit pentru landing-uri SaaS, site-uri de marketing complexe și aplicații web cu logică proprie.',
 		priceNote:
 			'Prețuri EUR fără TVA. Target OTS = Silver (5.000 €). Hosting edge (Vercel / Cloudflare Pages) 0-40 €/lună; mentenanță via ore/lună.',
 		features: [
@@ -606,20 +606,20 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 	{
 		id: 'paid-ads',
 		label: 'Ads / Promovare plătită',
-		description: 'Campanii plătite pe platformele majore — trafic rapid și măsurabil.',
+		description: 'Campanii plătite pe platformele majore: trafic rapid și măsurabil.',
 		slugs: ['google-ads', 'meta-ads', 'tiktok-ads']
 	},
 	{
 		id: 'organic',
 		label: 'Organic, SEO & AI Search',
 		description:
-			'Trafic organic pe termen lung, fără buget media — din Google și din motoarele de răspuns AI.',
+			'Trafic organic pe termen lung, fără buget media, din Google și din motoarele de răspuns AI.',
 		slugs: ['seo', 'aeo-geo']
 	},
 	{
 		id: 'web-dev-apps',
 		label: 'Dezvoltare Web & Apps',
-		description: 'Site, magazin, landing page, aplicație mobilă — one-time, fixed-price.',
+		description: 'Site, magazin, landing page, aplicație mobilă: plată unică, preț fix.',
 		slugs: ['website-dev', 'website-custom', 'woocommerce-dev', 'landing-page-dev', 'mobile-app']
 	},
 	{

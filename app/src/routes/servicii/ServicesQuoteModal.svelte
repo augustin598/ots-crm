@@ -283,8 +283,8 @@
 				{#if step === 1}
 					<h2 class="sq-h2" tabindex="-1" {@attach focusOnMount}>Alege serviciile</h2>
 					<p class="sq-sub">
-						Fiecare serviciu are pachetul lui — combină-le cum ai nevoie. Discountul se aplică
-						automat pe abonamentul lunar când alegi două sau mai multe.
+						Fiecare serviciu are pachetul lui; combină-le cum ai nevoie. De la două servicii în
+						sus, discountul pe abonamentul lunar se aplică automat.
 					</p>
 
 					{#if removed}

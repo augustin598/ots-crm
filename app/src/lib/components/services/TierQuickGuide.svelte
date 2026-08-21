@@ -26,10 +26,10 @@
 	};
 
 	const TAGLINES: Record<Tier, string> = {
-		bronze: 'Start minimal, 1-2 canale, focus pe optimizare atentă.',
-		silver: 'Pragul recomandat — date statistice pentru A/B, multi-raportare.',
-		gold: 'Multi-canal, consultanță dedicată, raportare premium.',
-		platinum: 'Enterprise, integrări custom, suport strategic săptămânal.'
+		bronze: 'Început cu bugete mici, unu sau două canale și optimizare atentă.',
+		silver: 'Pragul recomandat: destule date pentru teste A/B și raportare pe mai multe canale.',
+		gold: 'Mai multe canale, consultanță la fiecare raport și rapoarte personalizate.',
+		platinum: 'Pentru conturi mari: integrări la comandă și întâlnire strategică săptămânală.'
 	};
 
 	const ROWS: Row[] = [
@@ -159,9 +159,9 @@
 		</div>
 
 		<p class="text-xs text-muted-foreground mt-4">
-			Asta e doar diferența „mare" între pachete. Fiecare serviciu (Google Ads, SEO, etc.) are
-			propria matrice de ~20-25 features per pachet — le vezi complet când apeși pe o categorie din
-			catalog.
+			Aici e doar diferența mare dintre pachete. Fiecare serviciu (Google Ads, SEO etc.) are
+			propriul tabel de 20–25 de funcționalități per pachet; îl vezi complet când deschizi o
+			categorie din catalog.
 		</p>
 	</DialogContent>
 </Dialog>

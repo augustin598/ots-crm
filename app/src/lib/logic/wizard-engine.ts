@@ -76,7 +76,7 @@ export const BUSINESS_TYPE_OPTIONS: {
 }[] = [
 	{ value: 'ecommerce', label: 'E-commerce / magazin online', hint: 'Vinzi produse online (fashion, cosmetice, electronice, etc.)', icon: 'shopping-cart' },
 	{ value: 'b2b-services', label: 'Servicii B2B / SaaS / consultanță', hint: 'Vinzi servicii către alte firme sau profesioniști', icon: 'briefcase' },
-	{ value: 'local', label: 'Business local', hint: 'Restaurant, clinică, salon, atelier — clienți din zonă', icon: 'store' },
+	{ value: 'local', label: 'Business local', hint: 'Restaurant, clinică, salon, atelier: clienți din zonă', icon: 'store' },
 	{ value: 'content-media', label: 'Content / media / influencer', hint: 'Creator de conținut, publicație, podcast, YouTube', icon: 'video' },
 	{ value: 'education', label: 'Educație / cursuri', hint: 'Cursuri online, training-uri, platforme de învățare', icon: 'graduation-cap' },
 	{ value: 'other', label: 'Altceva', hint: 'Descrie scurt domeniul tău', icon: 'sparkles' }
@@ -131,7 +131,7 @@ export const BUDGET_OPTIONS: {
 		value: 'under-500',
 		label: 'Sub 500 € / lună',
 		tier: 'bronze',
-		note: 'Buget limitat — focus pe 1-2 canale, optimizare atentă.'
+		note: 'Buget limitat: unu sau două canale, optimizate atent.'
 	},
 	{
 		value: '500-1500',
@@ -144,14 +144,14 @@ export const BUDGET_OPTIONS: {
 		value: '1500-5000',
 		label: '1.500 – 5.000 € / lună',
 		tier: 'gold',
-		note: 'Scale consistent — permite multi-canal, creative multiple, remarketing avansat.',
+		note: 'Buget suficient pentru mai multe canale, mai multe creative și remarketing avansat.',
 		badge: 'popular'
 	},
 	{
 		value: '5000-plus',
 		label: 'Peste 5.000 € / lună',
 		tier: 'platinum',
-		note: 'Nivel enterprise — integrări custom, consultanță dedicată, offline conversions.'
+		note: 'Conturi mari: integrări la comandă, consultanță dedicată, conversii offline.'
 	}
 ];
 
@@ -162,13 +162,13 @@ export const PROJECT_STATUS_OPTIONS: {
 }[] = [
 	{
 		value: 'new',
-		label: 'Proiect nou — am nevoie de setup complet',
+		label: 'Proiect nou, am nevoie de setup complet',
 		description:
 			'Configurare conturi, pixel, GA4, strategie de la zero. Include taxă one-time de setup.'
 	},
 	{
 		value: 'continuing',
-		label: 'Continuare — conturile sunt deja configurate',
+		label: 'Continuare, conturile sunt deja configurate',
 		description: 'Preluăm ce există, nu mai plătești setup pentru canalele existente.'
 	},
 	{
@@ -534,7 +534,7 @@ export function adviseTierOverride(
 			originalTier: 'bronze',
 			suggestedTier: 'silver',
 			suggestedBudget: budgetFromTier('silver'),
-			rationale: `„${bundle.name}" are ${services} servicii. La pachetul Bronze bugetul media e prea mic ca fiecare canal să genereze date relevante — recomandăm Silver pentru raportare săptămânală și A/B testing.`,
+			rationale: `„${bundle.name}" are ${services} servicii. La pachetul Bronze bugetul media e prea mic ca fiecare canal să genereze date relevante; la Silver primești raportare săptămânală și teste A/B.`,
 			severity: 'warning'
 		};
 	}
@@ -544,7 +544,7 @@ export function adviseTierOverride(
 			originalTier: 'silver',
 			suggestedTier: 'gold',
 			suggestedBudget: budgetFromTier('gold'),
-			rationale: `Obiectiv „scale agresiv" cu ${services} servicii: pachetul Gold aduce consultanță săptămânală + rapoarte personalizate + integrări avansate — necesare pentru orchestrație multi-canal.`,
+			rationale: `Obiectiv „scale agresiv" cu ${services} servicii: la Gold ai consultanță săptămânală, rapoarte personalizate și integrări avansate, de care ai nevoie când coordonezi mai multe canale.`,
 			severity: 'warning'
 		};
 	}
@@ -620,7 +620,7 @@ function buildCustomBundle(services: string[], useCase: UseCase, catalog: Wizard
 		services: valid,
 		discountPct,
 		rationale:
-			'Am construit această combinație pornind de la serviciile pe care le-ai selectat. Dacă nu există un bundle standard care să se potrivească, mergi pe custom — echipa OTS ajustează în ofertă.'
+			'Am construit această combinație pornind de la serviciile pe care le-ai selectat. Dacă niciun pachet standard nu se potrivește, rămâne varianta custom, pe care o ajustăm în ofertă.'
 	};
 }
 
@@ -628,7 +628,8 @@ function explainPrimary(
 	bundle: Bundle,
 	answers: WizardAnswers,
 	tier: Tier,
-	score: ScoringVector
+	score: ScoringVector,
+	catalog: WizardCatalog
 ): string[] {
 	const reasons: string[] = [];
 	const biz = BUSINESS_TYPE_OPTIONS.find((b) => b.value === answers.businessType);
@@ -636,14 +637,14 @@ function explainPrimary(
 
 	if (biz && goal) {
 		reasons.push(
-			`Pentru ${biz.label.toLowerCase()} cu obiectiv „${goal.label.toLowerCase()}", bundle-ul „${bundle.name}" acoperă canalele potrivite.`
+			`Pentru ${biz.label.toLowerCase()} cu obiectivul „${goal.label.toLowerCase()}", pachetul „${bundle.name}" acoperă canalele potrivite.`
 		);
 	}
 
 	if (score.platformBonus >= 10) {
 		if (answers.businessType === 'ecommerce' && bundle.services.includes('meta-ads')) {
 			reasons.push(
-				'Meta DPA (catalog dinamic) e probata statistic pentru ROAS mai bun pe magazine online — de aceea face diferența.'
+				'Catalogul dinamic Meta (DPA) dă, de regulă, un ROAS mai bun pe magazinele online: reclama arată fiecărui vizitator exact produsele la care s-a uitat.'
 			);
 		} else if (
 			answers.businessType === 'local' &&
@@ -651,7 +652,7 @@ function explainPrimary(
 			bundle.services.includes('seo')
 		) {
 			reasons.push(
-				'Google Ads Local + SEO (Google Business Profile) = duo-ul standard pentru business local: vizibilitate plătită + organic pe zonă.'
+				'Google Ads Local și SEO (Google Business Profile) sunt combinația obișnuită pentru un business local: vizibilitate plătită și organică pe zona ta.'
 			);
 		} else if (
 			answers.goal === 'leads' &&
@@ -660,14 +661,17 @@ function explainPrimary(
 				bundle.services.includes('marketing-automation'))
 		) {
 			reasons.push(
-				'Google Search aduce lead-uri cu intenție mare + Email/Automation le nurtureză până devin clienți — combinația dovedită B2B.'
+				'Google Search aduce lead-uri cu intenție de cumpărare, iar emailul și automatizările le țin aproape până devin clienți. E combinația clasică în B2B.'
 			);
 		}
 	}
 
-	if (bundle.discountPct > 0) {
+	// Același discount ca în costul afișat (regula pe numărul de servicii), nu
+	// `bundle.discountPct` — altfel textul spunea −15% lângă un calcul cu −10%.
+	const appliedDiscount = discountForServiceCount(bundle.services.length, catalog);
+	if (appliedDiscount > 0) {
 		reasons.push(
-			`Combinația de ${bundle.services.length} servicii aduce automat −${bundle.discountPct}% discount multi-servicii.`
+			`Combinația de ${bundle.services.length} servicii aduce automat −${appliedDiscount}% discount multi-servicii.`
 		);
 	}
 
@@ -713,7 +717,8 @@ function estimateMonthlyCost(bundle: Bundle, tier: Tier, catalog: WizardCatalog)
 		const cat = pickCategory(catalog, slug);
 		return sum + (cat?.prices[tier] ?? 0);
 	}, 0);
-	return Math.round((monthly * (100 - bundle.discountPct)) / 100);
+	// Aceeași regulă ca `calculateCost`, ca „economisești ~X €/lună" să corespundă prețurilor afișate.
+	return Math.round((monthly * (100 - discountForServiceCount(bundle.services.length, catalog))) / 100);
 }
 
 function selectRecommendations(
@@ -731,7 +736,7 @@ function selectRecommendations(
 		bundle: primaryScored.bundle,
 		tier,
 		cost: calculateCost(primaryScored.bundle.services, tier, includeSetup, catalog),
-		reasonWhy: explainPrimary(primaryScored.bundle, answers, tier, primaryScored.scoreVector),
+		reasonWhy: explainPrimary(primaryScored.bundle, answers, tier, primaryScored.scoreVector, catalog),
 		warnings: [],
 		isCustom: false,
 		score: Math.round(primaryScored.scoreVector.finalScore)
@@ -754,7 +759,7 @@ function selectRecommendations(
 		seen.add(alt1.bundle.id);
 		const reasonLabel =
 			alt1.bundle.useCase !== primary.bundle.useCase
-				? 'Strategie diferită — dacă prioritățile se schimbă'
+				? 'Strategie diferită, dacă prioritățile se schimbă'
 				: 'Mix diferit de canale';
 		alternatives.push({
 			bundle: alt1.bundle,
@@ -797,8 +802,8 @@ function selectRecommendations(
 		const altCost = estimateMonthlyCost(alt2.bundle, tier, catalog);
 		const reasonLabel =
 			alt2Type === 'cheaper'
-				? `Opțiune buget — economisești ~${(primaryCost - altCost).toLocaleString('ro-RO')} €/lună`
-				: 'Opțiune scale — mai multe canale, creștere accelerată';
+				? `Opțiune buget: economisești ~${(primaryCost - altCost).toLocaleString('ro-RO')} €/lună`
+				: 'Opțiune scale: mai multe canale, creștere mai rapidă';
 		alternatives.push({
 			bundle: alt2.bundle,
 			tier,
