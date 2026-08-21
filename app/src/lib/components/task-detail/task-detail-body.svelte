@@ -73,7 +73,8 @@
 		Clock,
 		CheckSquare2,
 		Square,
-		ChevronLeft
+		ChevronLeft,
+		MessageCircle
 	} from '@lucide/svelte';
 	import { focusTrap } from '$lib/actions/focus-trap';
 	import { toast } from 'svelte-sonner';
@@ -82,6 +83,7 @@
 	import TaskCommentThread from './task-comment-thread.svelte';
 	import TaskActivityTimeline from './task-activity-timeline.svelte';
 	import TaskEmailSection from './task-email-section.svelte';
+	import TaskWhatsappGroupCard from './task-whatsapp-group-card.svelte';
 
 	interface Props {
 		task: (Task & { subtasks?: any[]; tags?: any[]; assignees?: any[] }) | null;
@@ -137,6 +139,7 @@
 	let progressOpen = $state(true);
 	let teamOpen = $state(true);
 	let materialsOpen = $state(false);
+	let whatsappOpen = $state(true);
 	let activityOpen = $state(false);
 
 	$effect(() => {
@@ -146,6 +149,7 @@
 			isMobile = matches;
 			progressOpen = !matches;
 			teamOpen = !matches;
+			whatsappOpen = !matches;
 			materialsOpen = false;
 			activityOpen = false;
 		};
@@ -1014,6 +1018,28 @@
 								{/if}
 							</div>
 						</details>
+
+						<!-- GRUP WHATSAPP card — doar echipa (nu portalul clientului) -->
+						{#if !isClient}
+							<details bind:open={whatsappOpen} class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">
+								<summary
+									class="flex cursor-pointer select-none list-none items-center justify-between p-4 text-sm font-semibold"
+								>
+									<span class="flex items-center gap-2">
+										<MessageCircle class="h-4 w-4 text-muted-foreground" />
+										Grup WhatsApp
+									</span>
+									<ChevronLeft
+										class="h-4 w-4 text-muted-foreground transition-transform md:hidden {whatsappOpen
+											? '-rotate-90'
+											: 'rotate-180'}"
+									/>
+								</summary>
+								<div class="px-4 pb-4">
+									<TaskWhatsappGroupCard taskId={currentTask.id} {tenantSlug} />
+								</div>
+							</details>
+						{/if}
 
 						<!-- MATERIALE card — lazy (loads on open) -->
 						<details bind:open={materialsOpen} class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">

@@ -14,6 +14,7 @@ import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-re
 import * as storage from '$lib/server/storage';
 import { createNotification } from '$lib/server/notifications';
 import { notifyTaskMention } from '$lib/server/telegram/task-notifications';
+import { notifyTaskMentionInGroup } from '$lib/server/whatsapp/task-notifications';
 import { requireStaff } from '$lib/server/get-actor';
 
 /** Sanitize TipTap HTML - allow safe tags + mention attributes */
@@ -348,6 +349,22 @@ export const createTaskComment = command(
 				`${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() ||
 				event.locals.user.email;
 			const tenantSlug = event.locals.tenant.slug;
+			// Numele celor menționați, pentru mesajul din grupul WhatsApp al task-ului.
+			const mentionedRows =
+				nonSelfMentionIds.length > 0
+					? await db
+							.select({
+								id: table.user.id,
+								firstName: table.user.firstName,
+								lastName: table.user.lastName,
+								email: table.user.email
+							})
+							.from(table.user)
+							.where(inArray(table.user.id, nonSelfMentionIds))
+					: [];
+			const mentionedNames = new Map(
+				mentionedRows.map((u) => [u.id, `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email])
+			);
 			for (const mentionedId of nonSelfMentionIds) {
 				await createNotification({
 					tenantId: event.locals.tenant.id,
@@ -370,6 +387,19 @@ export const createTaskComment = command(
 					authorUserId: event.locals.user.id,
 					authorName,
 					commentSnippet: data.content
+				}).catch(() => {});
+
+				// WhatsApp: în grupul legat de task, nu persoanei (aceeași buclă, alt canal).
+				void notifyTaskMentionInGroup({
+					tenantId: event.locals.tenant.id,
+					tenantSlug,
+					taskId: data.taskId,
+					taskTitle: task.title,
+					authorUserId: event.locals.user.id,
+					authorName,
+					mentionedUserId: mentionedId,
+					mentionedName: mentionedNames.get(mentionedId) ?? 'coleg',
+					commentHtml: sanitizedContent
 				}).catch(() => {});
 			}
 		}

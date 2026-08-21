@@ -122,6 +122,47 @@ function generateTaskId() {
 	return encodeBase32LowerCase(bytes);
 }
 
+/**
+ * Emite `task.status-changed` pentru orice cale care scrie `status`. Citește
+ * singur titlul și clientul, ca apelul să fie la fel de la toate cele opt
+ * locuri (editare, inline, kanban, bulk, aprobare, respingere, redeschidere).
+ * Nu aruncă: schimbarea de status e deja salvată.
+ */
+async function emitTaskStatusChanged(args: {
+	taskId: string;
+	oldStatus: string | null | undefined;
+	newStatus: string;
+	changedByUserId: string;
+	tenantId: string;
+	tenantSlug: string;
+}): Promise<void> {
+	if (!args.oldStatus || args.oldStatus === args.newStatus) return;
+	try {
+		const [row] = await db
+			.select({ title: table.task.title, clientId: table.task.clientId })
+			.from(table.task)
+			.where(and(eq(table.task.id, args.taskId), eq(table.task.tenantId, args.tenantId)))
+			.limit(1);
+		if (!row) return;
+		await getHooksManager().emit({
+			type: 'task.status-changed',
+			taskId: args.taskId,
+			taskTitle: row.title,
+			oldStatus: args.oldStatus,
+			newStatus: args.newStatus,
+			changedByUserId: args.changedByUserId,
+			clientId: row.clientId ?? null,
+			tenantId: args.tenantId,
+			tenantSlug: args.tenantSlug
+		});
+	} catch (error) {
+		logWarning('server', `task.status-changed emit failed: ${(error as Error).message}`, {
+			tenantId: args.tenantId,
+			metadata: { taskId: args.taskId }
+		});
+	}
+}
+
 const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
@@ -1506,6 +1547,14 @@ export const updateTask = command(
 			await sendClientNotificationIfEnabled(taskId, existing.tenantId, 'status-change', {
 				newStatus: updateData.status
 			}, event.locals.user.email);
+			await emitTaskStatusChanged({
+				taskId,
+				oldStatus: existing.status,
+				newStatus: updateData.status!,
+				changedByUserId: event.locals.user.id,
+				tenantId: existing.tenantId,
+				tenantSlug: event.locals.tenant.slug
+			});
 		} else {
 			// Collect changed fields for notification
 			const changedFieldLabels: string[] = [];
@@ -1785,6 +1834,14 @@ export const reopenTask = command(
 		await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 			newStatus: 'pending-approval'
 		}, event.locals.user.email);
+		await emitTaskStatusChanged({
+			taskId,
+			oldStatus,
+			newStatus: 'pending-approval',
+			changedByUserId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			tenantSlug: event.locals.tenant.slug
+		});
 
 		return { success: true };
 	}
@@ -1880,6 +1937,14 @@ export const updateTaskPosition = command(
 			await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 				newStatus
 			}, event.locals.user.email);
+			await emitTaskStatusChanged({
+				taskId,
+				oldStatus,
+				newStatus,
+				changedByUserId: event.locals.user.id,
+				tenantId: event.locals.tenant.id,
+				tenantSlug: event.locals.tenant.slug
+			});
 		}
 
 		return { success: true };
@@ -1971,6 +2036,14 @@ export const updateTaskStatus = command(
 			event.locals.user.email,
 			personalEmails
 		);
+		await emitTaskStatusChanged({
+			taskId,
+			oldStatus,
+			newStatus,
+			changedByUserId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			tenantSlug: event.locals.tenant.slug
+		});
 
 		return { success: true, changed: true };
 	}
@@ -2108,6 +2181,16 @@ export const bulkUpdateTaskStatus = command(
 				)
 			)
 		);
+		for (const t of changedTasks) {
+			await emitTaskStatusChanged({
+				taskId: t.id,
+				oldStatus: t.status,
+				newStatus,
+				changedByUserId: event.locals.user.id,
+				tenantId,
+				tenantSlug: event.locals.tenant.slug
+			});
+		}
 
 		return {
 			success: true,
@@ -2629,6 +2712,14 @@ export const approveTask = command(
 		await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 			newStatus: status
 		}, event.locals.user.email);
+		await emitTaskStatusChanged({
+			taskId,
+			oldStatus: 'pending-approval',
+			newStatus: status,
+			changedByUserId: event.locals.user.id,
+			tenantId: event.locals.tenant.id,
+			tenantSlug: event.locals.tenant.slug
+		});
 
 		return { success: true, taskId };
 	}
@@ -2684,6 +2775,14 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 	await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
 		newStatus: 'cancelled'
 	}, event.locals.user.email);
+	await emitTaskStatusChanged({
+		taskId,
+		oldStatus: 'pending-approval',
+		newStatus: 'cancelled',
+		changedByUserId: event.locals.user.id,
+		tenantId: event.locals.tenant.id,
+		tenantSlug: event.locals.tenant.slug
+	});
 
 	return { success: true, taskId };
 });

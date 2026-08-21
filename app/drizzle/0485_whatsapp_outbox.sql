@@ -1,0 +1,20 @@
+CREATE TABLE `whatsapp_outbox` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`group_jid` text NOT NULL,
+	`kind` text NOT NULL,
+	`dedupe_key` text,
+	`task_id` text,
+	`body` text NOT NULL,
+	`mentions_json` text,
+	`status` text DEFAULT 'queued' NOT NULL,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`next_attempt_at` timestamp NOT NULL,
+	`sent_at` timestamp,
+	`wam_id` text,
+	`last_error` text,
+	`created_at` timestamp DEFAULT current_timestamp NOT NULL,
+	`updated_at` timestamp DEFAULT current_timestamp NOT NULL,
+	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`task_id`) REFERENCES `task`(`id`) ON UPDATE no action ON DELETE no action
+);

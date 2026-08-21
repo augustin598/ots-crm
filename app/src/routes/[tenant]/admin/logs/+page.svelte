@@ -16,6 +16,14 @@
 		resolveDebugLog,
 		bulkResolveDebugLogs
 	} from '$lib/remotes/debug-logs.remote';
+	import {
+		getWhatsappOutbox,
+		getWhatsappOutboxStats,
+		retryWhatsappOutbox,
+		retryAllFailedWhatsappOutbox,
+		deleteWhatsappOutbox,
+		deleteFinishedWhatsappOutbox
+	} from '$lib/remotes/whatsapp-outbox.remote';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -43,6 +51,8 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import BugIcon from '@lucide/svelte/icons/bug';
+	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
+	import HourglassIcon from '@lucide/svelte/icons/hourglass';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ClockIcon from '@lucide/svelte/icons/clock';
@@ -58,6 +68,98 @@
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import { page } from '$app/state';
 	import { getErrorByCode } from '$lib/error-codes';
+
+	// ---- Coada WhatsApp (mesaje automate în grupuri) ----
+	const waOutboxQuery = getWhatsappOutbox();
+	const allWaRows = $derived(waOutboxQuery.current || []);
+	const waStatsQuery = getWhatsappOutboxStats();
+	const waStats = $derived(
+		waStatsQuery.current || { queued: 0, sending: 0, sent: 0, failed: 0, expired: 0 }
+	);
+	let waStatusFilter = $state<string>('');
+	let waSearchText = $state('');
+	let refreshingWa = $state(false);
+	let retryingWaId = $state<string | null>(null);
+	let retryingWaAll = $state(false);
+
+	const filteredWaRows = $derived(
+		allWaRows.filter((row) => {
+			if (waStatusFilter && row.status !== waStatusFilter) return false;
+			if (waSearchText) {
+				const q = waSearchText.toLowerCase();
+				if (
+					!row.body.toLowerCase().includes(q) &&
+					!(row.groupSubject ?? '').toLowerCase().includes(q) &&
+					!(row.taskTitle ?? '').toLowerCase().includes(q) &&
+					!(row.lastError ?? '').toLowerCase().includes(q)
+				)
+					return false;
+			}
+			return true;
+		})
+	);
+
+	const WA_STATUS: Record<string, { label: string; badge: string; tab: string }> = {
+		queued: { label: 'În așteptare', badge: 'bg-orange-100 text-orange-700', tab: 'border-orange-500 text-orange-600' },
+		sending: { label: 'Se trimite', badge: 'bg-blue-100 text-blue-700', tab: 'border-blue-500 text-blue-600' },
+		sent: { label: 'Trimis', badge: 'bg-green-100 text-green-700', tab: 'border-green-500 text-green-600' },
+		failed: { label: 'Eșuat', badge: 'bg-red-100 text-red-700', tab: 'border-red-500 text-red-600' },
+		expired: { label: 'Expirat', badge: 'bg-gray-100 text-gray-700', tab: 'border-gray-500 text-gray-600' }
+	};
+	const WA_KIND: Record<string, string> = { 'task.status': 'Status task', 'task.mention': 'Mențiune' };
+
+	function refreshWa() {
+		refreshingWa = true;
+		waOutboxQuery.refresh();
+		waStatsQuery.refresh();
+		setTimeout(() => (refreshingWa = false), 800);
+	}
+
+	async function handleRetryWa(id: string) {
+		retryingWaId = id;
+		try {
+			await retryWhatsappOutbox(id).updates(waOutboxQuery, waStatsQuery);
+			toast.success('Pus din nou în coadă. Pleacă la următoarea golire.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Nu am putut repune în coadă.');
+		} finally {
+			retryingWaId = null;
+		}
+	}
+
+	async function handleRetryAllWa() {
+		const n = waStats.failed + waStats.expired;
+		if (!confirm(`Repui în coadă ${n} mesaje picate sau expirate?`)) return;
+		retryingWaAll = true;
+		try {
+			const res = await retryAllFailedWhatsappOutbox().updates(waOutboxQuery, waStatsQuery);
+			toast.success(`${res.requeued} mesaje repuse în coadă.`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Nu am putut repune în coadă.');
+		} finally {
+			retryingWaAll = false;
+		}
+	}
+
+	async function handleDeleteWa(id: string) {
+		if (!confirm('Ștergi această intrare din coada WhatsApp?')) return;
+		try {
+			await deleteWhatsappOutbox(id).updates(waOutboxQuery, waStatsQuery);
+			toast.success('Intrare ștearsă.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere.');
+		}
+	}
+
+	async function handleDeleteFinishedWa() {
+		if (!confirm('Ștergi toate intrările trimise, picate și expirate? Cele în așteptare rămân.')) return;
+		try {
+			const res = await deleteFinishedWhatsappOutbox().updates(waOutboxQuery, waStatsQuery);
+			toast.success(`${res.deleted} intrări șterse.`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Eroare la ștergere.');
+		}
+	}
 
 	// ---- Email Logs ----
 	const emailLogsQuery = getEmailLogs();
@@ -443,6 +545,10 @@
 					<MailIcon class="h-4 w-4 mr-2" />
 					Email Logs
 				</TabsTrigger>
+				<TabsTrigger value="whatsapp">
+					<MessageCircleIcon class="h-4 w-4 mr-2" />
+					WhatsApp
+				</TabsTrigger>
 				<TabsTrigger value="debug">
 					<BugIcon class="h-4 w-4 mr-2" />
 					Debug
@@ -775,6 +881,187 @@
 							</div>
 						</div>
 					{/if}
+				{/if}
+			</div>
+		</TabsContent>
+
+		<!-- ==================== WHATSAPP OUTBOX TAB ==================== -->
+		<TabsContent value="whatsapp">
+			<div class="space-y-6">
+				<div class="flex items-center justify-between">
+					<div>
+						<h2 class="text-xl font-semibold">Coada WhatsApp</h2>
+						<p class="text-sm text-muted-foreground">Mesajele automate trimise în grupurile legate de task-uri: status și mențiuni</p>
+					</div>
+					<Button variant="outline" onclick={refreshWa} disabled={refreshingWa}>
+						<RefreshCwIcon class="h-4 w-4 mr-2 {refreshingWa ? 'animate-spin' : ''}" />
+						Actualizează
+					</Button>
+				</div>
+
+				<div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+					{#each [
+						{ key: 'queued', icon: ClockIcon, color: 'text-orange-500', num: 'text-orange-600' },
+						{ key: 'sending', icon: RefreshCwIcon, color: 'text-blue-500', num: 'text-blue-600' },
+						{ key: 'sent', icon: CheckCircleIcon, color: 'text-green-500', num: 'text-green-600' },
+						{ key: 'failed', icon: XCircleIcon, color: 'text-red-500', num: 'text-red-600' },
+						{ key: 'expired', icon: HourglassIcon, color: 'text-gray-500', num: 'text-gray-500' }
+					] as stat (stat.key)}
+						{@const Icon = stat.icon}
+						<Card
+							class="cursor-pointer hover:border-primary transition-colors {waStatusFilter === stat.key ? 'border-primary' : ''}"
+							onclick={() => (waStatusFilter = waStatusFilter === stat.key ? '' : stat.key)}
+						>
+							<CardContent class="pt-4 pb-4">
+								<div class="flex items-center justify-between">
+									<p class="text-sm text-muted-foreground">{WA_STATUS[stat.key].label}</p>
+									<Icon class="h-4 w-4 {stat.color}" />
+								</div>
+								<p class="text-2xl font-bold {stat.num}">{waStats[stat.key as keyof typeof waStats]}</p>
+							</CardContent>
+						</Card>
+					{/each}
+				</div>
+
+				<div class="flex items-center gap-4 border-b overflow-x-auto">
+					<button
+						class="px-1 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap {waStatusFilter === '' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						onclick={() => (waStatusFilter = '')}
+					>
+						Toate ({allWaRows.length})
+					</button>
+					{#each Object.entries(WA_STATUS) as [key, meta] (key)}
+						<button
+							class="px-1 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap {waStatusFilter === key ? meta.tab : 'border-transparent text-muted-foreground hover:text-foreground'}"
+							onclick={() => (waStatusFilter = waStatusFilter === key ? '' : key)}
+						>
+							{meta.label} ({waStats[key as keyof typeof waStats]})
+						</button>
+					{/each}
+				</div>
+
+				<div class="flex flex-wrap gap-4 items-center">
+					<div class="relative flex-1 min-w-[200px]">
+						<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+						<Input placeholder="Caută în mesaj, grup, task, eroare..." bind:value={waSearchText} class="pl-9" />
+					</div>
+					<div class="flex items-center gap-2 ml-auto">
+						<span class="text-sm text-muted-foreground">{filteredWaRows.length} intrări</span>
+						<Button
+							variant="outline"
+							size="sm"
+							title="Repune în coadă mesajele picate sau expirate"
+							onclick={handleRetryAllWa}
+							disabled={retryingWaAll || waStats.failed + waStats.expired === 0}
+						>
+							<RotateCcwIcon class="h-4 w-4 {retryingWaAll ? 'animate-spin' : ''}" />
+							<span class="ml-1 hidden sm:inline">Reîncearcă toate ({waStats.failed + waStats.expired})</span>
+						</Button>
+						<Button variant="outline" size="sm" title="Șterge intrările terminate" onclick={handleDeleteFinishedWa} disabled={waStats.sent + waStats.failed + waStats.expired === 0}>
+							<Trash2Icon class="h-4 w-4" />
+						</Button>
+					</div>
+				</div>
+
+				{#if waOutboxQuery.error}
+					<Card>
+						<CardContent class="py-12 text-center">
+							<XCircleIcon class="h-12 w-12 mx-auto text-red-500 mb-4" />
+							<p class="text-lg font-medium">Nu am putut încărca coada</p>
+							<p class="text-muted-foreground">{waOutboxQuery.error.message}</p>
+						</CardContent>
+					</Card>
+				{:else if !waOutboxQuery.current}
+					<Card>
+						<CardContent class="py-12 text-center text-muted-foreground">Se încarcă…</CardContent>
+					</Card>
+				{:else if allWaRows.length === 0}
+					<Card>
+						<CardContent class="py-12 text-center">
+							<MessageCircleIcon class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+							<p class="text-lg font-medium">Niciun mesaj în coadă</p>
+							<p class="text-muted-foreground">Apar aici după ce un task legat de un grup își schimbă statusul sau primește o mențiune.</p>
+						</CardContent>
+					</Card>
+				{:else if filteredWaRows.length === 0}
+					<Card>
+						<CardContent class="py-12 text-center">
+							<SearchIcon class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+							<p class="text-lg font-medium">Niciun rezultat</p>
+							<p class="text-muted-foreground">Schimbă filtrele.</p>
+						</CardContent>
+					</Card>
+				{:else}
+					<div class="space-y-3">
+						{#each filteredWaRows as row (row.id)}
+							<Collapsible>
+								<Card>
+									<CardContent class="pt-4 pb-4">
+										<div class="flex items-start justify-between gap-4">
+											<div class="flex-1 min-w-0">
+												<div class="flex items-center gap-2 mb-2 flex-wrap">
+													<MessageCircleIcon class="h-4 w-4 text-muted-foreground shrink-0" />
+													<Badge class={WA_STATUS[row.status]?.badge ?? ''}>{WA_STATUS[row.status]?.label ?? row.status}</Badge>
+													<Badge variant="outline">{WA_KIND[row.kind] ?? row.kind}</Badge>
+													<span class="text-xs text-muted-foreground font-mono">ID: {row.id.slice(0, 8)}...</span>
+												</div>
+												<p class="font-medium truncate">
+													Către: <span class="text-foreground">{row.groupSubject ?? row.groupJid}</span>
+												</p>
+												{#if row.taskTitle}
+													<p class="text-sm text-muted-foreground truncate">Task: {row.taskTitle}</p>
+												{/if}
+												<div class="flex flex-wrap gap-4 mt-2 text-xs text-muted-foreground">
+													<span>Creat: {formatDate(row.createdAt)}</span>
+													{#if row.sentAt}
+														<span>Trimis: {formatDate(row.sentAt)}</span>
+													{:else if row.status === 'queued'}
+														<span>Programat: {formatDate(row.nextAttemptAt)}</span>
+													{/if}
+													<span>Încercări: {row.attempts}</span>
+												</div>
+												{#if row.lastError}
+													<p class="text-sm text-red-600 mt-1">{row.lastError}</p>
+												{/if}
+											</div>
+											<div class="flex items-center gap-2 shrink-0">
+												<CollapsibleTrigger>
+													{#snippet child({ props })}
+														<Button {...props} variant="ghost" size="sm" title="Vezi mesajul">
+															<ChevronDownIcon class="h-4 w-4" />
+														</Button>
+													{/snippet}
+												</CollapsibleTrigger>
+												{#if row.status === 'failed' || row.status === 'expired'}
+													<Button
+														variant="ghost"
+														size="sm"
+														title="Repune în coadă"
+														disabled={retryingWaId === row.id}
+														onclick={() => handleRetryWa(row.id)}
+													>
+														<RotateCcwIcon class="h-4 w-4 text-blue-500 {retryingWaId === row.id ? 'animate-spin' : ''}" />
+													</Button>
+												{/if}
+												<Button variant="ghost" size="sm" title="Șterge" onclick={() => handleDeleteWa(row.id)}>
+													<Trash2Icon class="h-4 w-4 text-red-500" />
+												</Button>
+											</div>
+										</div>
+										<CollapsibleContent>
+											<div class="mt-4 pt-4 border-t space-y-2 text-sm text-muted-foreground">
+												<pre class="bg-muted p-3 rounded-md text-xs overflow-x-auto whitespace-pre-wrap text-foreground">{row.body}</pre>
+												{#if row.wamId}
+													<p>ID mesaj WhatsApp: <span class="font-mono text-xs">{row.wamId}</span></p>
+												{/if}
+												<p>Grup: <span class="font-mono text-xs">{row.groupJid}</span></p>
+											</div>
+										</CollapsibleContent>
+									</CardContent>
+								</Card>
+							</Collapsible>
+						{/each}
+					</div>
 				{/if}
 			</div>
 		</TabsContent>
