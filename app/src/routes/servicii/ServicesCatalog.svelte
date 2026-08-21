@@ -217,7 +217,7 @@
 		</div>
 
 		<!-- Pe telefon tabelul derulează orizontal; fără indiciu, coloanele Silver–Platinum par să lipsească. -->
-		<p class="sv-scrollhint" aria-hidden="true">Glisează tabelul spre stânga pentru Silver, Gold și Platinum →</p>
+		<p class="sv-scrollhint" aria-hidden="true">Glisează tabelul spre stânga pentru Silver, Gold și Platinum&nbsp;→</p>
 
 		<div class="sv-tablewrap" {@attach dragScroll}>
 			<table class="sv-table">
@@ -1424,10 +1424,21 @@
 		}
 		.sv-cartbar-clear {
 			grid-area: clear;
+			/* Coloana a doua e lată cât CTA-ul; fără asta „×” rămânea la începutul ei. */
+			justify-self: end;
+			width: 32px;
+			height: 32px;
 		}
 		.sv-cartbar-total {
 			grid-area: total;
 			min-width: 0;
+			align-self: center;
+		}
+		.sv-cartbar {
+			padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+		}
+		.sv-cartbar-inner > .sv-btn-primary {
+			justify-self: end;
 		}
 		/* Subtotalul tăiat nu încape lângă buton pe 375px; badge-ul −X% spune același lucru. */
 		.sv-cartbar-total s {
