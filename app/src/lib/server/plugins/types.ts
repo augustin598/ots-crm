@@ -126,6 +126,24 @@ export type TaskCompletedEvent = {
 	tenantSlug: string;
 };
 
+/**
+ * Orice schimbare de status a unui task, din orice cale (editare, kanban,
+ * inline, bulk, aprobare, redeschidere). Spre deosebire de `task.completed`,
+ * care e doar pentru `done`, ăsta se emite și pentru in-progress, review,
+ * blocked, cancelled. Cine ascultă ambele trebuie să aleagă unul la `done`.
+ */
+export type TaskStatusChangedEvent = {
+	type: 'task.status-changed';
+	taskId: string;
+	taskTitle: string;
+	oldStatus: string;
+	newStatus: string;
+	changedByUserId: string;
+	clientId: string | null;
+	tenantId: string;
+	tenantSlug: string;
+};
+
 export type ClientCreatedEvent = {
 	type: 'client.created';
 	tenantId: string;
@@ -151,6 +169,7 @@ export type HookEvent =
 	| TaskCreatedEvent
 	| TaskAssignedEvent
 	| TaskCompletedEvent
+	| TaskStatusChangedEvent
 	| ContractSignedEvent
 	| ContractActivatedEvent
 	| ContractExpiredEvent

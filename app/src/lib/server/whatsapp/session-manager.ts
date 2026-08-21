@@ -13,6 +13,7 @@ import { handleInbound, handleMessageUpdate } from './inbound-handler';
 import { upsertPushNames, upsertChatNames } from './contacts-store';
 import { enqueueFetch, dropTenant } from './avatar-fetcher';
 import { humanizedDelay } from './rate-limiter';
+import { startOutboxLoop, stopOutboxLoop } from './outbox';
 import { e164ToJid, jidToE164 } from './phone';
 
 const SILENT_LOGGER = pino({ level: 'silent' });
@@ -171,6 +172,8 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 					lastError: null
 				});
 				publishQr(tenantId, 'connected', { phoneE164, displayName });
+				// Outbox-ul se golește doar aici, unde e socketul (vezi outbox.ts).
+				startOutboxLoop(tenantId);
 				logInfo('whatsapp', 'Session connected', {
 					tenantId,
 					metadata: { sessionId, phoneE164, displayName }
@@ -187,6 +190,7 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 				});
 
 				sessions.delete(tenantId);
+				stopOutboxLoop(tenantId);
 				dropTenant(tenantId);
 
 				if (code === DisconnectReason.loggedOut) {
@@ -395,6 +399,7 @@ export async function stopSession(tenantId: string, logout = false): Promise<voi
 		});
 	}
 	sessions.delete(tenantId);
+	stopOutboxLoop(tenantId);
 	if (logout) {
 		await active.auth.clear().catch(() => {});
 		await setSessionStatus(tenantId, {
@@ -422,7 +427,20 @@ export async function sendText(tenantId: string, toE164Phone: string, text: stri
  * ar deveni un destinatar inexistent, în tăcere. Pauza dintre trimiteri rămâne
  * aceeași pentru ambele.
  */
-export async function sendTextToJid(tenantId: string, jid: string, text: string): Promise<string> {
+export interface SendTextOptions {
+	/**
+	 * JID-uri („40722…@s.whatsapp.net") care apar ca mențiuni reale în text
+	 * (albastre, cu notificare). Textul trebuie să conțină deja „@Nume".
+	 */
+	mentions?: string[];
+}
+
+export async function sendTextToJid(
+	tenantId: string,
+	jid: string,
+	text: string,
+	options: SendTextOptions = {}
+): Promise<string> {
 	const active = sessions.get(tenantId);
 	if (!active) throw new Error('WhatsApp session not connected');
 
@@ -434,7 +452,11 @@ export async function sendTextToJid(tenantId: string, jid: string, text: string)
 		// non-fatal
 	}
 
-	const sent = await active.sock.sendMessage(jid, { text });
+	const mentions = options.mentions?.filter(Boolean) ?? [];
+	const sent = await active.sock.sendMessage(
+		jid,
+		mentions.length > 0 ? { text, mentions } : { text }
+	);
 	if (!sent?.key?.id) throw new Error('sendMessage returned no message id');
 
 	try {

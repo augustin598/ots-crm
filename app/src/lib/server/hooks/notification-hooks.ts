@@ -10,6 +10,7 @@ import type {
 	TaskCreatedEvent,
 	TaskAssignedEvent,
 	TaskCompletedEvent,
+	TaskStatusChangedEvent,
 	ContractSignedEvent,
 	ContractActivatedEvent,
 	ContractExpiredEvent,
@@ -20,6 +21,7 @@ import type {
 } from '../plugins/types';
 import { logError, logInfo } from '$lib/server/logger';
 import { notifyTaskCreated, notifyTaskAssigned, notifyTaskCompleted } from '../telegram/task-notifications';
+import { notifyTaskStatusChangedInGroup } from '../whatsapp/task-notifications';
 
 /**
  * Get all owner/admin user IDs for a tenant (used to broadcast notifications).
@@ -124,6 +126,20 @@ export function registerNotificationHooks(): void {
 	// ---- Task Completed ----
 	hooks.on('task.completed', async (event: TaskCompletedEvent) => {
 		void notifyTaskCompleted(event).catch(() => {});
+	});
+
+	// ---- Task Status Changed (orice status, orice cale) → grupul WhatsApp al task-ului ----
+	// Telegram rămâne pe task.completed; WhatsApp ascultă DOAR aici, ca `done`
+	// să nu plece de două ori.
+	hooks.on('task.status-changed', async (event: TaskStatusChangedEvent) => {
+		try {
+			await notifyTaskStatusChangedInGroup(event);
+		} catch (error) {
+			logError('server', 'notification-hooks: whatsapp task.status-changed failed', {
+				tenantId: event.tenantId,
+				metadata: { taskId: event.taskId, err: error instanceof Error ? error.message : String(error) }
+			});
+		}
 	});
 
 	// ---- Contract Signed ----
