@@ -19,8 +19,13 @@ import { statusDedupeKey } from './outbox-policy';
 import { getUserWhatsappPhonesBatch } from './resolve-phone';
 import { buildMentionMessage, buildStatusMessage, notifiesGroup } from './task-messages';
 
+/**
+ * Linkul din grup e cel din portalul clientului, nu din admin: în grup sunt
+ * oamenii clientului. Același format ca `buildTaskUrl(kind='client')` din
+ * task-recipients.ts.
+ */
 function taskUrl(tenantSlug: string, taskId: string): string {
-	return `${getAppBaseUrl()}/${tenantSlug}/tasks/${taskId}`;
+	return `${getAppBaseUrl()}/client/${tenantSlug}/tasks/${taskId}`;
 }
 
 /** Grupul legat de task, doar dacă e încă bifat în inbox. */

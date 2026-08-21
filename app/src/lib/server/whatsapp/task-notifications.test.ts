@@ -92,7 +92,7 @@ describe('schimbarea de status', () => {
 			taskId: 't1'
 		});
 		expect(String(enqueued[0].body)).toContain('Andrei Pop a trecut task-ul în *În lucru*');
-		expect(String(enqueued[0].body)).toContain('https://crm.test/ots/tasks/t1');
+		expect(String(enqueued[0].body)).toContain('https://crm.test/client/ots/tasks/t1');
 	});
 
 	it('task fără grup: nimic', async () => {
