@@ -341,7 +341,9 @@
 				label: `${u.firstName} ${u.lastName}`.trim() || u.email,
 				kind: 'agency' as const,
 				email: u.email,
-				phone: (u as any).phone ?? null
+				// whatsappPhone vine din user_whatsapp_link (sursa canonică, calculată în
+				// users.remote); tenantUser.phone e doar rezervă pentru cine n-are legătură.
+				phone: (u as any).whatsappPhone ?? (u as any).phone ?? null
 			}))
 	);
 
@@ -897,7 +899,17 @@
 								{#each assignees as assignee (assignee.userId)}
 									{@const fullName =
 										`${assignee.firstName} ${assignee.lastName}`.trim() || assignee.email}
-									{@const assigneePhone = (assignee as any).phone ?? (users.find((u) => u.id === assignee.userId) as any)?.phone ?? null}
+									<!-- Assignees nu poartă telefon (getTasks nu-l selectează), deci îl luăm din
+									     listele deja încărcate. Utilizatorii de client trebuie căutați separat:
+									     `users` conține doar agenția, așa că fără a doua căutare niciun contact
+									     de client n-ar primi avatar, oricâte legături ar avea. -->
+									{@const assigneeUser = (users.find((u) => u.id === assignee.userId) ??
+										assignableClientUsers.find((u: any) => u.id === assignee.userId)) as any}
+									{@const assigneePhone =
+										(assignee as any).phone ??
+										assigneeUser?.whatsappPhone ??
+										assigneeUser?.phone ??
+										null}
 									<div class="group flex items-center gap-3">
 										<ContactAvatar
 											src={avatarSrcFromPhone(assigneePhone)}
