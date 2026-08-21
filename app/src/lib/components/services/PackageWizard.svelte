@@ -404,7 +404,7 @@
 				<ChevronLeftIcon class="h-4 w-4" />
 				Înapoi
 			</button>
-			<button type="button" class="wz-btn wz-btn-primary" onclick={next} disabled={!canProceed}>
+			<button type="button" class="wz-btn wz-btn-primary ots-gloss" onclick={next} disabled={!canProceed}>
 				{step === TOTAL_STEPS ? 'Vezi recomandarea' : 'Continuă'}
 				<ChevronRightIcon class="h-4 w-4" />
 			</button>
@@ -692,7 +692,7 @@
 
 				<!-- CTA -->
 				<div class="mt-6 flex flex-wrap gap-3">
-					<Button size="lg" onclick={() => requestBundle(primary)} disabled={submitting}>
+					<Button size="lg" class="ots-gloss" onclick={() => requestBundle(primary)} disabled={submitting}>
 						{submitting ? 'Se trimite...' : 'Trimit cerere pentru acest pachet'}
 						<ArrowRightIcon class="h-4 w-4 ml-2" />
 					</Button>

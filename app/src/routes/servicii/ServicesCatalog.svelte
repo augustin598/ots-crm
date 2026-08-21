@@ -36,6 +36,7 @@
 	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ServicesQuoteModal from './ServicesQuoteModal.svelte';
+	import CartToast, { type CartToastKind } from './CartToast.svelte';
 	import { ServicesCart } from './services-cart.svelte';
 	import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
 	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
@@ -89,11 +90,54 @@
 		compareOpen = true;
 	}
 
+	// Confirmarea din mijlocul ecranului: comparația se închide la click, iar bara de
+	// jos și contorul din nav nu sunt destul de explicite — vizitatorul trebuie să
+	// vadă clar ce a intrat în ofertă. `seq` remontează componenta la fiecare acțiune.
+	type ToastState = {
+		kind: CartToastKind;
+		category: Category | null;
+		tier: Tier | null;
+		/** Ce se pune înapoi la „Anulează" (serviciul scos sau toată oferta golită). */
+		undo: { categorySlug: string; tier: Tier }[] | null;
+	};
+	let toast = $state<ToastState | null>(null);
+	let toastSeq = $state(0);
+
+	function showToast(next: ToastState) {
+		toast = next;
+		toastSeq += 1;
+	}
+
+	function undoToast() {
+		if (!toast?.undo) return;
+		for (const item of toast.undo) cart.set(item.categorySlug, item.tier);
+		toast = null;
+	}
+
+	function clearCart() {
+		const snapshot = cart.items.map((i) => ({ ...i }));
+		cart.clear();
+		showToast({ kind: 'cleared', category: null, tier: null, undo: snapshot });
+	}
+
 	/** Din comparație: același tier = scoate, alt tier = înlocuiește, serviciu nou = adaugă. */
 	function handleTierPick(tier: Tier) {
 		if (!selectedCategory) return;
+		const before = cart.tierOf(selectedCategory.slug);
+		const kind: CartToastKind = before === null ? 'added' : before === tier ? 'removed' : 'replaced';
 		cart.toggle(selectedCategory.slug, tier);
 		compareOpen = false;
+		showToast({
+			kind,
+			category: selectedCategory,
+			tier,
+			undo: kind === 'removed' ? [{ categorySlug: selectedCategory.slug, tier }] : null
+		});
+	}
+
+	function openQuote() {
+		toast = null;
+		quoteOpen = true;
 	}
 
 	const currentYear = new Date().getFullYear();
@@ -103,8 +147,7 @@
 	<nav class="sv-nav">
 		<div class="sv-nav-inner">
 			<a href="/servicii" class="sv-logo">
-				<img src="/onetop-logo.png" alt="One Top Solution" />
-				<span>Servicii &amp; Pachete</span>
+				<img src="/onetop-logo.png" alt="One Top Solution — Servicii &amp; Pachete" />
 			</a>
 			<div class="sv-nav-spacer"></div>
 			{#if cart.count > 0}
@@ -132,7 +175,7 @@
 			pachet, cu prețul pe fiecare nivel.
 		</p>
 		<div class="sv-hero-actions">
-			<a href="#categorii" class="sv-btn sv-btn-primary">
+			<a href="#categorii" class="sv-btn sv-btn-primary ots-gloss">
 				Vezi pachetele <ArrowRightIcon class="h-4 w-4" />
 			</a>
 			<a href="/servicii/configurator" class="sv-btn sv-btn-ghost">
@@ -231,7 +274,7 @@
 					combinația care funcționează, cu preț estimat și discount aplicat.
 				</span>
 			</span>
-			<span class="sv-wizard-cta">Începe <ArrowRightIcon class="h-4 w-4" /></span>
+			<span class="sv-wizard-cta ots-gloss">Începe <ArrowRightIcon class="h-4 w-4" /></span>
 		</a>
 	</section>
 
@@ -368,16 +411,32 @@
 				<button
 					type="button"
 					class="sv-cartbar-clear"
-					onclick={() => cart.clear()}
+					onclick={clearCart}
 					aria-label="Golește oferta"
 				>
 					<XIcon class="h-4 w-4" aria-hidden="true" />
 				</button>
-				<button type="button" class="sv-btn sv-btn-primary" onclick={() => (quoteOpen = true)}>
+				<button type="button" class="sv-btn sv-btn-primary ots-gloss" onclick={() => (quoteOpen = true)}>
 					Solicită oferta <ArrowRightIcon class="h-4 w-4" />
 				</button>
 			</div>
 		</div>
+	{/if}
+
+	<!-- Tokenii (--accent, --border) există doar în .sv-page — de aceea stă aici, nu după </div>. -->
+	{#if toast && !quoteOpen}
+		{#key toastSeq}
+			<CartToast
+				kind={toast.kind}
+				category={toast.category}
+				tier={toast.tier}
+				tierLabel={toast.tier ? catalog.tierLabels[toast.tier] : ''}
+				summary={cartSummary}
+				onView={openQuote}
+				onDismiss={() => (toast = null)}
+				onUndo={toast.undo ? undoToast : undefined}
+			/>
+		{/key}
 	{/if}
 </div>
 
@@ -399,6 +458,7 @@
 {#if quoteOpen}
 	<ServicesQuoteModal {cart} {catalog} onClose={() => (quoteOpen = false)} />
 {/if}
+
 
 <style>
 	/* Tokenii sunt copiați 1:1 din /pachete-hosting, ca cele două pagini publice
@@ -1194,7 +1254,6 @@
 		.sv-card {
 			padding: 22px 20px 20px;
 		}
-		.sv-logo span,
 		.sv-nav-secondary {
 			display: none;
 		}
