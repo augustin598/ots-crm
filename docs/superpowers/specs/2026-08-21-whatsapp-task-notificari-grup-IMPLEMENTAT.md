@@ -68,6 +68,9 @@ Un task poate fi legat de un grup WhatsApp bifat în inbox. După legare:
   Telegram și in-app.
 - `src/lib/remotes/task-whatsapp.remote.ts`: `getTaskWhatsappLink(taskId)`
   (legătura, propunerea, opțiunile pentru admin), `setTaskWhatsappGroup`.
+- `src/lib/remotes/whatsapp-outbox.remote.ts` + tab-ul „WhatsApp" din
+  `/[tenant]/admin/logs`: coada cu statistici pe stare, căutare, mesajul
+  desfășurat, repunere în coadă (picat/expirat), ștergere. Doar owner/admin.
 
 ### Interfață
 
@@ -124,6 +127,4 @@ are socketul; altfel la următoarea golire de pe instanța conectată).
 ## Ce NU există încă
 
 - Preferință per tenant/utilizator „vreau sau nu notificări WhatsApp".
-- Interfață pentru outbox (rânduri `failed`/`expired`); doar logurile și
-  `outboxCounts(tenantId)` pentru un viitor endpoint `_debug-*`.
 - Notificări pentru alte evenimente (atribuire, scadență) în grup.
