@@ -1,6 +1,4 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
@@ -3157,6 +3155,216 @@
       "version": "6",
       "when": 1785398836928412,
       "tag": "0453_service_package_request_discount_pct",
+      "breakpoints": true
+    },
+    {
+      "idx": 454,
+      "version": "6",
+      "when": 1785398836928413,
+      "tag": "0454_user_whatsapp_link_ensure_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 455,
+      "version": "6",
+      "when": 1785398836928414,
+      "tag": "0455_user_whatsapp_link_ensure_user_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 456,
+      "version": "6",
+      "when": 1785398836928415,
+      "tag": "0456_user_whatsapp_link_ensure_phone_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 457,
+      "version": "6",
+      "when": 1785398836928416,
+      "tag": "0457_user_whatsapp_link_verified",
+      "breakpoints": true
+    },
+    {
+      "idx": 458,
+      "version": "6",
+      "when": 1785398836928417,
+      "tag": "0458_user_whatsapp_link_verified_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 459,
+      "version": "6",
+      "when": 1785398836928418,
+      "tag": "0459_user_whatsapp_link_consented_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 460,
+      "version": "6",
+      "when": 1785398836928419,
+      "tag": "0460_client_user_prefs_wa_dismissed_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 461,
+      "version": "6",
+      "when": 1785398836928420,
+      "tag": "0461_client_user_prefs_wa_dismissed_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 462,
+      "version": "6",
+      "when": 1785398836928421,
+      "tag": "0462_wa_link_verified_at_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 463,
+      "version": "6",
+      "when": 1785398836928422,
+      "tag": "0463_wa_link_verified_at_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 464,
+      "version": "6",
+      "when": 1785398836928423,
+      "tag": "0464_wa_link_consented_at_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 465,
+      "version": "6",
+      "when": 1785398836928424,
+      "tag": "0465_wa_link_consented_at_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 466,
+      "version": "6",
+      "when": 1785398836928425,
+      "tag": "0466_prefs_wa_dismissed_at_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 467,
+      "version": "6",
+      "when": 1785398836928426,
+      "tag": "0467_prefs_wa_dismissed_at_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 468,
+      "version": "6",
+      "when": 1785398836928427,
+      "tag": "0468_hosting_account_billing_excluded",
+      "breakpoints": true
+    },
+    {
+      "idx": 469,
+      "version": "6",
+      "when": 1785398836928428,
+      "tag": "0469_whatsapp_message_chat_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 470,
+      "version": "6",
+      "when": 1785398836928429,
+      "tag": "0470_whatsapp_message_sender_jid",
+      "breakpoints": true
+    },
+    {
+      "idx": 471,
+      "version": "6",
+      "when": 1785398836928430,
+      "tag": "0471_whatsapp_message_sender_phone",
+      "breakpoints": true
+    },
+    {
+      "idx": 472,
+      "version": "6",
+      "when": 1785398836928431,
+      "tag": "0472_whatsapp_message_sender_push_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 473,
+      "version": "6",
+      "when": 1785398836928432,
+      "tag": "0473_create_whatsapp_group",
+      "breakpoints": true
+    },
+    {
+      "idx": 474,
+      "version": "6",
+      "when": 1785398836928433,
+      "tag": "0474_whatsapp_group_jid_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 475,
+      "version": "6",
+      "when": 1785398836928434,
+      "tag": "0475_whatsapp_message_conversation_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 476,
+      "version": "6",
+      "when": 1785398836928435,
+      "tag": "0476_create_contract_sign_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 477,
+      "version": "6",
+      "when": 1785398836928436,
+      "tag": "0477_marketing_material_tenant_client_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 478,
+      "version": "6",
+      "when": 1785398836928437,
+      "tag": "0478_marketing_material_tenant_category_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 479,
+      "version": "6",
+      "when": 1785398836928438,
+      "tag": "0479_marketing_material_status_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 480,
+      "version": "6",
+      "when": 1785398836928439,
+      "tag": "0480_marketing_material_campaign_type_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 481,
+      "version": "6",
+      "when": 1785398836928440,
+      "tag": "0481_task_marketing_material_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 482,
+      "version": "6",
+      "when": 1785398836928441,
+      "tag": "0482_task_marketing_material_material_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 483,
+      "version": "6",
+      "when": 1785398836928442,
+      "tag": "0483_client_secondary_email_tenant_email_uidx",
       "breakpoints": true
     }
   ]

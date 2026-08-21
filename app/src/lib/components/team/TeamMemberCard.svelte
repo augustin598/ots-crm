@@ -4,6 +4,8 @@
 	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import { avatarColor, avatarInitials } from '$lib/config/team';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
+	import { page } from '$app/state';
 
 	export interface MemberCardData {
 		id: string;
@@ -12,6 +14,8 @@
 		lastName?: string | null;
 		title?: string | null;
 		phone?: string | null;
+		/** Telefon E.164 care are sigur un avatar WhatsApp stocat; null → inițiale. */
+		avatarPhone?: string | null;
 		role: { label: string; color: string; bg: string };
 		department?: { label: string; color: string } | null;
 		stats?: { active: number; done: number; onTime?: number | null } | null;
@@ -39,6 +43,9 @@
 
 	const initials = $derived(avatarInitials(member.firstName, member.lastName, member.email));
 	const color = $derived(avatarColor(member.email));
+	const avatarSrc = $derived(
+		whatsappAvatarUrl((page.params.tenant as string) ?? '', member.avatarPhone)
+	);
 	const displayName = $derived(
 		[member.firstName, member.lastName].filter(Boolean).join(' ').trim() || member.email
 	);
@@ -74,7 +81,19 @@
 	{/if}
 	<div class="team-card-head">
 		<div class="team-av-wrap">
-			<div class="team-av" style="background:{color}">{initials}</div>
+			<div class="team-av" style="background:{color}">
+				{initials}
+				{#if avatarSrc}
+					<!-- Imaginea acoperă inițialele; dacă nu se încarcă, se retrage și rămân inițialele. -->
+					<img
+						class="team-av-img"
+						src={avatarSrc}
+						alt={displayName}
+						loading="lazy"
+						onerror={(e) => e.currentTarget.remove()}
+					/>
+				{/if}
+			</div>
 			<span class="team-presence" class:online={member.online} class:offline={!member.online}></span>
 		</div>
 		<div class="team-card-info">
@@ -248,6 +267,8 @@
 		flex-shrink: 0;
 	}
 	.team-av {
+		position: relative;
+		overflow: hidden;
 		width: 48px;
 		height: 48px;
 		border-radius: 50%;
@@ -256,6 +277,13 @@
 		color: white;
 		font-weight: 800;
 		font-size: 15px;
+	}
+	.team-av-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 	.team-presence {
 		position: absolute;

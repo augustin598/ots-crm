@@ -4,7 +4,7 @@
 DELETE FROM `hosting_product`
 WHERE `description` = 'Auto-created product from Server Sync Tool'
   AND `price` = 0
-  AND `whmcs_product_id` IS NULL;
+  AND `whmcs_product_id` IS NULL;--> statement-breakpoint
 
 UPDATE `hosting_product`
 SET `description` = NULL

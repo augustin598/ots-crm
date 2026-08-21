@@ -78,10 +78,25 @@ export function classifyDaError(message: string, daCode?: string): DaErrorKind {
 	return 'unknown';
 }
 
+/**
+ * Normalized result of a DA user search.
+ *
+ * WARNING — only `username` is dependable. Probed against DA Evolution v1.701
+ * (2026-08-21) the two search endpoints return NEITHER domain nor email:
+ *   `/api/search/users`          → `["admin","topderma",...]`  (plain strings!)
+ *   `/api/search/users-extended` → `[{ user, role, matchedDomains, matchedPointers }]`
+ *                                   (the key is `user`, NOT `username`)
+ * So `domain`/`email` come back as `''` and `userType` carries `role` when the
+ * extended endpoint is used. Anything that needs the real domain, package or
+ * suspension state MUST call `getUserConfig(username)`.
+ */
 export interface DAUserSearchResult {
 	username: string;
+	/** `''` unless DA supplied it — see the warning above. */
 	domain: string;
+	/** `''` unless DA supplied it — see the warning above. */
 	email: string;
+	/** DA role (`admin` | `reseller` | `user`) when known, else `''`. */
 	userType: string;
 }
 
@@ -513,22 +528,98 @@ export class DirectAdminClient {
 		});
 	}
 
+	/**
+	 * Coerce every shape DA has been observed to return for a user search into
+	 * `DAUserSearchResult[]`.
+	 *
+	 * This exists because DA does NOT return the documented object array. It
+	 * sends a bare `["user1","user2"]` on `/api/search/users` and
+	 * `[{user,role,...}]` on `/api/search/users-extended`. Reading `.username`
+	 * off those yields `undefined` — which is exactly how the DA→CRM import
+	 * dialog ended up reporting "0 new / 46" while a real DA-only account
+	 * (topderma) sat there unimported.
+	 *
+	 * Accepted inputs: `string[]`, `object[]` (`username` | `user` | `name`),
+	 * `{ list: [...] }`, and the legacy `{ list: "a,b,c" }` comma form.
+	 */
+	private static normalizeUserSearch(raw: unknown): DAUserSearchResult[] {
+		let entries: unknown[] = [];
+		if (Array.isArray(raw)) {
+			entries = raw;
+		} else if (raw && typeof raw === 'object') {
+			const list = (raw as { list?: unknown }).list;
+			if (Array.isArray(list)) entries = list;
+			else if (typeof list === 'string') entries = list.split(',');
+		}
+
+		const out: DAUserSearchResult[] = [];
+		const seen = new Set<string>();
+		for (const entry of entries) {
+			let username = '';
+			let domain = '';
+			let email = '';
+			let userType = '';
+
+			if (typeof entry === 'string') {
+				username = entry.trim();
+			} else if (entry && typeof entry === 'object') {
+				const o = entry as Record<string, unknown>;
+				const pick = (...keys: string[]): string => {
+					for (const k of keys) {
+						const v = o[k];
+						if (typeof v === 'string' && v.trim()) return v.trim();
+					}
+					return '';
+				};
+				username = pick('username', 'user', 'name');
+				domain = pick('domain');
+				email = pick('email');
+				userType = pick('userType', 'usertype', 'role');
+			}
+
+			if (!username) continue;
+			const key = username.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push({ username, domain, email, userType });
+		}
+		return out;
+	}
+
+	/**
+	 * `query` is filtered CLIENT-SIDE on purpose: DA accepts `?search=` but
+	 * ignores it (verified on v1.701 — it returns the full list regardless), so
+	 * a caller passing a query would otherwise silently get every user back.
+	 */
+	private static applyUserSearchFilter(
+		users: DAUserSearchResult[],
+		query?: string
+	): DAUserSearchResult[] {
+		const q = query?.trim().toLowerCase();
+		if (!q) return users;
+		return users.filter(
+			(u) =>
+				u.username.toLowerCase().includes(q) ||
+				(!!u.domain && u.domain.toLowerCase().includes(q))
+		);
+	}
+
 	async searchUsers(query?: string): Promise<DAUserSearchResult[]> {
 		const params = query ? `?search=${encodeURIComponent(query)}` : '';
-		const result = await this.request<{ list?: DAUserSearchResult[] } | DAUserSearchResult[]>(
-			'GET',
-			`/api/search/users${params}`
+		const result = await this.request<unknown>('GET', `/api/search/users${params}`);
+		return DirectAdminClient.applyUserSearchFilter(
+			DirectAdminClient.normalizeUserSearch(result),
+			query
 		);
-		return Array.isArray(result) ? result : (result as { list?: DAUserSearchResult[] }).list ?? [];
 	}
 
 	async searchUsersExtended(query?: string): Promise<DAUserSearchResult[]> {
 		const params = query ? `?search=${encodeURIComponent(query)}` : '';
-		const result = await this.request<{ list?: DAUserSearchResult[] } | DAUserSearchResult[]>(
-			'GET',
-			`/api/search/users-extended${params}`
+		const result = await this.request<unknown>('GET', `/api/search/users-extended${params}`);
+		return DirectAdminClient.applyUserSearchFilter(
+			DirectAdminClient.normalizeUserSearch(result),
+			query
 		);
-		return Array.isArray(result) ? result : (result as { list?: DAUserSearchResult[] }).list ?? [];
 	}
 
 	async getUserConfig(username: string): Promise<DAUserConfig> {

@@ -235,15 +235,8 @@
 </script>
 
 <div class="space-y-5">
-	<!-- Breadcrumb -->
-	<nav class="flex items-center gap-2 text-sm text-slate-500" aria-label="breadcrumb">
-		<a href={`/${tenantSlug}/hosting`} class="hover:text-slate-700 dark:hover:text-slate-300">Hosting</a>
-		<span class="text-slate-300">›</span>
-		<a href={`/${tenantSlug}/hosting/accounts`} class="hover:text-slate-700 dark:hover:text-slate-300">Conturi</a>
-		<span class="text-slate-300">›</span>
-		<span class="text-slate-700 dark:text-slate-200">Grupare după client</span>
-	</nav>
-
+	<!-- Breadcrumb-ul e cel global din OtsTopbar (bara albă cu iconița home), ca pe
+	     restul aplicației. Aici era un al doilea, duplicat. -->
 	{#await groups}
 		<div class="rounded-xl border bg-white p-12 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-800">
 			Se încarcă conturile…

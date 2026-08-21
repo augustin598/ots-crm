@@ -208,6 +208,7 @@
 			lastName: m.lastName,
 			title: m.title ?? null,
 			phone: m.phone ?? null,
+			avatarPhone: m.avatarPhone ?? null,
 			role: memberRoleMeta(m.role),
 			department: memberDeptMeta(m.department),
 			stats: s ? { active: s.active, done: s.done, onTime: s.onTimePct } : null,
@@ -231,6 +232,7 @@
 			lastName: m.lastName,
 			title: m.title ?? null,
 			phone: m.phone ?? null,
+			avatarPhone: m.avatarPhone ?? null,
 			role: m.role,
 			department: m.department ?? null,
 			skills: parseSkills(m.skills),
@@ -841,6 +843,7 @@
 				clientName={activeClient.name}
 				clientEmail={activeClient.email}
 				clientPhone={activeClient.phone}
+				clientAvatarPhone={activeClient.avatarPhone ?? null}
 				{tenantSlug}
 			/>
 		{/if}

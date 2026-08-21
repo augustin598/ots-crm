@@ -22,6 +22,8 @@ import type { RequestHandler } from './$types';
  *   action=list-ips&serverId=X           — IPs DA exposes for new user creation
  *   action=list-packages&serverId=X      — user packages available on DA
  *   action=list-users&serverId=X[&q=foo] — search users (admin's pool)
+ *   action=list-users-raw&serverId=X     — UNPARSED body of /api/search/users and
+ *                                          /api/search/users-extended (shape probe)
  *   action=check-username&serverId=X&username=foo
  *                                        — pre-flight `userExists` probe
  *   action=check-domain&serverId=X&domain=foo.ro[&deep=true]
@@ -227,6 +229,36 @@ export const GET: RequestHandler = async (event) => {
 				count: users.length,
 				query: q ?? null,
 				users: users.slice(0, 100) // cap response
+			});
+		} catch (err) {
+			return errorResponse(err, performance.now() - start);
+		}
+	}
+
+	// === list-users-raw ====================================================
+	// Unparsed body of `/api/search/users` + `/api/search/users-extended`, so we
+	// can see the EXACT shape this DA version returns (string array vs object
+	// array). The DA→CRM import silently found nothing for weeks because the
+	// wrapper assumed objects while DA sent strings — this action makes that
+	// visible in one call instead of via dev-server logs.
+	if (action === 'list-users-raw') {
+		const start = performance.now();
+		try {
+			const [plain, extended] = await Promise.all([
+				client.getRawLegacyResponse('/api/search/users').catch((e) => ({
+					status: 0,
+					body: `<error: ${serializeError(e).message}>`
+				})),
+				client.getRawLegacyResponse('/api/search/users-extended').catch((e) => ({
+					status: 0,
+					body: `<error: ${serializeError(e).message}>`
+				}))
+			]);
+			return json({
+				ok: true,
+				durationMs: Math.round(performance.now() - start),
+				plain: { status: plain.status, sample: plain.body.slice(0, 1500) },
+				extended: { status: extended.status, sample: extended.body.slice(0, 1500) }
 			});
 		} catch (err) {
 			return errorResponse(err, performance.now() - start);

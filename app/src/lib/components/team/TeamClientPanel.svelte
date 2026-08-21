@@ -3,8 +3,12 @@
 		getClientSecondaryEmails,
 		createClientSecondaryEmail,
 		updateClientSecondaryEmailAccess,
-		deleteClientSecondaryEmail
+		deleteClientSecondaryEmail,
+		setClientContactWhatsappPhone,
+		getWhatsappGroupsForClient,
+		applyWhatsappGroupLinks
 	} from '$lib/remotes/client-secondary-emails.remote';
+	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from 'svelte-sonner';
@@ -21,6 +25,7 @@
 		type ClientRolePresetId,
 		type AccessFlags
 	} from '$lib/config/team';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import MailIcon from '@lucide/svelte/icons/mail';
@@ -34,10 +39,19 @@
 		clientName: string;
 		clientEmail: string | null;
 		clientPhone: string | null;
+		/** Telefon E.164 care are sigur un avatar WhatsApp stocat; null → inițiale. */
+		clientAvatarPhone?: string | null;
 		tenantSlug: string;
 	};
 
-	let { clientId, clientName, clientEmail, clientPhone, tenantSlug }: Props = $props();
+	let {
+		clientId,
+		clientName,
+		clientEmail,
+		clientPhone,
+		clientAvatarPhone = null,
+		tenantSlug
+	}: Props = $props();
 
 	const secondaryEmailsQuery = $derived(getClientSecondaryEmails(clientId));
 	const secondaryEmails = $derived(secondaryEmailsQuery?.current ?? []);
@@ -50,6 +64,107 @@
 
 	// Per-row expansion (granular flags editor)
 	let expandedRowId = $state<string | null>(null);
+
+	// Import numere din grupuri WhatsApp. Query-ul pornește doar când deschizi
+	// panoul — listarea grupurilor e un apel real la WhatsApp, nu-l facem degeaba.
+	let importOpen = $state(false);
+	let importSaving = $state(false);
+	let selectedGroupId = $state<string | null>(null);
+	/** phone → secondaryEmailId ales de om ('' = nu lega). Lipsa cheii = propunerea implicită. */
+	let importChoice = $state<Record<string, string>>({});
+
+	const importQuery = $derived(importOpen ? getWhatsappGroupsForClient(clientId) : null);
+	const importData = $derived(importQuery?.current ?? null);
+
+	type ImportGroup = NonNullable<typeof importData>['groups'][number];
+	type ImportMember = ImportGroup['members'][number];
+
+	const selectedGroup = $derived<ImportGroup | null>(
+		importData?.connected
+			? (importData.groups.find((g) => g.id === selectedGroupId) ?? importData.groups[0] ?? null)
+			: null
+	);
+	const secondaryContacts = $derived(
+		importData?.connected
+			? importData.contacts.filter((c): c is typeof c & { id: string } => c.kind === 'secondary' && !!c.id)
+			: []
+	);
+
+	function groupSuggestionCount(g: ImportGroup): number {
+		return g.members.filter((m) => m.suggestion).length;
+	}
+
+	/** Propunerea implicită: doar potrivirile tari (nume + prenume) se preselectează. */
+	function defaultChoiceFor(m: ImportMember): string {
+		if (!m.suggestion || m.suggestion.kind !== 'secondary' || !m.suggestion.id) return '';
+		return m.suggestion.score >= 1 ? m.suggestion.id : '';
+	}
+
+	function alreadyLinkedLabel(phone: string): string | null {
+		if (!importData?.connected) return null;
+		const c = importData.contacts.find((x) => x.linkedPhone === phone);
+		return c ? c.name : null;
+	}
+
+	function pendingLinks(): Array<{ secondaryEmailId: string; phone: string }> {
+		if (!selectedGroup) return [];
+		const out: Array<{ secondaryEmailId: string; phone: string }> = [];
+		for (const m of selectedGroup.members) {
+			if (alreadyLinkedLabel(m.phone)) continue;
+			const id = importChoice[m.phone] ?? defaultChoiceFor(m);
+			if (id) out.push({ secondaryEmailId: id, phone: m.phone });
+		}
+		return out;
+	}
+
+	function toggleImport() {
+		importOpen = !importOpen;
+		if (!importOpen) {
+			importChoice = {};
+			selectedGroupId = null;
+		}
+	}
+
+	async function applyImport() {
+		const links = pendingLinks();
+		if (links.length === 0) return;
+		importSaving = true;
+		try {
+			const res = await applyWhatsappGroupLinks({ clientId, links });
+			await secondaryEmailsQuery?.refresh();
+			await importQuery?.refresh();
+			importChoice = {};
+			if (res.applied.length > 0) {
+				toast.success(
+					`${res.applied.length} ${res.applied.length === 1 ? 'număr legat' : 'numere legate'}. Avatarele se descarcă în fundal.`
+				);
+			}
+			for (const s of res.skipped) toast.error(s.reason);
+		} catch (err) {
+			clientLogger.apiError('applyWhatsappGroupLinks', err);
+			toast.error(err instanceof Error ? err.message : 'Nu am putut lega numerele');
+		} finally {
+			importSaving = false;
+		}
+	}
+
+	// Telefon WhatsApp per contact secundar — scrie în user_whatsapp_link.
+	let phoneDraft = $state<Record<string, string>>({});
+	let phoneSaving = $state<string | null>(null);
+
+	async function savePhone(secondaryEmailId: string, phone: string) {
+		phoneSaving = secondaryEmailId;
+		try {
+			const res = await setClientContactWhatsappPhone({ secondaryEmailId, phone });
+			await secondaryEmailsQuery?.refresh();
+			toast.success(res.phoneE164 ? `Legat la ${res.phoneE164}` : 'Legătura a fost scoasă');
+		} catch (err) {
+			clientLogger.apiError('setClientContactWhatsappPhone', err);
+			toast.error(err instanceof Error ? err.message : 'Nu am putut salva numărul');
+		} finally {
+			phoneSaving = null;
+		}
+	}
 
 	function flagsFromRow(row: { accessFlagsResolved?: AccessFlags }): AccessFlags {
 		return row.accessFlagsResolved ?? emptyAccessFlags();
@@ -175,6 +290,15 @@
 		<div class="tcp-row">
 			<div class="tcp-av" style="background:{avatarColor(clientId)}">
 				{avatarInitials(clientName, null, clientEmail)}
+				{#if clientAvatarPhone}
+					<img
+						class="tcp-av-img"
+						src={whatsappAvatarUrl(tenantSlug, clientAvatarPhone)}
+						alt=""
+						loading="lazy"
+						onerror={(e) => e.currentTarget.remove()}
+					/>
+				{/if}
 			</div>
 			<div class="tcp-row-info">
 				<div class="tcp-row-name">{clientName}</div>
@@ -207,12 +331,99 @@
 				<span class="tcp-count">{secondaryEmails.length}</span>
 			</h3>
 			{#if !inviteOpen}
-				<Button size="sm" variant="outline" onclick={() => (inviteOpen = true)}>
-					<PlusIcon class="size-3.5 mr-1" />
-					Adaugă
-				</Button>
+				<div class="tcp-head-actions">
+					<Button size="sm" variant="ghost" onclick={toggleImport} title="Leagă numerele membrilor dintr-un grup WhatsApp">
+						<IconWhatsapp class="size-3.5 mr-1" />
+						{importOpen ? 'Închide importul' : 'Importă din grup'}
+					</Button>
+					<Button size="sm" variant="outline" onclick={() => (inviteOpen = true)}>
+						<PlusIcon class="size-3.5 mr-1" />
+						Adaugă
+					</Button>
+				</div>
 			{/if}
 		</div>
+
+		{#if importOpen}
+			<div class="tcp-import">
+				{#if importData === null}
+					<div class="tcp-import-hint">Se încarcă grupurile…</div>
+				{:else if !importData.connected}
+					<div class="tcp-import-hint">
+						WhatsApp nu e conectat. Conectează-l din pagina WhatsApp, apoi revino.
+					</div>
+				{:else if importData.groups.length === 0}
+					<div class="tcp-import-hint">Contul conectat nu e în niciun grup.</div>
+				{:else}
+					<label class="tcp-import-label">
+						Grupul
+						<select
+							class="tcp-select tcp-import-select"
+							value={selectedGroup?.id ?? ''}
+							onchange={(e) => (selectedGroupId = (e.currentTarget as HTMLSelectElement).value)}
+						>
+							{#each importData.groups as g (g.id)}
+								<option value={g.id}>
+									{g.subject || '(fără nume)'} · {g.size} membri{groupSuggestionCount(g) > 0
+										? ` · ${groupSuggestionCount(g)} potriviri`
+										: ''}
+								</option>
+							{/each}
+						</select>
+					</label>
+
+					{#if selectedGroup}
+						<div class="tcp-import-rows">
+							{#each selectedGroup.members as m (m.phone)}
+								{@const chosen = importChoice[m.phone] ?? defaultChoiceFor(m)}
+								{@const already = alreadyLinkedLabel(m.phone)}
+								<div class="tcp-import-row" class:linked={!!already}>
+									<div class="tcp-import-who">
+										<div class="tcp-import-name">{m.pushName ?? m.phone}</div>
+										<div class="tcp-import-phone">
+											{m.phone}{m.admin ? ` · ${m.admin === 'superadmin' ? 'creator' : 'admin'}` : ''}
+										</div>
+									</div>
+									{#if already}
+										<div class="tcp-import-already">deja legat la {already}</div>
+									{:else}
+										<select
+											class="tcp-select tcp-import-target"
+											class:suggested={!!m.suggestion && chosen === m.suggestion.id}
+											value={chosen}
+											onchange={(e) => (importChoice[m.phone] = (e.currentTarget as HTMLSelectElement).value)}
+										>
+											<option value="">— nu lega —</option>
+											{#each secondaryContacts as c (c.id)}
+												<option value={c.id}>
+													{c.name}{m.suggestion?.id === c.id
+														? m.suggestion.score >= 1 ? ' ✓' : ' ?'
+														: ''}
+												</option>
+											{/each}
+											{#if m.suggestion?.kind === 'primary'}
+												<option value="" disabled>
+													↳ seamănă cu contactul principal — schimbă din „Editează client"
+												</option>
+											{/if}
+										</select>
+									{/if}
+								</div>
+							{/each}
+						</div>
+						<div class="tcp-import-hint">
+							✓ = nume și prenume identice, ? = doar un cuvânt comun. Verifică înainte să aplici.
+						</div>
+						<div class="tcp-invite-actions">
+							<Button size="sm" variant="ghost" onclick={toggleImport}>Anulează</Button>
+							<Button size="sm" onclick={applyImport} disabled={importSaving || pendingLinks().length === 0}>
+								{importSaving ? 'Se leagă…' : `Leagă ${pendingLinks().length} ${pendingLinks().length === 1 ? 'număr' : 'numere'}`}
+							</Button>
+						</div>
+					{/if}
+				{/if}
+			</div>
+		{/if}
 
 		{#if inviteOpen}
 			<div class="tcp-invite">
@@ -265,6 +476,15 @@
 						<div class="tcp-srow-head">
 							<div class="tcp-av tcp-av-sm" style="background:{avatarColor(se.email)}">
 								{avatarInitials(null, null, se.email)}
+								{#if se.avatarPhone}
+									<img
+										class="tcp-av-img"
+										src={whatsappAvatarUrl(tenantSlug, se.avatarPhone)}
+										alt=""
+										loading="lazy"
+										onerror={(e) => e.currentTarget.remove()}
+									/>
+								{/if}
 							</div>
 							<div class="tcp-srow-info">
 								<div class="tcp-row-name">{se.email}</div>
@@ -312,7 +532,27 @@
 						</div>
 						{#if expanded}
 							<div class="tcp-flags">
-								<div class="tcp-flags-title">Permisiuni granulare</div>
+								<div class="tcp-flags-title">Telefon WhatsApp</div>
+								<div class="tcp-wa-row">
+									<Input
+										value={phoneDraft[se.id] ?? se.whatsappPhone ?? ''}
+										placeholder="+40712345678"
+										oninput={(e) =>
+											(phoneDraft[se.id] = (e.currentTarget as HTMLInputElement).value)}
+									/>
+									<Button
+										size="sm"
+										disabled={phoneSaving === se.id}
+										onclick={() => savePhone(se.id, phoneDraft[se.id] ?? se.whatsappPhone ?? '')}
+									>
+										{phoneSaving === se.id ? 'Se salvează…' : 'Salvează'}
+									</Button>
+								</div>
+								<div class="tcp-wa-hint">
+									Numărul personal de mobil. Din el vine avatarul afișat în taskuri, comentarii și
+									echipă. Lasă gol ca să scoți legătura.
+								</div>
+								<div class="tcp-flags-title tcp-flags-title-spaced">Permisiuni granulare</div>
 								<div class="tcp-flags-grid">
 									{#each ACCESS_CATEGORIES as cat (cat)}
 										<label class="tcp-flag">
@@ -430,7 +670,30 @@
 		background: color-mix(in oklch, var(--foreground) 3%, transparent);
 		border: 1px solid var(--border);
 	}
+	.tcp-wa-row {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+	.tcp-wa-hint {
+		font-size: 11.5px;
+		color: var(--muted-foreground);
+		margin-top: 6px;
+		line-height: 1.45;
+	}
+	.tcp-flags-title-spaced {
+		margin-top: 16px;
+	}
+	.tcp-av-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
 	.tcp-av {
+		position: relative;
+		overflow: hidden;
 		width: 38px;
 		height: 38px;
 		border-radius: 50%;
@@ -625,6 +888,83 @@
 		display: flex;
 		justify-content: flex-end;
 		gap: 6px;
+	}
+	.tcp-head-actions {
+		display: flex;
+		gap: 4px;
+		align-items: center;
+	}
+	.tcp-import {
+		border: 1px dashed #25d366;
+		border-radius: 10px;
+		padding: 12px;
+		background: color-mix(in oklch, #25d366 5%, transparent);
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.tcp-import-label {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		font-size: 11.5px;
+		font-weight: 600;
+		color: var(--muted-foreground);
+	}
+	.tcp-import-select {
+		width: 100%;
+		font-weight: 500;
+	}
+	.tcp-import-rows {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.tcp-import-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 7px 10px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--card);
+	}
+	.tcp-import-row.linked {
+		opacity: 0.6;
+	}
+	.tcp-import-who {
+		min-width: 0;
+	}
+	.tcp-import-name {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--foreground);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.tcp-import-phone {
+		font-size: 11.5px;
+		color: var(--muted-foreground);
+		font-variant-numeric: tabular-nums;
+	}
+	.tcp-import-target {
+		max-width: 240px;
+		flex-shrink: 0;
+	}
+	.tcp-import-target.suggested {
+		border-color: #25d366;
+	}
+	.tcp-import-already {
+		font-size: 11.5px;
+		color: var(--muted-foreground);
+		flex-shrink: 0;
+	}
+	.tcp-import-hint {
+		font-size: 11.5px;
+		color: var(--muted-foreground);
+		line-height: 1.45;
 	}
 	.tcp-empty-state {
 		text-align: center;

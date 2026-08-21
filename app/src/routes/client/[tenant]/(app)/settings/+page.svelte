@@ -3,6 +3,12 @@
 	import { updateClientCompanyData } from '$lib/remotes/clients.remote';
 	import { updateClientUserProfile } from '$lib/remotes/client-profile.remote';
 	import { getMyReportSchedule, updateMyReportSchedule } from '$lib/remotes/report-schedule.remote';
+	import {
+		getMyWhatsappPhone,
+		setMyWhatsappPhone,
+		deleteMyWhatsappPhone
+	} from '$lib/remotes/client-whatsapp-phone.remote';
+	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import { page } from '$app/state';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -74,6 +80,65 @@
 	});
 
 	// Profile edit mode
+	// Numărul de WhatsApp (user_whatsapp_link), separat de telefonul firmei.
+	const waPhone = getMyWhatsappPhone();
+	let waPhoneInput = $state('');
+	let waSaving = $state(false);
+	let waError = $state<string | null>(null);
+	let waPrefilled = false;
+
+	$effect(() => {
+		const current = waPhone.current;
+		if (!waPrefilled && current?.phoneE164) {
+			waPhoneInput = current.phoneE164;
+			waPrefilled = true;
+		}
+	});
+
+	const WA_ERRORS: Record<string, string> = {
+		format: 'Scrie numărul cu prefixul țării, de exemplu +40 7xx xxx xxx.',
+		not_on_whatsapp: 'Numărul nu pare să aibă WhatsApp. Verifică-l și încearcă din nou.',
+		already_linked:
+			'Numărul e deja legat de altcineva în CRM. Dacă e al tău, scrie-ne și îl mutăm noi.',
+		rate_limited:
+			'Ai încercat de trei ori în ultimele 24 de ore. Mai încearcă mâine sau scrie-ne pe e-mail.'
+	};
+
+	async function saveWaPhone() {
+		if (!waPhoneInput.trim() || waSaving) return;
+		waSaving = true;
+		waError = null;
+		try {
+			const res = await setMyWhatsappPhone({ phone: waPhoneInput });
+			if (!res.ok) {
+				waError = WA_ERRORS[res.reason] ?? 'Nu am putut salva numărul.';
+				return;
+			}
+			await waPhone.refresh();
+			toast.success('Numărul a fost salvat.');
+		} catch {
+			waError = 'Nu am putut salva numărul. Încearcă din nou.';
+		} finally {
+			waSaving = false;
+		}
+	}
+
+	async function deleteWaPhone() {
+		if (waSaving) return;
+		waSaving = true;
+		waError = null;
+		try {
+			await deleteMyWhatsappPhone();
+			await waPhone.refresh();
+			waPhoneInput = '';
+			toast.success('Numărul a fost șters.');
+		} catch {
+			waError = 'Nu am putut șterge numărul.';
+		} finally {
+			waSaving = false;
+		}
+	}
+
 	let editingProfile = $state(false);
 	let savingProfile = $state(false);
 	let profileForm = $state({ firstName: '', lastName: '' });
@@ -519,6 +584,51 @@
 			</CardContent>
 		</Card>
 	{/if}
+
+	<!-- Numărul de WhatsApp: sursa avatarului și canalul rapid de contact -->
+	<Card>
+		<CardHeader>
+			<CardTitle class="flex items-center gap-2">
+				<IconWhatsapp class="h-5 w-5" />
+				Numărul tău de WhatsApp
+			</CardTitle>
+			<CardDescription>
+				Îl folosim doar ca să vorbim cu tine despre proiectele tale. Îl poți schimba sau șterge
+				oricând.
+			</CardDescription>
+		</CardHeader>
+		<CardContent>
+			<div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+				<div class="flex-1 space-y-1.5">
+					<Label for="waPhone" class="sr-only">Numărul tău de mobil</Label>
+					<Input
+						id="waPhone"
+						type="tel"
+						inputmode="tel"
+						autocomplete="tel"
+						placeholder="+40 7xx xxx xxx"
+						bind:value={waPhoneInput}
+						disabled={waSaving}
+					/>
+					{#if waError}
+						<p class="text-xs font-medium text-destructive">{waError}</p>
+					{:else if waPhone.current?.phoneE164 && !waPhone.current.whatsappVerified}
+						<p class="text-xs text-muted-foreground">
+							Numărul e salvat, dar încă nu l-am putut verifica pe WhatsApp.
+						</p>
+					{/if}
+				</div>
+				<div class="flex gap-2">
+					<Button onclick={saveWaPhone} disabled={waSaving || !waPhoneInput.trim()}>
+						{waSaving ? 'Se verifică…' : 'Salvează'}
+					</Button>
+					{#if waPhone.current?.phoneE164}
+						<Button variant="outline" onclick={deleteWaPhone} disabled={waSaving}>Șterge</Button>
+					{/if}
+				</div>
+			</div>
+		</CardContent>
+	</Card>
 
 	<!-- Section 2: Email Notifications -->
 	<Card>

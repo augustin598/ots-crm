@@ -7,6 +7,7 @@
 	import { hexToOklchHue, isValidHex } from '$lib/theme-utils';
 	import OtsSidebar from '$lib/components/ots-sidebar/OtsSidebar.svelte';
 	import OtsTopbar from '$lib/components/ots-sidebar/OtsTopbar.svelte';
+	import { getTopbarActions } from '$lib/components/ots-sidebar/topbar-actions.svelte';
 
 	let { data, children }: { data: PageData; children: any } = $props();
 
@@ -51,7 +52,7 @@
 	</Sidebar>
 	<SidebarInset>
 		{#if !isContentRoute}
-			<OtsTopbar />
+			<OtsTopbar actions={getTopbarActions()} />
 		{/if}
 		<main class="min-w-0 flex-1 overflow-x-hidden {isContentRoute ? '' : 'p-6'}">
 			{@render children()}

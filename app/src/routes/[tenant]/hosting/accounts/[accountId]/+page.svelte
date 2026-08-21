@@ -101,6 +101,7 @@
 			billingCycle: a.billingCycle,
 			additionalDomains: a.additionalDomains ?? null,
 			autoRenew: a.autoRenew,
+			billingExcluded: a.billingExcluded ?? false,
 			paymentMethod: (a.paymentMethod === 'card' || a.paymentMethod === 'cash' ? a.paymentMethod : 'op'),
 			paymentReference: a.paymentReference ?? null,
 			paymentNote: a.paymentNote ?? null,
@@ -144,15 +145,8 @@
 </script>
 
 <div class="space-y-5">
-	<!-- Breadcrumb / back -->
-	<nav class="flex items-center gap-2 text-sm text-slate-500" aria-label="breadcrumb">
-		<a href={`/${tenantSlug}/hosting`} class="hover:text-slate-700 dark:hover:text-slate-300">Hosting</a>
-		<span class="text-slate-300">›</span>
-		<a href={`/${tenantSlug}/hosting/accounts`} class="hover:text-slate-700 dark:hover:text-slate-300">Conturi</a>
-		<span class="text-slate-300">›</span>
-		<span class="text-slate-700 dark:text-slate-200">Editare</span>
-	</nav>
-
+	<!-- Breadcrumb-ul e cel global din OtsTopbar; aici era un al doilea, duplicat.
+	     Link-ul „Înapoi la lista de conturi" de mai jos rămâne — e navigare, nu breadcrumb. -->
 	<a
 		href={`/${tenantSlug}/hosting/accounts`}
 		class="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"

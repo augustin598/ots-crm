@@ -1,0 +1,1 @@
+ALTER TABLE client_user_preferences ADD COLUMN whatsapp_prompt_last_dismissed_at integer;

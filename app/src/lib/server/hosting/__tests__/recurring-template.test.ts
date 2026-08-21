@@ -83,6 +83,7 @@ mock.module('$lib/server/db/schema', () => ({
 		hostingProductId: 'hosting_product_id',
 		recurringAmount: 'recurring_amount',
 		currency: 'currency',
+		billingExcluded: 'billing_excluded',
 		updatedAt: 'updated_at'
 	},
 	recurringInvoice: {
@@ -130,7 +131,9 @@ const baseArgs = {
 
 describe('upsertRecurringInvoiceForHostingAccount — snapshot write-back (auto-heal)', () => {
 	beforeEach(() => {
-		selectQueue = [];
+		// Prima citire a funcției e flag-ul „cont personal"; testele care vor
+		// varianta exclusă își rescriu coada.
+		selectQueue = [[{ billingExcluded: false }]];
 		updates.length = 0;
 		inserts.length = 0;
 	});
@@ -193,5 +196,70 @@ describe('upsertRecurringInvoiceForHostingAccount — snapshot write-back (auto-
 		expect(result.action).toBe('created');
 		expect(updates.length).toBe(0);
 		expect(inserts.length).toBe(0);
+	});
+});
+
+describe('upsertRecurringInvoiceForHostingAccount — „cont personal" (billing_excluded)', () => {
+	beforeEach(() => {
+		selectQueue = [];
+		updates.length = 0;
+		inserts.length = 0;
+	});
+
+	test('iese din start și NU rescrie suma cu prețul din catalog', async () => {
+		// Contul e marcat „personal" cu suma pusă manual pe 0. Fără guard,
+		// reconcilierea de mai jos ar fi scris la loc prețul din catalog — exact
+		// reclamația „dacă salvezi nu rămâne 0".
+		selectQueue.push([{ billingExcluded: true }]);
+		// Coada de mai jos e intenționat pregătită ca „drumul normal": dacă
+		// guard-ul n-ar exista, testul ar vedea update-ul de 114900.
+		selectQueue.push([{ id: 'prod-1', price: 114900, currency: 'RON' }]);
+		selectQueue.push([{ defaultTaxRate: 21 }]);
+		selectQueue.push([]);
+
+		const result = await upsertRecurringInvoiceForHostingAccount({
+			...baseArgs,
+			recurringAmount: 0
+		});
+
+		expect(result.action).toBe('skipped');
+		expect(result.reason).toBe('billing_excluded');
+		// Nimic scris: nici șablon recurent, nici snapshot de preț.
+		expect(inserts.find((i) => i.table === 'recurringInvoice')).toBeUndefined();
+		expect(updates.find((u) => u.table === 'hostingAccount')).toBeUndefined();
+	});
+
+	test('flag-ul se citește din DB, nu din argumente', async () => {
+		// Apelanții (remote-uri, import WHMCS, endpoint de debug) nu trimit flag-ul;
+		// dacă l-am fi luat din `args`, excluderea ar fi fost ignorată tăcut.
+		selectQueue.push([{ billingExcluded: true }]);
+
+		const result = await upsertRecurringInvoiceForHostingAccount(baseArgs);
+
+		expect(result.action).toBe('skipped');
+		expect(result.reason).toBe('billing_excluded');
+	});
+
+	test('un cont neexclus trece mai departe și se reconciliază normal', async () => {
+		selectQueue.push([{ billingExcluded: false }]);
+		selectQueue.push([{ id: 'prod-1', price: 114900, currency: 'RON' }]);
+		selectQueue.push([{ defaultTaxRate: 21 }]);
+		selectQueue.push([]);
+
+		const result = await upsertRecurringInvoiceForHostingAccount(baseArgs);
+
+		expect(result.action).toBe('created');
+		expect(updates.find((u) => u.table === 'hostingAccount')?.set.recurringAmount).toBe(114900);
+	});
+
+	test('lipsa rândului de cont nu blochează upsert-ul', async () => {
+		// Cont șters între timp / mock incomplet: tratăm ca „neexclus", nu aruncăm.
+		selectQueue.push([]);
+		selectQueue.push([{ id: 'prod-1', price: 114900, currency: 'RON' }]);
+		selectQueue.push([{ defaultTaxRate: 21 }]);
+		selectQueue.push([]);
+
+		const result = await upsertRecurringInvoiceForHostingAccount(baseArgs);
+		expect(result.action).toBe('created');
 	});
 });

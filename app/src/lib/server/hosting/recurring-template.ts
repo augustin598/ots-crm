@@ -156,6 +156,18 @@ export async function upsertRecurringInvoiceForHostingAccount(
 	if (args.status === 'terminated' || args.status === 'cancelled') {
 		return { action: 'skipped', reason: `status_${args.status}` };
 	}
+
+	// „Cont personal" — citit din DB, NU din `args`, ca să nu depindă de fiecare
+	// apelant (remote-uri, import WHMCS, endpoint-ul de debug sync). Ieșirea de
+	// aici oprește DOUĂ lucruri deodată: șablonul recurent și reconcilierea de mai
+	// jos care ar rescrie `recurringAmount` cu prețul din catalog — motivul pentru
+	// care o sumă pusă manual (inclusiv 0) nu rămânea 0.
+	const [flagRow] = await db
+		.select({ billingExcluded: table.hostingAccount.billingExcluded })
+		.from(table.hostingAccount)
+		.where(eq(table.hostingAccount.id, args.hostingAccountId))
+		.limit(1);
+	if (flagRow?.billingExcluded) return { action: 'skipped', reason: 'billing_excluded' };
 	const cycleMap = cycleToRecurring(args.billingCycle);
 	if (!cycleMap) return { action: 'skipped', reason: 'billing_cycle_one_time_or_unknown' };
 

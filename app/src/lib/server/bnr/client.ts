@@ -1,25 +1,57 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, desc, sql, and, gte, lte, inArray } from 'drizzle-orm';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { resolveFxRates, RATE_LOOKBACK_DAYS, type BnrRateRow } from './rate-lookup';
 import type { FxRates } from '$lib/server/banking/payment-match';
 
-const BNR_XML_URL = 'https://www.bnr.ro/nbrfxrates.xml';
+/**
+ * Feed-ul oficial de cursuri. BNR a mutat fișierele XML pe un server dedicat
+ * (anunț 4 aug 2026: /25710-2026-08-04-informare-privind-accesarea-cursurilor-...).
+ * Vechiul `https://www.bnr.ro/nbrfxrates.xml` răspunde acum cu 302 către pagina
+ * principală — `fetch` urma redirectul, primea HTML cu status 200 și parsarea
+ * cădea cu „BNR XML: Could not find Cube date". Nu reveni la host-ul `www`.
+ */
+const BNR_XML_URL = 'https://curs.bnr.ro/nbrfxrates.xml';
 
 /**
- * BNR serves a cert chain signed by certSIGN, whose intermediate CA expired
- * in April 2026. Node/Bun rejects the chain with "certificate has expired"
- * until the Romanian CA publishes a fresh intermediate AND their infra is
- * updated to serve it — both outside our control. To keep rates flowing we
- * disable verification ONLY for this host (scoped via Bun's per-request
- * `tls.rejectUnauthorized`). DNS hijack risk on www.bnr.ro is acceptably low
- * and the response is public data with no auth.
- *
- * Also sets a 15s timeout so a hung TLS handshake can't stall the BullMQ
- * worker past its 30s lock-renew window.
+ * Timeout de 15s ca un handshake TLS blocat să nu țină workerul BullMQ peste
+ * fereastra lui de 30s de reînnoire a lock-ului.
  */
 const BNR_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Lanțul certSIGN al BNR a expirat în aprilie 2026 și a oprit sincronizarea până
+ * am dezactivat verificarea TLS. Pe `curs.bnr.ro` certificatul e din nou valid
+ * (emis ian. 2026, intermediarul e servit corect), deci verificăm normal și
+ * cădem pe conexiune neverificată DOAR dacă lanțul se rupe iar: datele sunt
+ * publice și fără autentificare, iar alternativa e oprirea cursurilor.
+ */
+const TLS_CHAIN_ERROR =
+	/certificate has expired|unable to verify the first certificate|self[- ]signed certificate|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY_LEAF_SIGNATURE/i;
+
+function bnrFetchInit(insecure: boolean) {
+	return {
+		headers: { 'User-Agent': 'CRM-App/1.0', Accept: 'application/xml, text/xml' },
+		signal: AbortSignal.timeout(BNR_FETCH_TIMEOUT_MS),
+		// Un redirect înseamnă că feed-ul s-a mutat, nu ceva de urmat în tăcere.
+		redirect: 'manual' as const,
+		// Override TLS per cerere (specific Bun) — vezi comentariul de mai sus.
+		// NU copia pattern-ul în altă parte; e justificat doar pentru BNR.
+		...(insecure ? { tls: { rejectUnauthorized: false } } : {})
+	};
+}
+
+async function fetchBnrXml(): Promise<Response> {
+	try {
+		return await fetch(BNR_XML_URL, bnrFetchInit(false));
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		if (!TLS_CHAIN_ERROR.test(message)) throw err;
+		logWarning('bnr', `Lanț TLS invalid pe curs.bnr.ro, reîncerc fără verificare: ${message}`);
+		return await fetch(BNR_XML_URL, bnrFetchInit(true));
+	}
+}
 
 export interface BnrRate {
 	currency: string;
@@ -33,16 +65,23 @@ export interface BnrRate {
  * Returns raw rates array (not saved to DB).
  */
 export async function fetchBnrRates(): Promise<BnrRate[]> {
-	const res = await fetch(BNR_XML_URL, {
-		headers: { 'User-Agent': 'CRM-App/1.0' },
-		signal: AbortSignal.timeout(BNR_FETCH_TIMEOUT_MS),
-		// Bun-specific per-request TLS override — see comment on BNR_FETCH_TIMEOUT_MS.
-		// Do NOT copy this pattern elsewhere; it's load-bearing for BNR only.
-		tls: { rejectUnauthorized: false }
-	});
+	const res = await fetchBnrXml();
+
+	// Fără verificările astea două, o mutare a feed-ului sau o pagină de eroare
+	// HTML servită cu 200 ajung să fie parsate ca XML și pică abia la regex, cu
+	// un mesaj care nu spune nimic despre cauza reală.
+	if (res.status >= 300 && res.status < 400) {
+		const location = res.headers.get('location') ?? 'necunoscut';
+		throw new Error(`BNR XML: redirect ${res.status} către ${location} — feed-ul s-a mutat`);
+	}
 
 	if (!res.ok) {
 		throw new Error(`BNR XML fetch failed: ${res.status} ${res.statusText}`);
+	}
+
+	const contentType = res.headers.get('content-type') ?? '';
+	if (!/xml/i.test(contentType)) {
+		throw new Error(`BNR XML: răspuns non-XML (content-type: ${contentType || 'absent'})`);
 	}
 
 	const xml = await res.text();

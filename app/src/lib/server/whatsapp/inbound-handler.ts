@@ -1,11 +1,13 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { isPnUser, type WAMessage } from 'baileys';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logError, logInfo, logWarning } from '$lib/server/logger';
 import { jidToE164, phoneE164Variants } from './phone';
 import { detectMedia, downloadAndStoreMedia } from './media-handler';
+import { isGroupJid, isIgnorableChatJid, resolveGroupSender } from './group-jid';
+import { isWatchedGroup, participantPhoneLookup } from './group-store';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -75,36 +77,25 @@ function resolvePhoneJid(msg: WAMessage): string | null {
 	const key = msg.key;
 	if (!key?.remoteJid) return null;
 
-	// Skip non-1:1 chats (groups, broadcasts, status, newsletter)
-	if (
-		key.remoteJid.endsWith('@g.us') ||
-		key.remoteJid.endsWith('@broadcast') ||
-		key.remoteJid.endsWith('@newsletter') ||
-		key.remoteJid === 'status@broadcast'
-	) {
-		return null;
-	}
+	// Grupurile au propria cale, în handleInbound. Aici rămân doar difuzările,
+	// canalele și „status@broadcast", care n-au firul unei conversații.
+	if (isGroupJid(key.remoteJid) || isIgnorableChatJid(key.remoteJid)) return null;
 
 	// If already a phone number JID (@s.whatsapp.net), use it
 	if (isPnUser(key.remoteJid)) return key.remoteJid;
 
-	// If it's a LID (@lid), try to resolve through senderPn alt JID
-	// Baileys exposes alt JIDs on message keys when available
-	type KeyWithAlt = typeof key & {
-		senderPn?: string | null;
-		participantPn?: string | null;
-		senderLid?: string | null;
-	};
-	const keyWithAlt = key as KeyWithAlt;
-	const altCandidates: (string | null | undefined)[] = [
-		keyWithAlt.senderPn,
-		keyWithAlt.participantPn
-	];
+	// Conversație adresată pe LID („84027092512961@lid"). Baileys pune numărul
+	// alături, pe `remoteJidAlt` la unu-la-unu și pe `participantAlt` la grup
+	// (`Utils/decode-wa-message.js`). Numele vechi, `senderPn` și `participantPn`,
+	// nu există pe cheia mesajului în Baileys 7: sunt câmpuri ale evenimentului
+	// „group.join-request", deci ramura asta nu rezolva niciodată nimic și
+	// conversațiile pe LID se pierdeau tăcut.
+	const altCandidates: (string | null | undefined)[] = [key.remoteJidAlt, key.participantAlt];
 	for (const candidate of altCandidates) {
 		if (candidate && isPnUser(candidate)) return candidate;
 	}
 
-	// Unknown/LID without PN available — skip
+	// LID fără număr alăturat — nu avem cum să legăm conversația de cineva
 	return null;
 }
 
@@ -115,22 +106,51 @@ export async function handleInbound(
 	isHistory = false
 ): Promise<void> {
 	const pushNamesByPhone = new Map<string, string>();
+	// Traducerea LID → telefon se ia o dată pe grup, nu pe mesaj.
+	const senderLookups = new Map<string, (rawId: string) => string | null>();
 
 	for (const msg of messages) {
 		try {
 			if (!msg.key?.id) continue;
 
-			const phoneJid = resolvePhoneJid(msg);
-			if (!phoneJid) continue; // LID / group / broadcast — skip
+			const chatJid = msg.key.remoteJid ?? null;
+			if (!chatJid || isIgnorableChatJid(chatJid)) continue; // difuzări, canale, status
+
+			const isGroup = isGroupJid(chatJid);
+			// Grupurile nebifate se aruncă aici: nu ajung în bază și nu descarcă media.
+			if (isGroup && !(await isWatchedGroup(tenantId, chatJid))) continue;
+
+			let remoteJid: string;
+			let remotePhoneE164: string;
+			let sender: ReturnType<typeof resolveGroupSender> = {
+				jid: null,
+				phoneE164: null,
+				pushName: null
+			};
+
+			if (isGroup) {
+				// `remote_phone_e164` ține adresa conversației, iar la grup aceea e JID-ul.
+				remoteJid = chatJid;
+				remotePhoneE164 = chatJid;
+				let lookup = senderLookups.get(chatJid);
+				if (!lookup) {
+					lookup = await participantPhoneLookup(tenantId, chatJid);
+					senderLookups.set(chatJid, lookup);
+				}
+				sender = resolveGroupSender(msg, lookup);
+			} else {
+				const phoneJid = resolvePhoneJid(msg);
+				if (!phoneJid) continue; // LID fără număr — skip
+				remoteJid = phoneJid;
+				remotePhoneE164 = jidToE164(remoteJid);
+			}
 
 			const messageType = detectMessageType(msg);
 			if (!messageType) continue; // protocol/system/unknown — skip
 
 			const wamId = msg.key.id;
-			const remoteJid = phoneJid;
-			const remotePhoneE164 = jidToE164(remoteJid);
 
-			if (!msg.key.fromMe && msg.pushName && msg.pushName.trim()) {
+			if (!isGroup && !msg.key.fromMe && msg.pushName && msg.pushName.trim()) {
 				pushNamesByPhone.set(remotePhoneE164, msg.pushName.trim());
 			}
 
@@ -184,7 +204,10 @@ export async function handleInbound(
 			const body = extractText(msg);
 			const fromMe = !!msg.key.fromMe;
 			const direction = fromMe ? 'outbound' : 'inbound';
-			const clientId = await findClientByPhone(tenantId, remotePhoneE164);
+			// La grup nu legăm mesajul de client: fișa clientului arată conversația
+			// unu-la-unu, iar un grup poate ține oameni de la mai mulți clienți.
+			// Legătura grup → client stă pe `whatsapp_group.client_id`.
+			const clientId = isGroup ? null : await findClientByPhone(tenantId, remotePhoneE164);
 			const timestamp = msg.messageTimestamp
 				? new Date(Number(msg.messageTimestamp) * 1000)
 				: new Date();
@@ -199,6 +222,10 @@ export async function handleInbound(
 					direction,
 					remoteJid,
 					remotePhoneE164,
+					chatType: isGroup ? 'group' : 'direct',
+					senderJid: sender.jid,
+					senderPhoneE164: sender.phoneE164,
+					senderPushName: sender.pushName,
 					wamId,
 					messageType,
 					body: body ?? null,
@@ -217,7 +244,13 @@ export async function handleInbound(
 			if (!isHistory) {
 				logInfo('whatsapp', `Message stored (${direction})`, {
 					tenantId,
-					metadata: { sessionId, remotePhoneE164, messageType, clientId: clientId ?? null }
+					metadata: {
+						sessionId,
+						remotePhoneE164,
+						chatType: isGroup ? 'group' : 'direct',
+						messageType,
+						clientId: clientId ?? null
+					}
 				});
 			}
 		} catch (err) {
@@ -274,12 +307,28 @@ async function persistPushNamesFromMessages(tenantId: string, map: Map<string, s
 	}
 }
 
+const STATUS_RANK: Record<'sent' | 'delivered' | 'read', number> = {
+	sent: 2,
+	delivered: 3,
+	read: 4
+};
+
+/** Aceeași scară, calculată în SQLite, ca să nu mai citim rândul înainte de update. */
+const STATUS_RANK_SQL = sql<number>`CASE ${table.whatsappMessage.status} WHEN 'read' THEN 4 WHEN 'delivered' THEN 3 WHEN 'sent' THEN 2 WHEN 'pending' THEN 1 ELSE 0 END`;
+
+/**
+ * Confirmarea WhatsApp → starea noastră.
+ *
+ * Scara e cea din `proto.WebMessageInfo.Status`: 0 eroare, 1 în așteptare,
+ * 2 ajuns la server, 3 livrat, 4 citit, 5 redat. Vechea variantă era decalată cu
+ * unu (trata 2 ca „livrat" și 3 ca „citit"), deci un mesaj doar livrat apărea
+ * citit, iar `readAt` primea ora livrării.
+ */
 function mapAckStatus(ack: number | null | undefined): 'sent' | 'delivered' | 'read' | null {
 	if (ack == null) return null;
 	if (ack >= 4) return 'read';
-	if (ack >= 3) return 'read';
-	if (ack >= 2) return 'delivered';
-	if (ack >= 1) return 'sent';
+	if (ack === 3) return 'delivered';
+	if (ack === 2) return 'sent';
 	return null;
 }
 
@@ -307,7 +356,11 @@ export async function handleMessageUpdate(
 				.where(
 					and(
 						eq(table.whatsappMessage.tenantId, tenantId),
-						eq(table.whatsappMessage.wamId, wamId)
+						eq(table.whatsappMessage.wamId, wamId),
+						// Într-un grup confirmările vin separat de la fiecare participant, în
+						// orice ordine. Fără condiția asta, un „livrat" întârziat ar coborî un
+						// mesaj deja citit și am scrie în bază la fiecare confirmare.
+						lt(STATUS_RANK_SQL, STATUS_RANK[status])
 					)
 				);
 		} catch (err) {

@@ -21,7 +21,7 @@ function isNonRetryable(message: string): boolean {
 
 /**
  * Scheduled task: sync BNR exchange rates daily.
- * Fetches XML from https://www.bnr.ro/nbrfxrates.xml and upserts into DB.
+ * Fetches XML from https://curs.bnr.ro/nbrfxrates.xml and upserts into DB.
  */
 export async function processBnrRateSync(): Promise<{
 	success: boolean;

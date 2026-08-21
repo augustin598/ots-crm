@@ -4,27 +4,57 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { getIfExists } from '$lib/server/whatsapp/minio-helpers';
+import { isGroupJid } from '$lib/server/whatsapp/group-jid';
 
+/**
+ * Poza unei conversații.
+ *
+ * Parametrul e cheia conversației, nu neapărat un telefon: la grup e JID-ul
+ * („120363…@g.us"), iar poza vine din `whatsapp_group`. Numele parametrului a
+ * rămas `phoneE164` fiindcă e și numele folderului rutei.
+ */
 export const GET: RequestHandler = async ({ params, locals, request }) => {
 	if (!locals.user || !locals.tenant) throw error(401, 'Unauthorized');
 	const tenantId = locals.tenant.id;
-	const phoneE164 = params.phoneE164;
-	if (!phoneE164) throw error(400, 'phoneE164 required');
+	const chatKey = params.phoneE164;
+	if (!chatKey) throw error(400, 'phoneE164 required');
 
-	const [row] = await db
-		.select({
-			avatarPath: table.whatsappContact.avatarPath,
-			avatarMimeType: table.whatsappContact.avatarMimeType,
-			avatarFetchedAt: table.whatsappContact.avatarFetchedAt
-		})
-		.from(table.whatsappContact)
-		.where(
-			and(
-				eq(table.whatsappContact.tenantId, tenantId),
-				eq(table.whatsappContact.phoneE164, phoneE164)
+	let row: {
+		avatarPath: string | null;
+		avatarMimeType: string | null;
+		avatarFetchedAt: Date | null;
+	} | null = null;
+
+	if (isGroupJid(chatKey)) {
+		const [group] = await db
+			.select({
+				avatarPath: table.whatsappGroup.avatarPath,
+				avatarMimeType: table.whatsappGroup.avatarMimeType,
+				avatarFetchedAt: table.whatsappGroup.avatarFetchedAt
+			})
+			.from(table.whatsappGroup)
+			.where(
+				and(eq(table.whatsappGroup.tenantId, tenantId), eq(table.whatsappGroup.groupJid, chatKey))
 			)
-		)
-		.limit(1);
+			.limit(1);
+		row = group ?? null;
+	} else {
+		const [contact] = await db
+			.select({
+				avatarPath: table.whatsappContact.avatarPath,
+				avatarMimeType: table.whatsappContact.avatarMimeType,
+				avatarFetchedAt: table.whatsappContact.avatarFetchedAt
+			})
+			.from(table.whatsappContact)
+			.where(
+				and(
+					eq(table.whatsappContact.tenantId, tenantId),
+					eq(table.whatsappContact.phoneE164, chatKey)
+				)
+			)
+			.limit(1);
+		row = contact ?? null;
+	}
 
 	if (!row?.avatarPath) throw error(404, 'No avatar');
 

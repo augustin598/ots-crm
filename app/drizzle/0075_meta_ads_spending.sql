@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS `meta_ads_spending` (
 	`pdf_path` text,
 	`synced_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
-	`updated_at` timestamp NOT NULL DEFAULT current_date
+	`updated_at` timestamp NOT NULL DEFAULT current_date,
+	`pdf_source` text DEFAULT 'graph_api',
+	`minio_path` text,
+	`download_status` text DEFAULT 'pending' NOT NULL
 );--> statement-breakpoint
 
 -- Dedup: one row per tenant + ad account + period start + client

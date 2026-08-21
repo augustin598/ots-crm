@@ -39,10 +39,14 @@
 	const bg = $derived(PALETTE[hashString(seed) % PALETTE.length]);
 	const text = $derived(initials(name));
 
-	let errored = $state(false);
+	// Reținem CARE adresă a eșuat, nu doar că a eșuat ceva. Un simplu boolean ar
+	// rămâne aprins și după schimbarea pozei, iar aceeași instanță (capul firului,
+	// de pildă) ar arăta inițiale la toate conversațiile următoare.
+	let erroredSrc = $state<string | null>(null);
+	const showImage = $derived(!!src && erroredSrc !== src);
 </script>
 
-{#if src && !errored}
+{#if showImage}
 	<img
 		{src}
 		alt={name}
@@ -51,7 +55,7 @@
 		height={px}
 		class="rounded-full object-cover {className}"
 		style="width: {px}px; height: {px}px;"
-		onerror={() => (errored = true)}
+		onerror={() => (erroredSrc = src)}
 	/>
 {:else}
 	<div

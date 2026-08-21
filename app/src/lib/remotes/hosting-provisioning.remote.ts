@@ -1742,6 +1742,10 @@ export const getDiscoveredDaOnlyAccounts = query(DiscoverDaOnlySchema, async (fi
 		error?: string;
 		daUserCount?: number;
 		daOnlyCount?: number;
+		/** DA panel operators (role `admin`) skipped — never customer hosting accounts. */
+		adminSkipped?: number;
+		/** DA-only users whose config could not be read — reported, never silently dropped. */
+		unreadable?: string[];
 	}> = [];
 	const discovered: DiscoveredDaAccount[] = [];
 
@@ -1760,9 +1764,24 @@ export const getDiscoveredDaOnlyAccounts = query(DiscoverDaOnlySchema, async (fi
 			const crmSet = new Set(crmRows.map((r) => r.daUsername.trim().toLowerCase()));
 
 			const daClient = createDAClient(tenantId, server, { timeoutMs: 15000 });
-			const daUsers = await daClient.searchUsers();
-			const daOnly = daUsers.filter(
-				(u) => !crmSet.has((u.username ?? '').trim().toLowerCase())
+			// `users-extended` carries the DA role, which lets us drop panel-operator
+			// accounts (`admin`) that are never customer hosting. It is the same cost
+			// as the plain listing; fall back to it if this DA build lacks the route.
+			let daUsers = await daClient.searchUsersExtended().catch(() => null);
+			if (!daUsers || daUsers.length === 0) daUsers = await daClient.searchUsers();
+
+			const namedUsers = daUsers.filter((u) => u.username.trim().length > 0);
+			// DA panel logins with role `admin` ('admin' plus any personal admin user)
+			// are operators, not customer hosting. Resellers are NOT filtered — they
+			// can host real domains. If a site ever lives under an admin login it is
+			// still importable via _debug-import-da-account?username=...
+			// On DA builds without `users-extended`, userType is '' and nothing is
+			// filtered — the accounts show up rather than silently disappearing.
+			const adminUsers = namedUsers.filter((u) => u.userType.toLowerCase() === 'admin');
+			const daOnly = namedUsers.filter(
+				(u) =>
+					u.userType.toLowerCase() !== 'admin' &&
+					!crmSet.has(u.username.trim().toLowerCase())
 			);
 
 			// Full config per DA-only user (bounded concurrency) for package + suspended + all domains.
@@ -1775,9 +1794,15 @@ export const getDiscoveredDaOnlyAccounts = query(DiscoverDaOnlySchema, async (fi
 			});
 
 			let added = 0;
+			const unreadable: string[] = [];
 			for (const { u, cfg } of configs) {
 				const primary = (cfg?.domain || u.domain || (cfg?.domains ?? [])[0] || '').trim();
-				if (!primary) continue;
+				if (!primary) {
+					// Never drop this silently — an unreadable config used to be
+					// indistinguishable from "nothing to import".
+					unreadable.push(u.username);
+					continue;
+				}
 				const allDomains = cfg?.domains ?? [];
 				const packageName = cfg?.package ?? null;
 				discovered.push({
@@ -1801,8 +1826,10 @@ export const getDiscoveredDaOnlyAccounts = query(DiscoverDaOnlySchema, async (fi
 				name: server.name,
 				hostname: server.hostname,
 				ok: true,
-				daUserCount: daUsers.length,
-				daOnlyCount: added
+				daUserCount: namedUsers.length,
+				daOnlyCount: added,
+				adminSkipped: adminUsers.length,
+				unreadable
 			});
 		} catch (err) {
 			serverSummaries.push({
@@ -1825,7 +1852,9 @@ const ImportDaOnlySchema = v.object({
 		v.array(
 			v.object({
 				daServerId: v.pipe(v.string(), v.minLength(1)),
-				daUsername: v.pipe(v.string(), v.minLength(1))
+				daUsername: v.pipe(v.string(), v.minLength(1)),
+				/** Optional client to attach on import; tenant-checked server-side. */
+				clientId: v.optional(v.nullable(v.string()))
 			})
 		),
 		v.minLength(1),
@@ -1850,11 +1879,14 @@ export const importDaOnlyAccounts = command(ImportDaOnlySchema, async ({ items }
 	assertCan(actor, 'admin.hosting.manage');
 	if (actor.kind !== 'tenant') throw new Error('Forbidden');
 
-	// Group by server so we build one DA client per server.
-	const byServer = new Map<string, string[]>();
+	// Group by server so we build one DA client per server. The chosen clientId
+	// travels with each username — importing 20 accounts for 20 different clients
+	// in one click has to keep the pairing intact.
+	type PendingImport = { username: string; clientId: string | null };
+	const byServer = new Map<string, PendingImport[]>();
 	for (const it of items) {
 		const list = byServer.get(it.daServerId) ?? [];
-		list.push(it.daUsername);
+		list.push({ username: it.daUsername, clientId: it.clientId?.trim() || null });
 		byServer.set(it.daServerId, list);
 	}
 
@@ -1867,13 +1899,13 @@ export const importDaOnlyAccounts = command(ImportDaOnlySchema, async ({ items }
 
 	const results: ImportResultRow[] = [];
 
-	for (const [serverId, usernames] of byServer.entries()) {
+	for (const [serverId, pending] of byServer.entries()) {
 		const server = serverById.get(serverId);
 		if (!server) {
-			for (const u of usernames) {
+			for (const p of pending) {
 				results.push({
 					daServerId: serverId,
-					daUsername: u,
+					daUsername: p.username,
 					status: 'failed',
 					id: null,
 					reason: 'server_not_found'
@@ -1882,7 +1914,8 @@ export const importDaOnlyAccounts = command(ImportDaOnlySchema, async ({ items }
 			continue;
 		}
 		const daClient = createDAClient(tenantId, server, { timeoutMs: 15000 });
-		const rows = await mapWithConcurrency(usernames, PER_SERVER_CONCURRENCY, async (username) => {
+		const rows = await mapWithConcurrency(pending, PER_SERVER_CONCURRENCY, async (item) => {
+			const { username, clientId } = item;
 			try {
 				// Re-fetch DA config server-side — authoritative. Never trust a client-supplied
 				// domain/package (tenant-isolation + freshness).
@@ -1904,7 +1937,8 @@ export const importDaOnlyAccounts = command(ImportDaOnlySchema, async ({ items }
 					additionalDomains: cfg.domains ?? [],
 					daPackageName: cfg.package ?? null,
 					suspended: cfg.suspended === true,
-					daEmail: cfg.email ?? null
+					daEmail: cfg.email ?? null,
+					clientId
 				});
 				return {
 					daServerId: serverId,

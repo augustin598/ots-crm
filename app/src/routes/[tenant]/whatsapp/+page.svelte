@@ -16,12 +16,15 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { CheckCircle2, XCircle, AlertTriangle, Loader2, Send, Plus, Search, Pencil, Paperclip, Download, FileText } from '@lucide/svelte';
+	import { CheckCircle2, XCircle, AlertTriangle, Loader2, Send, Plus, Search, Pencil, Paperclip, Download, FileText, Users } from '@lucide/svelte';
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
+	import WhatsappGroupsDialog from '$lib/components/whatsapp/whatsapp-groups-dialog.svelte';
 	import { onDestroy, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
+	import { numarSi } from '$lib/utils/ro-numerale';
+	import { focusTrap } from '$lib/actions/focus-trap';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 
@@ -33,37 +36,58 @@
 	const conversationsQuery = $derived(connected ? listWhatsappConversations() : null);
 	const conversations = $derived(conversationsQuery?.current?.conversations ?? []);
 
-	let selectedPhone = $state<string | null>(null);
-	const threadQuery = $derived(selectedPhone ? getWhatsappThread(selectedPhone) : null);
+	// Cheia conversației: telefonul la o persoană, JID-ul la un grup.
+	let selectedChat = $state<string | null>(null);
+	const threadQuery = $derived(selectedChat ? getWhatsappThread(selectedChat) : null);
 	const thread = $derived(threadQuery?.current ?? null);
+	const isGroupChat = $derived(!!selectedChat?.endsWith('@g.us'));
 
 	let searchText = $state('');
-	function displayLabel(c: {
-		displayName: string | null;
-		clientName: string | null;
-		pushName: string | null;
-		remotePhoneE164: string;
-	}): string {
-		return c.displayName ?? c.clientName ?? c.pushName ?? c.remotePhoneE164;
+	let chatFilter = $state<'all' | 'direct' | 'group'>('all');
+	let groupsOpen = $state(false);
+
+	type ConversationRow = (typeof conversations)[number];
+
+	function displayLabel(c: ConversationRow): string {
+		if (c.chatType === 'group') return c.subject || 'Grup';
+		return c.displayName ?? c.clientName ?? c.pushName ?? c.chatKey;
 	}
 
-	const filteredConversations = $derived(
-		searchText.trim()
-			? conversations.filter((c) => {
-					const s = searchText.toLowerCase();
-					return (
-						c.remotePhoneE164.toLowerCase().includes(s) ||
-						(c.displayName ?? '').toLowerCase().includes(s) ||
-						(c.clientName ?? '').toLowerCase().includes(s) ||
-						(c.pushName ?? '').toLowerCase().includes(s) ||
-						(c.lastBody ?? '').toLowerCase().includes(s)
-					);
-				})
-			: conversations
-	);
+	/** Sub numele conversației: numărul la o persoană, câți membri la un grup. */
+	function subLabel(c: ConversationRow): string | null {
+		if (c.chatType === 'group') {
+			if (c.participantCount == null) return null;
+			return numarSi(c.participantCount, 'membru', 'membri');
+		}
+		return displayLabel(c) === c.chatKey ? null : c.chatKey;
+	}
+
+	const groupCount = $derived(conversations.filter((c) => c.chatType === 'group').length);
+	// Fără grupuri, bara de filtre dispare. Dacă filtrul ar rămâne pe „Grupuri",
+	// lista ar arăta goală și n-ar mai exista butonul care s-o repare.
+	const activeFilter = $derived(groupCount === 0 ? 'all' : chatFilter);
+
+	const filteredConversations = $derived.by(() => {
+		const byType =
+			activeFilter === 'all'
+				? conversations
+				: conversations.filter((c) => c.chatType === activeFilter);
+		const s = searchText.trim().toLowerCase();
+		if (!s) return byType;
+		return byType.filter(
+			(c) =>
+				c.chatKey.toLowerCase().includes(s) ||
+				(c.subject ?? '').toLowerCase().includes(s) ||
+				(c.displayName ?? '').toLowerCase().includes(s) ||
+				(c.clientName ?? '').toLowerCase().includes(s) ||
+				(c.pushName ?? '').toLowerCase().includes(s) ||
+				(c.lastSenderName ?? '').toLowerCase().includes(s) ||
+				(c.lastBody ?? '').toLowerCase().includes(s)
+		);
+	});
 
 	const activeConversation = $derived(
-		selectedPhone ? conversations.find((c) => c.remotePhoneE164 === selectedPhone) ?? null : null
+		selectedChat ? (conversations.find((c) => c.chatKey === selectedChat) ?? null) : null
 	);
 
 	let renameOpen = $state(false);
@@ -71,7 +95,7 @@
 	let renameSaving = $state(false);
 
 	function openRename() {
-		if (!selectedPhone) return;
+		if (!selectedChat || isGroupChat) return;
 		renameValue =
 			activeConversation?.displayName ??
 			thread?.contact?.displayName ??
@@ -82,10 +106,10 @@
 	}
 
 	async function handleRename() {
-		if (!selectedPhone) return;
+		if (!selectedChat || isGroupChat) return;
 		renameSaving = true;
 		try {
-			await renameWhatsappContact({ phoneE164: selectedPhone, displayName: renameValue });
+			await renameWhatsappContact({ phoneE164: selectedChat, displayName: renameValue });
 			renameOpen = false;
 			await conversationsQuery?.refresh();
 			await threadQuery?.refresh();
@@ -160,7 +184,7 @@
 		try {
 			await disconnectWhatsapp();
 			qrDataUrl = null;
-			selectedPhone = null;
+			selectedChat = null;
 			stopPolling();
 			toast.success('Deconectat');
 		} catch (err) {
@@ -177,7 +201,13 @@
 			if (!inboxTimer) {
 				inboxTimer = setInterval(() => {
 					conversationsQuery?.refresh();
-					if (selectedPhone) threadQuery?.refresh();
+					if (selectedChat) threadQuery?.refresh();
+					// Cât stai cu firul deschis, mesajele noi se marchează citite pe loc.
+					// Altfel insigna de necitite crește chiar pe conversația pe care o citești.
+					const open = selectedChat;
+					if (open && (activeConversation?.unread ?? 0) > 0) {
+						void markWhatsappConversationRead(open).catch(() => {});
+					}
 				}, 3000);
 			}
 		} else {
@@ -193,10 +223,11 @@
 		if (inboxTimer) clearInterval(inboxTimer);
 	});
 
-	async function selectConversation(remotePhoneE164: string) {
-		selectedPhone = remotePhoneE164;
+	async function selectConversation(chatKey: string) {
+		if (chatKey !== selectedChat) replyText = ''; // ciorna nu trece la alt destinatar
+		selectedChat = chatKey;
 		try {
-			await markWhatsappConversationRead(remotePhoneE164);
+			await markWhatsappConversationRead(chatKey);
 		} catch (err) {
 			console.warn('mark read failed', err);
 		}
@@ -210,10 +241,10 @@
 
 	async function handleSendReply() {
 		const body = replyText.trim();
-		if (!body || !selectedPhone) return;
+		if (!body || !selectedChat) return;
 		sending = true;
 		try {
-			await sendWhatsappMessage({ to: selectedPhone, text: body });
+			await sendWhatsappMessage({ to: selectedChat, text: body });
 			replyText = '';
 			await threadQuery?.refresh();
 			await conversationsQuery?.refresh();
@@ -243,7 +274,7 @@
 	}
 
 	async function sendFile(file: File, caption = '') {
-		if (!selectedPhone) return;
+		if (!selectedChat) return;
 		if (file.size > MAX_MEDIA_MB * 1024 * 1024) {
 			toast.error(`Fișier prea mare (max ${MAX_MEDIA_MB}MB)`);
 			return;
@@ -252,7 +283,7 @@
 		try {
 			const base64 = await fileToBase64(file);
 			await sendWhatsappMedia({
-				to: selectedPhone,
+				to: selectedChat,
 				base64,
 				mimeType: file.type || 'application/octet-stream',
 				fileName: file.name,
@@ -314,7 +345,7 @@
 	}
 
 	$effect(() => {
-		const key = selectedPhone;
+		const key = selectedChat;
 		void (thread?.messages.length ?? 0);
 		if (!messagesEl) return;
 
@@ -338,6 +369,17 @@
 
 	function handleLightboxKey(e: KeyboardEvent) {
 		if (e.key === 'Escape') closeLightbox();
+	}
+
+	/**
+	 * Adresa unui fișier din conversație. Numele intră în adresă, ca ultim segment:
+	 * browserul îl folosește la descărcare chiar dacă ignoră antetul, iar o adresă
+	 * nouă ocolește și răspunsul vechi rămas în cache.
+	 */
+	function mediaHref(messageId: string, fileName: string | null | undefined): string {
+		const base = `/api/whatsapp/media/${messageId}`;
+		const name = fileName?.trim();
+		return name ? `${base}/${encodeURIComponent(name)}` : base;
 	}
 
 	function formatSize(bytes: number | null | undefined): string {
@@ -389,6 +431,28 @@
 		if (!d) return '';
 		const date = typeof d === 'string' ? new Date(d) : d;
 		return date.toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' });
+	}
+
+	// Culoare stabilă pe expeditor, ca într-un grup să deosebești oamenii dintr-o
+	// privire. Nuanțele sunt cele închise (700–800), nu paleta de la ContactAvatar:
+	// aceea e făcută pentru text alb pe cerc colorat, iar aici scriem pe fundal
+	// deschis, unde chihlimbarul și verdeul crud coboară sub pragul de contrast.
+	const SENDER_COLORS = [
+		'#1d4ed8', // blue-700
+		'#047857', // emerald-700
+		'#b91c1c', // red-700
+		'#b45309', // amber-700
+		'#6d28d9', // violet-700
+		'#be185d', // pink-700
+		'#0e7490', // cyan-700
+		'#4d7c0f' // lime-700
+	];
+
+	function senderColor(seed: string | null): string {
+		if (!seed) return 'var(--muted-foreground)';
+		let h = 0;
+		for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+		return SENDER_COLORS[Math.abs(h) % SENDER_COLORS.length];
 	}
 
 	function statusIcon(status: string): string {
@@ -485,39 +549,83 @@
 				<CardHeader class="space-y-2 pb-3">
 					<div class="flex items-center justify-between">
 						<CardTitle class="text-base">Conversații</CardTitle>
-						<Button size="sm" variant="outline" onclick={() => (newConvOpen = true)}>
-							<Plus class="h-4 w-4" />
-						</Button>
+						<div class="flex items-center gap-1">
+							<Button
+								size="sm"
+								variant="outline"
+								title="Alege ce grupuri intră în inbox"
+								onclick={() => (groupsOpen = true)}
+							>
+								<Users class="h-4 w-4" />
+							</Button>
+							<Button size="sm" variant="outline" title="Conversație nouă" onclick={() => (newConvOpen = true)}>
+								<Plus class="h-4 w-4" />
+							</Button>
+						</div>
 					</div>
 					<div class="relative">
 						<Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
 						<Input bind:value={searchText} placeholder="Caută..." class="pl-8" />
 					</div>
+					{#if groupCount > 0}
+						<div class="flex items-center gap-1 rounded-md bg-muted p-0.5 text-xs">
+							{#each [{ key: 'all', label: 'Toate' }, { key: 'direct', label: 'Directe' }, { key: 'group', label: 'Grupuri' }] as const as tab (tab.key)}
+								<button
+									type="button"
+									class="flex-1 rounded px-2 py-1 font-medium transition-colors {activeFilter === tab.key
+										? 'bg-background shadow-sm'
+										: 'text-muted-foreground hover:text-foreground'}"
+									aria-pressed={activeFilter === tab.key}
+									onclick={() => (chatFilter = tab.key)}
+								>
+									{tab.label}
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</CardHeader>
 				<div class="flex-1 overflow-y-auto">
 					{#if filteredConversations.length === 0}
 						<div class="p-6 text-center text-sm text-muted-foreground">
-							{searchText ? 'Nimic găsit.' : 'Nicio conversație încă. Așteaptă mesaje sau inițiază o conversație nouă.'}
+							{#if searchText}
+								Nimic găsit.
+							{:else if activeFilter === 'group'}
+								Niciun grup în inbox. Alege-le din butonul cu oameni, de sus.
+							{:else}
+								Nicio conversație încă. Așteaptă mesaje sau începe una nouă.
+							{/if}
 						</div>
 					{:else}
 						<ul class="divide-y">
-							{#each filteredConversations as c (c.remotePhoneE164)}
-								{@const isSelected = selectedPhone === c.remotePhoneE164}
+							{#each filteredConversations as c (c.chatKey)}
+								{@const isSelected = selectedChat === c.chatKey}
 								{@const label = displayLabel(c)}
-								{@const hasName = label !== c.remotePhoneE164}
+								{@const sub = subLabel(c)}
+								{@const isGroup = c.chatType === 'group'}
 								<li>
 									<button
 										type="button"
 										class="w-full px-4 py-3 text-left transition-colors hover:bg-muted/50 {isSelected ? 'bg-muted' : ''}"
-										onclick={() => selectConversation(c.remotePhoneE164)}
+										aria-current={isSelected ? 'true' : undefined}
+										onclick={() => selectConversation(c.chatKey)}
 									>
 										<div class="flex items-center gap-3">
-											<ContactAvatar
-												src={`/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(c.remotePhoneE164)}`}
-												name={label}
-												phoneE164={c.remotePhoneE164}
-												size="md"
-											/>
+											<div class="relative shrink-0">
+												<ContactAvatar
+													src={`/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(c.chatKey)}`}
+													name={label}
+													phoneE164={c.chatKey}
+													size="md"
+												/>
+												{#if isGroup}
+													<span
+														class="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background"
+														aria-hidden="true"
+													>
+														<Users class="h-3 w-3 text-muted-foreground" />
+													</span>
+												{/if}
+											</div>
 											<div class="min-w-0 flex-1">
 												<div class="flex items-center gap-2">
 													<span class="truncate font-medium">{label}</span>
@@ -525,12 +633,20 @@
 														<Badge class="h-5 min-w-5 px-1.5 text-xs bg-emerald-600">{c.unread}</Badge>
 													{/if}
 												</div>
-												{#if hasName}
-													<p class="truncate text-xs text-muted-foreground">{c.remotePhoneE164}</p>
+												{#if sub}
+													<p class="truncate text-xs text-muted-foreground">{sub}</p>
 												{/if}
 												<p class="mt-1 truncate text-xs text-muted-foreground">
-													{#if c.lastDirection === 'outbound'}<span class="text-muted-foreground">Tu: </span>{/if}
-													{c.lastBody ?? `[${c.lastMessageType}]`}
+													{#if !c.lastAt}
+														<span class="italic">Niciun mesaj încă</span>
+													{:else}
+														{#if c.lastDirection === 'outbound'}
+															<span>Tu: </span>
+														{:else if isGroup && c.lastSenderName}
+															<span>{c.lastSenderName}: </span>
+														{/if}
+														{c.lastBody ?? `[${c.lastMessageType}]`}
+													{/if}
 												</p>
 											</div>
 											<span class="text-xs text-muted-foreground">{formatTime(c.lastAt)}</span>
@@ -545,7 +661,7 @@
 
 			<!-- Thread view -->
 			<Card class="flex flex-col overflow-hidden">
-				{#if !selectedPhone}
+				{#if !selectedChat}
 					<div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
 						<div class="text-center">
 							<IconWhatsapp class="mx-auto h-12 w-12 opacity-40" />
@@ -554,33 +670,57 @@
 					</div>
 				{:else}
 					<CardHeader class="border-b pb-3">
-						{@const threadLabel = activeConversation ? displayLabel(activeConversation) : (thread?.contact?.displayName ?? thread?.client?.name ?? thread?.contact?.pushName ?? selectedPhone)}
+						{@const threadLabel = activeConversation
+							? displayLabel(activeConversation)
+							: (thread?.group?.subject ??
+								thread?.contact?.displayName ??
+								thread?.client?.name ??
+								thread?.contact?.pushName ??
+								selectedChat)}
+						{@const memberCount = activeConversation?.participantCount ?? thread?.group?.participantCount ?? null}
 						<div class="flex items-center gap-3">
-							<ContactAvatar
-								src={`/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(selectedPhone)}`}
-								name={threadLabel}
-								phoneE164={selectedPhone}
-								size="lg"
-							/>
+							<div class="relative shrink-0">
+								<ContactAvatar
+									src={`/${tenantSlug}/api/whatsapp/avatar/${encodeURIComponent(selectedChat)}`}
+									name={threadLabel}
+									phoneE164={selectedChat}
+									size="lg"
+								/>
+								{#if isGroupChat}
+									<span
+										class="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-background"
+										aria-hidden="true"
+									>
+										<Users class="h-3.5 w-3.5 text-muted-foreground" />
+									</span>
+								{/if}
+							</div>
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center gap-2">
 									<CardTitle class="truncate text-base">{threadLabel}</CardTitle>
-									<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Redenumește" onclick={openRename}>
-										<Pencil class="h-3.5 w-3.5" />
-									</Button>
+									{#if !isGroupChat}
+										<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Redenumește" onclick={openRename}>
+											<Pencil class="h-3.5 w-3.5" />
+										</Button>
+									{/if}
 								</div>
-								{#if thread?.client}
-									<p class="truncate text-xs text-muted-foreground">
-										{selectedPhone} ·
+								<p class="truncate text-xs text-muted-foreground">
+									{#if isGroupChat}
+										{memberCount != null ? numarSi(memberCount, 'membru', 'membri') : 'Grup'}
+									{:else}
+										{selectedChat}
+									{/if}
+									{#if thread?.client}
+										·
 										<a href="/{tenantSlug}/clients/{thread.client.id}" class="underline hover:no-underline">
-											Vezi fișa clientului
+											{isGroupChat ? thread.client.name : 'Vezi fișa clientului'}
 										</a>
-									</p>
-								{:else}
-									<p class="truncate text-xs text-muted-foreground">{selectedPhone} · Nelegat la client</p>
-								{/if}
+									{:else if !isGroupChat}
+										· Nelegat la client
+									{/if}
+								</p>
 							</div>
-							<Button variant="ghost" size="sm" onclick={() => (selectedPhone = null)}>Închide</Button>
+							<Button variant="ghost" size="sm" onclick={() => (selectedChat = null)}>Închide</Button>
 						</div>
 					</CardHeader>
 					<div bind:this={messagesEl} onscroll={onMessagesScroll} class="flex-1 overflow-y-auto bg-muted/30 p-4">
@@ -597,17 +737,23 @@
 									{@const isVideo = m.messageType === 'video'}
 									{@const isAudio = m.messageType === 'audio'}
 									{@const isDocument = m.messageType === 'document'}
-									{@const mediaUrl = hasMedia ? `/api/whatsapp/media/${m.id}` : null}
+									{@const mediaUrl = hasMedia ? mediaHref(m.id, m.mediaFileName) : null}
 									<li class="flex {outbound ? 'justify-end' : 'justify-start'}">
 										<div
 											class="max-w-[70%] rounded-lg px-3 py-2 text-sm shadow-sm {outbound
 												? 'bg-emerald-600 text-white'
 												: 'bg-background border'}"
 										>
+											{#if isGroupChat && !outbound}
+												<p class="mb-1 text-xs font-semibold" style="color: {senderColor(m.senderPushName ?? m.senderPhoneE164)}">
+													{m.senderPushName ?? m.senderPhoneE164 ?? 'Membru necunoscut'}
+												</p>
+											{/if}
 											{#if hasMedia && isImage && mediaUrl}
 												<button
 													type="button"
 													class="block p-0 bg-transparent border-0 cursor-zoom-in"
+													aria-label="Mărește imaginea"
 													onclick={() => openLightbox(mediaUrl)}
 												>
 													<img src={mediaUrl} alt="" class="max-h-72 rounded object-contain" loading="lazy" />
@@ -621,8 +767,7 @@
 											{:else if hasMedia && isDocument && mediaUrl}
 												<a
 													href={mediaUrl}
-													target="_blank"
-													rel="noopener"
+													download={m.mediaFileName ?? ''}
 													class="flex items-center gap-2 rounded border border-black/10 bg-black/5 p-2 hover:bg-black/10 {outbound ? 'border-white/20 bg-white/10 hover:bg-white/20' : ''}"
 												>
 													<FileText class="h-8 w-8 shrink-0" />
@@ -637,7 +782,19 @@
 											{/if}
 
 											{#if m.body}
-												<p class="whitespace-pre-wrap break-words {hasMedia ? 'mt-2' : ''}">{m.body}</p>
+												<p class="whitespace-pre-wrap break-words {hasMedia ? 'mt-2' : ''}">
+													{#if m.bodyParts}
+														{#each m.bodyParts as part, i (i)}
+															{#if part.type === 'mention'}
+																<span
+																	class="rounded px-1 py-0.5 font-medium {outbound
+																		? 'bg-white/20 text-white'
+																		: 'bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300'}"
+																>{part.value}</span>
+															{:else}{part.value}{/if}
+														{/each}
+													{:else}{m.body}{/if}
+												</p>
 											{:else if !hasMedia}
 												<p class="italic opacity-80">[{m.messageType}]</p>
 											{/if}
@@ -689,18 +846,30 @@
 								}}
 								onpaste={handlePaste}
 							/>
-							<Button onclick={handleSendReply} disabled={!replyText.trim() || sending}>
+							<Button
+								onclick={handleSendReply}
+								disabled={!replyText.trim() || sending}
+								aria-label="Trimite mesajul"
+							>
 								{#if sending}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Send class="h-4 w-4" />{/if}
 							</Button>
 						</div>
-						<p class="mt-1 text-xs text-muted-foreground">Enter trimite · Shift+Enter = linie nouă · 📎 atașează · Ctrl+V lipește imagini · delay 3-7s/msg · max {MAX_MEDIA_MB}MB</p>
+						<p class="mt-1 text-xs text-muted-foreground">
+							{#if isGroupChat}<span>Mesajul ajunge la toți membrii grupului.</span>{' '}{/if}Enter trimite · Shift+Enter = linie nouă · 📎 atașează · Ctrl+V lipește imagini · delay 3-7s/msg · max {MAX_MEDIA_MB}MB
+						</p>
 					</div>
 				{/if}
 			</Card>
 		</div>
 
 		{#if renameOpen}
-			<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+			<div
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Redenumește contact"
+				use:focusTrap={{ onEscape: () => (renameOpen = false) }}
+			>
 				<Card class="w-full max-w-md">
 					<CardHeader>
 						<CardTitle>Redenumește contact</CardTitle>
@@ -709,7 +878,7 @@
 					<CardContent class="space-y-3">
 						<div class="space-y-1">
 							<label for="rename-phone" class="text-sm font-medium">Telefon</label>
-							<Input id="rename-phone" value={selectedPhone ?? ''} readonly class="font-mono" />
+							<Input id="rename-phone" value={selectedChat ?? ''} readonly class="font-mono" />
 						</div>
 						<div class="space-y-1">
 							<label for="rename-name" class="text-sm font-medium">Nume</label>
@@ -727,11 +896,21 @@
 			</div>
 		{/if}
 
+		{#if groupsOpen}
+			<WhatsappGroupsDialog
+				{tenantSlug}
+				onclose={() => (groupsOpen = false)}
+				onchanged={() => conversationsQuery?.refresh()}
+			/>
+		{/if}
+
 		{#if newConvOpen}
 			<div
 				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 				role="dialog"
 				aria-modal="true"
+				aria-label="Conversație nouă"
+				use:focusTrap={{ onEscape: () => (newConvOpen = false) }}
 			>
 				<Card class="w-full max-w-md">
 					<CardHeader>

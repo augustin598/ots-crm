@@ -5,7 +5,14 @@ import { and, eq, ne, desc, gte, lte, inArray, isNotNull, sql } from 'drizzle-or
 import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 
+/**
+ * MRR per cont, în cenți/lună. Conturile bifate „cont personal"
+ * (`billing_excluded`) contribuie 0 — sunt scoase din facturare, deci n-au ce
+ * căuta în venitul recurent. Filtrul stă AICI, în expresie, ca toate cele 6
+ * folosiri (KPI, istoric 12 luni, pe server, pe pachet) să fie automat aliniate.
+ */
 const MRR_CASE_SQL = sql<number>`
+	CASE WHEN ${table.hostingAccount.billingExcluded} THEN 0 ELSE
 	CASE ${table.hostingAccount.billingCycle}
 		WHEN 'monthly'      THEN ${table.hostingAccount.recurringAmount} * 1.0
 		WHEN 'quarterly'    THEN ${table.hostingAccount.recurringAmount} * 1.0 / 3
@@ -15,6 +22,7 @@ const MRR_CASE_SQL = sql<number>`
 		WHEN 'biennially'   THEN ${table.hostingAccount.recurringAmount} * 1.0 / 24
 		WHEN 'triennially'  THEN ${table.hostingAccount.recurringAmount} * 1.0 / 36
 		ELSE 0
+	END
 	END
 `;
 

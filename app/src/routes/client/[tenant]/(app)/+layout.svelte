@@ -10,8 +10,10 @@
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import OnboardingTour from '$lib/components/onboarding/onboarding-tour.svelte';
 	import ClientSwitcher from '$lib/components/client/client-switcher.svelte';
+	import WhatsappPhonePrompt from '$lib/components/client/whatsapp-phone-prompt.svelte';
 	import OtsSidebar from '$lib/components/ots-sidebar/OtsSidebar.svelte';
 	import OtsTopbar from '$lib/components/ots-sidebar/OtsTopbar.svelte';
+	import { getTopbarActions } from '$lib/components/ots-sidebar/topbar-actions.svelte';
 	import type { NavGroup } from '$lib/config/sidebar-nav';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
@@ -311,8 +313,12 @@
 	</Sidebar>
 	<SidebarInset>
 		{#if !isBareRoute}
-			<OtsTopbar groups={clientGroups} {pathPrefix} />
+			<OtsTopbar groups={clientGroups} {pathPrefix} actions={getTopbarActions()} />
 		{/if}
+		<WhatsappPhonePrompt
+			promptState={data.whatsappPrompt?.state ?? 'none'}
+			tenantName={data.whatsappPrompt?.tenantName ?? ''}
+		/>
 		{#if (data.userCompanies?.length ?? 0) > 1}
 			<header class="flex items-center justify-end gap-2 border-b px-6 py-3">
 				<ClientSwitcher

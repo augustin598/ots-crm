@@ -47,12 +47,17 @@
 		align-items: center;
 		gap: 14px;
 		padding: 12px 22px;
-		background: var(--background);
+		/* Alb curat, nu `--background` (care e un gri-albăstrui foarte deschis):
+		   bara trebuie să se desprindă de conținutul de dedesubt, ca în Campanii Ads. */
+		background: oklch(1 0 0);
 		border-bottom: 1px solid var(--border);
 		min-height: 52px;
 		position: sticky;
 		top: 0;
 		z-index: 20;
+	}
+	:global(.dark) .ots-topbar {
+		background: var(--card);
 	}
 	.ots-crumbs {
 		display: flex;

@@ -73,6 +73,8 @@ export async function processHostingRenewalReminder(): Promise<HostingRenewalRem
 		.where(
 			and(
 				eq(hostingAccount.status, 'active'),
+				// „Cont personal" — scos din facturare, deci nu are ce reînnoire să anunțe.
+				eq(hostingAccount.billingExcluded, false),
 				isNotNull(hostingAccount.nextDueDate),
 				sql`date(${hostingAccount.nextDueDate}) BETWEEN date('now', '+1 days') AND date('now', '+14 days')`
 			)
