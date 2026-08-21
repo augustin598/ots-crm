@@ -150,7 +150,7 @@
 	<nav class="sv-nav">
 		<div class="sv-nav-inner">
 			<a href="/servicii" class="sv-logo">
-				<img src="/onetop-logo.png" alt="One Top Solution — Servicii &amp; Pachete" />
+				<img src="/onetop-logo.png" alt="One Top Solution, Servicii și Pachete" />
 			</a>
 			<div class="sv-nav-spacer"></div>
 			{#if cart.count > 0}
@@ -188,7 +188,7 @@
 		<div class="sv-hero-tagline">
 			<span class="sv-hero-trust"><CheckIcon class="sv-ok" /> Prețuri în EUR, fără TVA</span>
 			<span class="sv-hero-trust"><CheckIcon class="sv-ok" /> Acces CRM real-time inclus</span>
-			<span class="sv-hero-trust"><CheckIcon class="sv-ok" /> Contract minim 1–6 luni</span>
+			<span class="sv-hero-trust"><CheckIcon class="sv-ok" /> Contract minim de la 1 la 6 luni</span>
 		</div>
 	</section>
 
@@ -197,7 +197,7 @@
 		<div class="sv-section-head">
 			<span class="sv-kicker"><SparklesIcon class="h-3.5 w-3.5" /> Inclus gratuit</span>
 			<h2>Acces CRM real-time în toate pachetele</h2>
-			<p>Spend, conversii, poziții SEO, uptime, open rate — live, 24/7, în contul tău.</p>
+			<p>Spend, conversii, poziții SEO, uptime, open rate: le vezi live, oricând, în contul tău.</p>
 		</div>
 
 		<!-- Pe telefon tabelul derulează orizontal; fără indiciu, coloanele Silver–Platinum par să lipsească. -->
@@ -257,7 +257,7 @@
 				<span class="sv-kicker"><PercentIcon class="h-3.5 w-3.5" /> Discount multi-servicii</span>
 				<h2>Cu cât combini mai multe servicii, cu atât plătești mai puțin</h2>
 				<p>
-					Se aplică pe abonamentul lunar combinat — nu pe bugetul media și nu pe costul
+					Se aplică pe abonamentul lunar combinat, nu pe bugetul media și nici pe costul
 					platformelor externe.
 				</p>
 			</div>
@@ -280,8 +280,8 @@
 			<span class="sv-wizard-body">
 				<strong>Nu știi ce pachet să alegi? Hai să te ghidăm.</strong>
 				<span>
-					5 întrebări rapide — tip business, obiectiv, buget, canale — și îți spunem exact
-					combinația care funcționează, cu preț estimat și discount aplicat.
+					Răspunzi la 5 întrebări scurte (tip de business, obiectiv, buget, canale) și îți
+					arătăm combinația potrivită, cu preț estimat și discountul deja aplicat.
 				</span>
 			</span>
 			<span class="sv-wizard-cta ots-gloss">Începe <ArrowRightIcon class="h-4 w-4" /></span>
@@ -293,8 +293,8 @@
 		<div class="sv-section-head">
 			<h2>Categorii servicii</h2>
 			<p>
-				Click pe o categorie pentru comparația Bronze → Platinum, adaugă pachetul dorit în ofertă
-				și combină mai multe servicii pentru discount.
+				Deschide o categorie, compară pachetele de la Bronze la Platinum și adaugă-l pe cel
+				potrivit în ofertă. De la două servicii în sus primești discount.
 			</p>
 		</div>
 

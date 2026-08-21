@@ -132,7 +132,7 @@
 
 	async function requestBundle(rec: Recommendation) {
 		if (rec.bundle.services.length === 0) {
-			toast.error('Bundle gol — nu se poate trimite cerere.');
+			toast.error('Pachetul e gol, nu avem ce trimite.');
 			return;
 		}
 		submitting = true;
@@ -155,7 +155,7 @@
 		const status = PROJECT_STATUS_OPTIONS.find((p) => p.value === answers.projectStatus);
 
 		return [
-			`Cerere generată prin wizardul Servicii & Oferte — bundle „${rec.bundle.name}".`,
+			`Cerere generată prin wizardul Servicii & Oferte, pachetul „${rec.bundle.name}".`,
 			`Tip business: ${biz?.label || '—'}${answers.businessType === 'other' && answers.businessTypeOther ? ` (${answers.businessTypeOther})` : ''}`,
 			`Obiectiv principal: ${goal?.label || '—'}`,
 			`Buget media lunar: ${budget?.label || '—'}`,
@@ -242,8 +242,8 @@
 			{#if step === 2}
 				<h2 class="wz-q">Care e obiectivul principal?</h2>
 				<p class="wz-q-hint">
-					Asta determină canalele și strategia — nu doar trafic, ci trafic care aduce rezultatul
-					dorit.
+					De aici pornesc canalele și strategia: vrem trafic care aduce rezultatul dorit, nu
+					trafic de dragul cifrelor.
 				</p>
 				<div class="grid gap-2.5">
 					{#each availableGoals as opt (opt.value)}
@@ -274,11 +274,11 @@
 			{#if step === 3}
 				<h2 class="wz-q">Cât alocă pentru buget media (Ads)?</h2>
 				<p class="text-sm text-muted-foreground mb-2">
-					Doar banii care merg către platforme (Google, Meta, TikTok) — managementul OTS se
+					Doar banii care merg către platforme (Google, Meta, TikTok). Managementul OTS se
 					plătește separat.
 				</p>
 				<p class="text-xs text-muted-foreground mb-3 italic">
-					Nu proiectăm rezultate pre-lansare. Bugetul ne ajută să calibrăm pachetul potrivit.
+					Nu promitem cifre înainte de lansare. Bugetul ne ajută doar să alegem pachetul potrivit.
 				</p>
 				<button
 					type="button"
@@ -335,8 +335,8 @@
 			{#if step === 4}
 				<h2 class="wz-q">Ce canale te interesează? (opțional)</h2>
 				<p class="wz-q-hint">
-					Bifează ce ai deja în minte. Dacă nu ești sigur, lasă gol — echipa OTS alege ce
-					funcționează pentru obiectivul tău.
+					Bifează ce ai deja în minte. Dacă nu ești sigur, lasă gol și alegem noi canalele care
+					se potrivesc obiectivului tău.
 				</p>
 				<div class="grid gap-2 sm:grid-cols-2">
 					{#each CATEGORIES as cat (cat.slug)}
@@ -363,8 +363,8 @@
 				</div>
 				{#if answers.interestedServices.length >= 2}
 					<p class="text-xs text-primary mt-4">
-						Ai ales {answers.interestedServices.length} servicii — discount multi-servicii se
-						aplică automat.
+						Ai ales {answers.interestedServices.length} servicii, deci discountul multi-servicii
+						se aplică automat.
 					</p>
 				{/if}
 			{/if}
@@ -486,9 +486,9 @@
 										<span class="wz-bill-amount">{formatEur(primary.cost.setupTotal)}</span>
 									</div>
 									<p>
-										<strong>Taxă implementare tehnică</strong> — GTM, GA4, Pixel, Consent Mode v2
-										(GDPR), structurare conturi, prima configurație campanii. Plătită înainte să
-										pornim munca, o singură dată.
+										<strong>Taxă de implementare tehnică</strong>: GTM, GA4, Pixel, Consent Mode v2
+										(GDPR), structurarea conturilor și prima configurare a campaniilor. Se plătește
+										o singură dată, înainte să pornim.
 									</p>
 								</div>
 							</li>
@@ -496,12 +496,12 @@
 								<span class="wz-bill-n">2</span>
 								<div class="wz-bill-body">
 									<div class="wz-bill-row">
-										<span class="wz-bill-label">La lansarea campaniilor (~10–14 zile)</span>
+										<span class="wz-bill-label">La lansarea campaniilor (în 10 până la 14 zile)</span>
 										<span class="wz-bill-amount">{formatEur(primary.cost.monthlyAfterDiscount)}</span>
 									</div>
 									<p>
-										<strong>Primul abonament lunar</strong> — se facturează în ziua lansării
-										campaniilor, nu la final de lună.
+										<strong>Primul abonament lunar</strong>, facturat în ziua lansării campaniilor,
+										nu la final de lună.
 									</p>
 								</div>
 							</li>
@@ -546,7 +546,7 @@
 						<div class="wz-price">
 							{formatEur(primary.cost.monthlyAfterDiscount)}<small>/lună</small>
 						</div>
-						<p class="wz-price-note">Folosim conturile tale existente — zero setup nou.</p>
+						<p class="wz-price-note">Folosim conturile tale existente, fără setup nou.</p>
 					</div>
 				{/if}
 
@@ -664,7 +664,7 @@
 			<p>
 				Costurile de mai sus sunt doar pentru managementul OTS, în EUR fără TVA. Bugetul media
 				(banii care merg în platforme) și costul platformelor externe (Brevo, HubSpot etc.) se
-				plătesc separat direct către furnizor. Oferta finală o confirmăm după un audit scurt —
+				plătesc separat, direct către furnizor. Oferta finală o confirmăm după un audit scurt;
 				poate include ajustări pentru volumul sau complexitatea proiectului.
 			</p>
 		</section>

@@ -163,7 +163,7 @@
 									variant={isActive ? 'outline' : 'default'}
 									aria-pressed={isActive}
 									aria-label={isActive
-										? `${activeLabel}: ${tierLabels[tier]} — apasă pentru a scoate din ofertă`
+										? `${activeLabel}: ${tierLabels[tier]}. Apasă pentru a-l scoate din ofertă`
 										: undefined}
 									onclick={() => onRequest(tier)}
 									disabled={price === null && !setup}
