@@ -23,6 +23,8 @@
 		getCapabilitiesForRole,
 		type Capability
 	} from '$lib/access/catalog';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
+	import { page } from '$app/state';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
@@ -35,6 +37,8 @@
 		lastName: string | null;
 		title: string | null;
 		phone: string | null;
+		/** Telefon E.164 care are sigur un avatar WhatsApp stocat; null → inițiale. */
+		avatarPhone?: string | null;
 		role: string;
 		department: string | null;
 		skills: string[];
@@ -245,7 +249,18 @@
 				<!-- Header -->
 				<div class="profile-head">
 					<div class="av-wrap">
-						<div class="av-large" style="background:{color}">{initials}</div>
+						<div class="av-large" style="background:{color}">
+							{initials}
+							{#if member.avatarPhone}
+								<img
+									class="av-img"
+									src={whatsappAvatarUrl((page.params.tenant as string) ?? '', member.avatarPhone)}
+									alt=""
+									loading="lazy"
+									onerror={(e) => e.currentTarget.remove()}
+								/>
+							{/if}
+						</div>
 						<span class="presence" class:online={member.online} class:offline={!member.online}></span>
 					</div>
 					<div class="profile-head-info">
@@ -542,6 +557,8 @@
 		flex-shrink: 0;
 	}
 	.av-large {
+		position: relative;
+		overflow: hidden;
 		width: 64px;
 		height: 64px;
 		border-radius: 50%;
@@ -550,6 +567,13 @@
 		color: white;
 		font-weight: 800;
 		font-size: 22px;
+	}
+	.av-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 	.presence {
 		position: absolute;

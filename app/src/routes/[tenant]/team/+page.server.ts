@@ -1,8 +1,10 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 import { ensureAdminTeamAccess } from '$lib/server/team-access';
+import { getUserWhatsappPhonesBatch } from '$lib/server/whatsapp/resolve-phone';
+import { normalizePhoneE164 } from '$lib/utils/phone';
 
 export const load: PageServerLoad = async (event) => {
 	await ensureAdminTeamAccess(event);
@@ -109,6 +111,49 @@ export const load: PageServerLoad = async (event) => {
 		};
 	}
 
+	// Avatar WhatsApp: telefonul canonic vine din user_whatsapp_link, cu revenire la
+	// tenantUser.phone normalizat (aceeași regulă ca în users.remote). Verificăm apoi
+	// care dintre telefoane au efectiv un avatar stocat, ca UI-ul să ceară imaginea
+	// doar când există — altfel fiecare membru fără poză ar genera un 404.
+	const linkedPhones = await getUserWhatsappPhonesBatch(
+		tenantId,
+		members.map((m) => m.userId)
+	);
+	const memberPhone = new Map<string, string>();
+	for (const m of members) {
+		const phone = linkedPhones.get(m.userId) ?? normalizePhoneE164(m.phone);
+		if (phone) memberPhone.set(m.userId, phone);
+	}
+	const clientPhone = new Map<string, string>();
+	for (const c of clientRows) {
+		const phone = normalizePhoneE164(c.phone);
+		if (phone) clientPhone.set(c.id, phone);
+	}
+
+	const candidatePhones = [...new Set([...memberPhone.values(), ...clientPhone.values()])];
+	const phonesWithAvatar = new Set<string>();
+	if (candidatePhones.length > 0) {
+		const avatarRows = await db
+			.select({ phoneE164: table.whatsappContact.phoneE164 })
+			.from(table.whatsappContact)
+			.where(
+				and(
+					eq(table.whatsappContact.tenantId, tenantId),
+					inArray(table.whatsappContact.phoneE164, candidatePhones),
+					isNotNull(table.whatsappContact.avatarPath)
+				)
+			);
+		for (const r of avatarRows) phonesWithAvatar.add(r.phoneE164);
+	}
+
+	const avatarPhoneFor = (phone: string | undefined): string | null =>
+		phone && phonesWithAvatar.has(phone) ? phone : null;
+
+	const membersWithAvatar = members.map((m) => ({
+		...m,
+		avatarPhone: avatarPhoneFor(memberPhone.get(m.userId))
+	}));
+
 	const clients = clientRows.map((c) => ({
 		id: c.id,
 		name: c.name,
@@ -116,11 +161,12 @@ export const load: PageServerLoad = async (event) => {
 		email: c.email,
 		phone: c.phone,
 		avatarPath: c.avatarPath,
+		avatarPhone: avatarPhoneFor(clientPhone.get(c.id)),
 		secondaryCount: Number(c.secondaryCount ?? 0)
 	}));
 
 	return {
-		members,
+		members: membersWithAvatar,
 		invitations,
 		stats,
 		sessions,

@@ -3,6 +3,8 @@
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { avatarColor, avatarInitials } from '$lib/config/team';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
+	import { page } from '$app/state';
 
 	export interface ClientCardData {
 		id: string;
@@ -10,6 +12,8 @@
 		businessName: string | null;
 		email: string | null;
 		phone: string | null;
+		/** Telefon E.164 care are sigur un avatar WhatsApp stocat; null → inițiale. */
+		avatarPhone?: string | null;
 		secondaryCount: number;
 	}
 
@@ -39,7 +43,18 @@
 	}}
 >
 	<div class="tc-head">
-		<div class="tc-av" style="background:{color}">{initials}</div>
+		<div class="tc-av" style="background:{color}">
+			{initials}
+			{#if client.avatarPhone}
+				<img
+					class="tc-av-img"
+					src={whatsappAvatarUrl((page.params.tenant as string) ?? '', client.avatarPhone)}
+					alt=""
+					loading="lazy"
+					onerror={(e) => e.currentTarget.remove()}
+				/>
+			{/if}
+		</div>
 		<div class="tc-info">
 			<div class="tc-name">{client.name}</div>
 			{#if client.businessName && client.businessName !== client.name}
@@ -108,6 +123,8 @@
 		align-items: center;
 	}
 	.tc-av {
+		position: relative;
+		overflow: hidden;
 		width: 44px;
 		height: 44px;
 		border-radius: 50%;
@@ -117,6 +134,13 @@
 		font-weight: 800;
 		font-size: 14px;
 		flex-shrink: 0;
+	}
+	.tc-av-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 	.tc-info {
 		min-width: 0;

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { DEPARTMENTS, avatarColor, avatarInitials } from '$lib/config/team';
+	import { whatsappAvatarUrl } from '$lib/utils/phone';
+	import { page } from '$app/state';
 	import type { MemberCardData } from './TeamMemberCard.svelte';
 
 	let {
@@ -51,6 +53,15 @@
 						<div class="av-wrap">
 							<div class="av" style="background:{avatarColor(m.email)}">
 								{avatarInitials(m.firstName, m.lastName, m.email)}
+								{#if m.avatarPhone}
+									<img
+										class="av-img"
+										src={whatsappAvatarUrl((page.params.tenant as string) ?? '', m.avatarPhone)}
+										alt=""
+										loading="lazy"
+										onerror={(e) => e.currentTarget.remove()}
+									/>
+								{/if}
 							</div>
 							<span class="presence" class:online={m.online} class:offline={!m.online}></span>
 						</div>
@@ -140,6 +151,8 @@
 		flex-shrink: 0;
 	}
 	.av {
+		position: relative;
+		overflow: hidden;
 		width: 32px;
 		height: 32px;
 		border-radius: 50%;
@@ -148,6 +161,13 @@
 		color: white;
 		font-weight: 800;
 		font-size: 11px;
+	}
+	.av-img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 	.presence {
 		position: absolute;
