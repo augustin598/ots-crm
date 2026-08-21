@@ -32,7 +32,7 @@ Un task poate fi legat de un grup WhatsApp bifat în inbox. După legare:
 
 - `task.whatsapp_group_id` (migrarea 0484), nullable, FK `whatsapp_group(id)`.
 - `whatsapp_outbox` (0485, indexuri 0486–0487): `group_jid`, `kind`
-  (`task.status` | `task.mention`), `dedupe_key`, `task_id`, `body`,
+  (`task.status` | `task.mention` | `task.linked`), `dedupe_key`, `task_id`, `body`,
   `mentions_json` (JID-uri), `status` (`queued` → `sending` → `sent` |
   `failed` | `expired`), `attempts`, `next_attempt_at`, `sent_at`, `wam_id`,
   `last_error`.
@@ -82,6 +82,16 @@ Un task poate fi legat de un grup WhatsApp bifat în inbox. După legare:
 - Activitate: `whatsapp_group_linked` / `whatsapp_group_unlinked` în timeline.
 
 ## Textele
+
+La legarea task-ului de grup (grupul află de task de atunci; un task nou n-are
+grup la creare, legarea e decizia omului):
+
+```
+📌 *Raport lunar Beautyone*
+Task nou în grup, adăugat de Augustin Constantin. Status: În lucru.
+Responsabil: Ana Pop · Termen: 28 aug. 2026
+https://clients.onetopsolution.ro/client/ots/tasks/abc123
+```
 
 ```
 🔧 *Raport lunar Beautyone*

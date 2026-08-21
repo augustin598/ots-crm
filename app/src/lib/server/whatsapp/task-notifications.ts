@@ -17,7 +17,7 @@ import type { TaskStatusChangedEvent } from '$lib/server/plugins/types';
 import { enqueueGroupMessage } from './outbox';
 import { statusDedupeKey } from './outbox-policy';
 import { getUserWhatsappPhonesBatch } from './resolve-phone';
-import { buildMentionMessage, buildStatusMessage, notifiesGroup } from './task-messages';
+import { buildLinkedTaskMessage, buildMentionMessage, buildStatusMessage, notifiesGroup } from './task-messages';
 
 /**
  * Linkul din grup e cel din portalul clientului, nu din admin: în grup sunt
@@ -112,5 +112,38 @@ export async function notifyTaskMentionInGroup(payload: {
 		taskId: payload.taskId,
 		body: text,
 		mentions
+	});
+}
+
+/**
+ * La legarea task-ului de grup: prezentarea lui. Grupul a fost deja validat
+ * (bifat) de `setTaskWhatsappGroup`, de aceea primim JID-ul direct.
+ */
+export async function notifyTaskLinkedToGroup(payload: {
+	tenantId: string;
+	tenantSlug: string;
+	taskId: string;
+	taskTitle: string;
+	status: string;
+	assigneeName: string | null;
+	dueDate: Date | null;
+	actorUserId: string;
+	groupJid: string;
+}): Promise<void> {
+	const actorName = await userDisplayName(payload.actorUserId);
+	const body = buildLinkedTaskMessage({
+		taskTitle: payload.taskTitle,
+		actorName,
+		status: payload.status,
+		assigneeName: payload.assigneeName,
+		dueDate: payload.dueDate,
+		taskUrl: taskUrl(payload.tenantSlug, payload.taskId)
+	});
+	await enqueueGroupMessage({
+		tenantId: payload.tenantId,
+		groupJid: payload.groupJid,
+		kind: 'task.linked',
+		taskId: payload.taskId,
+		body
 	});
 }

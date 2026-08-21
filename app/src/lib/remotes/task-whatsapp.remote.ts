@@ -4,7 +4,8 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { recordTaskActivity } from '$lib/server/task-activity';
-import { logInfo } from '$lib/server/logger';
+import { logInfo, logWarning } from '$lib/server/logger';
+import { notifyTaskLinkedToGroup } from '$lib/server/whatsapp/task-notifications';
 
 /**
  * Legătura task ↔ grup WhatsApp (etapa 2).
@@ -104,19 +105,32 @@ export const setTaskWhatsappGroup = command(
 	async ({ taskId, groupId }) => {
 		const { tenantId, userId, canEdit } = assertTenantMember();
 		if (!canEdit) throw new Error('Doar un administrator poate lega un task de un grup WhatsApp.');
+		const event = getRequestEvent();
+		const tenantSlug = event?.locals.tenant?.slug ?? '';
 
 		const [task] = await db
-			.select({ id: table.task.id, whatsappGroupId: table.task.whatsappGroupId })
+			.select({
+				id: table.task.id,
+				whatsappGroupId: table.task.whatsappGroupId,
+				title: table.task.title,
+				status: table.task.status,
+				dueDate: table.task.dueDate,
+				assigneeFirstName: table.user.firstName,
+				assigneeLastName: table.user.lastName
+			})
 			.from(table.task)
+			.leftJoin(table.user, eq(table.user.id, table.task.assignedToUserId))
 			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
 			.limit(1);
 		if (!task) throw new Error('Task not found');
 
 		let subject: string | null = null;
+		let groupJid: string | null = null;
 		if (groupId) {
 			const [group] = await db
 				.select({
 					id: table.whatsappGroup.id,
+					groupJid: table.whatsappGroup.groupJid,
 					subject: table.whatsappGroup.subject,
 					watched: table.whatsappGroup.watched
 				})
@@ -128,6 +142,7 @@ export const setTaskWhatsappGroup = command(
 				throw new Error('Grupul nu e în lista celor urmărite. Bifează-l întâi din „Grupuri".');
 			}
 			subject = group.subject;
+			groupJid = group.groupJid;
 		}
 
 		if ((task.whatsappGroupId ?? null) === groupId) return { success: true, changed: false };
@@ -151,6 +166,30 @@ export const setTaskWhatsappGroup = command(
 			userId,
 			metadata: { taskId, groupId }
 		});
+
+		// Grupul află de task în momentul legării („Task nou în grup”).
+		if (groupJid) {
+			const assigneeName =
+				`${task.assigneeFirstName ?? ''} ${task.assigneeLastName ?? ''}`.trim() || null;
+			try {
+				await notifyTaskLinkedToGroup({
+					tenantId,
+					tenantSlug,
+					taskId,
+					taskTitle: task.title,
+					status: task.status,
+					assigneeName,
+					dueDate: task.dueDate ?? null,
+					actorUserId: userId,
+					groupJid
+				});
+			} catch (error) {
+				logWarning('whatsapp', `prezentarea task-ului în grup a picat: ${(error as Error).message}`, {
+					tenantId,
+					metadata: { taskId, groupId }
+				});
+			}
+		}
 
 		return { success: true, changed: true };
 	}

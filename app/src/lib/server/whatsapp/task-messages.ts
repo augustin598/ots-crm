@@ -49,6 +49,36 @@ export function buildStatusMessage(input: {
 	);
 }
 
+function formatDateRo(d: Date): string {
+	return d.toLocaleDateString('ro-RO', {
+		day: 'numeric',
+		month: 'short',
+		year: 'numeric',
+		timeZone: 'Europe/Bucharest'
+	});
+}
+
+/** Prezentarea task-ului când e legat de grup: grupul află de el de atunci. */
+export function buildLinkedTaskMessage(input: {
+	taskTitle: string;
+	actorName: string;
+	status: string;
+	assigneeName: string | null;
+	dueDate: Date | null;
+	taskUrl: string;
+}): string {
+	const details = [
+		input.assigneeName ? `Responsabil: ${cleanInline(input.assigneeName)}` : null,
+		input.dueDate ? `Termen: ${formatDateRo(input.dueDate)}` : null
+	].filter(Boolean);
+	return (
+		`📌 *${cleanInline(input.taskTitle)}*\n` +
+		`Task nou în grup, adăugat de ${cleanInline(input.actorName)}. Status: ${statusLabelRo(input.status)}.\n` +
+		(details.length > 0 ? `${details.join(' · ')}\n` : '') +
+		input.taskUrl
+	);
+}
+
 const SNIPPET_MAX = 160;
 
 function htmlToSnippet(html: string): string {

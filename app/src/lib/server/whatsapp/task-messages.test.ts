@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+	buildLinkedTaskMessage,
 	buildMentionMessage,
 	buildStatusMessage,
 	notifiesGroup,
@@ -107,5 +108,48 @@ describe('mesajul de mențiune', () => {
 			taskUrl: url
 		});
 		expect(text).toContain('„cc @Ana Pop te rog"');
+	});
+});
+
+describe('mesajul de prezentare la legarea task-ului', () => {
+	it('spune cine l-a legat, responsabilul, termenul și statusul curent', () => {
+		const text = buildLinkedTaskMessage({
+			taskTitle: 'Raport lunar Beautyone',
+			actorName: 'Augustin Constantin',
+			status: 'in-progress',
+			assigneeName: 'Ana Pop',
+			dueDate: new Date('2026-08-28T00:00:00Z'),
+			taskUrl: url
+		});
+		expect(text).toBe(
+			'📌 *Raport lunar Beautyone*\n' +
+				'Task nou în grup, adăugat de Augustin Constantin. Status: În lucru.\n' +
+				'Responsabil: Ana Pop · Termen: 28 aug. 2026\n' +
+				url
+		);
+	});
+
+	it('fără responsabil și termen, rândul lor lipsește', () => {
+		const text = buildLinkedTaskMessage({
+			taskTitle: 'T',
+			actorName: 'A',
+			status: 'todo',
+			assigneeName: null,
+			dueDate: null,
+			taskUrl: url
+		});
+		expect(text).toBe('📌 *T*\nTask nou în grup, adăugat de A. Status: De făcut.\n' + url);
+	});
+
+	it('doar termen, fără responsabil', () => {
+		const text = buildLinkedTaskMessage({
+			taskTitle: 'T',
+			actorName: 'A',
+			status: 'todo',
+			assigneeName: null,
+			dueDate: new Date('2026-09-01T00:00:00Z'),
+			taskUrl: url
+		});
+		expect(text.split('\n')[2]).toBe('Termen: 1 sept. 2026');
 	});
 });

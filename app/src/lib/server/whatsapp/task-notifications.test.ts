@@ -60,7 +60,7 @@ mock.module('$lib/server/db/schema', () => ({
 	user: { __name: 'user', id: 'id', firstName: 'f', lastName: 'l', email: 'e' }
 }));
 
-const { notifyTaskStatusChangedInGroup, notifyTaskMentionInGroup } = await import('./task-notifications');
+const { notifyTaskStatusChangedInGroup, notifyTaskMentionInGroup, notifyTaskLinkedToGroup } = await import('./task-notifications');
 
 const baseEvent = {
 	type: 'task.status-changed' as const,
@@ -147,5 +147,26 @@ describe('mențiunea', () => {
 	it('autorul care se menționează singur nu produce mesaj', async () => {
 		await notifyTaskMentionInGroup({ ...payload, mentionedUserId: 'u1' });
 		expect(enqueued).toHaveLength(0);
+	});
+});
+
+describe('legarea task-ului de grup', () => {
+	it('pune în coadă prezentarea task-ului, fără coalescere', async () => {
+		await notifyTaskLinkedToGroup({
+			tenantId: 'ten',
+			tenantSlug: 'ots',
+			taskId: 't1',
+			taskTitle: 'Raport lunar',
+			status: 'todo',
+			assigneeName: null,
+			dueDate: null,
+			actorUserId: 'u1',
+			groupJid: '123@g.us'
+		});
+		expect(enqueued).toHaveLength(1);
+		expect(enqueued[0]).toMatchObject({ kind: 'task.linked', groupJid: '123@g.us', taskId: 't1' });
+		expect(enqueued[0].dedupeKey ?? null).toBeNull();
+		expect(String(enqueued[0].body)).toContain('Task nou în grup, adăugat de Andrei Pop');
+		expect(String(enqueued[0].body)).toContain('https://crm.test/client/ots/tasks/t1');
 	});
 });
