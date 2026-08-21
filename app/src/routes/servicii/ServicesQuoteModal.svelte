@@ -22,6 +22,7 @@
 	import UserIcon from '@lucide/svelte/icons/user-round';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import Undo2Icon from '@lucide/svelte/icons/undo-2';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import CheckCircleIcon from '@lucide/svelte/icons/circle-check-big';
 	import CheckoutModalShell from '$lib/components/checkout-modal-shell.svelte';
@@ -128,6 +129,25 @@
 		const tier = defaultTierFor(cat, catalog.tiers);
 		if (tier) cart.set(cat.slug, tier);
 	}
+
+	// Confirmarea scoaterii unui serviciu, cu „Anulează": toast-ul paginii stă sub
+	// overlay-ul modalului, așa că mesajul apare aici, deasupra listei.
+	let removed = $state<{ categorySlug: string; tier: Tier; name: string } | null>(null);
+	let removedSeq = $state(0);
+	function removeLine(categorySlug: string, tier: Tier, name: string) {
+		cart.remove(categorySlug);
+		removed = { categorySlug, tier, name };
+		removedSeq += 1;
+	}
+	function undoRemove() {
+		if (!removed) return;
+		cart.set(removed.categorySlug, removed.tier);
+		removed = null;
+	}
+	const dismissRemoved: Attachment<HTMLElement> = () => {
+		const t = setTimeout(() => (removed = null), 4000);
+		return () => clearTimeout(t);
+	};
 
 	async function submit() {
 		if (submitting || summary.serviceCount === 0 || !contactValid) return;
@@ -267,6 +287,20 @@
 						automat pe abonamentul lunar când alegi două sau mai multe.
 					</p>
 
+					{#if removed}
+						{#key removedSeq}
+							<div class="sq-removed" role="status" {@attach dismissRemoved}>
+								<Trash2Icon size={14} aria-hidden="true" />
+								<span>
+									<strong>{removed.name}</strong> ({tierLabel(removed.tier)}) a fost scos din ofertă.
+								</span>
+								<button type="button" class="sq-undo" onclick={undoRemove}>
+									<Undo2Icon size={14} aria-hidden="true" /> Anulează
+								</button>
+							</div>
+						{/key}
+					{/if}
+
 					{#if summary.lines.length === 0}
 						<div class="sq-empty">Coșul e gol. Adaugă un serviciu din lista de mai jos.</div>
 					{:else}
@@ -289,7 +323,7 @@
 											type="button"
 											class="sq-remove"
 											aria-label={`Scoate ${line.name} din ofertă`}
-											onclick={() => cart.remove(line.categorySlug)}
+											onclick={() => removeLine(line.categorySlug, line.tier, line.name)}
 										>
 											<Trash2Icon size={14} aria-hidden="true" />
 										</button>
@@ -678,6 +712,60 @@
 		color: #475569;
 		margin: 0 0 20px;
 		max-width: 540px;
+	}
+	.sq-removed {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0 0 12px;
+		padding: 10px 12px;
+		border: 1px solid #e5e9f0;
+		border-left: 3px solid #64748b;
+		border-radius: 10px;
+		background: #f7f8fa;
+		color: #475569;
+		font-size: 13px;
+		animation: sqFade 0.2s ease-out;
+	}
+	.sq-removed span {
+		flex: 1;
+		min-width: 0;
+	}
+	.sq-removed strong {
+		color: #0b1220;
+	}
+	.sq-undo {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 11px;
+		border-radius: 8px;
+		border: 1px solid #e5e9f0;
+		background: white;
+		font-family: inherit;
+		font-size: 12.5px;
+		font-weight: 700;
+		color: #0b1220;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.sq-undo:hover {
+		border-color: #1877f2;
+		color: #1877f2;
+	}
+	.sq-undo:focus-visible {
+		outline: 2px solid #1877f2;
+		outline-offset: 2px;
+	}
+	@keyframes sqFade {
+		from {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+		to {
+			opacity: 1;
+			transform: none;
+		}
 	}
 	.sq-empty {
 		padding: 18px;
@@ -1281,6 +1369,9 @@
 	@media (prefers-reduced-motion: reduce) {
 		.sq-btn-primary:not(:disabled):hover {
 			transform: none;
+		}
+		.sq-removed {
+			animation: none;
 		}
 	}
 </style>

@@ -63,16 +63,20 @@
 </script>
 
 <Dialog bind:open>
-	<DialogContent class="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+	<!-- Suprafață albă: cardurile de tier au text închis pe alb (contrast), iar culoarea
+	     tier-ului e doar accent (banda de sus, punctul, numele). -->
+	<DialogContent class="sm:max-w-5xl max-h-[90vh] overflow-y-auto bg-white dark:bg-card p-6 sm:p-8">
 		{#if category}
 			<DialogHeader>
-				<div class="flex items-center gap-3">
-					<div class="rounded-lg bg-muted/60 p-2.5 shrink-0">
+				<div class="flex items-center gap-3.5">
+					<div class="rounded-xl bg-primary/10 text-primary p-3 shrink-0 ring-1 ring-primary/15">
 						<CategoryIcon slug={category.slug} class="h-6 w-6" />
 					</div>
 					<div class="min-w-0">
-						<DialogTitle class="text-2xl leading-tight">{category.name}</DialogTitle>
-						<DialogDescription>{category.tagline}</DialogDescription>
+						<DialogTitle class="text-2xl sm:text-[26px] font-extrabold tracking-tight leading-tight">
+							{category.name}
+						</DialogTitle>
+						<DialogDescription class="text-[15px] mt-0.5">{category.tagline}</DialogDescription>
 					</div>
 				</div>
 			</DialogHeader>
@@ -85,41 +89,53 @@
 					{@const setup = category.setupFees?.[tier]}
 					{@const isRecommended = isWebDev && tier === 'silver'}
 					<div
-						class="relative rounded-xl border {isRecommended
-							? 'border-primary ring-2 ring-primary/30'
-							: colors.border} {colors.metallic} p-5 flex flex-col shadow-md"
+						class={cn(
+							'relative overflow-hidden rounded-2xl border bg-white dark:bg-background flex flex-col shadow-sm transition-shadow hover:shadow-lg',
+							isRecommended
+								? 'border-primary ring-2 ring-primary/25 shadow-md'
+								: 'border-border dark:border-border'
+						)}
 					>
+						<!-- Banda de tier: singurul loc unde gradientul „metalic" mai apare. -->
+						<div class="h-2 {colors.metallic}" aria-hidden="true"></div>
 						{#if isRecommended}
 							<span
-								class="absolute -top-2.5 right-4 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary text-primary-foreground shadow-sm z-10"
+								class="absolute top-4 right-4 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary text-primary-foreground shadow-sm z-10"
 							>
 								<CheckIcon class="h-2.5 w-2.5" />
-								Recomandat OTS
+								Recomandat
 							</span>
 						{/if}
-						<div
-							class="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-xl bg-gradient-to-b from-white/50 to-transparent dark:from-white/10"
-						></div>
-						<div class="relative">
-							<div class="flex items-center gap-2 mb-3">
-								<span class="h-2.5 w-2.5 rounded-full {colors.dot}"></span>
-								<span class="font-semibold {colors.text}">{tierLabels[tier]}</span>
+						<div class="relative p-5 pt-4 flex flex-col flex-1">
+							<div class="flex items-center gap-2 mb-4">
+								<span class="h-2.5 w-2.5 rounded-full {colors.dot} ring-4 ring-current/10"></span>
+								<span class="text-[13px] font-bold uppercase tracking-wider {colors.text}">
+									{tierLabels[tier]}
+								</span>
 							</div>
-							<div class="text-2xl font-bold {colors.text}">
+							<!-- Unitatea pe rândul ei: „18.000 € one-time" nu se mai rupe la mijloc pe cardul îngust. -->
+							<div class="text-[28px] leading-none font-extrabold tracking-tight text-foreground whitespace-nowrap">
 								{#if price !== null}
 									{formatEur(price)}
-									<span class="text-sm font-normal opacity-70">/lună</span>
 								{:else if setup}
 									{formatEur(setup)}
-									<span class="text-sm font-normal opacity-70">one-time</span>
 								{:else}
-									<span class="opacity-50">—</span>
+									<span class="text-muted-foreground/50">—</span>
+								{/if}
+							</div>
+							<div class="mt-1.5 mb-4 text-[13px] font-medium text-muted-foreground">
+								{#if price !== null}
+									pe lună, fără TVA
+								{:else if setup}
+									plată unică, fără TVA
+								{:else}
+									&nbsp;
 								{/if}
 							</div>
 							{#if setup && price !== null}
 								<Popover>
 									<PopoverTrigger
-										class="inline-flex items-center gap-1 mt-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+										class="-mt-2 mb-4 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
 									>
 										Setup: <strong>{formatEur(setup)}</strong>
 										<HelpCircleIcon class="h-3 w-3 opacity-70" />
@@ -136,7 +152,10 @@
 								{@const isActive = activeTier === tier}
 								<!-- Toggle: a doua apăsare scoate serviciul din ofertă; numele spune asta, nu doar starea. -->
 								<Button
-									class={cn('mt-4 w-full', isActive && 'border-primary text-primary')}
+									class={cn(
+										'mt-auto pt-0 w-full font-semibold',
+										isActive ? 'border-primary text-primary bg-primary/5' : 'shadow-sm'
+									)}
 									size="sm"
 									variant={isActive ? 'outline' : 'default'}
 									aria-pressed={isActive}
@@ -160,18 +179,20 @@
 			</div>
 
 			{#if category.priceNote}
-				<p class="text-sm text-muted-foreground italic mb-4">{category.priceNote}</p>
+				<p class="mb-4 rounded-lg bg-muted/40 px-3.5 py-2.5 text-[13px] text-muted-foreground">
+					{category.priceNote}
+				</p>
 			{/if}
 
 			<!-- Pe telefon tabelul derulează orizontal, cu coloana de funcționalități fixă în stânga. -->
-			<div class="overflow-x-auto rounded-lg border">
+			<div class="overflow-x-auto rounded-xl border bg-white dark:bg-background">
 				<table class="w-full min-w-[540px] sm:min-w-0 text-sm">
-					<thead class="bg-muted/50">
-						<tr>
-							<th class="sticky left-0 z-10 w-[150px] bg-muted text-left p-3 font-medium sm:static sm:w-auto sm:bg-transparent">Funcționalitate</th>
+					<thead>
+						<tr class="border-b-2 border-border">
+							<th class="sticky left-0 z-10 w-[150px] bg-white dark:bg-background text-left px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:static sm:w-auto">Funcționalitate</th>
 							{#each tiers as tier (tier)}
 								{@const colors = tierColors[tier]}
-								<th class="p-3 font-semibold text-center {colors.text}">
+								<th class="px-3 py-3 font-bold text-center {colors.text}">
 									<div class="inline-flex items-center gap-1.5">
 										<span class="h-2 w-2 rounded-full {colors.dot}"></span>
 										{tierLabels[tier]}
@@ -181,20 +202,22 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each category.features as feature (feature.id)}
-							<tr class="border-t">
-								<td class="sticky left-0 z-10 bg-background p-3 align-top sm:static sm:bg-transparent">{feature.label}</td>
+						{#each category.features as feature, i (feature.id)}
+							<tr class={cn('border-t border-border/70', i % 2 === 1 && 'bg-muted/30')}>
+								<td class={cn('sticky left-0 z-10 px-4 py-3 align-top font-medium text-foreground sm:static', i % 2 === 1 ? 'bg-muted/30 sm:bg-transparent' : 'bg-white dark:bg-background sm:bg-transparent')}>{feature.label}</td>
 								{#each tiers as tier (tier)}
 									{@const value = feature.values[tier]}
-									<td class="p-3 text-center align-top">
+									<td class="px-3 py-3 text-center align-top">
 										{#if isBooleanFeature(value)}
 											{#if value}
-												<CheckIcon class="mx-auto h-4 w-4 text-green-600 dark:text-green-400" />
+												<span class="inline-grid h-6 w-6 place-items-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+													<CheckIcon class="h-3.5 w-3.5" />
+												</span>
 											{:else}
-												<MinusIcon class="mx-auto h-4 w-4 text-muted-foreground/40" />
+												<MinusIcon class="mx-auto h-4 w-4 text-muted-foreground/35" />
 											{/if}
 										{:else}
-											<span class="font-medium">{formatFeatureValue(value)}</span>
+											<span class="font-semibold text-foreground">{formatFeatureValue(value)}</span>
 										{/if}
 									</td>
 								{/each}
