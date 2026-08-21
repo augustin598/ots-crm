@@ -96,16 +96,33 @@ function htmlToSnippet(html: string): string {
 	return clean.length > SNIPPET_MAX ? `${clean.slice(0, SNIPPET_MAX)}…` : clean;
 }
 
+/**
+ * O mențiune reală de WhatsApp cere DOUĂ lucruri: JID-ul în `mentions` și, în
+ * text, ancora „@<cifrele numărului>". Cu „@Ana Pop" în text, `mentionedJid`
+ * rămâne metadată fără ancoră: pastila nu se randează și nimeni nu e notificat
+ * (verificat în Baileys, Utils/messages.js). Clientul WhatsApp înlocuiește
+ * singur numărul cu numele din agendă la afișare.
+ */
 export function buildMentionMessage(input: {
 	taskTitle: string;
 	authorName: string;
-	mentioned: { name: string; phoneE164: string | null };
+	/** Toți cei menționați în același comentariu, într-un singur mesaj. */
+	mentioned: Array<{ name: string; phoneE164: string | null }>;
 	commentHtml: string;
 	taskUrl: string;
 }): { text: string; mentions: string[] } {
-	const name = cleanInline(input.mentioned.name);
-	const mentions = input.mentioned.phoneE164 ? [e164ToJid(input.mentioned.phoneE164)] : [];
-	const who = mentions.length > 0 ? `@${name}` : name;
+	const mentions: string[] = [];
+	const parts = input.mentioned.map((m) => {
+		if (!m.phoneE164) return cleanInline(m.name);
+		mentions.push(e164ToJid(m.phoneE164));
+		return `@${m.phoneE164.replace(/[^\d]/g, '')}`;
+	});
+
+	const who =
+		parts.length <= 1
+			? (parts[0] ?? '')
+			: `${parts.slice(0, -1).join(', ')} și ${parts[parts.length - 1]}`;
+
 	const snippet = htmlToSnippet(input.commentHtml);
 	const text =
 		`💬 *${cleanInline(input.taskTitle)}*\n` +

@@ -121,12 +121,11 @@ describe('mențiunea', () => {
 		taskTitle: 'Raport lunar',
 		authorUserId: 'u1',
 		authorName: 'Andrei Pop',
-		mentionedUserId: 'u2',
-		mentionedName: 'Ana Pop',
+		mentioned: [{ userId: 'u2', name: 'Ana Pop' }],
 		commentHtml: '<p>Ana, vezi te rog</p>'
 	};
 
-	it('cu număr: mențiune reală, fără cheie de coalescere', async () => {
+	it('cu număr: ancoră pe număr în text, JID în mentions, fără coalescere', async () => {
 		phones = new Map([['u2', '+40722123456']]);
 		await notifyTaskMentionInGroup(payload);
 		expect(enqueued).toHaveLength(1);
@@ -135,7 +134,8 @@ describe('mențiunea', () => {
 			mentions: ['40722123456@s.whatsapp.net']
 		});
 		expect(enqueued[0].dedupeKey ?? null).toBeNull();
-		expect(String(enqueued[0].body)).toContain('pentru @Ana Pop:');
+		expect(String(enqueued[0].body)).toContain('pentru @40722123456:');
+		expect(String(enqueued[0].body)).toContain('https://crm.test/client/ots/tasks/t1');
 	});
 
 	it('fără număr: numele simplu', async () => {
@@ -144,8 +144,25 @@ describe('mențiunea', () => {
 		expect(String(enqueued[0].body)).toContain('pentru Ana Pop:');
 	});
 
-	it('autorul care se menționează singur nu produce mesaj', async () => {
-		await notifyTaskMentionInGroup({ ...payload, mentionedUserId: 'u1' });
+	it('mai mulți menționați într-un comentariu produc UN singur mesaj', async () => {
+		phones = new Map([
+			['u2', '+40722123456'],
+			['u3', '+40733111222']
+		]);
+		await notifyTaskMentionInGroup({
+			...payload,
+			mentioned: [
+				{ userId: 'u2', name: 'Ana Pop' },
+				{ userId: 'u3', name: 'Ion Rus' }
+			]
+		});
+		expect(enqueued).toHaveLength(1);
+		expect(String(enqueued[0].body)).toContain('pentru @40722123456 și @40733111222:');
+		expect(enqueued[0].mentions).toHaveLength(2);
+	});
+
+	it('autorul se scoate din listă; dacă rămâne gol, nu pleacă nimic', async () => {
+		await notifyTaskMentionInGroup({ ...payload, mentioned: [{ userId: 'u1', name: 'Andrei Pop' }] });
 		expect(enqueued).toHaveLength(0);
 	});
 });

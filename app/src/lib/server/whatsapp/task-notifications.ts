@@ -88,19 +88,23 @@ export async function notifyTaskMentionInGroup(payload: {
 	taskTitle: string;
 	authorUserId: string;
 	authorName: string;
-	mentionedUserId: string;
-	mentionedName: string;
+	/** Toți cei menționați în comentariu; autorul se scoate aici. */
+	mentioned: Array<{ userId: string; name: string }>;
 	commentHtml: string;
 }): Promise<void> {
-	if (payload.mentionedUserId === payload.authorUserId) return;
+	const targets = payload.mentioned.filter((m) => m.userId !== payload.authorUserId);
+	if (targets.length === 0) return;
 	const groupJid = await linkedWatchedGroup(payload.tenantId, payload.taskId);
 	if (!groupJid) return;
 
-	const phones = await getUserWhatsappPhonesBatch(payload.tenantId, [payload.mentionedUserId]);
+	const phones = await getUserWhatsappPhonesBatch(
+		payload.tenantId,
+		targets.map((m) => m.userId)
+	);
 	const { text, mentions } = buildMentionMessage({
 		taskTitle: payload.taskTitle,
 		authorName: payload.authorName,
-		mentioned: { name: payload.mentionedName, phoneE164: phones.get(payload.mentionedUserId) ?? null },
+		mentioned: targets.map((m) => ({ name: m.name, phoneE164: phones.get(m.userId) ?? null })),
 		commentHtml: payload.commentHtml,
 		taskUrl: taskUrl(payload.tenantSlug, payload.taskId)
 	});

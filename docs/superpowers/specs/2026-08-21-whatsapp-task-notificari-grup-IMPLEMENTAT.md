@@ -101,10 +101,17 @@ https://clients.onetopsolution.ro/client/ots/tasks/abc123
 
 ```
 💬 *Raport lunar Beautyone*
-Mențiune de la Andrei Pop pentru @Ana Pop:
+Mențiune de la Andrei Pop pentru @40722123456 și @40733111222:
 „Ana, poți verifica bugetul de septembrie până mâine?"
 https://clients.onetopsolution.ro/client/ots/tasks/abc123
 ```
+
+Ancora din text e **numărul**, nu numele: WhatsApp randează pastila albastră
+(și notifică omul) doar când textul conține „@<cifre>" iar JID-ul e în
+`mentions`. Cu „@Ana Pop" în text, `mentionedJid` rămâne metadată moartă
+(verificat în Baileys, `Utils/messages.js`). Telefonul înlocuiește singur
+numărul cu numele din agendă la afișare. Cine n-are număr apare cu numele
+simplu. Toate mențiunile dintr-un comentariu intră într-un singur mesaj.
 
 ## Capcane întâlnite
 
@@ -136,6 +143,26 @@ bunx --bun svelte-check --threshold error
 Live: leagă un task de grupul intern din pagina lui, schimbă statusul, rândul
 apare în `whatsapp_outbox` ca `sent` în câteva secunde (dacă instanța curentă
 are socketul; altfel la următoarea golire de pe instanța conectată).
+
+## Găsit la auditul mențiunilor (2026-08-21), NEreparat
+
+- `updateTaskComment` (task-comments.remote.ts:452) nu notifică nimic: o
+  mențiune adăugată prin **editarea** unui comentariu nu produce nici email,
+  nici in-app, nici Telegram, nici mesaj în grup. Preexistent, nu doar WhatsApp.
+  La reparare, notifică doar mențiunile noi (diff față de conținutul vechi).
+- În portalul clientului, `client-task-comments.svelte` montează `RichEditor`
+  fără prop-ul `users`, deci „@" deschide un dropdown gol cu „No users found".
+  Clientul nu poate menționa pe nimeni.
+- Pagina `/[tenant]/tasks/[taskId]` alimentează lista de mențiuni cu
+  `getClientUsers` (toate contactele clientului), nu cu
+  `getAssignableClientUsers`, deci se pot menționa contacte fără acces la
+  taskuri; primesc email cu textul comentariului, dar linkul le dă 403.
+- `getTenantUsers` nu filtrează `tenant_user.status`, deci membrii suspendați
+  apar în sugestii și primesc notificări.
+- Un rând rămas în `sending` la o cădere de proces se retrimite după 5 minute
+  fără să compare `wam_id`, deci un mesaj deja livrat se poate dubla.
+- Garda „grup debifat" se aplică doar la punerea în coadă; un rând deja în
+  coadă pleacă și dacă grupul a fost debifat între timp.
 
 ## Ce NU există încă
 

@@ -56,17 +56,17 @@ describe('mesajul de status', () => {
 });
 
 describe('mesajul de mențiune', () => {
-	it('cu număr cunoscut, numele devine mențiune reală și JID-ul intră în listă', () => {
+	it('ancora din text e numărul, nu numele: altfel WhatsApp nu randează mențiunea', () => {
 		const { text, mentions } = buildMentionMessage({
 			taskTitle: 'Raport lunar Beautyone',
 			authorName: 'Andrei Pop',
-			mentioned: { name: 'Ana Pop', phoneE164: '+40722123456' },
+			mentioned: [{ name: 'Ana Pop', phoneE164: '+40722123456' }],
 			commentHtml: '<p>Ana, poți verifica <strong>bugetul</strong> până mâine?</p>',
 			taskUrl: url
 		});
 		expect(text).toBe(
 			'💬 *Raport lunar Beautyone*\n' +
-				'Mențiune de la Andrei Pop pentru @Ana Pop:\n' +
+				'Mențiune de la Andrei Pop pentru @40722123456:\n' +
 				'„Ana, poți verifica bugetul până mâine?"\n' +
 				url
 		);
@@ -77,13 +77,44 @@ describe('mesajul de mențiune', () => {
 		const { text, mentions } = buildMentionMessage({
 			taskTitle: 'T',
 			authorName: 'A',
-			mentioned: { name: 'Ana Pop', phoneE164: null },
+			mentioned: [{ name: 'Ana Pop', phoneE164: null }],
 			commentHtml: '<p>salut</p>',
 			taskUrl: url
 		});
 		expect(text).toContain('pentru Ana Pop:');
-		expect(text).not.toContain('@Ana');
+		expect(text).not.toContain('@');
 		expect(mentions).toEqual([]);
+	});
+
+	it('doi menționați intră în același mesaj, legați cu „și"', () => {
+		const { text, mentions } = buildMentionMessage({
+			taskTitle: 'T',
+			authorName: 'A',
+			mentioned: [
+				{ name: 'Ana Pop', phoneE164: '+40722123456' },
+				{ name: 'Ion Rus', phoneE164: '+40733111222' }
+			],
+			commentHtml: '<p>x</p>',
+			taskUrl: url
+		});
+		expect(text.split('\n')[1]).toBe('Mențiune de la A pentru @40722123456 și @40733111222:');
+		expect(mentions).toEqual(['40722123456@s.whatsapp.net', '40733111222@s.whatsapp.net']);
+	});
+
+	it('trei menționați: virgulă, apoi „și" înaintea ultimului; cine n-are număr apare cu numele', () => {
+		const { text, mentions } = buildMentionMessage({
+			taskTitle: 'T',
+			authorName: 'A',
+			mentioned: [
+				{ name: 'Ana Pop', phoneE164: '+40722123456' },
+				{ name: 'Ion Rus', phoneE164: null },
+				{ name: 'Dan Ilie', phoneE164: '+40744999888' }
+			],
+			commentHtml: '<p>x</p>',
+			taskUrl: url
+		});
+		expect(text.split('\n')[1]).toBe('Mențiune de la A pentru @40722123456, Ion Rus și @40744999888:');
+		expect(mentions).toHaveLength(2);
 	});
 
 	it('fragmentul se taie la 160 de caractere cu puncte de suspensie', () => {
@@ -91,7 +122,7 @@ describe('mesajul de mențiune', () => {
 		const { text } = buildMentionMessage({
 			taskTitle: 'T',
 			authorName: 'A',
-			mentioned: { name: 'B', phoneE164: null },
+			mentioned: [{ name: 'B', phoneE164: null }],
 			commentHtml: `<p>${long}</p>`,
 			taskUrl: url
 		});
@@ -103,7 +134,7 @@ describe('mesajul de mențiune', () => {
 		const { text } = buildMentionMessage({
 			taskTitle: 'T',
 			authorName: 'A',
-			mentioned: { name: 'B', phoneE164: null },
+			mentioned: [{ name: 'B', phoneE164: null }],
 			commentHtml: '<p>cc <span data-type="mention" data-id="u1">@Ana Pop</span> te rog</p>',
 			taskUrl: url
 		});

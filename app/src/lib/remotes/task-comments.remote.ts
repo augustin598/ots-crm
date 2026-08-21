@@ -2,7 +2,7 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, isNotNull, or } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 
 const VALID_EMOJIS = ['👍', '🔥', '🎉'] as const;
@@ -15,6 +15,7 @@ import * as storage from '$lib/server/storage';
 import { createNotification } from '$lib/server/notifications';
 import { notifyTaskMention } from '$lib/server/telegram/task-notifications';
 import { notifyTaskMentionInGroup } from '$lib/server/whatsapp/task-notifications';
+import { logWarning } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
 
 /** Sanitize TipTap HTML - allow safe tags + mention attributes */
@@ -350,17 +351,43 @@ export const createTaskComment = command(
 				event.locals.user.email;
 			const tenantSlug = event.locals.tenant.slug;
 			// Numele celor menționați, pentru mesajul din grupul WhatsApp al task-ului.
+			// Doar oameni din tenantul curent (echipă sau utilizatori ai clienților):
+			// `user` n-are tenantId, iar `data-id` vine din HTML-ul trimis de client,
+			// deci fără filtrul ăsta un id fabricat ar strecura în grup numele unui
+			// utilizator din alt tenant. Aceeași apărare ca în task-recipients.ts.
 			const mentionedRows =
 				nonSelfMentionIds.length > 0
 					? await db
-							.select({
+							.selectDistinct({
 								id: table.user.id,
 								firstName: table.user.firstName,
 								lastName: table.user.lastName,
 								email: table.user.email
 							})
 							.from(table.user)
-							.where(inArray(table.user.id, nonSelfMentionIds))
+							.leftJoin(
+								table.tenantUser,
+								and(
+									eq(table.tenantUser.userId, table.user.id),
+									eq(table.tenantUser.tenantId, event.locals.tenant.id)
+								)
+							)
+							.leftJoin(
+								table.clientUser,
+								and(
+									eq(table.clientUser.userId, table.user.id),
+									eq(table.clientUser.tenantId, event.locals.tenant.id)
+								)
+							)
+							.where(
+								and(
+									inArray(table.user.id, nonSelfMentionIds),
+									or(
+										isNotNull(table.tenantUser.userId),
+										isNotNull(table.clientUser.userId)
+									)
+								)
+							)
 					: [];
 			const mentionedNames = new Map(
 				mentionedRows.map((u) => [u.id, `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email])
@@ -388,20 +415,31 @@ export const createTaskComment = command(
 					authorName,
 					commentSnippet: data.content
 				}).catch(() => {});
-
-				// WhatsApp: în grupul legat de task, nu persoanei (aceeași buclă, alt canal).
-				void notifyTaskMentionInGroup({
-					tenantId: event.locals.tenant.id,
-					tenantSlug,
-					taskId: data.taskId,
-					taskTitle: task.title,
-					authorUserId: event.locals.user.id,
-					authorName,
-					mentionedUserId: mentionedId,
-					mentionedName: mentionedNames.get(mentionedId) ?? 'coleg',
-					commentHtml: sanitizedContent
-				}).catch(() => {});
 			}
+
+			// WhatsApp: UN singur mesaj în grupul task-ului pentru toți cei
+			// menționați în comentariu. Per persoană ar însemna trei mesaje
+			// aproape identice la un comentariu cu trei mențiuni, exact volumul
+			// care duce la banarea numărului.
+			void notifyTaskMentionInGroup({
+				tenantId: event.locals.tenant.id,
+				tenantSlug,
+				taskId: data.taskId,
+				taskTitle: task.title,
+				authorUserId: event.locals.user.id,
+				authorName,
+				mentioned: nonSelfMentionIds
+					.filter((id) => mentionedNames.has(id))
+					.map((id) => ({ userId: id, name: mentionedNames.get(id)! })),
+				commentHtml: sanitizedContent
+			}).catch((err) => {
+				// Fără logul ăsta, o mențiune care nu ajunge în grup n-ar lăsa
+				// nicio urmă: nici rând în outbox, nici eroare nicăieri.
+				logWarning('whatsapp', `mențiunea nu a intrat în coada grupului: ${(err as Error).message}`, {
+					tenantId: event.locals.tenant!.id,
+					metadata: { taskId: data.taskId, commentId }
+				});
+			});
 		}
 
 		// Legacy company-level client notification — deduped against the
