@@ -18,11 +18,16 @@ build/
 .svelte-kit/
 target/
 
-# Local environment and secrets — runtime env comes from app-config `config`;
-# the app reads only $env/dynamic/*, so .env is not needed at build time either
-.env
-.env.*
-!.env.example
+# `.env` RĂMÂNE în arhivă (2026-08-20): runtime env comes from app-config `config`,
+# but `bun run build` (Bun auto-loads .env) evaluates every server module while
+# SvelteKit reads route config; without .env those modules fall back to
+# localhost/empty values and retry connections for the whole build — the same
+# retry storm that OOMKilled build #6caa5570 (2026-07-17). The in-cluster builds
+# of 2026-08-17/20 failed the same way once .env was excluded; local Docker builds
+# (which include .env) succeed. Only the builder stage sees it — the production
+# image copies build output, never .env.
+.env.local
+.env.*.local
 *.pem
 *.key
 app-config.json
