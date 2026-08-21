@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS `notification` (
 	`link` text,
 	`is_read` integer NOT NULL DEFAULT 0,
 	`metadata` text,
-	`created_at` timestamp DEFAULT (current_timestamp) NOT NULL
+	`created_at` timestamp DEFAULT (current_timestamp) NOT NULL,
+	`client_id` text
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `notification_user_read_idx` ON `notification`(`user_id`, `is_read`);

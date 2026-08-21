@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS `marketing_material` (
 	`tags` text,
 	`created_at` timestamp DEFAULT current_timestamp NOT NULL,
 	`updated_at` timestamp DEFAULT current_timestamp NOT NULL,
+	`attached_images` text,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`seo_link_id`) REFERENCES `seo_link`(`id`) ON UPDATE no action ON DELETE set null,

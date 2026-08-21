@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS `contract_template` (
 	`created_by_user_id` text NOT NULL,
 	`created_at` timestamp DEFAULT current_date NOT NULL,
 	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	`clauses_json` text,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
@@ -162,7 +163,11 @@ CREATE TABLE IF NOT EXISTS `tenant` (
 	`postal_code` text,
 	`country` text DEFAULT 'România',
 	`created_at` timestamp DEFAULT current_date NOT NULL,
-	`updated_at` timestamp DEFAULT current_date NOT NULL
+	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	`phone` text,
+	`email` text,
+	`iban_euro` text,
+	`theme_color` text
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `tenant_slug_unique` ON `tenant` (`slug`);--> statement-breakpoint

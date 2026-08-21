@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS `meta_ads_integration` (
 	`last_sync_at` timestamp,
 	`last_sync_results` text,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
-	`updated_at` timestamp NOT NULL DEFAULT current_date
+	`updated_at` timestamp NOT NULL DEFAULT current_date,
+	`fb_session_expires_at` integer
 );--> statement-breakpoint
 
 -- Unique: one integration per tenant + Business Manager ID
@@ -54,7 +55,13 @@ CREATE TABLE IF NOT EXISTS `meta_ads_invoice` (
 	`status` text NOT NULL DEFAULT 'synced',
 	`synced_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT current_date,
-	`updated_at` timestamp NOT NULL DEFAULT current_date
+	`updated_at` timestamp NOT NULL DEFAULT current_date,
+	`pdf_source` text DEFAULT 'graph_api',
+	`minio_path` text,
+	`period_start` text,
+	`period_end` text,
+	`download_status` text DEFAULT 'pending' NOT NULL,
+	`downloaded_at` integer
 );--> statement-breakpoint
 
 -- Unique index for deduplication

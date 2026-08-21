@@ -66,11 +66,5 @@ CREATE TABLE IF NOT EXISTS `saved_report_view` (
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-ALTER TABLE `client` ADD `monthly_budget` integer;--> statement-breakpoint
-ALTER TABLE `client_user_preferences` ADD `onboarding_tour_completed` integer DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE `client_user_preferences` ADD `onboarding_tour_enabled` integer DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `client_user_preferences` ADD `onboarding_checklist` text;--> statement-breakpoint
-ALTER TABLE `meta_ads_account` ADD `account_status` integer DEFAULT 1 NOT NULL;--> statement-breakpoint
-ALTER TABLE `meta_ads_account` ADD `disable_reason` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE `tenant` ADD `favicon` text;--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `lead_tenant_external_platform_idx` ON `lead` (`tenant_id`,`external_lead_id`,`platform`);

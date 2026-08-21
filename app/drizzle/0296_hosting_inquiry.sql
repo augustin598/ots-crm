@@ -1,4 +1,4 @@
-CREATE TABLE `hosting_inquiry` (
+CREATE TABLE IF NOT EXISTS `hosting_inquiry` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`hosting_product_id` text,
@@ -19,7 +19,7 @@ CREATE TABLE `hosting_inquiry` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`),
 	FOREIGN KEY (`hosting_product_id`) REFERENCES `hosting_product`(`id`) ON DELETE SET NULL,
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON DELETE SET NULL
-);
-CREATE INDEX `hosting_inquiry_tenant_idx` ON `hosting_inquiry` (`tenant_id`);
-CREATE INDEX `hosting_inquiry_status_idx` ON `hosting_inquiry` (`status`);
-CREATE INDEX `hosting_inquiry_created_idx` ON `hosting_inquiry` (`created_at`);
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `hosting_inquiry_tenant_idx` ON `hosting_inquiry` (`tenant_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `hosting_inquiry_status_idx` ON `hosting_inquiry` (`status`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `hosting_inquiry_created_idx` ON `hosting_inquiry` (`created_at`);

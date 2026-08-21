@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS `seo_link` (
 	`notes` text,
 	`created_at` timestamp DEFAULT current_date NOT NULL,
 	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	`last_check_dofollow` text,
+	`article_published_at` text,
+	`extracted_links` text,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON UPDATE no action ON DELETE no action

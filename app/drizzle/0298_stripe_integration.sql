@@ -1,4 +1,4 @@
-CREATE TABLE `stripe_integration` (
+CREATE TABLE IF NOT EXISTS `stripe_integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
 	`account_id` text,
@@ -14,6 +14,6 @@ CREATE TABLE `stripe_integration` (
 	`created_at` text DEFAULT (current_date) NOT NULL,
 	`updated_at` text DEFAULT (current_date) NOT NULL,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`)
-);
-CREATE UNIQUE INDEX `stripe_integration_tenant_id_unique` ON `stripe_integration` (`tenant_id`);
-CREATE INDEX `stripe_integration_tenant_idx` ON `stripe_integration` (`tenant_id`);
+);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `stripe_integration_tenant_id_unique` ON `stripe_integration` (`tenant_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `stripe_integration_tenant_idx` ON `stripe_integration` (`tenant_id`);

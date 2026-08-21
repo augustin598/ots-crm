@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS `client_user` (
 	`tenant_id` text NOT NULL,
 	`created_at` timestamp DEFAULT current_date NOT NULL,
 	`updated_at` timestamp DEFAULT current_date NOT NULL,
+	`is_primary` integer DEFAULT true NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`client_id`) REFERENCES `client`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`tenant_id`) REFERENCES `tenant`(`id`) ON UPDATE no action ON DELETE no action
