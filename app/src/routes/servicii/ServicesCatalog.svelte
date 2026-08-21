@@ -192,6 +192,22 @@
 		</div>
 	</section>
 
+	<!-- Wizard. Aceeași ofertă ca în portalul clientului, doar că aici cererea
+	     trece prin formularul public de contact. -->
+	<section class="sv-section sv-section--wizard">
+		<a href="/servicii/configurator" class="sv-wizard">
+			<span class="sv-wizard-icon"><WandIcon class="h-5 w-5" /></span>
+			<span class="sv-wizard-body">
+				<strong>Nu știi ce pachet să alegi? Hai să te ghidăm.</strong>
+				<span>
+					Răspunzi la 5 întrebări scurte (tip de business, obiectiv, buget, canale) și îți
+					arătăm combinația potrivită, cu preț estimat și discountul deja aplicat.
+				</span>
+			</span>
+			<span class="sv-wizard-cta ots-gloss">Începe <ArrowRightIcon class="h-4 w-4" /></span>
+		</a>
+	</section>
+
 	<!-- CRM inclus -->
 	<section class="sv-section">
 		<div class="sv-section-head">
@@ -271,22 +287,6 @@
 			</div>
 		</section>
 	{/if}
-
-	<!-- Wizard. Aceeași ofertă ca în portalul clientului, doar că aici cererea
-	     trece prin formularul public de contact. -->
-	<section class="sv-section">
-		<a href="/servicii/configurator" class="sv-wizard">
-			<span class="sv-wizard-icon"><WandIcon class="h-5 w-5" /></span>
-			<span class="sv-wizard-body">
-				<strong>Nu știi ce pachet să alegi? Hai să te ghidăm.</strong>
-				<span>
-					Răspunzi la 5 întrebări scurte (tip de business, obiectiv, buget, canale) și îți
-					arătăm combinația potrivită, cu preț estimat și discountul deja aplicat.
-				</span>
-			</span>
-			<span class="sv-wizard-cta ots-gloss">Începe <ArrowRightIcon class="h-4 w-4" /></span>
-		</a>
-	</section>
 
 	<!-- Categorii -->
 	<section class="sv-section" id="categorii">
@@ -621,7 +621,7 @@
 		position: relative;
 		isolation: isolate;
 		overflow: hidden;
-		padding: 76px 24px 64px;
+		padding: 72px 24px 32px;
 		text-align: center;
 		background: radial-gradient(ellipse at top, rgba(24, 119, 242, 0.07), transparent 62%);
 	}
@@ -752,13 +752,17 @@
 	/* ===== Secțiuni ===== */
 	.sv-section {
 		max-width: 1200px;
-		margin: 90px auto 0;
+		margin: 56px auto 0;
 		padding: 0 24px;
+	}
+	/* Bannerul wizardului stă imediat sub hero; distanța standard dintre secțiuni ar lăsa un gol. */
+	.sv-section--wizard {
+		margin-top: 0;
 	}
 	.sv-section-head {
 		text-align: center;
 		max-width: 640px;
-		margin: 0 auto 42px;
+		margin: 0 auto 30px;
 	}
 	.sv-kicker {
 		display: inline-flex;
@@ -1152,8 +1156,8 @@
 
 	/* ===== Subsol ===== */
 	.sv-foot {
-		margin-top: 80px;
-		padding: 40px 24px 24px;
+		margin-top: 56px;
+		padding: 32px 24px 24px;
 		border-top: 1px solid var(--border);
 		background: var(--bg-soft);
 		color: var(--muted);
@@ -1211,10 +1215,13 @@
 	}
 	@media (max-width: 680px) {
 		.sv-hero {
-			padding: 56px 20px 56px;
+			padding: 48px 20px 24px;
 		}
 		.sv-section {
-			margin-top: 60px;
+			margin-top: 40px;
+		}
+		.sv-section--wizard {
+			margin-top: 0;
 		}
 		.sv-section-head h2 {
 			font-size: 27px;
