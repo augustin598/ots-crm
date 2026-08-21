@@ -66,7 +66,9 @@ mock.module('$lib/server/package-requests', () => ({
 	}
 }));
 
-const { submitPublicPackageRequest } = await import('../public-services.remote');
+const { submitPublicPackageRequest, submitPublicQuoteRequest } = await import(
+	'../public-services.remote'
+);
 
 const INPUT = {
 	categorySlug: 'seo',
@@ -169,6 +171,147 @@ describe('submitPublicPackageRequest — scrierea cererii', () => {
 	test('dacă INSERT-ul pică, nu trimitem notificare', async () => {
 		insertShouldThrow = true;
 		await expect(submitPublicPackageRequest(INPUT)).rejects.toThrow();
+		expect(notified).toHaveLength(0);
+	});
+});
+
+// ─── submitPublicQuoteRequest (coș multi-serviciu) ────────────────────────────
+const QUOTE_INPUT = {
+	items: [
+		{ categorySlug: 'google-ads', tier: 'gold' as const },
+		{ categorySlug: 'seo', tier: 'bronze' as const }
+	],
+	contactName: 'Maria Ionescu',
+	contactEmail: 'Maria@Example.RO',
+	contactPhone: '0733 000 111',
+	companyName: 'Maria SRL',
+	note: 'Vrem să pornim în septembrie.'
+};
+
+describe('submitPublicQuoteRequest', () => {
+	test('scrie UN rând cu pivot, services, items (snapshot preț) și discount', async () => {
+		const result = await submitPublicQuoteRequest(QUOTE_INPUT);
+
+		expect(result.success).toBe(true);
+		expect(insertedRows).toHaveLength(1);
+		const row = insertedRows[0];
+
+		expect(row.id).toBe(result.requestId);
+		expect(row.tenantId).toBe('t1');
+		expect(row.clientId).toBeNull();
+		expect(row.clientUserId).toBeNull();
+		expect(row.source).toBe('public');
+		expect(row.status).toBe('pending');
+		// Pivotul = primul serviciu, ca admin/email/portal să poată citi rândul ca până acum.
+		expect(row.categorySlug).toBe('google-ads');
+		expect(row.tier).toBe('gold');
+		expect(row.bundleId).toBeNull();
+		expect(JSON.parse(row.services)).toEqual(['google-ads', 'seo']);
+
+		const items = JSON.parse(row.items);
+		expect(items).toHaveLength(2);
+		expect(items[0]).toMatchObject({ categorySlug: 'google-ads', tier: 'gold' });
+		expect(items[1]).toMatchObject({ categorySlug: 'seo', tier: 'bronze' });
+		// Snapshot de preț: numere (sau null pentru setup-only), niciodată undefined.
+		expect(typeof items[0].monthlyEur).toBe('number');
+		expect('setupEur' in items[0]).toBe(true);
+		// 2 servicii → regula de 10 % din catalog.
+		expect(row.discountPct).toBe(10);
+
+		expect(row.contactEmail).toBe('maria@example.ro');
+		expect(row.contactName).toBe('Maria Ionescu');
+		expect(row.contactPhone).toBe('0733 000 111');
+		expect(row.companyName).toBe('Maria SRL');
+		expect(row.note).toBe('Vrem să pornim în septembrie.');
+		expect(notified).toEqual([{ tenantId: 't1', requestId: result.requestId }]);
+	});
+
+	test('un singur serviciu → services tot JSON, discount 0', async () => {
+		await submitPublicQuoteRequest({ ...QUOTE_INPUT, items: [QUOTE_INPUT.items[1]] });
+		const row = insertedRows[0];
+		expect(JSON.parse(row.services)).toEqual(['seo']);
+		expect(row.discountPct).toBe(0);
+		expect(row.categorySlug).toBe('seo');
+		expect(row.tier).toBe('bronze');
+	});
+
+	test('câmpurile opționale goale devin null', async () => {
+		await submitPublicQuoteRequest({
+			items: QUOTE_INPUT.items,
+			contactName: 'Maria T',
+			contactEmail: 'maria@example.com'
+		});
+		const row = insertedRows[0];
+		expect(row.contactPhone).toBeNull();
+		expect(row.companyName).toBeNull();
+		expect(row.note).toBeNull();
+	});
+
+	test('slug necunoscut → 400, nimic inserat', async () => {
+		await expect(
+			submitPublicQuoteRequest({
+				...QUOTE_INPUT,
+				items: [{ categorySlug: 'nu-exista', tier: 'gold' }]
+			})
+		).rejects.toMatchObject({ status: 400 });
+		expect(insertedRows).toHaveLength(0);
+	});
+
+	test('același serviciu de două ori → 400', async () => {
+		await expect(
+			submitPublicQuoteRequest({
+				...QUOTE_INPUT,
+				items: [
+					{ categorySlug: 'seo', tier: 'gold' },
+					{ categorySlug: 'seo', tier: 'bronze' }
+				]
+			})
+		).rejects.toMatchObject({ status: 400 });
+		expect(insertedRows).toHaveLength(0);
+	});
+
+	test('tier neoferit pentru categorie (fără preț și fără setup) → 400', async () => {
+		// Găsim din catalogul real o combinație (slug, tier) fără preț lunar și fără setup.
+		const { CATEGORIES, TIERS } = await import('$lib/constants/ots-catalog');
+		let combo: { categorySlug: string; tier: (typeof TIERS)[number] } | null = null;
+		for (const c of CATEGORIES) {
+			for (const t of TIERS) {
+				if (c.prices[t] === null && c.setupFees?.[t] === undefined) {
+					combo = { categorySlug: c.slug, tier: t };
+					break;
+				}
+			}
+			if (combo) break;
+		}
+		if (!combo) return; // catalogul nu are o astfel de combinație; nimic de verificat
+		await expect(
+			submitPublicQuoteRequest({ ...QUOTE_INPUT, items: [combo] })
+		).rejects.toMatchObject({ status: 400 });
+		expect(insertedRows).toHaveLength(0);
+	});
+
+	test('tenantul vine din poartă, nu din payload', async () => {
+		gate = { tenantId: 'tenant-real', row: { enabled: true } };
+		await submitPublicQuoteRequest({ ...QUOTE_INPUT, tenantId: 'tenant-fals' } as never);
+		expect(insertedRows[0].tenantId).toBe('tenant-real');
+	});
+
+	test('poarta închisă → 403', async () => {
+		gate = null;
+		await expect(submitPublicQuoteRequest(QUOTE_INPUT)).rejects.toMatchObject({ status: 403 });
+		expect(insertedRows).toHaveLength(0);
+	});
+
+	test('rate limit depășit → 429, aceeași găleată ca formularul simplu', async () => {
+		rateLimitAllowed = false;
+		await expect(submitPublicQuoteRequest(QUOTE_INPUT)).rejects.toMatchObject({ status: 429 });
+		expect(rateLimitCalls[0]).toEqual({ kind: 'public-services-request', ip: '10.0.0.7' });
+		expect(insertedRows).toHaveLength(0);
+	});
+
+	test('INSERT eșuat → 500, fără notificare', async () => {
+		insertShouldThrow = true;
+		await expect(submitPublicQuoteRequest(QUOTE_INPUT)).rejects.toMatchObject({ status: 500 });
 		expect(notified).toHaveLength(0);
 	});
 });

@@ -1,12 +1,32 @@
-import {
-	BUNDLES,
-	CATEGORIES,
-	getCategory,
-	BUNDLE_TIERS_RULE,
-	type Bundle,
-	type Tier,
-	type UseCase
-} from '$lib/constants/ots-catalog';
+import type { Bundle, Tier, UseCase } from '$lib/constants/ots-catalog';
+
+/**
+ * Catalogul de care are nevoie motorul, primit ca argument în loc să fie
+ * importat static.
+ *
+ * De ce: pagina publică `/servicii` e protejată cu parolă, dar un import static
+ * din `ots-catalog` ar fi împachetat TOT catalogul — inclusiv prețurile — într-un
+ * chunk JS servit oricui cere URL-ul, gate sau nu. Datele ajung la browser doar
+ * prin `load`, după parolă. Tipurile de mai sus se șterg la build, deci nu au
+ * acest efect.
+ *
+ * Portalul clientului pasează constantele importate direct; pagina publică
+ * pasează ce a primit din `load`.
+ */
+export type WizardCatalog = {
+	bundles: Bundle[];
+	categories: {
+		slug: string;
+		name: string;
+		prices: Record<Tier, number | null>;
+		setupFees?: Partial<Record<Tier, number>>;
+	}[];
+	bundleTiersRule: { minServices: number; discountPct: number }[];
+};
+
+function pickCategory(catalog: WizardCatalog, slug: string) {
+	return catalog.categories.find((c) => c.slug === slug);
+}
 
 export type BusinessType =
 	| 'ecommerce'
@@ -188,9 +208,9 @@ export function budgetToTier(budget: BudgetBand | null): Tier {
 	return option?.tier ?? 'silver';
 }
 
-export function discountForServiceCount(count: number): number {
+export function discountForServiceCount(count: number, catalog: WizardCatalog): number {
 	let best = 0;
-	for (const rule of BUNDLE_TIERS_RULE) {
+	for (const rule of catalog.bundleTiersRule) {
 		if (count >= rule.minServices) best = rule.discountPct;
 	}
 	return best;
@@ -454,18 +474,19 @@ export interface CostBreakdown {
 export function calculateCost(
 	services: string[],
 	tier: Tier,
-	includeSetup: boolean
+	includeSetup: boolean,
+	catalog: WizardCatalog
 ): CostBreakdown {
 	const monthlyTotal = services.reduce((sum, slug) => {
-		const cat = getCategory(slug);
+		const cat = pickCategory(catalog, slug);
 		return sum + (cat?.prices[tier] ?? 0);
 	}, 0);
-	const discountPct = discountForServiceCount(services.length);
+	const discountPct = discountForServiceCount(services.length, catalog);
 	const monthlyAfterDiscount = Math.round((monthlyTotal * (100 - discountPct)) / 100);
 	const monthlySavings = monthlyTotal - monthlyAfterDiscount;
 	const setupTotal = includeSetup
 		? services.reduce((sum, slug) => {
-				const cat = getCategory(slug);
+				const cat = pickCategory(catalog, slug);
 				return sum + (cat?.setupFees?.[tier] ?? 0);
 			}, 0)
 		: 0;
@@ -583,14 +604,14 @@ export interface RecommendationResult {
 	tierAdvice: TierAdvice | null;
 }
 
-function validServicesSlugs(): Set<string> {
-	return new Set(CATEGORIES.map((c) => c.slug));
+function validServicesSlugs(catalog: WizardCatalog): Set<string> {
+	return new Set(catalog.categories.map((c) => c.slug));
 }
 
-function buildCustomBundle(services: string[], useCase: UseCase): Bundle {
-	const valid = services.filter((s) => validServicesSlugs().has(s));
-	const names = valid.map((s) => getCategory(s)?.name || s).join(' + ');
-	const discountPct = discountForServiceCount(valid.length);
+function buildCustomBundle(services: string[], useCase: UseCase, catalog: WizardCatalog): Bundle {
+	const valid = services.filter((s) => validServicesSlugs(catalog).has(s));
+	const names = valid.map((s) => pickCategory(catalog, s)?.name || s).join(' + ');
+	const discountPct = discountForServiceCount(valid.length, catalog);
 	return {
 		id: 'custom',
 		name: 'Pachet personalizat',
@@ -687,9 +708,9 @@ function servicesOverlapRatio(a: string[], b: string[]): number {
 	return overlap / Math.max(a.length, b.length);
 }
 
-function estimateMonthlyCost(bundle: Bundle, tier: Tier): number {
+function estimateMonthlyCost(bundle: Bundle, tier: Tier, catalog: WizardCatalog): number {
 	const monthly = bundle.services.reduce((sum, slug) => {
-		const cat = getCategory(slug);
+		const cat = pickCategory(catalog, slug);
 		return sum + (cat?.prices[tier] ?? 0);
 	}, 0);
 	return Math.round((monthly * (100 - bundle.discountPct)) / 100);
@@ -699,7 +720,8 @@ function selectRecommendations(
 	scored: ScoredBundle[],
 	answers: WizardAnswers,
 	tier: Tier,
-	includeSetup: boolean
+	includeSetup: boolean,
+	catalog: WizardCatalog
 ): { primary: Recommendation; alternatives: Recommendation[] } {
 	const seen = new Set<string>();
 	const primaryScored = scored[0];
@@ -708,7 +730,7 @@ function selectRecommendations(
 	const primary: Recommendation = {
 		bundle: primaryScored.bundle,
 		tier,
-		cost: calculateCost(primaryScored.bundle.services, tier, includeSetup),
+		cost: calculateCost(primaryScored.bundle.services, tier, includeSetup, catalog),
 		reasonWhy: explainPrimary(primaryScored.bundle, answers, tier, primaryScored.scoreVector),
 		warnings: [],
 		isCustom: false,
@@ -737,7 +759,7 @@ function selectRecommendations(
 		alternatives.push({
 			bundle: alt1.bundle,
 			tier,
-			cost: calculateCost(alt1.bundle.services, tier, includeSetup),
+			cost: calculateCost(alt1.bundle.services, tier, includeSetup, catalog),
 			reasonWhy: [reasonLabel],
 			reasonLabel,
 			warnings: [],
@@ -747,13 +769,13 @@ function selectRecommendations(
 	}
 
 	// Alt 2 — Cost/scope tradeoff
-	const primaryCost = estimateMonthlyCost(primary.bundle, tier);
+	const primaryCost = estimateMonthlyCost(primary.bundle, tier, catalog);
 	let alt2: ScoredBundle | null = null;
 	let alt2Type: 'cheaper' | 'comprehensive' = 'cheaper';
 
 	for (const s of scored.slice(1)) {
 		if (seen.has(s.bundle.id)) continue;
-		const cost = estimateMonthlyCost(s.bundle, tier);
+		const cost = estimateMonthlyCost(s.bundle, tier, catalog);
 		if (cost < primaryCost * 0.85) {
 			alt2 = s;
 			alt2Type = 'cheaper';
@@ -772,7 +794,7 @@ function selectRecommendations(
 	}
 	if (alt2) {
 		seen.add(alt2.bundle.id);
-		const altCost = estimateMonthlyCost(alt2.bundle, tier);
+		const altCost = estimateMonthlyCost(alt2.bundle, tier, catalog);
 		const reasonLabel =
 			alt2Type === 'cheaper'
 				? `Opțiune buget — economisești ~${(primaryCost - altCost).toLocaleString('ro-RO')} €/lună`
@@ -780,7 +802,7 @@ function selectRecommendations(
 		alternatives.push({
 			bundle: alt2.bundle,
 			tier,
-			cost: calculateCost(alt2.bundle.services, tier, includeSetup),
+			cost: calculateCost(alt2.bundle.services, tier, includeSetup, catalog),
 			reasonWhy: [reasonLabel],
 			reasonLabel,
 			warnings: [],
@@ -797,11 +819,11 @@ function selectRecommendations(
 		);
 		if (!existsAsStandard) {
 			const useCase = mapToUseCase(answers.businessType, answers.goal);
-			const custom = buildCustomBundle(answers.interestedServices, useCase);
+			const custom = buildCustomBundle(answers.interestedServices, useCase, catalog);
 			alternatives.push({
 				bundle: custom,
 				tier,
-				cost: calculateCost(custom.services, tier, includeSetup),
+				cost: calculateCost(custom.services, tier, includeSetup, catalog),
 				reasonWhy: ['Exact serviciile pe care le-ai ales, ca pachet custom.'],
 				reasonLabel: 'Exact canalele tale, custom',
 				warnings: [],
@@ -813,15 +835,18 @@ function selectRecommendations(
 	return { primary, alternatives };
 }
 
-export function recommend(answers: WizardAnswers): RecommendationResult {
+export function recommend(answers: WizardAnswers, catalog: WizardCatalog): RecommendationResult {
 	const useCase = mapToUseCase(answers.businessType, answers.goal);
 	const tier = budgetToTier(answers.mediaBudget);
 	const includeSetup = answers.projectStatus !== 'continuing';
 
-	const scored = BUNDLES.map((b) => ({ bundle: b, scoreVector: scoreBundleNuanced(b, answers) }));
+	const scored = catalog.bundles.map((b) => ({
+		bundle: b,
+		scoreVector: scoreBundleNuanced(b, answers)
+	}));
 	scored.sort((a, b) => b.scoreVector.finalScore - a.scoreVector.finalScore);
 
-	const { primary, alternatives } = selectRecommendations(scored, answers, tier, includeSetup);
+	const { primary, alternatives } = selectRecommendations(scored, answers, tier, includeSetup, catalog);
 
 	const tierAdvice = adviseTierOverride(tier, primary.bundle, answers.goal, answers.projectStatus);
 

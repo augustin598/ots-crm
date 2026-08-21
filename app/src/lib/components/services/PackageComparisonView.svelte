@@ -20,6 +20,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import { cn } from '$lib/utils';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
@@ -40,6 +41,9 @@
 		onRequest?: (tier: Tier) => void;
 		/** Textul butonului de cerere; `{tier}` e înlocuit cu numele pachetului. */
 		requestLabel?: string;
+		/** Tier-ul deja ales pentru această categorie (coșul de pe /servicii); butonul lui arată `activeLabel`. */
+		activeTier?: Tier | null;
+		activeLabel?: string;
 	};
 
 	let {
@@ -52,7 +56,9 @@
 		hourlyRates,
 		isWebDev = false,
 		onRequest,
-		requestLabel = 'Vreau {tier}'
+		requestLabel = 'Vreau {tier}',
+		activeTier = null,
+		activeLabel = 'În ofertă'
 	}: Props = $props();
 </script>
 
@@ -71,7 +77,8 @@
 				</div>
 			</DialogHeader>
 
-			<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 my-6">
+			<!-- Pe telefon o singură coloană: la două, prețurile („1.200 €/lună") și butoanele se rupeau pe rânduri. -->
+			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
 				{#each tiers as tier (tier)}
 					{@const colors = tierColors[tier]}
 					{@const price = category.prices[tier]}
@@ -126,13 +133,25 @@
 								</Popover>
 							{/if}
 							{#if onRequest}
+								{@const isActive = activeTier === tier}
+								<!-- Toggle: a doua apăsare scoate serviciul din ofertă; numele spune asta, nu doar starea. -->
 								<Button
-									class="mt-4 w-full"
+									class={cn('mt-4 w-full', isActive && 'border-primary text-primary')}
 									size="sm"
+									variant={isActive ? 'outline' : 'default'}
+									aria-pressed={isActive}
+									aria-label={isActive
+										? `${activeLabel}: ${tierLabels[tier]} — apasă pentru a scoate din ofertă`
+										: undefined}
 									onclick={() => onRequest(tier)}
 									disabled={price === null && !setup}
 								>
-									{requestLabel.replace('{tier}', tierLabels[tier])}
+									{#if isActive}
+										<CheckIcon class="h-3.5 w-3.5" aria-hidden="true" />
+										{activeLabel}
+									{:else}
+										{requestLabel.replace('{tier}', tierLabels[tier])}
+									{/if}
 								</Button>
 							{/if}
 						</div>
@@ -144,11 +163,12 @@
 				<p class="text-sm text-muted-foreground italic mb-4">{category.priceNote}</p>
 			{/if}
 
+			<!-- Pe telefon tabelul derulează orizontal, cu coloana de funcționalități fixă în stânga. -->
 			<div class="overflow-x-auto rounded-lg border">
-				<table class="w-full text-sm">
+				<table class="w-full min-w-[540px] sm:min-w-0 text-sm">
 					<thead class="bg-muted/50">
 						<tr>
-							<th class="text-left p-3 font-medium">Funcționalitate</th>
+							<th class="sticky left-0 z-10 w-[150px] bg-muted text-left p-3 font-medium sm:static sm:w-auto sm:bg-transparent">Funcționalitate</th>
 							{#each tiers as tier (tier)}
 								{@const colors = tierColors[tier]}
 								<th class="p-3 font-semibold text-center {colors.text}">
@@ -163,7 +183,7 @@
 					<tbody>
 						{#each category.features as feature (feature.id)}
 							<tr class="border-t">
-								<td class="p-3 align-top">{feature.label}</td>
+								<td class="sticky left-0 z-10 bg-background p-3 align-top sm:static sm:bg-transparent">{feature.label}</td>
 								{#each tiers as tier (tier)}
 									{@const value = feature.values[tier]}
 									<td class="p-3 text-center align-top">

@@ -6,7 +6,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { notifyAdminsOfPackageRequestInBackground } from '$lib/server/package-requests';
 import { logError } from '$lib/server/logger';
-import { getCategory, TIERS } from '$lib/constants/ots-catalog';
+import { getCategory, TIERS, type Tier } from '$lib/constants/ots-catalog';
 import { requireStaff } from '$lib/server/get-actor';
 
 function generateRequestId(): string {
@@ -28,6 +28,25 @@ const updateStatusSchema = v.object({
 	requestId: v.pipe(v.string(), v.minLength(1)),
 	status: v.picklist(['pending', 'contacted', 'accepted', 'rejected'])
 });
+
+/** Forma unui element din coloana `items` (ofertă multi-serviciu de pe /servicii). */
+export type QuoteRequestItem = {
+	categorySlug: string;
+	tier: Tier;
+	monthlyEur: number | null;
+	setupEur: number | null;
+};
+
+/** Un rând cu JSON stricat nu trebuie să dărâme toată lista din admin. */
+function parseJsonArray<T>(raw: string | null): T[] | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? (parsed as T[]) : null;
+	} catch {
+		return null;
+	}
+}
 
 export const getPackageRequests = query(async () => {
 	const event = getRequestEvent();
@@ -57,7 +76,10 @@ export const getPackageRequests = query(async () => {
 				contactName: table.servicePackageRequest.contactName,
 				contactEmail: table.servicePackageRequest.contactEmail,
 				contactPhone: table.servicePackageRequest.contactPhone,
-				companyName: table.servicePackageRequest.companyName
+				companyName: table.servicePackageRequest.companyName,
+				// Oferta multi-serviciu: tier + preț per serviciu și discountul aplicat.
+				items: table.servicePackageRequest.items,
+				discountPct: table.servicePackageRequest.discountPct
 			})
 			.from(table.servicePackageRequest)
 			.leftJoin(table.client, eq(table.servicePackageRequest.clientId, table.client.id))
@@ -66,7 +88,8 @@ export const getPackageRequests = query(async () => {
 
 		return rows.map((r) => ({
 			...r,
-			services: r.services ? (JSON.parse(r.services) as string[]) : null
+			services: parseJsonArray<string>(r.services),
+			items: parseJsonArray<QuoteRequestItem>(r.items)
 		}));
 	} catch (err) {
 		const raw = err instanceof Error ? err : new Error(String(err));

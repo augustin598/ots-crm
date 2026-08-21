@@ -364,7 +364,8 @@
 			<div class="space-y-3">
 				{#each filteredRequests as req (req.id)}
 					{@const tierColors = TIER_COLORS[req.tier as Tier]}
-					{@const isBundle = Array.isArray(req.services) && req.services.length > 1}
+					{@const isQuote = Array.isArray(req.items) && req.items.length > 0}
+					{@const isBundle = !isQuote && Array.isArray(req.services) && req.services.length > 1}
 					{@const displayName = req.clientName || req.contactName || '—'}
 					{@const displayEmail = req.clientEmail || req.contactEmail}
 					<Card class="p-4" id={`req-${req.id}`}>
@@ -372,7 +373,12 @@
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2 flex-wrap mb-1.5">
 									<div class="flex items-center gap-2">
-										{#if isBundle}
+										{#if isQuote && req.items}
+											<Badge class="bg-primary/10 text-primary border-primary/20">Ofertă</Badge>
+											<h3 class="font-semibold">
+												{req.items.length} {req.items.length === 1 ? 'serviciu' : 'servicii'}
+											</h3>
+										{:else if isBundle}
 											<Badge class="bg-primary/10 text-primary border-primary/20">Bundle</Badge>
 											<h3 class="font-semibold">
 												{req.bundleId || 'Pachet custom'}
@@ -382,12 +388,15 @@
 											<h3 class="font-semibold">{categoryLabel(req.categorySlug)}</h3>
 										{/if}
 									</div>
-									<span
-										class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border {tierColors.border} {tierColors.text} {tierColors.bg}"
-									>
-										<span class="h-1.5 w-1.5 rounded-full {tierColors.dot}"></span>
-										{TIER_LABELS[req.tier as Tier] ?? req.tier}
-									</span>
+									<!-- La ofertă fiecare serviciu are tier-ul lui; un chip global ar induce în eroare. -->
+									{#if !isQuote}
+										<span
+											class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border {tierColors.border} {tierColors.text} {tierColors.bg}"
+										>
+											<span class="h-1.5 w-1.5 rounded-full {tierColors.dot}"></span>
+											{TIER_LABELS[req.tier as Tier] ?? req.tier}
+										</span>
+									{/if}
 									<Badge class={statusBadgeClass(req.status)}>
 										{STATUS_LABEL[req.status] ?? req.status}
 									</Badge>
@@ -402,7 +411,37 @@
 										</Badge>
 									{/if}
 								</div>
-								{#if isBundle && req.services}
+								{#if isQuote && req.items}
+									<ul class="grid gap-1.5 mb-2 sm:grid-cols-2">
+										{#each req.items as item (item.categorySlug)}
+											{@const c = TIER_COLORS[item.tier] ?? TIER_COLORS.bronze}
+											<li
+												class="flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-md border bg-muted/40"
+											>
+												<CategoryIcon slug={item.categorySlug} class="h-3.5 w-3.5 shrink-0" />
+												<span class="font-medium truncate">{categoryLabel(item.categorySlug)}</span>
+												<span
+													class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border {c.border} {c.text} {c.bg}"
+												>
+													<span class="h-1.5 w-1.5 rounded-full {c.dot}"></span>
+													{TIER_LABELS[item.tier] ?? item.tier}
+												</span>
+												<span class="ml-auto text-muted-foreground whitespace-nowrap">
+													{#if item.monthlyEur !== null}
+														{formatEur(item.monthlyEur)}/lună
+													{:else if item.setupEur}
+														{formatEur(item.setupEur)} setup
+													{/if}
+												</span>
+											</li>
+										{/each}
+									</ul>
+									{#if req.discountPct}
+										<p class="text-xs text-emerald-700 dark:text-emerald-400 mb-2">
+											Discount multi-servicii afișat clientului: −{req.discountPct}% pe abonamentul lunar
+										</p>
+									{/if}
+								{:else if isBundle && req.services}
 									<div class="flex flex-wrap gap-1.5 mb-2">
 										{#each req.services as slug (slug)}
 											<span

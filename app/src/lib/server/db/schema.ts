@@ -2312,6 +2312,14 @@ export const servicePackageRequest = sqliteTable('service_package_request', {
 	contactEmail: text('contact_email'),
 	contactPhone: text('contact_phone'),
 	companyName: text('company_name'),
+	// Oferta multi-serviciu de pe /servicii: JSON `[{ categorySlug, tier, monthlyEur, setupEur }]`.
+	// Fiecare serviciu isi are tier-ul lui (Google Ads Gold + SEO Bronze), iar preturile sunt
+	// snapshot — catalogul se schimba in timp, cererea trebuie sa arate ce a vazut clientul.
+	// `categorySlug`/`tier`/`services` raman populate cu pivotul si slug-urile, ca randul sa
+	// fie citibil de codul existent (admin, email, portal).
+	items: text('items'),
+	// Discountul multi-servicii aplicat pe abonamentul lunar la momentul cererii (0–100).
+	discountPct: integer('discount_pct'),
 	status: text('status').notNull().default('pending'), // 'pending' | 'contacted' | 'accepted' | 'rejected'
 	contactedAt: timestamp('contacted_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
