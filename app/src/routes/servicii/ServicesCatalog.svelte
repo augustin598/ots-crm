@@ -39,6 +39,7 @@
 	import CartToast, { type CartToastKind } from './CartToast.svelte';
 	import { ServicesCart } from './services-cart.svelte';
 	import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
+	import { dragScroll } from '$lib/actions/drag-scroll';
 	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
 	import type { Category, Tier } from '$lib/constants/ots-catalog';
 	import type { PublicCatalog, PublicCompany } from './types';
@@ -200,7 +201,7 @@
 		<!-- Pe telefon tabelul derulează orizontal; fără indiciu, coloanele Silver–Platinum par să lipsească. -->
 		<p class="sv-scrollhint" aria-hidden="true">Glisează tabelul spre stânga pentru Silver, Gold și Platinum →</p>
 
-		<div class="sv-tablewrap">
+		<div class="sv-tablewrap" {@attach dragScroll}>
 			<table class="sv-table">
 				<thead>
 					<tr>
@@ -288,7 +289,7 @@
 			</p>
 		</div>
 
-		<div class="sv-filters" role="group" aria-label="Filtrează pe grup de servicii">
+		<div class="sv-filters" role="group" aria-label="Filtrează pe grup de servicii" {@attach dragScroll}>
 			<button
 				type="button"
 				class="sv-filter"

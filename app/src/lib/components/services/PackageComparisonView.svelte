@@ -21,6 +21,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import { cn } from '$lib/utils';
+	import { dragScroll } from '$lib/actions/drag-scroll';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
@@ -185,7 +186,7 @@
 			{/if}
 
 			<!-- Pe telefon tabelul derulează orizontal, cu coloana de funcționalități fixă în stânga. -->
-			<div class="overflow-x-auto rounded-xl border bg-white dark:bg-background">
+			<div class="overflow-x-auto rounded-xl border bg-white dark:bg-background" {@attach dragScroll}>
 				<table class="w-full min-w-[540px] sm:min-w-0 text-sm">
 					<thead>
 						<tr class="border-b-2 border-border">
