@@ -3158,6 +3158,111 @@
       "when": 1785398836928412,
       "tag": "0453_service_package_request_discount_pct",
       "breakpoints": true
+    },
+    {
+      "idx": 454,
+      "version": "6",
+      "when": 1785398836928413,
+      "tag": "0454_user_whatsapp_link_ensure_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 455,
+      "version": "6",
+      "when": 1785398836928414,
+      "tag": "0455_user_whatsapp_link_ensure_user_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 456,
+      "version": "6",
+      "when": 1785398836928415,
+      "tag": "0456_user_whatsapp_link_ensure_phone_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 457,
+      "version": "6",
+      "when": 1785398836928416,
+      "tag": "0457_user_whatsapp_link_verified",
+      "breakpoints": true
+    },
+    {
+      "idx": 458,
+      "version": "6",
+      "when": 1785398836928417,
+      "tag": "0458_user_whatsapp_link_verified_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 459,
+      "version": "6",
+      "when": 1785398836928418,
+      "tag": "0459_user_whatsapp_link_consented_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 460,
+      "version": "6",
+      "when": 1785398836928419,
+      "tag": "0460_client_user_prefs_wa_dismissed_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 461,
+      "version": "6",
+      "when": 1785398836928420,
+      "tag": "0461_client_user_prefs_wa_dismissed_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 462,
+      "version": "6",
+      "when": 1785398836928421,
+      "tag": "0462_wa_link_verified_at_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 463,
+      "version": "6",
+      "when": 1785398836928422,
+      "tag": "0463_wa_link_verified_at_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 464,
+      "version": "6",
+      "when": 1785398836928423,
+      "tag": "0464_wa_link_consented_at_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 465,
+      "version": "6",
+      "when": 1785398836928424,
+      "tag": "0465_wa_link_consented_at_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 466,
+      "version": "6",
+      "when": 1785398836928425,
+      "tag": "0466_prefs_wa_dismissed_at_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 467,
+      "version": "6",
+      "when": 1785398836928426,
+      "tag": "0467_prefs_wa_dismissed_at_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 468,
+      "version": "6",
+      "when": 1785398836928427,
+      "tag": "0468_hosting_account_billing_excluded",
+      "breakpoints": true
     }
   ]
 }
