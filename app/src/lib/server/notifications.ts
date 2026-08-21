@@ -47,6 +47,7 @@ export type NotificationType =
 	| 'email.delivery_failed'
 	| 'comment.mention'
 	| 'approval.requested'
+	| 'whatsapp.session_down'
 	// Clients
 	| 'client.created'
 	// System

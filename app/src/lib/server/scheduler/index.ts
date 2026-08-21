@@ -40,6 +40,7 @@ import { processAdsOptimizationTaskCreator } from './tasks/ads-optimization-task
 import { processAdsOptimizationTaskReaper } from './tasks/ads-optimization-task-reaper';
 import { processAdsOptimizerOutcomeEvaluator } from './tasks/ads-optimizer-outcome-evaluator';
 import { processPersonalopsHeartbeatMonitor } from './tasks/personalops-heartbeat-monitor';
+import { processWhatsappSessionWatchdog } from './tasks/whatsapp-session-watchdog';
 import { processMetaTokenExpirationMonitor } from './tasks/meta-token-expiration-monitor';
 import { processDirectAdminSyncAccounts } from './tasks/directadmin-sync-accounts';
 import { processDirectAdminSyncPackages } from './tasks/directadmin-sync-packages';
@@ -182,6 +183,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	ads_optimization_task_reaper: processAdsOptimizationTaskReaper,
 	ads_optimizer_outcome_evaluator: processAdsOptimizerOutcomeEvaluator,
 	personalops_heartbeat_monitor: processPersonalopsHeartbeatMonitor,
+	whatsapp_session_watchdog: processWhatsappSessionWatchdog,
 	meta_token_expiration_monitor: processMetaTokenExpirationMonitor,
 	meta_ads_leads_sync: processMetaAdsLeadsSync,
 	token_refresh: processTokenRefresh,
@@ -351,7 +353,7 @@ export const startScheduler = async () => {
 		'whmcs-invoice-reconcile',
 		'ads-optimization-task-creator', 'ads-optimization-task-reaper',
 		'ads-optimizer-outcome-evaluator',
-		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor',
+		'personalops-heartbeat-monitor', 'whatsapp-session-watchdog', 'meta-token-expiration-monitor',
 		'directadmin-sync-accounts', 'directadmin-sync-packages',
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
 		'content-auto-publish', 'content-auto-generate'
@@ -1029,6 +1031,19 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] personalops-heartbeat-monitor registered (*/15 * * * * Europe/Bucharest)');
 
+	// Santinela socketului WhatsApp — la 5 minute. Fără socket, tot ce trece prin
+	// WhatsApp (mesaje primite, comanda /task, notificările în grup) tace fără
+	// nicio urmă, iar `status` rămâne pe `connected` de la pod-ul mort.
+	await schedulerQueue.add(
+		'whatsapp-session-watchdog',
+		{ type: 'whatsapp_session_watchdog', params: {} },
+		{
+			repeat: { pattern: '*/5 * * * *', tz: 'Europe/Bucharest' },
+			jobId: 'whatsapp-session-watchdog'
+		}
+	);
+	logInfo('scheduler', '[scheduler] whatsapp-session-watchdog registered (*/5 * * * * Europe/Bucharest)');
+
 	// Meta token expiration monitor — daily at 09:00 RO. Alerts <14d, <7d, <1d.
 	await schedulerQueue.add(
 		'meta-token-expiration-monitor',
@@ -1159,6 +1174,7 @@ export const JOB_LABELS: Record<string, string> = {
 	ads_optimization_task_creator: 'Creator Task-uri Optimizare Ads',
 	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)',
 	personalops_heartbeat_monitor: 'Monitor Heartbeat PersonalOPS (alertă instanțe tăcute)',
+	whatsapp_session_watchdog: 'Santinelă Socket WhatsApp (alertă când nicio instanță nu îl ține)',
 	meta_token_expiration_monitor: 'Monitor Expirare Token Meta Ads (alertă <14z)',
 	hosting_renewal_reminder: 'Reminder Reînnoire Hosting (14/7/1z înainte)',
 	hosting_expiry_guard: 'Auto-suspendare Hosting (proforme neplătite, grație 10z)',

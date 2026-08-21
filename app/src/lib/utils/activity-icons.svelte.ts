@@ -52,6 +52,7 @@ export function getActivityIcon(type: string): Component {
 			return KeyIcon;
 		case 'keez.sync_error':
 		case 'smartbill.sync_error':
+		case 'whatsapp.session_down':
 			return AlertCircleIcon;
 		case 'email.delivery_failed':
 			return MailXIcon;
@@ -113,6 +114,7 @@ export function getActivityColor(type: string): string {
 		case 'budget.exceeded':
 		case 'system.db_error':
 		case 'scheduler.job_failed':
+		case 'whatsapp.session_down':
 			return 'text-destructive';
 		case 'comment.mention':
 		case 'approval.requested':
@@ -140,6 +142,7 @@ export function getActivityCategory(type: string): string {
 	if (type === 'comment.mention' || type === 'approval.requested') return 'Comunicare';
 	if (type === 'client.created') return 'Clienti';
 	if (type === 'system.db_error' || type === 'scheduler.job_failed') return 'Sistem';
+	if (type.startsWith('whatsapp.')) return 'Sistem';
 	return 'Altele';
 }
 
@@ -151,6 +154,6 @@ export const ACTIVITY_CATEGORIES = [
 	{ id: 'contracts', label: 'Contracte', prefixes: ['contract.'] },
 	{ id: 'tasks', label: 'Taskuri', prefixes: ['task.'] },
 	{ id: 'marketing', label: 'Marketing', prefixes: ['ad.'] },
-	{ id: 'system', label: 'Sistem', prefixes: ['sync.', 'integration.', 'system.', 'scheduler.', 'keez.', 'smartbill.', 'email.'] },
+	{ id: 'system', label: 'Sistem', prefixes: ['sync.', 'integration.', 'system.', 'scheduler.', 'keez.', 'smartbill.', 'email.', 'whatsapp.'] },
 	{ id: 'communication', label: 'Comunicare', prefixes: ['comment.', 'approval.'] },
 ] as const;
