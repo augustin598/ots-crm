@@ -130,7 +130,7 @@
 		{#if onUndo}
 			<button type="button" class="ct-view ct-undo" onclick={onUndo}>Anulează</button>
 		{:else if summary.serviceCount > 0}
-			<button type="button" class="ct-view" onclick={onView}>
+			<button type="button" class="ct-view ots-gloss" onclick={onView}>
 				Vezi oferta <ArrowRightIcon size={14} aria-hidden="true" />
 			</button>
 		{/if}

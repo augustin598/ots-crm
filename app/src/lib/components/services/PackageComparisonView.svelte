@@ -154,7 +154,7 @@
 								<Button
 									class={cn(
 										'mt-auto pt-0 w-full font-semibold',
-										isActive ? 'border-primary text-primary bg-primary/5' : 'shadow-sm'
+										isActive ? 'border-primary text-primary bg-primary/5' : 'shadow-sm ots-gloss'
 									)}
 									size="sm"
 									variant={isActive ? 'outline' : 'default'}

@@ -213,7 +213,7 @@
 		<!-- Un singur buton pentru Continuă/Trimite: elementul focalizat nu e demontat la schimbarea pasului. -->
 		<button
 			type="button"
-			class="sq-btn-primary"
+			class="sq-btn-primary ots-gloss"
 			onclick={primaryAction}
 			disabled={submitting || (step === 1 && summary.serviceCount === 0)}
 		>
@@ -245,7 +245,7 @@
 				Am înregistrat cererea pentru <strong>{sentCount} {sentCount === 1 ? 'serviciu' : 'servicii'}</strong>.
 				Echipa One Top Solution te contactează pe <strong>{sentTo}</strong> în cel mai scurt timp.
 			</p>
-			<button type="button" class="sq-btn-primary" {@attach focusOnMount} onclick={onClose}>
+			<button type="button" class="sq-btn-primary ots-gloss" {@attach focusOnMount} onclick={onClose}>
 				Închide
 			</button>
 		</div>

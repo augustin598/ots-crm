@@ -175,7 +175,7 @@
 			pachet, cu prețul pe fiecare nivel.
 		</p>
 		<div class="sv-hero-actions">
-			<a href="#categorii" class="sv-btn sv-btn-primary">
+			<a href="#categorii" class="sv-btn sv-btn-primary ots-gloss">
 				Vezi pachetele <ArrowRightIcon class="h-4 w-4" />
 			</a>
 			<a href="/servicii/configurator" class="sv-btn sv-btn-ghost">
@@ -274,7 +274,7 @@
 					combinația care funcționează, cu preț estimat și discount aplicat.
 				</span>
 			</span>
-			<span class="sv-wizard-cta">Începe <ArrowRightIcon class="h-4 w-4" /></span>
+			<span class="sv-wizard-cta ots-gloss">Începe <ArrowRightIcon class="h-4 w-4" /></span>
 		</a>
 	</section>
 
@@ -416,7 +416,7 @@
 				>
 					<XIcon class="h-4 w-4" aria-hidden="true" />
 				</button>
-				<button type="button" class="sv-btn sv-btn-primary" onclick={() => (quoteOpen = true)}>
+				<button type="button" class="sv-btn sv-btn-primary ots-gloss" onclick={() => (quoteOpen = true)}>
 					Solicită oferta <ArrowRightIcon class="h-4 w-4" />
 				</button>
 			</div>

@@ -212,3 +212,94 @@
 ::view-transition-new(root) {
 	animation: fade-in 0.3s ease-in;
 }
+
+/* CTA „gloss" OTS — degradeu albastru animat + sheen diagonal la hover + ridicare ușoară.
+   Portat din `.ce-gold-cta` (resort-casaelena.ro), cu paleta noastră (#1877f2 / #0d5cc7).
+   Se pune pe butoanele primare publice (/servicii: hero, bara de coș, modal, toast, „Adaugă”). */
+.ots-gloss {
+	position: relative;
+	overflow: hidden;
+	isolation: isolate;
+	transition:
+		background 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		color 0.2s ease,
+		box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		border-color 0.25s ease,
+		transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ots-gloss::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -75%;
+	width: 55%;
+	background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.5) 50%, transparent 100%);
+	transform: skewX(-18deg);
+	opacity: 0;
+	pointer-events: none;
+	z-index: 3;
+}
+.ots-gloss:not(:disabled):hover {
+	background: linear-gradient(45deg, #3b8ff5 0%, #0d5cc7 50%, #3b8ff5 100%) !important;
+	background-size: 220% 220% !important;
+	border-color: #0d5cc7 !important;
+	color: #fff !important;
+	box-shadow:
+		0 10px 26px rgba(24, 119, 242, 0.38),
+		inset 0 1px 0 rgba(255, 255, 255, 0.35),
+		inset 0 -1px 0 rgba(6, 50, 110, 0.35);
+	transform: translateY(-2px);
+	animation: otsGlossFlow 3.2s ease-in-out infinite;
+}
+.ots-gloss:not(:disabled):hover::after {
+	animation: otsGlossSheen 0.9s cubic-bezier(0.25, 0.7, 0.3, 1) 0.04s;
+}
+.ots-gloss svg {
+	transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ots-gloss:not(:disabled):hover svg {
+	transform: translateX(3px);
+}
+.ots-gloss:not(:disabled):active {
+	transform: translateY(-1px) scale(0.985);
+}
+@keyframes otsGlossSheen {
+	0% {
+		left: -75%;
+		opacity: 0;
+	}
+	10% {
+		opacity: 1;
+	}
+	100% {
+		left: 135%;
+		opacity: 0;
+	}
+}
+@keyframes otsGlossFlow {
+	0% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.ots-gloss,
+	.ots-gloss:hover,
+	.ots-gloss svg {
+		animation: none !important;
+		transform: none !important;
+		transition:
+			background 0.2s,
+			color 0.2s,
+			box-shadow 0.2s;
+	}
+	.ots-gloss::after {
+		display: none;
+	}
+}
