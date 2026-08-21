@@ -1,8 +1,8 @@
 # Task ↔ grup WhatsApp: notificări de status și mențiuni (etapa 2)
 
-Stare la 2026-08-21, 20:30: pe `main` (merge `80de33e1` + fix `fdf2ff70`),
-în producție (build `#9574848f`), verificat live: schimbare de status pe task-ul
-de test → mesaj în grupul intern în ~1 s, cu linkul spre portalul clientului.
+Stare la 2026-08-21, 22:40: pe `main`, în producție (ultimul build `#6a29443b`),
+verificat live pe toate cele cinci feluri de mesaj. Documentul acoperă și etapa 3
+(comanda `/task` din grup), făcută în aceeași seară.
 
 Continuă harta din `2026-08-21-whatsapp-grupuri-in-inbox-IMPLEMENTAT.md`.
 
@@ -16,7 +16,47 @@ Un task poate fi legat de un grup WhatsApp bifat în inbox. După legare:
   și un fragment din comentariu; dacă persoana are număr în
   `user_whatsapp_link`, `@Nume` e mențiune reală WhatsApp (albastră, cu notificare).
 
-`pending-approval` nu se anunță în grup (pas intern de aprobare).
+`pending-approval` nu se anunță în grup ca status nou, dar are etichetă în
+română când apare ca status vechi („din Așteaptă aprobare").
+
+**Etapa 3, în același document:** din grup se poate scrie `/task …`, iar CRM-ul
+creează un task în așteptarea aprobării. La aprobare, grupul primește un mesaj
+propriu („a acceptat task-ul") cu termenul, dacă e pus.
+
+## Comanda /task (etapa 3)
+
+Flux: cineva scrie în grup `/task Refacem bannerele` → CRM creează taskul cu
+`status='pending-approval'`, pe clientul grupului, legat automat de grupul din
+care a venit → grupul primește „📥 Am notat de la X: «…». Așteaptă aprobare." →
+omul aprobă în CRM, cu termen opțional → grupul primește „✅ … a acceptat
+task-ul. Termen: …".
+
+Cine poate: doar expeditori cu numărul în `user_whatsapp_link` (fără
+`source='self_service'`), care sunt fie din echipă, fie utilizatori ai
+clientului legat de grup. Un necunoscut e ignorat **în tăcere**: un răspuns
+automat la fiecare mesaj refuzat ar fi chiar amplificatorul de spam.
+
+Apărări, în ordine:
+1. mesajele proprii ale contului (`fromMe`) sunt sărite — altfel răspunsurile
+   automate s-ar putea auto-declanșa. **Consecință practică:** comanda nu merge
+   scrisă de pe telefonul care ține contul WhatsApp al firmei;
+2. `isHistory` sărit — altfel o reconectare rejoacă istoricul și creează sute
+   de taskuri;
+3. idempotență pe `wam_id`: rândul se creează doar dacă insertul mesajului a
+   afectat un rând (`rowsAffected`), iar `task.source_wam_id` are index unic
+   per tenant (migrări 0488–0489). Baileys livrează același mesaj de două ori;
+4. limite de rată, primele de pe calea de primire: 5/oră per expeditor,
+   10/oră per grup, 60/zi per tenant (`checkFixedWindowLimit`, în proces —
+   socketul e oricum pe o singură instanță).
+
+Fișiere: `src/lib/server/whatsapp/task-command-parser.ts` (pur, 9 teste),
+`task-command.ts` (gărzi + creare, 9 teste cu DB falsă),
+`resolve-phone.ts` → `resolveUserByWhatsappPhone` (drumul invers, refuză
+ambiguitatea când un număr e legat de mai mulți oameni),
+`inbound-handler.ts` (interceptarea, după insert),
+`task-messages.ts` → `buildTaskCommandAck`, `buildApprovalMessage`,
+`tasks.remote.ts` → `approveTask` acceptă `dueDate`,
+`task-detail/task-approve-dialog.svelte` (dialogul de aprobare).
 
 ## Deciziile
 
@@ -164,7 +204,25 @@ are socketul; altfel la următoarea golire de pe instanța conectată).
 - Garda „grup debifat" se aplică doar la punerea în coadă; un rând deja în
   coadă pleacă și dacă grupul a fost debifat între timp.
 
+## Defect de infrastructură, NEreparat: socketul se pierde la deploy
+
+La rollout pornesc două pod-uri odată, ambele restaurează sesiunea, se bat pe
+ea („Connection closed (440): Stream Errored (conflict)", de trei ori în cinci
+secunde), unul câștigă — și dacă Kubernetes îl oprește tocmai pe acela,
+**nimeni nu mai are socket**, iar `whatsapp_session.status` rămâne
+`connected`, deci nimic nu semnalizează. S-a întâmplat pe 21 aug la 22:27:
+patru minute de tăcere completă, un mesaj `/task` pierdut fără urmă.
+
+Paliativ până la fix: după fiecare deploy, `POST /ots/api/_debug-whatsapp-reload`.
+
+Fix propus: heartbeat pe `whatsapp_session` (pod-ul cu socketul scrie periodic
+o urmă; alt pod preia dacă urma e mai veche de câteva minute) + marcarea
+statusului ca `disconnected` la oprirea pod-ului, ca baza să nu mai mintă.
+
 ## Ce NU există încă
 
 - Preferință per tenant/utilizator „vreau sau nu notificări WhatsApp".
+- Alte comenzi în grup (`/status`, `/gata`, `/help`); doar `/task` există.
+- Respingerea unui task nu are mesaj propriu: grupul primește anunțul generic
+  „a trecut task-ul în Anulat".
 - Notificări pentru alte evenimente (atribuire, scadență) în grup.
