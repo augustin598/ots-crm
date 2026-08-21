@@ -102,7 +102,7 @@ https://clients.onetopsolution.ro/client/ots/tasks/abc123
 ```
 💬 *Raport lunar Beautyone*
 Mențiune de la Andrei Pop pentru @40722123456 și @40733111222:
-„Ana, poți verifica bugetul de septembrie până mâine?"
+„Ana, poți verifica bugetul de septembrie până mâine?" (pastilele de mențiune se scot din fragment)
 https://clients.onetopsolution.ro/client/ots/tasks/abc123
 ```
 

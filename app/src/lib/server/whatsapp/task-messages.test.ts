@@ -130,15 +130,38 @@ describe('mesajul de mențiune', () => {
 		expect(quote).toBe(`„${'a'.repeat(160)}…"`);
 	});
 
-	it('pastila de mențiune din TipTap se citește ca text', () => {
+	it('pastilele de mențiune ies din fragment: numele e deja în rândul de deasupra', () => {
 		const { text } = buildMentionMessage({
 			taskTitle: 'T',
 			authorName: 'A',
-			mentioned: [{ name: 'B', phoneE164: null }],
+			mentioned: [{ name: 'Ana Pop', phoneE164: '+40722123456' }],
 			commentHtml: '<p>cc <span data-type="mention" data-id="u1">@Ana Pop</span> te rog</p>',
 			taskUrl: url
 		});
-		expect(text).toContain('„cc @Ana Pop te rog"');
+		expect(text).toContain('„cc te rog"');
+		expect(text).not.toContain('@Ana Pop');
+	});
+
+	it('punctuația rămasă orfană după scoaterea pastilei se curăță', () => {
+		const { text } = buildMentionMessage({
+			taskTitle: 'T',
+			authorName: 'A',
+			mentioned: [{ name: 'Ana Pop', phoneE164: null }],
+			commentHtml: '<p>Test, ignorați: <span data-type="mention" data-id="u1">@Ana Pop</span></p>',
+			taskUrl: url
+		});
+		expect(text.split('\n')[2]).toBe('„Test, ignorați"');
+	});
+
+	it('comentariu format doar dintr-o mențiune: fără rând de citat', () => {
+		const { text } = buildMentionMessage({
+			taskTitle: 'T',
+			authorName: 'A',
+			mentioned: [{ name: 'Ana Pop', phoneE164: '+40722123456' }],
+			commentHtml: '<p><span data-type="mention" data-id="u1">@Ana Pop</span></p>',
+			taskUrl: url
+		});
+		expect(text).toBe('💬 *T*\nMențiune de la A pentru @40722123456:\n' + url);
 	});
 });
 

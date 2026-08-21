@@ -83,6 +83,9 @@ const SNIPPET_MAX = 160;
 
 function htmlToSnippet(html: string): string {
 	const text = html
+		// Pastilele de mențiune ies din fragment: numele celor menționați e deja
+		// în rândul de deasupra, iar păstrarea lor dubla numele în mesaj.
+		.replace(/<span[^>]*data-type="mention"[^>]*>.*?<\/span>/gi, ' ')
 		.replace(/<br\s*\/?>/gi, ' ')
 		.replace(/<\/(p|div|li|h\d)>/gi, ' ')
 		.replace(/<[^>]*>/g, '')
@@ -92,7 +95,12 @@ function htmlToSnippet(html: string): string {
 		.replace(/&gt;/g, '>')
 		.replace(/&quot;/g, '"')
 		.replace(/&#39;/g, "'");
-	const clean = cleanInline(text);
+	const clean = cleanInline(text)
+		// După scoaterea pastilei rămâne punctuație orfană („ignorați:" la final,
+		// „, poți" la început), care arată ca un text tăiat greșit.
+		.replace(/\s+([,;:.!?])/g, '$1')
+		.replace(/^[\s,;:]+/, '')
+		.replace(/[\s,;:]+$/, '');
 	return clean.length > SNIPPET_MAX ? `${clean.slice(0, SNIPPET_MAX)}…` : clean;
 }
 
