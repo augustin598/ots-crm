@@ -95,7 +95,13 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 		version,
 		auth: auth.state,
 		logger: SILENT_LOGGER,
-		browser: Browsers.macOS('Desktop'), // required for full history sync
+		// NU folosi Browsers.macOS('Desktop') (sau orice pereche Mac OS/Windows + 'Desktop')
+		// împreună cu syncFullHistory: true. În acea combinație Baileys trimite
+		// webSubPlatform = DARWIN/WIN32 (profil de aplicație desktop nativă), iar WhatsApp
+		// închide WebSocket-ul înainte de a emite QR-ul → „Connection Terminated" (428)
+		// la nesfârșit. Cu 'Chrome' rămâne WEB_BROWSER, iar requireFullSync se trimite
+		// în continuare în DeviceProps. Verificat pe baileys 7.0.0-rc.9 și rc14.
+		browser: Browsers.macOS('Chrome'),
 		printQRInTerminal: false,
 		syncFullHistory: true,
 		markOnlineOnConnect: false,
@@ -192,6 +198,23 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 						lastError: `loggedOut: ${message}`
 					});
 					publishQr(tenantId, 'disconnected', { reason: 'logged_out' });
+					return;
+				}
+
+				// 515 (restartRequired) NU e o eroare: WhatsApp îl trimite imediat după
+				// împerecherea prin QR și cere redeschiderea conexiunii. Dacă îl marcăm ca
+				// „disconnected" cu lastError, pagina afișează o eroare roșie chiar după o
+				// scanare reușită, până când reconectarea automată se termină.
+				if (code === DisconnectReason.restartRequired) {
+					await setSessionStatus(tenantId, { status: 'connecting', lastError: null });
+					setTimeout(() => {
+						startSession(tenantId).catch((err) => {
+							logError('whatsapp', 'Restart-required reconnect failed', {
+								tenantId,
+								metadata: { err: err instanceof Error ? err.message : String(err) }
+							});
+						});
+					}, 250);
 					return;
 				}
 
@@ -388,11 +411,22 @@ export function getActiveSession(tenantId: string): ActiveSession | null {
 }
 
 export async function sendText(tenantId: string, toE164Phone: string, text: string): Promise<string> {
+	return sendTextToJid(tenantId, e164ToJid(toE164Phone), text);
+}
+
+/**
+ * Trimite direct pe un JID, fără să presupună că destinatarul e un număr.
+ *
+ * Baileys trimite la fel către un grup („120363…@g.us") și către o persoană, dar
+ * `e164ToJid` lipește mereu „@s.whatsapp.net", deci un JID de grup trecut prin ea
+ * ar deveni un destinatar inexistent, în tăcere. Pauza dintre trimiteri rămâne
+ * aceeași pentru ambele.
+ */
+export async function sendTextToJid(tenantId: string, jid: string, text: string): Promise<string> {
 	const active = sessions.get(tenantId);
 	if (!active) throw new Error('WhatsApp session not connected');
 
 	await humanizedDelay(tenantId);
-	const jid = e164ToJid(toE164Phone);
 
 	try {
 		await active.sock.sendPresenceUpdate('composing', jid);
@@ -425,11 +459,19 @@ export async function sendMedia(
 	toE164Phone: string,
 	input: SendMediaInput
 ): Promise<{ wamId: string; mediaPath: string | null; sizeBytes: number }> {
+	return sendMediaToJid(tenantId, e164ToJid(toE164Phone), input);
+}
+
+/** Varianta pe JID a lui `sendMedia`, ca să meargă și în grup. */
+export async function sendMediaToJid(
+	tenantId: string,
+	jid: string,
+	input: SendMediaInput
+): Promise<{ wamId: string; mediaPath: string | null; sizeBytes: number }> {
 	const active = sessions.get(tenantId);
 	if (!active) throw new Error('WhatsApp session not connected');
 
 	await humanizedDelay(tenantId);
-	const jid = e164ToJid(toE164Phone);
 
 	try {
 		await active.sock.sendPresenceUpdate('composing', jid);
