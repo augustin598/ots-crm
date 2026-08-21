@@ -58,12 +58,19 @@
 				seen.add(u.id);
 				return true;
 			})
-			.map((u: { id: string; firstName?: string | null; lastName?: string | null; email: string }) => ({
-				id: u.id,
-				firstName: u.firstName ?? '',
-				lastName: u.lastName ?? '',
-				email: u.email
-			}));
+			.map(
+				(u: {
+					id: string;
+					firstName?: string | null;
+					lastName?: string | null;
+					email?: string | null;
+				}) => ({
+					id: u.id,
+					firstName: u.firstName ?? '',
+					lastName: u.lastName ?? '',
+					email: u.email ?? ''
+				})
+			);
 	});
 
 	const clientQuery = $derived(task?.clientId ? getClient(task.clientId) : null);
