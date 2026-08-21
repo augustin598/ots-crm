@@ -12,10 +12,11 @@ import { recordTaskActivity } from '$lib/server/task-activity';
 import { sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
 import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-recipients';
 import * as storage from '$lib/server/storage';
-import { createNotification } from '$lib/server/notifications';
-import { notifyTaskMention } from '$lib/server/telegram/task-notifications';
-import { notifyTaskMentionInGroup } from '$lib/server/whatsapp/task-notifications';
-import { logWarning } from '$lib/server/logger';
+import {
+	extractMentionIds,
+	newMentionIds,
+	notifyMentionTargets
+} from '$lib/server/task-comment-mentions';
 import { requireStaff } from '$lib/server/get-actor';
 
 /** Sanitize TipTap HTML - allow safe tags + mention attributes */
@@ -68,33 +69,6 @@ function assertTenantOwnedPath(path: string, tenantId: string): void {
 	if (!path.startsWith(expectedPrefix)) {
 		throw new Error('Invalid attachment path');
 	}
-}
-
-/**
- * Extract mentioned user IDs from TipTap HTML content.
- * TipTap outputs attributes in varying order, so we match data-id on any element
- * that also has data-type="mention" (handles both attribute orderings).
- */
-function extractMentionIds(html: string): string[] {
-	const ids: string[] = [];
-	// Match any tag that contains both data-type="mention" and data-id="..."
-	const tagRegex = /<[^>]*data-type="mention"[^>]*>/g;
-	let tagMatch;
-	while ((tagMatch = tagRegex.exec(html)) !== null) {
-		const idMatch = tagMatch[0].match(/data-id="([^"]+)"/);
-		if (idMatch?.[1] && !ids.includes(idMatch[1])) {
-			ids.push(idMatch[1]);
-		}
-	}
-	// Also match reversed order: data-id before data-type
-	const tagRegex2 = /<[^>]*data-id="([^"]+)"[^>]*data-type="mention"[^>]*>/g;
-	let tagMatch2;
-	while ((tagMatch2 = tagRegex2.exec(html)) !== null) {
-		if (tagMatch2[1] && !ids.includes(tagMatch2[1])) {
-			ids.push(tagMatch2[1]);
-		}
-	}
-	return ids;
 }
 
 export const getTaskComments = query(
@@ -340,105 +314,25 @@ export const createTaskComment = command(
 			}
 		}
 
-		// In-app + Telegram notifications for @mentions stay as before — they
-		// are a separate channel and fire even when email is throttled.
+		// În aplicație, Telegram și grupul WhatsApp pentru mențiuni. Canale
+		// separate de email: pleacă și când emailul e oprit din setări.
+		// Aceeași funcție e folosită și la editarea comentariului, ca o mențiune
+		// adăugată acolo să nu mai moară în tăcere.
 		if (mentionedUserIds.length > 0) {
-			const nonSelfMentionIds = mentionedUserIds.filter(
-				(id) => id !== event.locals.user!.id
-			);
 			const authorName =
 				`${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() ||
 				event.locals.user.email;
-			const tenantSlug = event.locals.tenant.slug;
-			// Numele celor menționați, pentru mesajul din grupul WhatsApp al task-ului.
-			// Doar oameni din tenantul curent (echipă sau utilizatori ai clienților):
-			// `user` n-are tenantId, iar `data-id` vine din HTML-ul trimis de client,
-			// deci fără filtrul ăsta un id fabricat ar strecura în grup numele unui
-			// utilizator din alt tenant. Aceeași apărare ca în task-recipients.ts.
-			const mentionedRows =
-				nonSelfMentionIds.length > 0
-					? await db
-							.selectDistinct({
-								id: table.user.id,
-								firstName: table.user.firstName,
-								lastName: table.user.lastName,
-								email: table.user.email
-							})
-							.from(table.user)
-							.leftJoin(
-								table.tenantUser,
-								and(
-									eq(table.tenantUser.userId, table.user.id),
-									eq(table.tenantUser.tenantId, event.locals.tenant.id)
-								)
-							)
-							.leftJoin(
-								table.clientUser,
-								and(
-									eq(table.clientUser.userId, table.user.id),
-									eq(table.clientUser.tenantId, event.locals.tenant.id)
-								)
-							)
-							.where(
-								and(
-									inArray(table.user.id, nonSelfMentionIds),
-									or(
-										isNotNull(table.tenantUser.userId),
-										isNotNull(table.clientUser.userId)
-									)
-								)
-							)
-					: [];
-			const mentionedNames = new Map(
-				mentionedRows.map((u) => [u.id, `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email])
-			);
-			for (const mentionedId of nonSelfMentionIds) {
-				await createNotification({
-					tenantId: event.locals.tenant.id,
-					userId: mentionedId,
-					clientId: task.clientId ?? undefined,
-					type: 'comment.mention',
-					title: `${authorName} te-a menționat`,
-					message: `Te-a menționat într-un comentariu la "${task.title}"`,
-					link: `/${tenantSlug}/tasks/${data.taskId}`,
-					priority: 'high',
-					metadata: { taskId: data.taskId, commentId }
-				}).catch(() => {});
-
-				void notifyTaskMention({
-					tenantId: event.locals.tenant.id,
-					tenantSlug,
-					taskId: data.taskId,
-					taskTitle: task.title,
-					mentionedUserId: mentionedId,
-					authorUserId: event.locals.user.id,
-					authorName,
-					commentSnippet: data.content
-				}).catch(() => {});
-			}
-
-			// WhatsApp: UN singur mesaj în grupul task-ului pentru toți cei
-			// menționați în comentariu. Per persoană ar însemna trei mesaje
-			// aproape identice la un comentariu cu trei mențiuni, exact volumul
-			// care duce la banarea numărului.
-			void notifyTaskMentionInGroup({
+			await notifyMentionTargets({
 				tenantId: event.locals.tenant.id,
-				tenantSlug,
+				tenantSlug: event.locals.tenant.slug,
 				taskId: data.taskId,
 				taskTitle: task.title,
-				authorUserId: event.locals.user.id,
-				authorName,
-				mentioned: nonSelfMentionIds
-					.filter((id) => mentionedNames.has(id))
-					.map((id) => ({ userId: id, name: mentionedNames.get(id)! })),
-				commentHtml: sanitizedContent
-			}).catch((err) => {
-				// Fără logul ăsta, o mențiune care nu ajunge în grup n-ar lăsa
-				// nicio urmă: nici rând în outbox, nici eroare nicăieri.
-				logWarning('whatsapp', `mențiunea nu a intrat în coada grupului: ${(err as Error).message}`, {
-					tenantId: event.locals.tenant!.id,
-					metadata: { taskId: data.taskId, commentId }
-				});
+				taskClientId: task.clientId ?? null,
+				commentId,
+				actorUserId: event.locals.user.id,
+				actorName: authorName,
+				contentHtml: sanitizedContent,
+				mentionedUserIds
 			});
 		}
 
@@ -528,13 +422,80 @@ export const updateTaskComment = command(
 			throw new Error('Unauthorized to update this comment');
 		}
 
+		const sanitizedContent = sanitizeCommentHtml(data.content);
+
 		await db
 			.update(table.taskComment)
 			.set({
-				content: sanitizeCommentHtml(data.content),
+				content: sanitizedContent,
 				updatedAt: new Date()
 			})
 			.where(and(eq(table.taskComment.id, data.commentId), eq(table.taskComment.taskId, comment.comment.taskId)));
+
+		// Mențiunile adăugate prin editare erau, până acum, mențiuni moarte: nici
+		// email, nici notificare în aplicație, nici Telegram, nici mesaj în grup.
+		// Se anunță doar cine e nou față de conținutul dinainte, ambele texte
+		// fiind sanitizate, deci comparabile. Altfel orice corectură de virgulă
+		// ar fi re-anunțat toată lumea menționată vreodată în comentariu.
+		const addedMentionIds = newMentionIds(comment.comment.content ?? '', sanitizedContent).filter(
+			(id) => id !== event.locals.user!.id
+		);
+
+		if (addedMentionIds.length > 0) {
+			const authorName =
+				`${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() ||
+				event.locals.user.email;
+
+			// Emailul merge doar către cei nou menționați. Lista completă de la un
+			// comentariu nou (responsabili, urmăritori) n-are ce căuta aici: o
+			// editare nu e un comentariu nou și nu trebuie să sune la nimeni care
+			// nu tocmai a fost strigat pe nume.
+			const [settings] = await db
+				.select({ internalEmailOnComment: table.taskSettings.internalEmailOnComment })
+				.from(table.taskSettings)
+				.where(eq(table.taskSettings.tenantId, event.locals.tenant.id))
+				.limit(1);
+			const internalEnabled = settings?.internalEmailOnComment !== false;
+
+			const recipients = await resolveTaskRecipients({
+				tenantId: event.locals.tenant.id,
+				tenantSlug: event.locals.tenant.slug,
+				taskId: comment.comment.taskId,
+				event: 'comment',
+				actorUserId: event.locals.user.id,
+				mentionedUserIds: addedMentionIds
+			});
+
+			for (const r of recipients) {
+				if (!addedMentionIds.includes(r.userId)) continue;
+				if (r.kind === 'agency' && !internalEnabled) continue;
+				try {
+					await sendTaskUpdateEmail(
+						comment.comment.taskId,
+						r.email,
+						r.name,
+						'mention',
+						r.taskUrl,
+						data.commentId
+					);
+				} catch (error) {
+					console.error(`Failed to send mention notification to ${r.email}:`, error);
+				}
+			}
+
+			await notifyMentionTargets({
+				tenantId: event.locals.tenant.id,
+				tenantSlug: event.locals.tenant.slug,
+				taskId: comment.comment.taskId,
+				taskTitle: comment.task.title,
+				taskClientId: comment.task.clientId ?? null,
+				commentId: data.commentId,
+				actorUserId: event.locals.user.id,
+				actorName: authorName,
+				contentHtml: sanitizedContent,
+				mentionedUserIds: addedMentionIds
+			});
+		}
 
 		return { success: true };
 	}
