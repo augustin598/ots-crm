@@ -22,6 +22,8 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import { cn } from '$lib/utils';
 	import { dragScroll } from '$lib/actions/drag-scroll';
+	import FeatureHint from './FeatureHint.svelte';
+	import { FEATURE_HINTS } from '$lib/constants/ots-catalog-feature-hints';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
@@ -205,7 +207,14 @@
 					<tbody>
 						{#each category.features as feature, i (feature.id)}
 							<tr class={cn('border-t border-border/70', i % 2 === 1 && 'bg-muted/30')}>
-								<td class={cn('sticky left-0 z-10 px-4 py-3 align-top font-medium text-foreground sm:static', i % 2 === 1 ? 'bg-muted/30 sm:bg-transparent' : 'bg-white dark:bg-background sm:bg-transparent')}>{feature.label}</td>
+								<td class={cn('sticky left-0 z-10 px-4 py-3 align-top font-medium text-foreground sm:static', i % 2 === 1 ? 'bg-muted/30 sm:bg-transparent' : 'bg-white dark:bg-background sm:bg-transparent')}>
+									<span class="inline-flex items-center">
+										{feature.label}
+										{#if FEATURE_HINTS[feature.id]}
+											<FeatureHint text={FEATURE_HINTS[feature.id]} label={feature.label} />
+										{/if}
+									</span>
+								</td>
 								{#each tiers as tier (tier)}
 									{@const value = feature.values[tier]}
 									<td class="px-3 py-3 text-center align-top">

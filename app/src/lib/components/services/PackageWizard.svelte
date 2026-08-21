@@ -8,9 +8,6 @@
   constantele direct; pagina publică pasează ce a primit din `load`.
 -->
 <script lang="ts">
-	import { Card } from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from 'svelte-sonner';
@@ -410,20 +407,13 @@
 			</button>
 		</div>
 	{:else if result}
-		<!-- ============= RESULT PAGE ============== -->
-		<div class="mb-8">
-			<div class="flex items-center gap-2 mb-1">
-				<SparklesIcon class="h-3.5 w-3.5 text-primary" />
-				<span class="text-[11px] font-medium uppercase tracking-wider text-primary">
-					Recomandarea ta
-				</span>
-			</div>
-			<h1 class="text-3xl font-bold tracking-tight">
-				Am găsit pachetul potrivit pentru tine
-			</h1>
-			<p class="text-muted-foreground mt-2">
-				Pe baza răspunsurilor tale, iată ce combinație funcționează cel mai bine.
-			</p>
+		<!-- ============= RESULT PAGE ==============
+		     Același limbaj vizual ca /servicii: carduri albe cu bordură --border și raze 18px,
+		     kicker albastru, chip-uri albe cu icon, cutii pe --bg-soft, butoanele paginii. -->
+		<div class="wz-head">
+			<span class="wz-kicker"><SparklesIcon class="h-3.5 w-3.5" /> Recomandarea ta</span>
+			<h1>Am găsit pachetul potrivit pentru tine</h1>
+			<p>Pe baza răspunsurilor tale, iată ce combinație funcționează cel mai bine.</p>
 		</div>
 
 		{@const primary = result.primary}
@@ -432,49 +422,22 @@
 		<!-- TIER ADVICE BANNER (if algorithm detected a better tier match) -->
 		{#if result.tierAdvice}
 			{@const advice = result.tierAdvice}
-			{@const isWarning = advice.severity === 'warning'}
-			<div
-				class="mb-6 rounded-lg border p-4 flex items-start gap-3 {isWarning
-					? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40'
-					: 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40'}"
-			>
-				<div
-					class="rounded-md p-1.5 shrink-0 {isWarning
-						? 'bg-amber-200/50 dark:bg-amber-900/50'
-						: 'bg-blue-200/50 dark:bg-blue-900/50'}"
-				>
-					{#if isWarning}
-						<LightbulbIcon class="h-4 w-4 text-amber-700 dark:text-amber-300" />
+			<div class={['wz-note', advice.severity === 'warning' && 'wz-note--warn']}>
+				<span class="wz-note-icon" aria-hidden="true">
+					{#if advice.severity === 'warning'}
+						<LightbulbIcon class="h-4 w-4" />
 					{:else}
-						<InfoIcon class="h-4 w-4 text-blue-700 dark:text-blue-300" />
+						<InfoIcon class="h-4 w-4" />
 					{/if}
-				</div>
-				<div class="flex-1 min-w-0">
-					<div
-						class="text-sm font-semibold mb-1 {isWarning
-							? 'text-amber-900 dark:text-amber-200'
-							: 'text-blue-900 dark:text-blue-200'}"
-					>
-						Sugestie: treci la pachetul {TIER_LABELS[advice.suggestedTier]}
-					</div>
-					<p
-						class="text-xs leading-relaxed {isWarning
-							? 'text-amber-800 dark:text-amber-300/90'
-							: 'text-blue-800 dark:text-blue-300/90'}"
-					>
-						{advice.rationale}
-					</p>
-					<div class="flex items-center gap-2 mt-3 flex-wrap">
-						<Button size="sm" variant="outline" onclick={() => applyTierAdvice(advice)}>
+				</span>
+				<div class="wz-note-body">
+					<strong>Sugestie: treci la pachetul {TIER_LABELS[advice.suggestedTier]}</strong>
+					<p>{advice.rationale}</p>
+					<div class="wz-note-actions">
+						<button type="button" class="wz-btn wz-btn-ghost wz-btn--sm" onclick={() => applyTierAdvice(advice)}>
 							Aplică sugestia ({TIER_LABELS[advice.suggestedTier]})
-						</Button>
-						<button
-							type="button"
-							onclick={() => (tierGuideOpen = true)}
-							class="inline-flex items-center gap-1 text-xs font-medium hover:underline {isWarning
-								? 'text-amber-900 dark:text-amber-200'
-								: 'text-blue-900 dark:text-blue-200'}"
-						>
+						</button>
+						<button type="button" class="wz-link" onclick={() => (tierGuideOpen = true)}>
 							Ce înseamnă pachetele?
 						</button>
 					</div>
@@ -483,294 +446,222 @@
 		{/if}
 
 		<!-- PRIMARY RECOMMENDATION -->
-		<Card
-			class="relative p-6 mb-6 border-2 border-primary/40 overflow-hidden {tierColors.metallic}"
-		>
-			<div
-				class="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/50 to-transparent dark:from-white/10"
-			></div>
-			<div class="relative">
-				<div class="flex items-center gap-2 mb-3 flex-wrap">
-					<Badge class="bg-primary text-primary-foreground">Top match</Badge>
-					<Badge class="border {tierColors.border} {tierColors.text} bg-white/70 dark:bg-black/30">
-						<span class="h-1.5 w-1.5 rounded-full {tierColors.dot} mr-1.5"></span>
+		<article class="wz-result">
+			<div class="wz-result-band {tierColors.metallic}" aria-hidden="true"></div>
+			<div class="wz-result-body">
+				<div class="wz-pills">
+					<span class="wz-pill wz-pill--accent">Top match</span>
+					<span class="wz-pill wz-pill--tier {tierColors.text}">
+						<span class="wz-dot {tierColors.dot}"></span>
 						Pachet {TIER_LABELS[primary.tier]}
-					</Badge>
-					<button
-						type="button"
-						onclick={() => (tierGuideOpen = true)}
-						class="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-					>
+					</span>
+					<button type="button" class="wz-link" onclick={() => (tierGuideOpen = true)}>
 						<HelpCircleIcon class="h-3 w-3" />
 						Ce înseamnă asta?
 					</button>
 				</div>
-				<h2 class="text-2xl font-bold {tierColors.text}">{primary.bundle.name}</h2>
-				<p class="text-sm {tierColors.text} opacity-80 mt-1">{primary.bundle.tagline}</p>
+				<h2 class="wz-result-title">{primary.bundle.name}</h2>
+				<p class="wz-result-tagline">{primary.bundle.tagline}</p>
 
 				<!-- Services included -->
-				<div class="flex flex-wrap gap-2 mt-4">
+				<div class="wz-chips">
 					{#each primary.bundle.services as slug (slug)}
-						<span
-							class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-white/70 dark:bg-black/30 border border-white/60 dark:border-white/10"
-						>
-							<CategoryIcon {slug} class="h-3.5 w-3.5" />
-							<span class="font-medium">{getCategory(slug)?.name}</span>
+						<span class="wz-chip">
+							<span class="wz-chip-icon"><CategoryIcon {slug} class="h-3.5 w-3.5" /></span>
+							{getCategory(slug)?.name}
 						</span>
 					{/each}
 				</div>
 
 				<!-- Cost breakdown: 3-step timeline (industry standard billing) -->
-				<div class="mt-6 space-y-3">
-					{#if primary.cost.includedSetup && primary.cost.setupTotal > 0}
-						<div class="text-xs uppercase tracking-wider font-semibold text-muted-foreground mb-2">
-							Cum se facturează
-						</div>
-
-						<!-- Step 1: Contract signing — setup fee -->
-						<div
-							class="rounded-lg bg-white/80 dark:bg-black/40 border border-white/60 dark:border-white/10 p-4"
-						>
-							<div class="flex items-start gap-3">
-								<span
-									class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold shrink-0"
-								>
-									1
-								</span>
-								<div class="min-w-0 flex-1">
-									<div class="flex items-baseline justify-between gap-2 flex-wrap mb-1">
-										<span class="text-sm font-semibold">La semnarea contractului</span>
-										<span class="text-xl font-bold">{formatEur(primary.cost.setupTotal)}</span>
+				{#if primary.cost.includedSetup && primary.cost.setupTotal > 0}
+					<div class="wz-box">
+						<div class="wz-box-kicker">Cum se facturează</div>
+						<ol class="wz-bill">
+							<li class="wz-bill-step">
+								<span class="wz-bill-n">1</span>
+								<div class="wz-bill-body">
+									<div class="wz-bill-row">
+										<span class="wz-bill-label">La semnarea contractului</span>
+										<span class="wz-bill-amount">{formatEur(primary.cost.setupTotal)}</span>
 									</div>
-									<p class="text-xs text-muted-foreground leading-snug">
+									<p>
 										<strong>Taxă implementare tehnică</strong> — GTM, GA4, Pixel, Consent Mode v2
 										(GDPR), structurare conturi, prima configurație campanii. Plătită înainte să
 										pornim munca, o singură dată.
 									</p>
 								</div>
-							</div>
-						</div>
-
-						<!-- Step 2: Campaign launch — first monthly -->
-						<div
-							class="rounded-lg bg-white/80 dark:bg-black/40 border border-white/60 dark:border-white/10 p-4"
-						>
-							<div class="flex items-start gap-3">
-								<span
-									class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold shrink-0"
-								>
-									2
-								</span>
-								<div class="min-w-0 flex-1">
-									<div class="flex items-baseline justify-between gap-2 flex-wrap mb-1">
-										<span class="text-sm font-semibold">La lansarea campaniilor (~10-14 zile)</span>
-										<span class="text-xl font-bold">
-											{formatEur(primary.cost.monthlyAfterDiscount)}
-										</span>
+							</li>
+							<li class="wz-bill-step">
+								<span class="wz-bill-n">2</span>
+								<div class="wz-bill-body">
+									<div class="wz-bill-row">
+										<span class="wz-bill-label">La lansarea campaniilor (~10–14 zile)</span>
+										<span class="wz-bill-amount">{formatEur(primary.cost.monthlyAfterDiscount)}</span>
 									</div>
-									<p class="text-xs text-muted-foreground leading-snug">
+									<p>
 										<strong>Primul abonament lunar</strong> — se facturează în ziua lansării
 										campaniilor, nu la final de lună.
 									</p>
 								</div>
-							</div>
-						</div>
-
-						<!-- Step 3: Recurring -->
-						<div
-							class="rounded-lg bg-white/80 dark:bg-black/40 border border-white/60 dark:border-white/10 p-4"
-						>
-							<div class="flex items-start gap-3">
-								<span
-									class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-muted-foreground/25 text-foreground text-xs font-bold shrink-0"
-								>
-									3+
-								</span>
-								<div class="min-w-0 flex-1">
-									<div class="flex items-baseline justify-between gap-2 flex-wrap mb-1">
-										<span class="text-sm font-semibold">Din luna a 2-a, recurent</span>
-										<span class="text-xl font-bold">
-											{formatEur(primary.cost.monthlyAfterDiscount)}<span
-												class="text-xs font-normal text-muted-foreground"
-											>
-												/lună</span
-											>
+							</li>
+							<li class="wz-bill-step">
+								<span class="wz-bill-n wz-bill-n--muted">3+</span>
+								<div class="wz-bill-body">
+									<div class="wz-bill-row">
+										<span class="wz-bill-label">Din luna a 2-a, recurent</span>
+										<span class="wz-bill-amount">
+											{formatEur(primary.cost.monthlyAfterDiscount)}<small>/lună</small>
 										</span>
 									</div>
-									<p class="text-xs text-muted-foreground leading-snug">
+									<p>
 										<strong>Doar abonamentul lunar</strong>, fără setup. Implementarea tehnică e deja
 										făcută.
 									</p>
 								</div>
-							</div>
-						</div>
-
+							</li>
+						</ol>
 						{#if primary.cost.discountPct > 0}
-							<div
-								class="rounded-lg bg-primary/10 border border-primary/20 px-4 py-2.5 text-xs flex items-center justify-between gap-2 flex-wrap"
-							>
-								<span class="text-muted-foreground">
-									Abonament brut:
-									<span class="line-through">{formatEur(primary.cost.monthlyTotal)}/lună</span>
+							<div class="wz-discount">
+								<span>
+									Abonament brut: <s>{formatEur(primary.cost.monthlyTotal)}/lună</s>
 								</span>
-								<span class="text-primary font-semibold">
+								<strong>
 									Discount multi-servicii −{primary.cost.discountPct}% = economisești
 									{formatEur(primary.cost.monthlySavings)}/lună
-								</span>
+								</strong>
 							</div>
 						{/if}
-					{:else}
-						<!-- No setup needed (continuing project) -->
-						<div
-							class="rounded-lg bg-white/80 dark:bg-black/40 p-4 border border-white/60 dark:border-white/10"
-						>
-							<div class="flex items-center gap-2 mb-2">
-								<span class="text-xs uppercase tracking-wider font-semibold">
-									Cost lunar (fără setup)
-								</span>
+					</div>
+				{:else}
+					<!-- No setup needed (continuing project) -->
+					<div class="wz-box wz-box--price">
+						<div class="wz-box-kicker">Cost lunar (fără setup)</div>
+						{#if primary.cost.discountPct > 0}
+							<div class="wz-price-was">
+								<s>{formatEur(primary.cost.monthlyTotal)}</s>
+								<span class="wz-price-off">−{primary.cost.discountPct}%</span>
 							</div>
-							{#if primary.cost.discountPct > 0}
-								<div class="flex items-baseline gap-2">
-									<span class="text-sm line-through text-muted-foreground">
-										{formatEur(primary.cost.monthlyTotal)}
-									</span>
-									<span class="text-xs font-semibold text-primary">
-										−{primary.cost.discountPct}%
-									</span>
-								</div>
-							{/if}
-							<div class="text-3xl font-bold">
-								{formatEur(primary.cost.monthlyAfterDiscount)}
-								<span class="text-sm font-normal text-muted-foreground">/lună</span>
-							</div>
-							<p class="text-xs text-muted-foreground mt-1">
-								Folosim conturile tale existente — zero setup nou.
-							</p>
+						{/if}
+						<div class="wz-price">
+							{formatEur(primary.cost.monthlyAfterDiscount)}<small>/lună</small>
 						</div>
-					{/if}
-				</div>
+						<p class="wz-price-note">Folosim conturile tale existente — zero setup nou.</p>
+					</div>
+				{/if}
 
 				<!-- Why this -->
-				<div class="mt-6 rounded-lg bg-white/70 dark:bg-black/30 p-4 border border-white/60 dark:border-white/10">
-					<div class="text-xs uppercase tracking-wider text-muted-foreground mb-2">
-						De ce ți-am recomandat asta
-					</div>
-					<ul class="space-y-1.5">
+				<div class="wz-box">
+					<div class="wz-box-kicker">De ce ți-am recomandat asta</div>
+					<ul class="wz-why">
 						{#each primary.reasonWhy as reason (reason)}
-							<li class="flex items-start gap-2 text-sm">
+							<li>
 								<CheckIcon class="wz-opt-check wz-opt-check--sm" />
 								<span>{reason}</span>
 							</li>
 						{/each}
 					</ul>
-					<p class="text-xs text-muted-foreground mt-3 italic">
-						{primary.bundle.rationale}
-					</p>
+					<p class="wz-why-rationale">{primary.bundle.rationale}</p>
 				</div>
 
 				<!-- Warnings -->
 				{#if result.warnings.length > 0}
-					<div
-						class="mt-4 rounded-lg bg-amber-100 dark:bg-amber-950/40 p-3 border border-amber-300 dark:border-amber-800"
-					>
-						{#each result.warnings as warn (warn)}
-							<div class="flex items-start gap-2 text-sm text-amber-900 dark:text-amber-200">
-								<AlertTriangleIcon class="h-4 w-4 shrink-0 mt-0.5" />
-								<span>{warn}</span>
-							</div>
-						{/each}
-						<button
-							type="button"
-							onclick={() => (tierGuideOpen = true)}
-							class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amber-900 dark:text-amber-200 hover:underline"
-						>
-							<HelpCircleIcon class="h-3.5 w-3.5" />
-							Ce înseamnă Bronze / Silver / Gold / Platinum?
-						</button>
+					<div class="wz-note wz-note--warn wz-note--stack">
+						<span class="wz-note-icon" aria-hidden="true"><AlertTriangleIcon class="h-4 w-4" /></span>
+						<div class="wz-note-body">
+							{#each result.warnings as warn (warn)}
+								<p>{warn}</p>
+							{/each}
+							<button type="button" class="wz-link" onclick={() => (tierGuideOpen = true)}>
+								<HelpCircleIcon class="h-3.5 w-3.5" />
+								Ce înseamnă Bronze / Silver / Gold / Platinum?
+							</button>
+						</div>
 					</div>
 				{/if}
 
 				<!-- CTA -->
-				<div class="mt-6 flex flex-wrap gap-3">
-					<Button size="lg" class="ots-gloss" onclick={() => requestBundle(primary)} disabled={submitting}>
-						{submitting ? 'Se trimite...' : 'Trimit cerere pentru acest pachet'}
-						<ArrowRightIcon class="h-4 w-4 ml-2" />
-					</Button>
-					<Button variant="outline" onclick={restart}>
-						<RotateCcwIcon class="h-4 w-4 mr-2" />
+				<div class="wz-result-cta">
+					<button
+						type="button"
+						class="wz-btn wz-btn-primary ots-gloss"
+						onclick={() => requestBundle(primary)}
+						disabled={submitting}
+					>
+						{submitting ? 'Se trimite…' : 'Trimit cerere pentru acest pachet'}
+						<ArrowRightIcon class="h-4 w-4" />
+					</button>
+					<button type="button" class="wz-btn wz-btn-ghost" onclick={restart}>
+						<RotateCcwIcon class="h-4 w-4" />
 						Răspunde din nou
-					</Button>
+					</button>
 				</div>
 			</div>
-		</Card>
+		</article>
 
 		<!-- ALTERNATIVES -->
 		{#if result.alternatives.length > 0}
-			<h2 class="text-xl font-semibold mb-1 mt-10">Alternative de explorat</h2>
-			<p class="wz-q-hint">
-				Dacă recomandarea principală nu e exact ce ai în minte, uite alte 2 variante.
-			</p>
-			<div class="grid gap-4 sm:grid-cols-2">
+			<div class="wz-alt-head">
+				<h2>Alternative de explorat</h2>
+				<p>Dacă recomandarea principală nu e exact ce ai în minte, uite alte 2 variante.</p>
+			</div>
+			<div class="wz-alts">
 				{#each result.alternatives as alt (alt.bundle.id)}
 					{@const altColors = TIER_COLORS[alt.tier]}
-					<Card class="p-5 hover:border-primary/50 transition-colors">
-						<div class="flex items-center gap-2 mb-2 flex-wrap">
-							<h3 class="font-semibold">{alt.bundle.name}</h3>
-							<span
-								class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border {altColors.border} {altColors.text} {altColors.bg}"
-							>
-								<span class="h-1.5 w-1.5 rounded-full {altColors.dot}"></span>
-								{TIER_LABELS[alt.tier]}
-							</span>
-						</div>
-						{#if alt.reasonLabel}
-							<p class="text-[11px] font-medium uppercase tracking-wider text-primary mb-1">
-								{alt.reasonLabel}
-							</p>
-						{/if}
-						<p class="text-xs text-muted-foreground mb-3">{alt.bundle.tagline}</p>
-
-						<div class="flex flex-wrap gap-1.5 mb-3">
-							{#each alt.bundle.services as slug (slug)}
-								<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-muted">
-									<CategoryIcon {slug} class="h-3 w-3" />
-									{getCategory(slug)?.name}
+					<article class="wz-alt">
+						<div class="wz-alt-band {altColors.metallic}" aria-hidden="true"></div>
+						<div class="wz-alt-body">
+							<div class="wz-pills">
+								<h3 class="wz-alt-title">{alt.bundle.name}</h3>
+								<span class="wz-pill wz-pill--tier {altColors.text}">
+									<span class="wz-dot {altColors.dot}"></span>
+									{TIER_LABELS[alt.tier]}
 								</span>
-							{/each}
-						</div>
-
-						<div class="pt-3 border-t flex items-baseline justify-between gap-2 text-sm">
-							<span class="font-bold">
-								{formatEur(alt.cost.monthlyAfterDiscount)}
-								<span class="text-xs font-normal text-muted-foreground">/lună</span>
-							</span>
-							{#if alt.cost.discountPct > 0}
-								<span class="text-xs text-primary">−{alt.cost.discountPct}%</span>
-							{/if}
-						</div>
-						{#if alt.cost.includedSetup && alt.cost.setupTotal > 0}
-							<div class="text-xs text-muted-foreground mt-1">
-								Setup one-time: {formatEur(alt.cost.setupTotal)}
 							</div>
-						{/if}
+							{#if alt.reasonLabel}
+								<p class="wz-alt-reason">{alt.reasonLabel}</p>
+							{/if}
+							<p class="wz-alt-tagline">{alt.bundle.tagline}</p>
 
-						<Button
-							variant="outline"
-							size="sm"
-							class="w-full mt-4"
-							onclick={() => requestBundle(alt)}
-							disabled={submitting}
-						>
-							Alege această variantă
-						</Button>
-					</Card>
+							<div class="wz-chips wz-chips--sm">
+								{#each alt.bundle.services as slug (slug)}
+									<span class="wz-chip">
+										<span class="wz-chip-icon"><CategoryIcon {slug} class="h-3 w-3" /></span>
+										{getCategory(slug)?.name}
+									</span>
+								{/each}
+							</div>
+
+							<div class="wz-alt-price">
+								<span class="wz-alt-amount">
+									{formatEur(alt.cost.monthlyAfterDiscount)}<small>/lună</small>
+								</span>
+								{#if alt.cost.discountPct > 0}
+									<span class="wz-price-off">−{alt.cost.discountPct}%</span>
+								{/if}
+							</div>
+							{#if alt.cost.includedSetup && alt.cost.setupTotal > 0}
+								<div class="wz-alt-setup">Setup one-time: {formatEur(alt.cost.setupTotal)}</div>
+							{/if}
+
+							<button
+								type="button"
+								class="wz-btn wz-btn-ghost wz-btn--block"
+								onclick={() => requestBundle(alt)}
+								disabled={submitting}
+							>
+								Alege această variantă
+								<ArrowRightIcon class="h-4 w-4" />
+							</button>
+						</div>
+					</article>
 				{/each}
 			</div>
 		{/if}
 
-		<section class="rounded-lg bg-muted/40 p-4 mt-8 text-sm">
-			<p class="font-medium mb-1">Despre prețurile afișate</p>
-			<p class="text-xs text-muted-foreground leading-relaxed">
+		<section class="wz-fine">
+			<strong>Despre prețurile afișate</strong>
+			<p>
 				Costurile de mai sus sunt doar pentru managementul OTS, în EUR fără TVA. Bugetul media
 				(banii care merg în platforme) și costul platformelor externe (Brevo, HubSpot etc.) se
 				plătesc separat direct către furnizor. Oferta finală o confirmăm după un audit scurt —
@@ -1004,6 +895,459 @@
 			transition: none;
 		}
 	}
+
+	/* ===== Rezultat — același limbaj ca /servicii ===== */
+	.wz-note {
+		display: flex;
+		gap: 12px;
+		align-items: flex-start;
+		margin-bottom: 20px;
+		padding: 14px 16px;
+		border: 1px solid #bfdbfe;
+		border-left: 3px solid var(--accent);
+		border-radius: 14px;
+		background: #f5f9ff;
+		color: var(--ink);
+	}
+	.wz-note--warn {
+		border-color: #fde68a;
+		border-left-color: #d97706;
+		background: #fffbeb;
+	}
+	.wz-note--stack {
+		margin: 20px 0 0;
+	}
+	.wz-note-icon {
+		width: 30px;
+		height: 30px;
+		border-radius: 9px;
+		display: grid;
+		place-items: center;
+		background: rgba(24, 119, 242, 0.12);
+		color: var(--accent-dark);
+		flex-shrink: 0;
+	}
+	.wz-note--warn .wz-note-icon {
+		background: rgba(217, 119, 6, 0.14);
+		color: #b45309;
+	}
+	.wz-note-body {
+		min-width: 0;
+		flex: 1;
+		font-size: 13.5px;
+	}
+	.wz-note-body strong {
+		display: block;
+		font-weight: 700;
+		margin-bottom: 2px;
+	}
+	.wz-note-body p {
+		margin: 0;
+		color: var(--ink2);
+		line-height: 1.5;
+	}
+	.wz-note-body p + p {
+		margin-top: 4px;
+	}
+	.wz-note-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px 14px;
+		margin-top: 10px;
+	}
+	.wz-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 0;
+		border: none;
+		background: none;
+		font-family: inherit;
+		font-size: 12.5px;
+		font-weight: 600;
+		color: var(--accent-dark);
+		cursor: pointer;
+	}
+	.wz-link:hover {
+		text-decoration: underline;
+	}
+	.wz-btn--sm {
+		padding: 8px 14px;
+		font-size: 12.5px;
+	}
+	.wz-btn--block {
+		width: 100%;
+		justify-content: center;
+		margin-top: 16px;
+	}
+
+	.wz-result,
+	.wz-alt {
+		background: white;
+		border: 1px solid var(--border);
+		border-radius: 18px;
+		overflow: hidden;
+	}
+	.wz-result {
+		border-color: rgba(24, 119, 242, 0.35);
+		box-shadow: 0 18px 44px rgba(11, 18, 32, 0.08);
+		margin-bottom: 28px;
+	}
+	/* Banda de tier: singura urmă de culoare „metalică”, ca în dialogul de comparație. */
+	.wz-result-band,
+	.wz-alt-band {
+		height: 6px;
+	}
+	.wz-result-body {
+		padding: 26px 28px 28px;
+	}
+	.wz-pills {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px 10px;
+		margin-bottom: 12px;
+	}
+	.wz-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 10px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		border: 1px solid var(--border);
+		background: white;
+		color: var(--ink2);
+	}
+	.wz-pill--accent {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: white;
+	}
+	.wz-dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+	}
+	.wz-result-title {
+		margin: 0;
+		font-size: 28px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		color: var(--ink);
+	}
+	.wz-result-tagline {
+		margin: 4px 0 0;
+		font-size: 15px;
+		color: var(--ink2);
+	}
+	.wz-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 16px;
+	}
+	.wz-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 12px 6px 6px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: white;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--ink);
+	}
+	.wz-chips--sm .wz-chip {
+		font-size: 12px;
+		padding: 4px 10px 4px 4px;
+	}
+	.wz-chip-icon {
+		width: 26px;
+		height: 26px;
+		border-radius: 8px;
+		background: var(--bg-soft);
+		display: grid;
+		place-items: center;
+	}
+	.wz-chips--sm .wz-chip-icon {
+		width: 22px;
+		height: 22px;
+	}
+
+	.wz-box {
+		margin-top: 20px;
+		padding: 18px 20px;
+		border: 1px solid var(--border);
+		border-radius: 14px;
+		background: var(--bg-soft);
+	}
+	.wz-box-kicker {
+		font-size: 11px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--ink2);
+		margin-bottom: 12px;
+	}
+	.wz-bill {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.wz-bill-step {
+		display: flex;
+		gap: 12px;
+		align-items: flex-start;
+		padding: 14px 16px;
+		background: white;
+		border: 1px solid var(--border);
+		border-radius: 12px;
+	}
+	.wz-bill-n {
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		display: grid;
+		place-items: center;
+		background: var(--accent);
+		color: white;
+		font-size: 12px;
+		font-weight: 800;
+		flex-shrink: 0;
+	}
+	.wz-bill-n--muted {
+		background: #e2e8f0;
+		color: var(--ink);
+	}
+	.wz-bill-body {
+		min-width: 0;
+		flex: 1;
+	}
+	.wz-bill-body p {
+		margin: 4px 0 0;
+		font-size: 12.5px;
+		line-height: 1.45;
+		color: var(--ink2);
+	}
+	.wz-bill-body p strong {
+		color: var(--ink);
+	}
+	.wz-bill-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 4px 12px;
+	}
+	.wz-bill-label {
+		font-size: 14px;
+		font-weight: 700;
+	}
+	.wz-bill-amount {
+		font-size: 20px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		color: var(--ink);
+		white-space: nowrap;
+	}
+	.wz-bill-amount small,
+	.wz-price small,
+	.wz-alt-amount small {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--ink2);
+		margin-left: 2px;
+	}
+	.wz-discount {
+		margin-top: 12px;
+		padding: 10px 14px;
+		border: 1px solid rgba(16, 185, 129, 0.3);
+		border-radius: 10px;
+		background: rgba(16, 185, 129, 0.08);
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		gap: 4px 12px;
+		font-size: 12.5px;
+		color: var(--ink2);
+	}
+	.wz-discount strong {
+		color: #047857;
+		font-weight: 700;
+	}
+	.wz-box--price .wz-box-kicker {
+		margin-bottom: 6px;
+	}
+	.wz-price-was {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+		color: var(--ink2);
+	}
+	.wz-price-off {
+		font-size: 11px;
+		font-weight: 800;
+		color: #047857;
+		background: rgba(16, 185, 129, 0.12);
+		padding: 2px 7px;
+		border-radius: 999px;
+	}
+	.wz-price {
+		font-size: 34px;
+		font-weight: 800;
+		letter-spacing: -0.03em;
+		line-height: 1.1;
+		color: var(--ink);
+		margin-top: 2px;
+	}
+	.wz-price-note {
+		margin: 6px 0 0;
+		font-size: 12.5px;
+		color: var(--ink2);
+	}
+	.wz-why {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.wz-why li {
+		display: flex;
+		gap: 8px;
+		align-items: flex-start;
+		font-size: 14px;
+		color: var(--ink);
+	}
+	.wz-why-rationale {
+		margin: 12px 0 0;
+		font-size: 12.5px;
+		font-style: italic;
+		color: var(--ink2);
+		line-height: 1.5;
+	}
+	.wz-result-cta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12px;
+		margin-top: 24px;
+	}
+
+	.wz-alt-head {
+		margin: 36px 0 16px;
+	}
+	.wz-alt-head h2 {
+		margin: 0;
+		font-size: 22px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+	}
+	.wz-alt-head p {
+		margin: 4px 0 0;
+		font-size: 14px;
+		color: var(--ink2);
+	}
+	.wz-alts {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 16px;
+	}
+	.wz-alt {
+		transition:
+			border-color 0.15s,
+			box-shadow 0.15s,
+			transform 0.15s;
+	}
+	.wz-alt:hover {
+		border-color: rgba(24, 119, 242, 0.45);
+		box-shadow: 0 14px 34px rgba(11, 18, 32, 0.08);
+		transform: translateY(-2px);
+	}
+	.wz-alt-body {
+		padding: 18px 20px 20px;
+	}
+	.wz-alt-title {
+		margin: 0;
+		font-size: 17px;
+		font-weight: 800;
+		letter-spacing: -0.01em;
+	}
+	.wz-alt-reason {
+		margin: 0 0 4px;
+		font-size: 11px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+	.wz-alt-tagline {
+		margin: 0;
+		font-size: 13px;
+		color: var(--ink2);
+	}
+	.wz-alt .wz-chips {
+		margin-top: 12px;
+	}
+	.wz-alt-price {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		margin-top: 14px;
+		padding-top: 12px;
+		border-top: 1px solid var(--border);
+	}
+	.wz-alt-amount {
+		font-size: 20px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		color: var(--ink);
+	}
+	.wz-alt-setup {
+		margin-top: 4px;
+		font-size: 12px;
+		color: var(--ink2);
+	}
+	.wz-fine {
+		margin-top: 28px;
+		padding: 16px 18px;
+		border: 1px solid var(--border);
+		border-radius: 14px;
+		background: var(--bg-soft);
+		font-size: 13px;
+	}
+	.wz-fine strong {
+		display: block;
+		margin-bottom: 4px;
+		font-weight: 700;
+	}
+	.wz-fine p {
+		margin: 0;
+		font-size: 12.5px;
+		line-height: 1.55;
+		color: var(--ink2);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.wz-alt {
+			transition: none;
+		}
+		.wz-alt:hover {
+			transform: none;
+		}
+	}
+
 	@media (max-width: 640px) {
 		.wz-inner {
 			padding: 20px 16px 56px;
@@ -1016,6 +1360,19 @@
 		}
 		.wz-nav .wz-btn {
 			flex: 1;
+			justify-content: center;
+		}
+		.wz-result-body {
+			padding: 20px;
+		}
+		.wz-result-title {
+			font-size: 24px;
+		}
+		.wz-alts {
+			grid-template-columns: 1fr;
+		}
+		.wz-result-cta .wz-btn {
+			flex: 1 1 100%;
 			justify-content: center;
 		}
 	}

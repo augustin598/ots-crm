@@ -628,7 +628,8 @@ function explainPrimary(
 	bundle: Bundle,
 	answers: WizardAnswers,
 	tier: Tier,
-	score: ScoringVector
+	score: ScoringVector,
+	catalog: WizardCatalog
 ): string[] {
 	const reasons: string[] = [];
 	const biz = BUSINESS_TYPE_OPTIONS.find((b) => b.value === answers.businessType);
@@ -665,9 +666,12 @@ function explainPrimary(
 		}
 	}
 
-	if (bundle.discountPct > 0) {
+	// Același discount ca în costul afișat (regula pe numărul de servicii), nu
+	// `bundle.discountPct` — altfel textul spunea −15% lângă un calcul cu −10%.
+	const appliedDiscount = discountForServiceCount(bundle.services.length, catalog);
+	if (appliedDiscount > 0) {
 		reasons.push(
-			`Combinația de ${bundle.services.length} servicii aduce automat −${bundle.discountPct}% discount multi-servicii.`
+			`Combinația de ${bundle.services.length} servicii aduce automat −${appliedDiscount}% discount multi-servicii.`
 		);
 	}
 
@@ -713,7 +717,8 @@ function estimateMonthlyCost(bundle: Bundle, tier: Tier, catalog: WizardCatalog)
 		const cat = pickCategory(catalog, slug);
 		return sum + (cat?.prices[tier] ?? 0);
 	}, 0);
-	return Math.round((monthly * (100 - bundle.discountPct)) / 100);
+	// Aceeași regulă ca `calculateCost`, ca „economisești ~X €/lună" să corespundă prețurilor afișate.
+	return Math.round((monthly * (100 - discountForServiceCount(bundle.services.length, catalog))) / 100);
 }
 
 function selectRecommendations(
@@ -731,7 +736,7 @@ function selectRecommendations(
 		bundle: primaryScored.bundle,
 		tier,
 		cost: calculateCost(primaryScored.bundle.services, tier, includeSetup, catalog),
-		reasonWhy: explainPrimary(primaryScored.bundle, answers, tier, primaryScored.scoreVector),
+		reasonWhy: explainPrimary(primaryScored.bundle, answers, tier, primaryScored.scoreVector, catalog),
 		warnings: [],
 		isCustom: false,
 		score: Math.round(primaryScored.scoreVector.finalScore)

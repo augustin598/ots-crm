@@ -40,6 +40,8 @@
 	import { ServicesCart } from './services-cart.svelte';
 	import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
 	import { dragScroll } from '$lib/actions/drag-scroll';
+	import FeatureHint from '$lib/components/services/FeatureHint.svelte';
+	import { FEATURE_HINTS } from '$lib/constants/ots-catalog-feature-hints';
 	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
 	import type { Category, Tier } from '$lib/constants/ots-catalog';
 	import type { PublicCatalog, PublicCompany } from './types';
@@ -217,7 +219,14 @@
 				<tbody>
 					{#each catalog.crmFeatures as feat (feat.id)}
 						<tr>
-							<th scope="row" class="sv-td-label">{feat.label}</th>
+							<th scope="row" class="sv-td-label">
+								<span class="sv-td-label-inner">
+									{feat.label}
+									{#if FEATURE_HINTS[feat.id]}
+										<FeatureHint text={FEATURE_HINTS[feat.id]} label={feat.label} />
+									{/if}
+								</span>
+							</th>
 							{#each catalog.tiers as tier (tier)}
 								{@const value = feat.values[tier]}
 								<td class="sv-td-val">
@@ -847,6 +856,10 @@
 		text-align: left;
 		font-weight: 500;
 		color: var(--ink2);
+	}
+	.sv-td-label-inner {
+		display: inline-flex;
+		align-items: center;
 	}
 	.sv-td-val {
 		padding: 11px 18px;
