@@ -101,6 +101,7 @@
 			billingCycle: a.billingCycle,
 			additionalDomains: a.additionalDomains ?? null,
 			autoRenew: a.autoRenew,
+			billingExcluded: a.billingExcluded ?? false,
 			paymentMethod: (a.paymentMethod === 'card' || a.paymentMethod === 'cash' ? a.paymentMethod : 'op'),
 			paymentReference: a.paymentReference ?? null,
 			paymentNote: a.paymentNote ?? null,

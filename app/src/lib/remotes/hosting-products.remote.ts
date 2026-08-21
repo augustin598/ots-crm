@@ -317,9 +317,12 @@ export const getHostingProductStats = query(async () => {
 	const rows = await db
 		.select({
 			productId: table.hostingAccount.hostingProductId,
-			sold: sql<number>`COUNT(*)`.as('sold'),
+			// Conturile „personale" nu sunt vânzări — le ținem în afara ambelor cifre,
+			// ca `sold` și `mrrCents` să spună aceeași poveste.
+			sold: sql<number>`SUM(CASE WHEN ${table.hostingAccount.billingExcluded} THEN 0 ELSE 1 END)`.as('sold'),
 			mrrCents: sql<number>`
 				COALESCE(SUM(ROUND(
+					CASE WHEN ${table.hostingAccount.billingExcluded} THEN 0 ELSE
 					CASE ${table.hostingAccount.billingCycle}
 						WHEN 'monthly'      THEN ${table.hostingAccount.recurringAmount} * 1.0
 						WHEN 'quarterly'    THEN ${table.hostingAccount.recurringAmount} * 1.0 / 3
@@ -329,6 +332,7 @@ export const getHostingProductStats = query(async () => {
 						WHEN 'biennially'   THEN ${table.hostingAccount.recurringAmount} * 1.0 / 24
 						WHEN 'triennially'  THEN ${table.hostingAccount.recurringAmount} * 1.0 / 36
 						ELSE 0
+					END
 					END
 				)), 0)
 			`.as('mrr_cents')

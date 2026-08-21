@@ -1077,6 +1077,19 @@ export const hostingAccount = sqliteTable(
 		/** Whether the contract renews automatically. UI toggle on the "Ciclu" column. */
 		autoRenew: integer('auto_renew', { mode: 'boolean' }).notNull().default(true),
 		/**
+		 * „Cont personal" — contul e scos COMPLET din circuitul de facturare:
+		 *  - `upsertRecurringInvoiceForHostingAccount` iese din start, deci NU se
+		 *    creează/actualizează șablon recurent ȘI nu se mai suprascrie
+		 *    `recurringAmount` cu prețul din catalog (suma pusă manual, inclusiv 0,
+		 *    rămâne cea introdusă);
+		 *  - nu intră în MRR/ARR (panou conturi, dashboard hosting, MRR per produs);
+		 *  - nu apare la „facturare în risc";
+		 *  - nu primește emailuri de reînnoire.
+		 * Pentru conturile proprii (demo, interne, test) sau cele facturate în alt
+		 * mod. La activare, șablonul recurent existent e dezactivat.
+		 */
+		billingExcluded: integer('billing_excluded', { mode: 'boolean' }).notNull().default(false),
+		/**
 		 * Default payment method for recurring invoices on this account.
 		 * - 'op' (transfer bancar): Keez emits the fiscal invoice as usual (default).
 		 * - 'card': Keez emits the fiscal invoice (collected via Stripe/POS).

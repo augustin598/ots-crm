@@ -783,6 +783,8 @@ const UpdateAccountSchema = v.object({
 	),
 	additionalDomains: v.optional(v.nullable(v.array(v.string()))),
 	autoRenew: v.optional(v.boolean()),
+	/** „Cont personal" — scoate contul din facturare/reînnoire/MRR. */
+	billingExcluded: v.optional(v.boolean()),
 	paymentMethod: v.optional(v.picklist(['card', 'op', 'cash'])),
 	// Referință + comentariu pe plată (nr. OP / nr. chitanță / id tranzacție card).
 	// Trimise mereu împreună cu `paymentMethod` din tab-ul „Plată & Factură".
@@ -882,6 +884,7 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 	if (data.billingCycle !== undefined) updates.billingCycle = data.billingCycle;
 	if (data.additionalDomains !== undefined) updates.additionalDomains = data.additionalDomains;
 	if (data.autoRenew !== undefined) updates.autoRenew = data.autoRenew;
+	if (data.billingExcluded !== undefined) updates.billingExcluded = data.billingExcluded;
 	if (data.paymentMethod !== undefined) updates.paymentMethod = data.paymentMethod;
 	if (data.paymentReference !== undefined)
 		updates.paymentReference = data.paymentReference?.trim() || null;
@@ -937,6 +940,29 @@ export const updateHostingAccount = command(UpdateAccountSchema, async (data) =>
 		});
 		invoicesMarkedPaid = outcome.marked;
 		invoicesSkipped = outcome.skipped;
+	}
+
+	// Bifarea „cont personal" trebuie să oprească și facturarea DEJA pornită:
+	// `upsertRecurringInvoiceForHostingAccount` iese din start pentru conturile
+	// excluse, deci n-ar dezactiva niciodată singur un șablon rămas activ — iar
+	// scheduler-ul ar continua să emită proforme pentru un cont scos din facturare.
+	if (data.billingExcluded === true) {
+		try {
+			await db
+				.update(table.recurringInvoice)
+				.set({ isActive: false, updatedAt: new Date() })
+				.where(
+					and(
+						eq(table.recurringInvoice.tenantId, tenantId),
+						eq(table.recurringInvoice.hostingAccountId, data.id),
+						eq(table.recurringInvoice.isActive, true)
+					)
+				);
+		} catch (e) {
+			logWarning('directadmin', 'updateHostingAccount: dezactivarea șablonului recurent a eșuat', {
+				metadata: { err: e instanceof Error ? e.message : String(e), accountId: data.id }
+			});
+		}
 	}
 
 	// Starea proaspătă a contului, DUPĂ eventualele hook-uri de plată (onInvoicePaid
@@ -1228,6 +1254,8 @@ export type AccountInGroup = {
 	 * (audit M2, 2026-05-30). Detected at read-time; no schema column.
 	 */
 	billingRisk: boolean;
+	/** „Cont personal" — scos din facturare, reînnoire, MRR și alerte. */
+	billingExcluded: boolean;
 };
 
 export type ClientGroup = {
@@ -1333,6 +1361,7 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 			status: table.hostingAccount.status,
 			billingCycle: table.hostingAccount.billingCycle,
 			autoRenew: table.hostingAccount.autoRenew,
+			billingExcluded: table.hostingAccount.billingExcluded,
 			paymentMethod: table.hostingAccount.paymentMethod,
 			startDate: table.hostingAccount.startDate,
 			nextDueDate: table.hostingAccount.nextDueDate,
@@ -1625,7 +1654,11 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 		clientId: string | null;
 		recurringAmount: number;
 		billingCycle: string;
+		billingExcluded?: boolean | null;
 	}): boolean {
+		// Un „cont personal" NU are șablon recurent prin definiție — l-am scos noi
+		// din facturare, deci lipsa lui nu e un risc de raportat.
+		if (r.billingExcluded) return false;
 		return (
 			r.status === 'active' &&
 			!!r.clientId &&
@@ -1701,13 +1734,14 @@ export const getHostingAccountsGrouped = query(FiltersSchema, async (filters) =>
 			recurringAmount: r.recurringAmount,
 			currency: r.currency,
 			lastInvoice: lastInv,
-			billingRisk: isBillingAtRisk(r)
+			billingRisk: isBillingAtRisk(r),
+			billingExcluded: r.billingExcluded ?? false
 		};
 		g.accounts.push(acc);
 		g.totals.count++;
 		g.totals.addonCount += filteredAddons.length;
 		g.totals.byStatus[r.status] = (g.totals.byStatus[r.status] ?? 0) + 1;
-		if (r.status === 'active' || r.status === 'pending') {
+		if (!r.billingExcluded && (r.status === 'active' || r.status === 'pending')) {
 			g.totals.mrrCents += toMonthlyCentsGrouped(r.recurringAmount, r.billingCycle);
 		}
 		if (acc.billingRisk) g.totals.billingRiskCount++;

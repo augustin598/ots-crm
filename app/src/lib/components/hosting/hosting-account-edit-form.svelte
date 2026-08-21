@@ -16,6 +16,7 @@
 		billingCycle: string;
 		additionalDomains: string[] | null;
 		autoRenew: boolean;
+		billingExcluded: boolean;
 		paymentMethod: 'card' | 'op' | 'cash';
 		/** Nr. OP / nr. chitanță / id tranzacție card (auto pentru card). */
 		paymentReference: string | null;
@@ -77,6 +78,7 @@
 		billingCycle: string;
 		additionalDomains: string[];
 		autoRenew: boolean;
+		billingExcluded: boolean;
 		paymentMethod: 'card' | 'op' | 'cash';
 		paymentReference: string;
 		paymentNote: string;
@@ -98,6 +100,7 @@
 			billingCycle: a.billingCycle,
 			additionalDomains: a.additionalDomains ?? [],
 			autoRenew: a.autoRenew,
+			billingExcluded: a.billingExcluded ?? false,
 			paymentMethod: a.paymentMethod ?? 'op',
 			paymentReference: a.paymentReference ?? '',
 			paymentNote: a.paymentNote ?? '',
@@ -311,6 +314,58 @@
 		{ value: 'biennially', label: '2 ani', suffix: '/ 24 luni', save: 'cea mai bună valoare' }
 	];
 
+	/** Câte luni acoperă un ciclu — pentru echivalentul lunar de pe tile-uri. */
+	const CYCLE_MONTHS: Record<string, number> = {
+		monthly: 1,
+		quarterly: 3,
+		semiannually: 6,
+		biannually: 6,
+		annually: 12,
+		biennially: 24,
+		triennially: 36
+	};
+
+	/**
+	 * Prețul afișat pe fiecare tile de ciclu vine din CATALOG (produsele legate de
+	 * același pachet DA ca acest cont), nu dintr-o formulă. Un „anual = lunar × 12"
+	 * calculat de noi ar inventa un preț pe care nimeni nu-l facturează.
+	 * Ciclurile fără produs în catalog rămân fără sumă — spunem asta explicit sub grilă.
+	 */
+	const catalogByCycle = $derived.by(() => {
+		const list = productsPromise.current ?? [];
+		const selected = draft.hostingProductId
+			? list.find((p) => p.id === draft.hostingProductId)
+			: null;
+		const pkgId = draft.daPackageId ?? selected?.daPackageId ?? null;
+		const map = new Map<string, { price: number; currency: string; perMonth: number }>();
+		if (!pkgId) return map;
+		for (const p of list) {
+			if (p.daPackageId !== pkgId || !p.isActive) continue;
+			if (!p.price || p.price <= 0) continue;
+			const cycle = p.billingCycle ?? 'monthly';
+			if (map.has(cycle)) continue; // primul produs activ pe ciclu câștigă
+			const months = CYCLE_MONTHS[cycle] ?? 1;
+			map.set(cycle, {
+				price: p.price,
+				currency: (p.currency || 'RON').toUpperCase(),
+				perMonth: p.price / months
+			});
+		}
+		return map;
+	});
+
+	/**
+	 * „cu reducere" / „cea mai bună valoare" se arată DOAR când chiar există o
+	 * reducere față de tariful lunar din catalog. Altfel eticheta e o promisiune
+	 * pe care prețurile n-o susțin.
+	 */
+	function hasRealDiscount(cycle: string): boolean {
+		const monthly = catalogByCycle.get('monthly');
+		const tile = catalogByCycle.get(cycle);
+		if (!monthly || !tile || monthly.currency !== tile.currency) return false;
+		return tile.perMonth < monthly.perMonth;
+	}
+
 	// TVA dinamică din setări (invoice_settings.defaultTaxRate). Fallback 21 (standard RO)
 	// doar până se încarcă setările; NU hardcodăm rata.
 	let vatSettingsPromise = $state(getInvoiceSettings());
@@ -496,6 +551,7 @@
 					| 'one_time',
 				additionalDomains: draft.additionalDomains,
 				autoRenew: draft.autoRenew,
+				billingExcluded: draft.billingExcluded,
 				paymentMethod: draft.paymentMethod,
 				paymentReference: draft.paymentReference.trim() || null,
 				paymentNote: draft.paymentNote.trim() || null,
@@ -852,6 +908,7 @@
 				<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ciclu de facturare</div>
 				<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
 					{#each CYCLE_TILES as c (c.value)}
+						{@const cat = catalogByCycle.get(c.value)}
 						<button
 							type="button"
 							onclick={() => (draft.billingCycle = c.value)}
@@ -860,8 +917,22 @@
 								: 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600'}"
 						>
 							<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{c.label}</div>
-							<div class="mt-1 text-sm text-slate-600 dark:text-slate-300">{c.suffix}</div>
-							{#if c.save}
+							<div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+								{#if cat}
+									<span class="font-semibold tabular-nums text-slate-900 dark:text-slate-100"
+										>{formatMoney(cat.price / 100, cat.currency)}</span
+									>
+									{c.suffix}
+								{:else}
+									<span class="text-slate-400">{c.suffix}</span>
+								{/if}
+							</div>
+							{#if cat && c.value !== 'monthly' && catalogByCycle.has('monthly')}
+								<div class="text-[10px] text-slate-400 tabular-nums">
+									≈ {formatMoney(cat.perMonth / 100, cat.currency)} / lună
+								</div>
+							{/if}
+							{#if c.save && hasRealDiscount(c.value)}
 								<div class="mt-1 inline-flex rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300">{c.save}</div>
 							{/if}
 							{#if draft.billingCycle === c.value}
@@ -872,6 +943,17 @@
 						</button>
 					{/each}
 				</div>
+				{#if catalogByCycle.size === 0}
+					<p class="text-[11px] text-slate-500">
+						Fără prețuri în carduri: pachetul DA al acestui cont nu are produse active cu preț în
+						catalog (Hosting → Produse Hosting). Suma de mai jos rămâne cea introdusă manual.
+					</p>
+				{:else}
+					<p class="text-[11px] text-slate-500">
+						Prețurile de pe carduri vin din catalogul de produse pentru pachetul acestui cont, nu
+						din suma de mai jos.
+					</p>
+				{/if}
 				{#if !['monthly', 'annually', 'biennially'].includes(draft.billingCycle)}
 					<p class="text-[11px] text-amber-600">
 						Ciclu curent: <span class="font-semibold">{CYCLE_LABEL[draft.billingCycle] ?? draft.billingCycle}</span>.
@@ -941,6 +1023,24 @@
 					</div>
 					<input type="checkbox" bind:checked={draft.autoRenew} class="size-5 accent-blue-600" />
 				</label>
+				<label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl border px-4 py-3 {draft.billingExcluded
+					? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30'
+					: 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'}">
+					<div class="min-w-0">
+						<div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Cont personal</div>
+						<div class="text-[11px] text-slate-500">
+							Scoate contul din facturare: fără șablon recurent, fără proforme de reînnoire,
+							fără emailuri de expirare și în afara MRR. Suma rămâne cea scrisă aici (inclusiv 0)
+							— nu mai e rescrisă cu prețul din catalog.
+						</div>
+					</div>
+					<input type="checkbox" bind:checked={draft.billingExcluded} class="size-5 accent-amber-600" />
+				</label>
+				{#if draft.billingExcluded && !account.billingExcluded}
+					<p class="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+						La salvare, orice șablon recurent activ al acestui cont va fi dezactivat.
+					</p>
+				{/if}
 			</section>
 		{:else if activeTab === 'payment'}
 			<!-- ===================== PLATĂ & FACTURĂ ===================== -->
