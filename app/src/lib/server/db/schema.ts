@@ -4163,7 +4163,7 @@ export const magicLinkTokenRelations = relations(magicLinkToken, ({ one }) => ({
 	})
 }));
 
-// BNR Exchange Rates (synced daily from https://www.bnr.ro/nbrfxrates.xml)
+// BNR Exchange Rates (synced daily from https://curs.bnr.ro/nbrfxrates.xml)
 export const bnrExchangeRate = sqliteTable('bnr_exchange_rate', {
 	id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
 	currency: text('currency').notNull(),
