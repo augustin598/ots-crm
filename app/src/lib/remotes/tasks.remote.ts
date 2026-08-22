@@ -5,7 +5,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, inArray, notInArray, like, sql, asc, desc, lt, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { sendTaskAssignmentEmail, sendTaskUpdateEmail, sendTaskClientNotificationEmail, getNotificationRecipients } from '$lib/server/email';
-import { resolveTaskRecipients, recipientEmailsLower } from '$lib/server/task-recipients';
+import { resolveTaskRecipients, recipientEmailsLower, buildTaskUrl } from '$lib/server/task-recipients';
 import { recordTaskActivity } from '$lib/server/task-activity';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { logError, logWarning } from '$lib/server/logger';
@@ -165,6 +165,83 @@ async function emitTaskStatusChanged(args: {
 			metadata: { taskId: args.taskId }
 		});
 	}
+}
+
+/**
+ * Emailurile personale la ieșirea din aprobare.
+ *
+ * `approveTask`/`rejectTask` trimiteau doar notificarea de companie către
+ * client, care se oprește oricum la filtrul „doar participanții" — deci un task
+ * fără responsabil și fără watcheri nu producea niciun email, spre deosebire de
+ * aceeași schimbare făcută din kanban, care trece prin `resolveTaskRecipients`.
+ *
+ * Pe lângă responsabili și watcheri, anunțăm și pe cel care a cerut task-ul:
+ * la cele venite prin „/task" din WhatsApp, el e singurul care așteaptă
+ * răspunsul.
+ */
+async function sendApprovalDecisionEmails(args: {
+	taskId: string;
+	tenantId: string;
+	tenantSlug: string;
+	actorUserId: string;
+	actorEmail: string;
+	createdByUserId: string | null;
+}): Promise<Set<string>> {
+	let personalEmails = new Set<string>();
+	try {
+		const recipients = await resolveTaskRecipients({
+			tenantId: args.tenantId,
+			tenantSlug: args.tenantSlug,
+			taskId: args.taskId,
+			event: 'status-change',
+			actorUserId: args.actorUserId
+		});
+		personalEmails = recipientEmailsLower(recipients);
+		for (const r of recipients) {
+			try {
+				await sendTaskUpdateEmail(args.taskId, r.email, r.name, 'status', r.taskUrl);
+			} catch (error) {
+				logWarning('email', `email de aprobare eșuat spre ${r.email}: ${(error as Error).message}`);
+			}
+		}
+
+		if (args.createdByUserId && args.createdByUserId !== args.actorUserId) {
+			const [creator] = await db
+				.select({
+					email: table.user.email,
+					firstName: table.user.firstName,
+					lastName: table.user.lastName
+				})
+				.from(table.user)
+				.where(eq(table.user.id, args.createdByUserId))
+				.limit(1);
+			const lower = creator?.email?.toLowerCase().trim();
+			if (creator?.email && lower && !personalEmails.has(lower)) {
+				const [isClientUser] = await db
+					.select({ id: table.clientUser.id })
+					.from(table.clientUser)
+					.where(
+						and(
+							eq(table.clientUser.userId, args.createdByUserId),
+							eq(table.clientUser.tenantId, args.tenantId)
+						)
+					)
+					.limit(1);
+				const url = buildTaskUrl(args.tenantSlug, args.taskId, isClientUser ? 'client' : 'agency');
+				const name =
+					`${creator.firstName ?? ''} ${creator.lastName ?? ''}`.trim() || creator.email;
+				try {
+					await sendTaskUpdateEmail(args.taskId, creator.email, name, 'status', url);
+					personalEmails.add(lower);
+				} catch (error) {
+					logWarning('email', `email de aprobare spre autor eșuat: ${(error as Error).message}`);
+				}
+			}
+		}
+	} catch (error) {
+		logWarning('email', `resolveTaskRecipients(aprobare) a eșuat: ${(error as Error).message}`);
+	}
+	return personalEmails;
 }
 
 const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked'] as const;
@@ -2724,10 +2801,24 @@ export const approveTask = command(
 			newValue: status
 		});
 
+		const personalEmails = await sendApprovalDecisionEmails({
+			taskId,
+			tenantId: event.locals.tenant.id,
+			tenantSlug: event.locals.tenant.slug,
+			actorUserId: event.locals.user.id,
+			actorEmail: event.locals.user.email,
+			createdByUserId: existing.createdByUserId ?? null
+		});
+
 		// Send client notification
-		await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
-			newStatus: status
-		}, event.locals.user.email);
+		await sendClientNotificationIfEnabled(
+			taskId,
+			event.locals.tenant.id,
+			'status-change',
+			{ newStatus: status },
+			event.locals.user.email,
+			personalEmails
+		);
 		await emitTaskStatusChanged({
 			taskId,
 			oldStatus: 'pending-approval',
@@ -2789,10 +2880,24 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 		newValue: 'cancelled'
 	});
 
+	const personalEmails = await sendApprovalDecisionEmails({
+		taskId,
+		tenantId: event.locals.tenant.id,
+		tenantSlug: event.locals.tenant.slug,
+		actorUserId: event.locals.user.id,
+		actorEmail: event.locals.user.email,
+		createdByUserId: existing.createdByUserId ?? null
+	});
+
 	// Send client notification
-	await sendClientNotificationIfEnabled(taskId, event.locals.tenant.id, 'status-change', {
-		newStatus: 'cancelled'
-	}, event.locals.user.email);
+	await sendClientNotificationIfEnabled(
+		taskId,
+		event.locals.tenant.id,
+		'status-change',
+		{ newStatus: 'cancelled' },
+		event.locals.user.email,
+		personalEmails
+	);
 	await emitTaskStatusChanged({
 		taskId,
 		oldStatus: 'pending-approval',

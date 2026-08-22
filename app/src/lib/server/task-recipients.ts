@@ -62,7 +62,7 @@ interface CandidateRow {
 
 const baseUrl = () => getAppBaseUrl();
 
-function buildTaskUrl(tenantSlug: string, taskId: string, kind: RecipientKind): string {
+export function buildTaskUrl(tenantSlug: string, taskId: string, kind: RecipientKind): string {
 	const base = baseUrl();
 	return kind === 'client'
 		? `${base}/client/${tenantSlug}/tasks/${taskId}`
