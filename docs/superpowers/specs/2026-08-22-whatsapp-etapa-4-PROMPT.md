@@ -24,6 +24,11 @@ are socket mai mult de câteva minute (log de eroare, notificare, ceva ce se
 vede). Contează mai mult decât orice altă funcție: fără socket, tot ce am
 construit tace în tăcere.
 
+Nu ținti reconectarea în general: pe 22 august dimineața, conexiunea s-a
+pierdut de două ori (408, „Connection was lost") și s-a refăcut singură în opt
+secunde. Mecanismul de reconectare e sănătos; cazul de reparat e strict bătaia
+dintre două pod-uri la deploy, unde câștigătorul e apoi oprit de Kubernetes.
+
 **2. Mențiunile care nu ajung nicăieri.** Editarea unui comentariu
 (`updateTaskComment`, `task-comments.remote.ts:452`) nu notifică absolut nimic:
 nici email, nici in-app, nici Telegram, nici grupul WhatsApp. Dacă adaugi un
@@ -88,6 +93,17 @@ Pe scurt, ce există:
   din portalul clientului: acolo blocul de email către client se sare.
 - Comanda `/task` nu merge scrisă de pe telefonul care ține contul WhatsApp al
   firmei (`fromMe` e sărit intenționat). Folosește un telefon de membru.
+
+## Mărunțișuri, dacă rămâne timp
+
+- Mesajul de acceptare pleacă în coada din Admin cu eticheta „Status task",
+  fiindcă `notifyTaskStatusChangedInGroup` folosește `kind: 'task.status'`
+  indiferent de `reason`. Un fel propriu (`task.approved`) l-ar face filtrabil.
+- Respingerea unui task n-are mesaj propriu: grupul primește anunțul generic
+  „a trecut task-ul în Anulat", fără motiv.
+- Task-ul „Test notificări WhatsApp (etapa 2)" e încă legat de grupul intern:
+  orice mutare a lui trimite un mesaj. Dezleagă-l sau șterge-l când nu mai e
+  nevoie de el.
 
 ## Cum vreau să lucrezi
 
