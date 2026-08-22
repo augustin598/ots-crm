@@ -422,6 +422,62 @@ export const getClientUsers = query(v.pipe(v.string(), v.minLength(1)), async (c
  * Filters keep contacts who have NOT been granted task-portal access invisible
  * from the assignee picker, avoiding implicit access escalation via assignment.
  */
+/**
+ * Cine poate fi menționat într-un comentariu la un task: echipa agenției (doar
+ * membri activi) plus utilizatorii clientului task-ului.
+ *
+ * Există separat de `getTenantUsers` fiindcă asta e chemată și din portalul
+ * clientului, iar acolo n-au ce căuta rolurile, aptitudinile și drepturile
+ * echipei. Întoarce strict ce afișează lista de mențiuni.
+ */
+export const getMentionableUsers = query(v.pipe(v.string(), v.minLength(1)), async (taskId) => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) throw new Error('Unauthorized');
+	const tenantId = event.locals.tenant.id;
+
+	const [task] = await db
+		.select({ id: table.task.id, clientId: table.task.clientId })
+		.from(table.task)
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
+		.limit(1);
+	if (!task) throw new Error('Task not found');
+
+	// Un utilizator de portal vede lista doar pentru taskurile clientului lui.
+	if (event.locals.isClientUser && task.clientId !== event.locals.client?.id) {
+		throw new Error('Unauthorized');
+	}
+
+	const staff = await db
+		.select({
+			id: table.user.id,
+			email: table.user.email,
+			firstName: table.user.firstName,
+			lastName: table.user.lastName
+		})
+		.from(table.tenantUser)
+		.innerJoin(table.user, eq(table.tenantUser.userId, table.user.id))
+		.where(and(eq(table.tenantUser.tenantId, tenantId), eq(table.tenantUser.status, 'active')));
+
+	const clientPeople = task.clientId
+		? await db
+				.select({
+					id: table.user.id,
+					email: table.user.email,
+					firstName: table.user.firstName,
+					lastName: table.user.lastName
+				})
+				.from(table.clientUser)
+				.innerJoin(table.user, eq(table.clientUser.userId, table.user.id))
+				.where(
+					and(eq(table.clientUser.tenantId, tenantId), eq(table.clientUser.clientId, task.clientId))
+				)
+		: [];
+
+	const merged = new Map<string, (typeof staff)[number]>();
+	for (const u of [...staff, ...clientPeople]) merged.set(u.id, u);
+	return [...merged.values()];
+});
+
 export const getAssignableClientUsers = query(
 	v.pipe(v.string(), v.minLength(1)),
 	async (clientId) => {

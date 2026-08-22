@@ -9,6 +9,7 @@
 	import { getTaskActivities } from '$lib/remotes/task-activities.remote';
 	import { page } from '$app/state';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
+	import { getMentionableUsers } from '$lib/remotes/users.remote';
 	import ContactAvatar from '$lib/components/ui/contact-avatar.svelte';
 	import { whatsappAvatarUrl } from '$lib/utils/phone';
 	import type { LightboxImage } from './client-task-lightbox.svelte';
@@ -43,6 +44,10 @@
 	}
 
 	const commentsQuery = $derived(getTaskComments(taskId));
+	// Fără lista asta, „@" deschidea un dropdown gol cu „No users found": clientul
+	// era singura parte care nu putea menționa pe nimeni, deși serverul accepta.
+	const mentionUsersQuery = $derived(getMentionableUsers(taskId));
+	const mentionUsers = $derived(mentionUsersQuery.current ?? []);
 	const allComments = $derived(commentsQuery.current ?? []);
 
 	const topLevelComments = $derived(allComments.filter((c) => !c.parentCommentId));
@@ -425,6 +430,7 @@
 						{#if replyingToId === c.id}
 							<div class="mt-3 rounded-md border border-[#e5e9f0] bg-[#f7f8fa] p-2">
 								<RichEditor
+									users={mentionUsers}
 									bind:this={replyEditorRef}
 									placeholder="Scrie un răspuns..."
 									minHeight="100px"
@@ -466,6 +472,7 @@
 	<!-- Composer -->
 	<div class="ct-composer mt-4">
 		<RichEditor
+			users={mentionUsers}
 			bind:this={editorRef}
 			placeholder="Adaugă un comentariu... (paste imagine cu Ctrl+V)"
 			minHeight="120px"
