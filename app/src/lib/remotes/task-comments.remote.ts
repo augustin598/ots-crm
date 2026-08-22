@@ -205,6 +205,125 @@ export const getTaskComments = query(
 	}
 );
 
+/**
+ * Anunțurile pentru un set de oameni tocmai menționați: in-app, Telegram,
+ * grupul WhatsApp al task-ului și un email de mențiune. Folosit la editarea
+ * unui comentariu; crearea are propriul flux, care trimite și emailurile de
+ * comentariu obișnuit.
+ */
+async function notifyAddedMentions(payload: {
+	tenantId: string;
+	tenantSlug: string;
+	taskId: string;
+	taskTitle: string;
+	clientId: string | null;
+	commentId: string;
+	commentHtml: string;
+	authorUserId: string;
+	authorName: string;
+	mentionedUserIds: string[];
+}): Promise<void> {
+	const rows = await db
+		.selectDistinct({
+			id: table.user.id,
+			firstName: table.user.firstName,
+			lastName: table.user.lastName,
+			email: table.user.email
+		})
+		.from(table.user)
+		.leftJoin(
+			table.tenantUser,
+			and(eq(table.tenantUser.userId, table.user.id), eq(table.tenantUser.tenantId, payload.tenantId))
+		)
+		.leftJoin(
+			table.clientUser,
+			and(eq(table.clientUser.userId, table.user.id), eq(table.clientUser.tenantId, payload.tenantId))
+		)
+		.where(
+			and(
+				inArray(table.user.id, payload.mentionedUserIds),
+				or(isNotNull(table.tenantUser.userId), isNotNull(table.clientUser.userId))
+			)
+		);
+
+	if (rows.length === 0) return;
+
+	const names = new Map(
+		rows.map((u) => [u.id, `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email])
+	);
+
+	for (const u of rows) {
+		await createNotification({
+			tenantId: payload.tenantId,
+			userId: u.id,
+			clientId: payload.clientId ?? undefined,
+			type: 'comment.mention',
+			title: `${payload.authorName} te-a menționat`,
+			message: `Te-a menționat într-un comentariu la "${payload.taskTitle}"`,
+			link: `/${payload.tenantSlug}/tasks/${payload.taskId}`,
+			priority: 'high',
+			metadata: { taskId: payload.taskId, commentId: payload.commentId }
+		}).catch(() => {});
+
+		void notifyTaskMention({
+			tenantId: payload.tenantId,
+			tenantSlug: payload.tenantSlug,
+			taskId: payload.taskId,
+			taskTitle: payload.taskTitle,
+			mentionedUserId: u.id,
+			authorUserId: payload.authorUserId,
+			authorName: payload.authorName,
+			commentSnippet: payload.commentHtml
+		}).catch(() => {});
+	}
+
+	// Emailul de mențiune, doar celor tocmai adăugați.
+	try {
+		const recipients = await resolveTaskRecipients({
+			tenantId: payload.tenantId,
+			tenantSlug: payload.tenantSlug,
+			taskId: payload.taskId,
+			event: 'comment',
+			actorUserId: payload.authorUserId,
+			mentionedUserIds: payload.mentionedUserIds
+		});
+		for (const r of recipients) {
+			if (r.reason !== 'mention') continue;
+			await sendTaskUpdateEmail(
+				payload.taskId,
+				r.email,
+				r.name,
+				'mention',
+				r.taskUrl,
+				payload.commentId
+			).catch(() => {});
+		}
+	} catch (error) {
+		logWarning('email', `mențiuni din editare, email eșuat: ${(error as Error).message}`, {
+			tenantId: payload.tenantId,
+			metadata: { taskId: payload.taskId }
+		});
+	}
+
+	void notifyTaskMentionInGroup({
+		tenantId: payload.tenantId,
+		tenantSlug: payload.tenantSlug,
+		taskId: payload.taskId,
+		taskTitle: payload.taskTitle,
+		authorUserId: payload.authorUserId,
+		authorName: payload.authorName,
+		mentioned: payload.mentionedUserIds
+			.filter((id) => names.has(id))
+			.map((id) => ({ userId: id, name: names.get(id)! })),
+		commentHtml: payload.commentHtml
+	}).catch((err) => {
+		logWarning('whatsapp', `mențiunea din editare nu a intrat în coadă: ${(err as Error).message}`, {
+			tenantId: payload.tenantId,
+			metadata: { taskId: payload.taskId, commentId: payload.commentId }
+		});
+	});
+}
+
 export const createTaskComment = command(
 	v.object({
 		taskId: v.pipe(v.string(), v.minLength(1)),
@@ -528,15 +647,43 @@ export const updateTaskComment = command(
 			throw new Error('Unauthorized to update this comment');
 		}
 
+		const sanitized = sanitizeCommentHtml(data.content);
+
 		await db
 			.update(table.taskComment)
 			.set({
-				content: sanitizeCommentHtml(data.content),
+				content: sanitized,
 				updatedAt: new Date()
 			})
 			.where(and(eq(table.taskComment.id, data.commentId), eq(table.taskComment.taskId, comment.comment.taskId)));
 
-		return { success: true };
+		// Mențiunile adăugate prin editare erau, până acum, complet mute: nici
+		// email, nici clopoțel, nici Telegram, nici grup. Anunțăm DOAR pe cei
+		// apăruți acum, prin diferență față de conținutul vechi, altfel fiecare
+		// corectură de virgulă i-ar re-anunța pe toți cei menționați deja.
+		const before = new Set(extractMentionIds(comment.comment.content ?? ''));
+		const added = extractMentionIds(data.content).filter(
+			(id) => !before.has(id) && id !== event.locals.user!.id
+		);
+
+		if (added.length > 0) {
+			await notifyAddedMentions({
+				tenantId: event.locals.tenant.id,
+				tenantSlug: event.locals.tenant.slug,
+				taskId: comment.comment.taskId,
+				taskTitle: comment.task.title,
+				clientId: comment.task.clientId,
+				commentId: data.commentId,
+				commentHtml: sanitized,
+				authorUserId: event.locals.user.id,
+				authorName:
+					`${event.locals.user.firstName ?? ''} ${event.locals.user.lastName ?? ''}`.trim() ||
+					event.locals.user.email,
+				mentionedUserIds: added
+			});
+		}
+
+		return { success: true, notifiedMentions: added.length };
 	}
 );
 
