@@ -135,7 +135,7 @@ async function emitTaskStatusChanged(args: {
 	changedByUserId: string;
 	tenantId: string;
 	tenantSlug: string;
-	reason?: 'approval';
+	reason?: 'approval' | 'rejection';
 	dueDate?: Date | null;
 }): Promise<void> {
 	if (!args.oldStatus || args.oldStatus === args.newStatus) return;
@@ -2799,7 +2799,8 @@ export const rejectTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 		newStatus: 'cancelled',
 		changedByUserId: event.locals.user.id,
 		tenantId: event.locals.tenant.id,
-		tenantSlug: event.locals.tenant.slug
+		tenantSlug: event.locals.tenant.slug,
+		reason: 'rejection'
 	});
 
 	return { success: true, taskId };

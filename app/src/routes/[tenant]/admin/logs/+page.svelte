@@ -106,7 +106,7 @@
 		failed: { label: 'Eșuat', badge: 'bg-red-100 text-red-700', tab: 'border-red-500 text-red-600' },
 		expired: { label: 'Expirat', badge: 'bg-gray-100 text-gray-700', tab: 'border-gray-500 text-gray-600' }
 	};
-	const WA_KIND: Record<string, string> = { 'task.status': 'Status task', 'task.mention': 'Mențiune', 'task.linked': 'Task nou în grup', 'task.command-ack': 'Confirmare /task' };
+	const WA_KIND: Record<string, string> = { 'task.status': 'Status task', 'task.mention': 'Mențiune', 'task.linked': 'Task nou în grup', 'task.command-ack': 'Confirmare /task', 'task.approved': 'Task acceptat', 'task.rejected': 'Task respins' };
 
 	function refreshWa() {
 		refreshingWa = true;

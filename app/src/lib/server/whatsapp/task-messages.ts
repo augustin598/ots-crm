@@ -172,3 +172,16 @@ export function buildApprovalMessage(input: {
 		input.taskUrl
 	);
 }
+
+/** Respingerea, ca să nu apară în grup drept „a trecut task-ul în Anulat". */
+export function buildRejectionMessage(input: {
+	taskTitle: string;
+	actorName: string;
+	taskUrl: string;
+}): string {
+	return (
+		`🚫 *${cleanInline(input.taskTitle)}*\n` +
+		`${cleanInline(input.actorName)} nu a acceptat task-ul.\n` +
+		input.taskUrl
+	);
+}

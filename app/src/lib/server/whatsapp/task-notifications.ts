@@ -21,6 +21,7 @@ import {
 	buildApprovalMessage,
 	buildLinkedTaskMessage,
 	buildMentionMessage,
+	buildRejectionMessage,
 	buildStatusMessage,
 	notifiesGroup
 } from './task-messages';
@@ -69,7 +70,8 @@ export async function notifyTaskStatusChangedInGroup(event: TaskStatusChangedEve
 	if (!groupJid) return;
 
 	const actorName = await userDisplayName(event.changedByUserId);
-	// Aprobarea are mesaj propriu: „acceptat" + termenul, nu „a trecut în De făcut".
+	// Aprobarea și respingerea au mesaje proprii: „acceptat" cu termen, respectiv
+	// „nu a acceptat", nu anunțul generic de schimbare de status.
 	const body =
 		event.reason === 'approval'
 			? buildApprovalMessage({
@@ -78,7 +80,13 @@ export async function notifyTaskStatusChangedInGroup(event: TaskStatusChangedEve
 					dueDate: event.dueDate ?? null,
 					taskUrl: taskUrl(event.tenantSlug, event.taskId)
 				})
-			: buildStatusMessage({
+			: event.reason === 'rejection'
+				? buildRejectionMessage({
+						taskTitle: event.taskTitle,
+						actorName,
+						taskUrl: taskUrl(event.tenantSlug, event.taskId)
+					})
+				: buildStatusMessage({
 					taskTitle: event.taskTitle,
 					actorName,
 					oldStatus: event.oldStatus,
@@ -89,7 +97,9 @@ export async function notifyTaskStatusChangedInGroup(event: TaskStatusChangedEve
 	await enqueueGroupMessage({
 		tenantId: event.tenantId,
 		groupJid,
-		kind: 'task.status',
+		// Fel propriu pentru aprobare/respingere, ca să se poată filtra în coada
+		// din Admin, unde altfel apăreau toate ca „Status task".
+		kind: event.reason === 'approval' ? 'task.approved' : event.reason === 'rejection' ? 'task.rejected' : 'task.status',
 		dedupeKey: statusDedupeKey(event.taskId, groupJid),
 		taskId: event.taskId,
 		body

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
 	buildApprovalMessage,
+	buildRejectionMessage,
 	buildLinkedTaskMessage,
 	buildTaskCommandAck,
 	buildMentionMessage,
@@ -263,5 +264,13 @@ describe('eticheta statusului de aprobare', () => {
 		});
 		expect(text).toContain('(din Așteaptă aprobare)');
 		expect(text).not.toContain('pending-approval');
+	});
+});
+
+describe('mesajul de respingere', () => {
+	it('spune că nu a fost acceptat, nu „a trecut în Anulat"', () => {
+		expect(
+			buildRejectionMessage({ taskTitle: 'Refacem bannerele', actorName: 'Augustin', taskUrl: url })
+		).toBe('🚫 *Refacem bannerele*\nAugustin nu a acceptat task-ul.\n' + url);
 	});
 });

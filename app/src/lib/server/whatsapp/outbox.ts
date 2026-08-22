@@ -38,7 +38,13 @@ function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 }
 
-export type OutboxKind = 'task.status' | 'task.mention' | 'task.linked' | 'task.command-ack';
+export type OutboxKind =
+	| 'task.status'
+	| 'task.mention'
+	| 'task.linked'
+	| 'task.command-ack'
+	| 'task.approved'
+	| 'task.rejected';
 
 export interface EnqueueInput {
 	tenantId: string;
