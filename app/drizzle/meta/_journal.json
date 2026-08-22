@@ -3408,6 +3408,20 @@
       "when": 1785398836928463,
       "tag": "0489_task_tenant_source_wam_uidx",
       "breakpoints": true
+    },
+    {
+      "idx": 490,
+      "version": "6",
+      "when": 1785398836928464,
+      "tag": "0490_whatsapp_session_last_heartbeat_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 491,
+      "version": "6",
+      "when": 1785398836928465,
+      "tag": "0491_whatsapp_session_heartbeat_owner",
+      "breakpoints": true
     }
   ]
 }

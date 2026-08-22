@@ -14,6 +14,7 @@ import { upsertPushNames, upsertChatNames } from './contacts-store';
 import { enqueueFetch, dropTenant } from './avatar-fetcher';
 import { humanizedDelay } from './rate-limiter';
 import { startOutboxLoop, stopOutboxLoop } from './outbox';
+import { HEARTBEAT_INTERVAL_MS, clearHeartbeat, writeHeartbeat } from './session-health';
 import { e164ToJid, jidToE164 } from './phone';
 
 const SILENT_LOGGER = pino({ level: 'silent' });
@@ -36,6 +37,35 @@ const sessions: Map<string, ActiveSession> =
 const starting: Map<string, Promise<ActiveSession>> =
 	(GT[STARTING_SYMBOL] as Map<string, Promise<ActiveSession>>) ??
 	(GT[STARTING_SYMBOL] = new Map<string, Promise<ActiveSession>>());
+
+/**
+ * Bătaia de inimă a instanței care ține socketul. Fără ea, o sesiune moartă
+ * arată în bază exact ca una vie (vezi `session-health.ts`).
+ */
+const HEARTBEATS_SYMBOL = Symbol.for('ots_crm_whatsapp_heartbeats');
+const heartbeats: Map<string, ReturnType<typeof setInterval>> =
+	(GT[HEARTBEATS_SYMBOL] as Map<string, ReturnType<typeof setInterval>>) ??
+	(GT[HEARTBEATS_SYMBOL] = new Map());
+
+function startHeartbeat(tenantId: string): void {
+	stopHeartbeat(tenantId);
+	void writeHeartbeat(tenantId).catch(() => {});
+	const handle = setInterval(() => {
+		void writeHeartbeat(tenantId).catch((err) => {
+			logWarning('whatsapp', 'heartbeat write failed', {
+				tenantId,
+				metadata: { err: err instanceof Error ? err.message : String(err) }
+			});
+		});
+	}, HEARTBEAT_INTERVAL_MS);
+	heartbeats.set(tenantId, handle);
+}
+
+function stopHeartbeat(tenantId: string): void {
+	const handle = heartbeats.get(tenantId);
+	if (handle) clearInterval(handle);
+	heartbeats.delete(tenantId);
+}
 
 function generateSessionId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -174,6 +204,7 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 				publishQr(tenantId, 'connected', { phoneE164, displayName });
 				// Outbox-ul se golește doar aici, unde e socketul (vezi outbox.ts).
 				startOutboxLoop(tenantId);
+				startHeartbeat(tenantId);
 				logInfo('whatsapp', 'Session connected', {
 					tenantId,
 					metadata: { sessionId, phoneE164, displayName }
@@ -191,6 +222,8 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 
 				sessions.delete(tenantId);
 				stopOutboxLoop(tenantId);
+				stopHeartbeat(tenantId);
+				void clearHeartbeat(tenantId).catch(() => {});
 				dropTenant(tenantId);
 
 				if (code === DisconnectReason.loggedOut) {
@@ -400,6 +433,8 @@ export async function stopSession(tenantId: string, logout = false): Promise<voi
 	}
 	sessions.delete(tenantId);
 	stopOutboxLoop(tenantId);
+	stopHeartbeat(tenantId);
+	await clearHeartbeat(tenantId).catch(() => {});
 	if (logout) {
 		await active.auth.clear().catch(() => {});
 		await setSessionStatus(tenantId, {
@@ -567,6 +602,12 @@ export async function shutdownAllSessions(): Promise<void> {
 				// ignore
 			}
 			sessions.delete(tenantId);
+			stopOutboxLoop(tenantId);
+			stopHeartbeat(tenantId);
+			// Ștergem bătaia la oprirea instanței, ca gardianul de pe alt pod să
+			// preia imediat, nu după expirarea celor trei minute. Fără asta, un
+			// rollout lasă WhatsApp mut până la prima verificare programată.
+			await clearHeartbeat(tenantId).catch(() => {});
 		})
 	);
 }

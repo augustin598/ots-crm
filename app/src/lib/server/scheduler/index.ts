@@ -28,6 +28,7 @@ import { processStripeEventCleanup } from './tasks/stripe-event-cleanup';
 import { processStripeInvoiceReconcile } from './tasks/stripe-invoice-reconcile';
 import { processTokenCleanup } from './tasks/token-cleanup';
 import { processDbWriteHealthCheck } from './tasks/db-write-health-check';
+import { processWhatsappSessionGuard } from './tasks/whatsapp-session-guard';
 import { processPdfReportSend } from './tasks/pdf-report-send';
 import { processEmailRetry, recoverInterruptedRetries } from './tasks/email-retry';
 import { cleanupOldNotifications } from './tasks/notification-cleanup';
@@ -190,6 +191,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	stripe_invoice_reconcile: processStripeInvoiceReconcile,
 	token_cleanup: processTokenCleanup,
 	db_write_health_check: processDbWriteHealthCheck,
+	whatsapp_session_guard: processWhatsappSessionGuard,
 	pdf_report_send: processPdfReportSend,
 	email_retry: processEmailRetry,
 	notification_cleanup: cleanupOldNotifications,
@@ -812,6 +814,25 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// WhatsApp session guard — every 2 minutes. Repornește sesiunea pe instanța
+	// curentă dacă nicio instanță nu mai ține socketul (vezi session-health.ts).
+	// Rulează pe fiecare pod: preluarea se revendică în DB, deci doar unul câștigă.
+	await schedulerQueue.add(
+		'whatsapp-session-guard',
+		{
+			type: 'whatsapp_session_guard',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '*/2 * * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'whatsapp-session-guard',
+			attempts: 1
+		}
+	);
+
 	// DB write health check — every 5 minutes (no retries — next scheduled run is sufficient)
 	await schedulerQueue.add(
 		'db-write-health-check',
@@ -1148,6 +1169,7 @@ export const JOB_LABELS: Record<string, string> = {
 	debug_log_cleanup: 'Cleanup Loguri Debug',
 	token_cleanup: 'Cleanup Token-uri Expirate',
 	db_write_health_check: 'Health Check Scriere DB',
+	whatsapp_session_guard: 'Gardian sesiune WhatsApp',
 	pdf_report_send: 'Trimitere Rapoarte PDF',
 	email_retry: 'Retry Emailuri Eșuate',
 	notification_cleanup: 'Cleanup Notificari Vechi',

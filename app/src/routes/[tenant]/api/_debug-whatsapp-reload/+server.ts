@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { getActiveSession, startSession, stopSession, getSessionStatus } from '$lib/server/whatsapp/session-manager';
+import { INSTANCE_ID, sessionHeartbeatAge } from '$lib/server/whatsapp/session-health';
 import type { RequestHandler } from './$types';
 
 /**
@@ -35,6 +36,10 @@ export const GET: RequestHandler = async (event) => {
 		ok: true,
 		action: 'Trimite POST pe aceeași adresă ca să redeschizi conexiunea.',
 		activeInThisProcess: !!getActiveSession(tenantId),
+		instance: INSTANCE_ID,
+		// Vârsta bătăii de inimă: dacă trece de 180 s, nicio instanță nu mai
+		// ține socketul, oricât de „connected" ar arăta statusul.
+		heartbeatAgeSeconds: await sessionHeartbeatAge(tenantId),
 		status: await getSessionStatus(tenantId)
 	});
 };

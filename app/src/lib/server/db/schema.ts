@@ -4754,6 +4754,16 @@ export const whatsappSession = sqliteTable('whatsapp_session', {
 	lastConnectedAt: timestamp('last_connected_at', { withTimezone: true, mode: 'date' }),
 	lastDisconnectedAt: timestamp('last_disconnected_at', { withTimezone: true, mode: 'date' }),
 	lastError: text('last_error'),
+	/**
+	 * Semn de viață scris de instanța care ȚINE socketul Baileys, la fiecare
+	 * minut. `status='connected'` spune doar ce ne dorim; asta spune dacă
+	 * există cu adevărat un proces care poate primi și trimite. Fără el, la un
+	 * rollout în care pod-ul câștigător e oprit, baza raporta „connected" iar
+	 * WhatsApp tăcea complet (21 aug 2026).
+	 */
+	lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true, mode: 'date' }),
+	/** Care instanță scrie bătaia; doar pentru diagnostic. */
+	heartbeatOwner: text('heartbeat_owner'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
