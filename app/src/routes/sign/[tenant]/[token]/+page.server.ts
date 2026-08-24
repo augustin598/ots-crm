@@ -36,8 +36,6 @@ async function resolveTokenAndContract(tenantParam: string, rawToken: string) {
 		.limit(1);
 
 	if (!signToken) return null;
-	if (signToken.used) return { expired: true } as const;
-	if (signToken.expiresAt < new Date()) return { expired: true } as const;
 
 	const [contract] = await db
 		.select()
@@ -47,13 +45,19 @@ async function resolveTokenAndContract(tenantParam: string, rawToken: string) {
 
 	if (!contract) return null;
 
+	// Tokenul e „consumat" după semnare și expiră după termen. Contractul deja semnat
+	// de beneficiar rămâne accesibil pe același link, dar doar în citire (arhivă):
+	// destinatarul poate revedea și descărca ce a semnat, fără a mai putea semna.
+	const spent = signToken.used || signToken.expiresAt < new Date();
+	if (spent && !contract.beneficiarSignedAt) return { expired: true } as const;
+
 	const [client] = await db
 		.select()
 		.from(table.client)
 		.where(eq(table.client.id, contract.clientId))
 		.limit(1);
 
-	return { tenant, signToken, contract, client };
+	return { tenant, signToken, contract, client, readOnly: spent };
 }
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -67,9 +71,10 @@ export const load: PageServerLoad = async ({ params }) => {
 		throw error(400, 'Link invalid sau expirat');
 	}
 
-	const { tenant, contract, client } = result;
+	const { tenant, contract, client, readOnly } = result;
 
 	return {
+		readOnly,
 		contract: {
 			id: contract.id,
 			contractNumber: contract.contractNumber,
@@ -113,6 +118,11 @@ export const actions: Actions = {
 		const result = await resolveTokenAndContract(params.tenant, params.token);
 
 		if (!result || 'expired' in result) {
+			return fail(400, { error: 'Link invalid sau expirat' });
+		}
+
+		// Linkul deschis în arhivă (token consumat sau expirat) nu mai poate semna.
+		if (result.readOnly) {
 			return fail(400, { error: 'Link invalid sau expirat' });
 		}
 

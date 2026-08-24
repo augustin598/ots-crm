@@ -18,10 +18,22 @@
 	const justSigned = $derived(form && 'success' in form && form.success);
 	const canSubmit = $derived(signatureName.trim().length > 0 && signatureDataUrl.length > 0);
 
+	const signedDate = $derived(
+		data.contract.beneficiarSignedAt
+			? new Date(data.contract.beneficiarSignedAt).toLocaleDateString('ro-RO', {
+					day: 'numeric',
+					month: 'long',
+					year: 'numeric'
+				})
+			: null
+	);
+
 	let redirectCountdown = $state(5);
 
+	// Redirectăm doar imediat după semnare. Un link deschis a doua oară (arhivă)
+	// rămâne pe pagină, ca beneficiarul să poată reciti și descărca contractul.
 	$effect(() => {
-		if (justSigned || alreadySigned) {
+		if (justSigned) {
 			const interval = setInterval(() => {
 				redirectCountdown--;
 				if (redirectCountdown <= 0) {
@@ -66,8 +78,36 @@
 			</div>
 		</div>
 
-		<!-- PDF preview — hidden after signing because token becomes invalid -->
-		{#if !alreadySigned && !justSigned}
+		<!-- Confirmarea semnării stă deasupra contractului la redeschiderea linkului -->
+		{#if alreadySigned || justSigned}
+			<div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+				<div class="text-4xl mb-3">✓</div>
+				<h2 class="text-xl font-bold text-green-800 mb-2">
+					{justSigned ? 'Contract semnat cu succes!' : 'Contract semnat'}
+				</h2>
+				<p class="text-green-700">
+					Semnătura <strong>{justSigned && form && 'signatureName' in form ? form.signatureName : data.contract.beneficiarSignatureName}</strong> a fost înregistrată{!justSigned && signedDate ? ` pe ${signedDate}` : ''}.
+				</p>
+				{#if justSigned}
+					<p class="text-sm text-green-600 mt-2">Veți primi o confirmare prin email de la {data.tenant.name}.</p>
+					<p class="text-xs text-gray-500 mt-3">Redirectare automată în {redirectCountdown} secunde...</p>
+				{:else}
+					<p class="text-sm text-green-600 mt-2">
+						Puteți reciti oricând contractul mai jos sau îl puteți descărca.
+					</p>
+					<a
+						href={pdfSrc}
+						download="Contract-{data.contract.contractNumber}.pdf"
+						class="inline-block mt-4 bg-green-700 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-800 transition-colors"
+					>
+						Descarcă contractul (PDF)
+					</a>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- Previzualizare contract — ascunsă doar în secunda de după semnare -->
+		{#if !justSigned}
 			<div class="bg-white rounded-lg border overflow-hidden">
 				<div class="border-b px-4 py-3 bg-gray-50">
 					<p class="text-sm font-medium text-gray-700">Previzualizare contract</p>
@@ -81,18 +121,8 @@
 			</div>
 		{/if}
 
-		<!-- Signing section -->
-		{#if alreadySigned || justSigned}
-			<div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-				<div class="text-4xl mb-3">✓</div>
-				<h2 class="text-xl font-bold text-green-800 mb-2">Contract semnat cu succes!</h2>
-				<p class="text-green-700">
-					Semnătura <strong>{justSigned && form && 'signatureName' in form ? form.signatureName : data.contract.beneficiarSignatureName}</strong> a fost înregistrată.
-				</p>
-				<p class="text-sm text-green-600 mt-2">Veți primi o confirmare prin email de la {data.tenant.name}.</p>
-				<p class="text-xs text-gray-500 mt-3">Redirectare automată în {redirectCountdown} secunde...</p>
-			</div>
-		{:else}
+		<!-- Formularul de semnare, doar cât linkul e activ -->
+		{#if !alreadySigned && !justSigned && !data.readOnly}
 			<div class="bg-white rounded-lg border p-6">
 				<h2 class="text-lg font-bold text-gray-900 mb-1">Semnați contractul</h2>
 				<p class="text-sm text-gray-600 mb-4">

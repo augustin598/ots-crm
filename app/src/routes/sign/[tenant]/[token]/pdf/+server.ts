@@ -41,9 +41,6 @@ export const GET: RequestHandler = async ({ params }) => {
 	if (!signToken) {
 		throw error(400, 'Link invalid');
 	}
-	if (signToken.used || signToken.expiresAt < new Date()) {
-		throw error(400, 'Link expirat');
-	}
 
 	const [contract] = await db
 		.select()
@@ -53,6 +50,12 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	if (!contract) {
 		throw error(404, 'Contract not found');
+	}
+
+	// Aceeași regulă ca pagina de semnare: după ce tokenul e consumat sau expirat,
+	// PDF-ul rămâne accesibil doar dacă beneficiarul chiar a semnat contractul.
+	if ((signToken.used || signToken.expiresAt < new Date()) && !contract.beneficiarSignedAt) {
+		throw error(400, 'Link expirat');
 	}
 
 	// If this is an uploaded contract, serve the uploaded file directly
