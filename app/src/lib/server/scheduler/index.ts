@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { env } from '$env/dynamic/private';
 import { processRecurringInvoices } from './tasks/recurring-invoices';
 import { processRecurringTasksSafety } from './tasks/recurring-tasks-safety';
+import { processRecurringTasksCatchup } from './tasks/recurring-tasks-catchup';
 import { processTaskReminders } from './tasks/task-reminders';
 import { processDailyWorkReminders } from './tasks/daily-work-reminders';
 import { processSpvInvoiceSync } from './tasks/spv-invoice-sync';
@@ -160,6 +161,7 @@ type TaskHandler = (params: Record<string, any>) => Promise<any>;
 const taskHandlers: Record<string, TaskHandler> = {
 	recurring_invoices: processRecurringInvoices,
 	recurring_tasks_safety: processRecurringTasksSafety,
+	recurring_tasks_catchup: processRecurringTasksCatchup,
 	task_reminders: processTaskReminders,
 	daily_work_reminders: processDailyWorkReminders,
 	spv_invoice_sync: processSpvInvoiceSync,
@@ -339,7 +341,8 @@ export const startScheduler = async () => {
 
 	// Clean up stale repeatable jobs from Redis (from old code deployments with different patterns)
 	const expectedJobIds = new Set([
-		'recurring-invoices', 'recurring-tasks-safety', 'task-reminders', 'daily-work-reminders',
+		'recurring-invoices', 'recurring-tasks-safety', 'recurring-tasks-catchup',
+		'task-reminders', 'daily-work-reminders',
 		'spv-invoice-sync', 'revolut-transaction-sync', 'keez-invoice-sync',
 		'gmail-invoice-sync', 'gmail-invoice-sync-evening', 'bnr-rate-sync',
 		'invoice-overdue-reminders', 'contract-lifecycle', 'google-ads-invoice-sync',
@@ -401,6 +404,23 @@ export const startScheduler = async () => {
 				tz: 'Europe/Bucharest'
 			},
 			jobId: 'recurring-tasks-safety'
+		}
+	);
+
+	// Re-anchor open recurring occurrences on the current period, daily at 8:15 AM
+	// (after the safety-net, so chains it just spawned are already in place)
+	await schedulerQueue.add(
+		'recurring-tasks-catchup',
+		{
+			type: 'recurring_tasks_catchup',
+			params: {}
+		},
+		{
+			repeat: {
+				pattern: '15 8 * * *',
+				tz: 'Europe/Bucharest'
+			},
+			jobId: 'recurring-tasks-catchup'
 		}
 	);
 
@@ -1146,6 +1166,8 @@ export function getSchedulerQueue(): Queue {
 /** Human-readable labels for job types */
 export const JOB_LABELS: Record<string, string> = {
 	recurring_invoices: 'Facturi Recurente',
+	recurring_tasks_safety: 'Task-uri Recurente (Safety-net)',
+	recurring_tasks_catchup: 'Task-uri Recurente (Recalibrare Scadente)',
 	task_reminders: 'Reminder-e Task-uri',
 	daily_work_reminders: 'Reminder-e Zilnice Lucru',
 	spv_invoice_sync: 'Sync Facturi SPV',

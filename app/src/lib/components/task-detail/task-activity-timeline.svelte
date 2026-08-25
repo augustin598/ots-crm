@@ -66,6 +66,14 @@
 				return 'a creat evenimentul, dar linkul Meet încă se genera';
 			case 'meet_event_failed':
 				return 'nu a putut crea evenimentul în Google Calendar';
+			case 'recurring_spawned':
+				return 'a generat următoarea ocurență recurentă';
+			case 'recurring_chain_ended':
+				return 'a încheiat seria recurentă (s-a atins data de final)';
+			case 'recurring_occurrences_skipped':
+				return 'a sărit peste ocurențele ratate';
+			case 'recurring_occurrence_rolled':
+				return 'a mutat scadența pe perioada curentă';
 			case 'whatsapp_group_linked':
 				return 'a legat task-ul de un grup WhatsApp';
 			case 'whatsapp_group_unlinked':
@@ -96,6 +104,41 @@
 		} catch {
 			return null;
 		}
+	}
+
+	/**
+	 * `recurring_*` catch-up rows carry a JSON payload too. Spell out how many
+	 * periods went by unfinished and where the deadline landed — the raw badges
+	 * would otherwise show an ISO timestamp next to a bare number.
+	 */
+	function recurringDetail(
+		activity: { action: string; newValue?: string | null }
+	): string | null {
+		if (!activity.newValue) return null;
+		if (
+			activity.action !== 'recurring_occurrence_rolled' &&
+			activity.action !== 'recurring_occurrences_skipped'
+		) {
+			return null;
+		}
+		try {
+			const parsed = JSON.parse(activity.newValue);
+			const count = Number(parsed.missed ?? parsed.skipped ?? 0);
+			const to = parsed.to ? formatActivityDate(parsed.to) : null;
+			if (!to) return null;
+			const plural = count === 1 ? 'ocurență ratată' : 'ocurențe ratate';
+			return count > 0
+				? `${count} ${plural} — scadența nouă: ${to}`
+				: `Scadența nouă: ${to}`;
+		} catch {
+			return null;
+		}
+	}
+
+	function formatActivityDate(iso: string): string | null {
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return null;
+		return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
 	}
 
 	function resolveActivityValue(
@@ -140,6 +183,11 @@
 			case 'whatsapp_group_linked':
 			case 'whatsapp_group_unlinked':
 				return 'bg-green-100 text-green-700';
+			case 'recurring_spawned':
+			case 'recurring_occurrences_skipped':
+			case 'recurring_occurrence_rolled':
+			case 'recurring_chain_ended':
+				return 'bg-violet-100 text-violet-600';
 			case 'meet_event_deleted':
 				return 'bg-gray-200 text-gray-600';
 			default:
@@ -168,6 +216,7 @@
 			{#each activities as activity (activity.id)}
 				{@const actorName = activity.userName || userMap.get(activity.userId) || activity.userId}
 				{@const meet = meetDetail(activity)}
+				{@const recurring = recurringDetail(activity)}
 				<div class="relative flex items-start gap-3">
 					<div
 						class="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full {getActivityIconColor(activity.action)}"
@@ -213,6 +262,8 @@
 									>
 								{/if}
 							</p>
+						{:else if recurring}
+							<p class="mt-1 text-xs text-muted-foreground">{recurring}</p>
 						{:else if activity.oldValue || activity.newValue}
 							<div class="mt-0.5 flex flex-wrap items-center gap-1">
 								{#if activity.oldValue}
