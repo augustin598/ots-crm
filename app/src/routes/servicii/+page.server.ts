@@ -76,7 +76,7 @@ export const load: PageServerLoad = async (event) => {
 
 	return {
 		unlocked: true as const,
-		catalog: buildPublicCatalog(),
+		catalog: await buildPublicCatalog(tenantId),
 		company: await loadPublicCompany(tenantId)
 	};
 };

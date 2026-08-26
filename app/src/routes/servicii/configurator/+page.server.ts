@@ -34,7 +34,7 @@ export const load: PageServerLoad = async (event) => {
 	}
 
 	return {
-		catalog: buildPublicCatalog(),
+		catalog: await buildPublicCatalog(tenantId),
 		company: await loadPublicCompany(tenantId)
 	};
 };

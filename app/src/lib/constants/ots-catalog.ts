@@ -654,12 +654,26 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 // Rămâne o singură necorelare cunoscută: website-dev Silver (1.200 €) iese la
 // ~18 ore, prea puțin pentru un site de prezentare complet. Se rezolvă din
 // scope (template, max 5 pagini, o rundă de design), nu din tarif.
-export const HOURLY_RATES: { label: string; rate: number }[] = [
-	{ label: 'Development', rate: 65 },
-	{ label: 'Design UI/UX', rate: 70 },
-	{ label: 'Project Management', rate: 55 },
-	{ label: 'DevOps / API', rate: 80 }
+export type HourlyRateSlug = 'development' | 'design-ui-ux' | 'project-management' | 'devops-api';
+
+export interface HourlyRate {
+	/** Identificator stabil — ajunge în DB (service_hours_order) și în metadata Stripe; nu-l redenumi. */
+	slug: HourlyRateSlug;
+	label: string;
+	/** EUR întregi pe oră, fără TVA. */
+	rate: number;
+}
+
+export const HOURLY_RATES: HourlyRate[] = [
+	{ slug: 'development', label: 'Development', rate: 65 },
+	{ slug: 'design-ui-ux', label: 'Design UI/UX', rate: 70 },
+	{ slug: 'project-management', label: 'Project Management', rate: 55 },
+	{ slug: 'devops-api', label: 'DevOps / API', rate: 80 }
 ];
+
+export function getHourlyRate(slug: string): HourlyRate | undefined {
+	return HOURLY_RATES.find((r) => r.slug === slug);
+}
 
 // Sluguri pentru care `PackageComparisonDialog` afișează
 // badge „Recomandat OTS" pe Silver + tabel tarife orare.

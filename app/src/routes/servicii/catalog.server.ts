@@ -24,9 +24,18 @@ import {
 	BUNDLE_TIERS_RULE,
 	BUNDLES
 } from '$lib/constants/ots-catalog';
+import { resolveVatPercent } from '$lib/server/vat/rate';
 import type { PublicCatalog, PublicCompany } from './types';
 
-export function buildPublicCatalog(): PublicCatalog {
+export async function buildPublicCatalog(tenantId: string): Promise<PublicCatalog> {
+	// Aceeași sursă de TVA ca factura Keez și PaymentIntent-ul (audit C1): totalul
+	// afișat la cumpărarea orelor trebuie să fie exact cel încasat și facturat.
+	const [settings] = await db
+		.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+
 	return {
 		categories: CATEGORIES,
 		// Doar slug-urile: categoriile se trimit o singură dată și se rezolvă în pagină.
@@ -44,7 +53,8 @@ export function buildPublicCatalog(): PublicCatalog {
 		webDevSlugs: [...WEB_DEV_SLUGS],
 		setupDefaultDescription: SETUP_DEFAULT_DESCRIPTION,
 		discountRules: BUNDLE_TIERS_RULE,
-		bundles: BUNDLES
+		bundles: BUNDLES,
+		vatPercent: resolveVatPercent(settings?.defaultTaxRate)
 	};
 }
 

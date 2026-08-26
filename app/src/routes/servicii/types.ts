@@ -22,7 +22,9 @@ export type PublicCatalog = {
 	tiers: Tier[];
 	tierLabels: Record<Tier, string>;
 	tierColors: Record<Tier, TierColors>;
-	hourlyRates: { label: string; rate: number }[];
+	hourlyRates: { slug: string; label: string; rate: number }[];
+	/** Cota TVA a tenantului (%, întreg) — pentru totalul afișat la cumpărarea orelor. */
+	vatPercent: number;
 	webDevSlugs: string[];
 	setupDefaultDescription: string;
 	discountRules: { minServices: number; discountPct: number; label: string }[];
