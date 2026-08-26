@@ -87,6 +87,8 @@
 	let county = $state('');
 	let postalCode = $state('');
 	let note = $state('');
+	// Acord explicit cu Termenii + GDPR înainte de plată, ca la checkout-ul de hosting.
+	let consentTerms = $state(false);
 	let touched = $state(false);
 
 	// Verificarea ANAF e informativă (autocompletare); validarea reală e pe server.
@@ -121,8 +123,15 @@
 	const cityError = $derived(
 		billingType === 'person' && city.trim().length < 2 ? 'Scrie localitatea.' : null
 	);
+	const consentError = $derived(consentTerms ? null : 'Bifează acordul cu Termenii și politica GDPR.');
 	const detailsValid = $derived(
-		!nameError && !emailError && !companyError && !cuiError && !addressError && !cityError
+		!nameError &&
+			!emailError &&
+			!companyError &&
+			!cuiError &&
+			!addressError &&
+			!cityError &&
+			!consentError
 	);
 	const show = (err: string | null) => touched && err !== null;
 	/** Prima eroare în ordinea vizuală a câmpurilor (CUI și firma stau deasupra numelui). */
@@ -133,6 +142,7 @@
 		if (emailError) return { id: 'hc-email', message: emailError };
 		if (addressError) return { id: 'hc-address', message: addressError };
 		if (cityError) return { id: 'hc-city', message: cityError };
+		if (consentError) return { id: 'hc-consent', message: consentError };
 		return null;
 	});
 
@@ -207,7 +217,8 @@
 				city: city.trim(),
 				county: county.trim() || undefined,
 				postalCode: postalCode.trim() || undefined,
-				note: note.trim() || undefined
+				note: note.trim() || undefined,
+				consentTerms: true as const
 			});
 			const stripe = await loadStripe(res.publishableKey);
 			if (!stripe) throw new Error('Stripe.js nu s-a putut încărca. Verifică conexiunea.');
@@ -389,6 +400,7 @@
 								<div class="hc-input-wrap">
 									<input
 										id="hc-cui"
+										name="cui"
 										class={['hc-input', show(cuiError) && 'hc-input-error']}
 										bind:value={cui}
 										onblur={onCuiBlur}
@@ -401,9 +413,9 @@
 										aria-describedby={show(cuiError) ? 'hc-cui-err' : cuiHint ? 'hc-cui-hint' : undefined}
 									/>
 									{#if cuiChecking}
-										<LoaderIcon size={16} class="hc-spin hc-input-icon" aria-label="Se verifică la ANAF" />
+										<LoaderIcon size={16} class="hc-spin hc-input-icon" role="img" aria-label="Se verifică la ANAF" />
 									{:else if cuiVerified}
-										<CheckIcon size={16} class="hc-input-icon hc-input-ok" aria-label="Verificat la ANAF" />
+										<CheckIcon size={16} class="hc-input-icon hc-input-ok" role="img" aria-label="Verificat la ANAF" />
 									{/if}
 								</div>
 								{#if show(cuiError)}
@@ -418,6 +430,7 @@
 								<label class="hc-label" for="hc-company">Denumire firmă *</label>
 								<input
 									id="hc-company"
+									name="companyName"
 									class={['hc-input', show(companyError) && 'hc-input-error']}
 									bind:value={companyName}
 									maxlength="160"
@@ -430,7 +443,7 @@
 								{/if}
 							</div>
 							<label class="hc-check hc-span-2">
-								<input type="checkbox" bind:checked={vatPayer} />
+								<input type="checkbox" name="vatPayer" bind:checked={vatPayer} />
 								<span>Firma este plătitoare de TVA</span>
 							</label>
 						{/if}
@@ -441,6 +454,7 @@
 							</label>
 							<input
 								id="hc-name"
+								name="contactName"
 								class={['hc-input', show(nameError) && 'hc-input-error']}
 								bind:value={contactName}
 								maxlength="120"
@@ -456,6 +470,7 @@
 							<label class="hc-label" for="hc-email">Email *</label>
 							<input
 								id="hc-email"
+								name="contactEmail"
 								class={['hc-input', show(emailError) && 'hc-input-error']}
 								type="email"
 								bind:value={contactEmail}
@@ -476,6 +491,7 @@
 							<label class="hc-label" for="hc-phone">Telefon</label>
 							<input
 								id="hc-phone"
+								name="contactPhone"
 								class="hc-input"
 								type="tel"
 								bind:value={contactPhone}
@@ -498,6 +514,7 @@
 							</label>
 							<input
 								id="hc-address"
+								name="address"
 								class={['hc-input', show(addressError) && 'hc-input-error']}
 								bind:value={address}
 								maxlength="500"
@@ -518,6 +535,7 @@
 							<label class="hc-label" for="hc-city">Localitate {billingType === 'person' ? '*' : ''}</label>
 							<input
 								id="hc-city"
+								name="city"
 								class={['hc-input', show(cityError) && 'hc-input-error']}
 								bind:value={city}
 								maxlength="120"
@@ -533,6 +551,7 @@
 							<label class="hc-label" for="hc-county">Județ</label>
 							<input
 								id="hc-county"
+								name="county"
 								class="hc-input"
 								bind:value={county}
 								maxlength="120"
@@ -544,12 +563,34 @@
 							<label class="hc-label" for="hc-note">Pe ce vrei să folosim orele? (opțional)</label>
 							<textarea
 								id="hc-note"
+								name="note"
 								class="hc-input hc-textarea"
 								bind:value={note}
 								rows="3"
 								maxlength="2000"
 								placeholder="Ex.: modificări pe pagina de checkout, integrare cu un API extern…"
 							></textarea>
+						</div>
+						<div class="hc-field hc-span-2">
+							<label class={['hc-check', show(consentError) && 'hc-check-error']}>
+								<input
+									id="hc-consent"
+									type="checkbox"
+									name="consentTerms"
+									bind:checked={consentTerms}
+									aria-invalid={show(consentError) ? 'true' : undefined}
+									aria-describedby="hc-consent-hint"
+								/>
+								<span>
+									Sunt de acord cu <a href="/termeni" target="_blank" rel="noopener">Termenii</a> și
+									<a href="/gdpr" target="_blank" rel="noopener">politica GDPR</a>. *
+								</span>
+							</label>
+							<span id="hc-consent-hint" class={['hc-hint', show(consentError) && 'hc-hint-err']}>
+								{show(consentError)
+									? consentError
+									: 'Datele de mai sus se folosesc doar pentru factură, acces în portal și contact.'}
+							</span>
 						</div>
 						<!-- Enter în orice câmp = „Continuă"; butonul vizibil e în footer. -->
 						<button type="submit" class="hc-sr" tabindex="-1" aria-hidden="true">Continuă</button>
@@ -878,6 +919,13 @@
 		width: 16px;
 		height: 16px;
 		accent-color: #1877f2;
+	}
+	.hc-check a {
+		color: #1877f2;
+		text-decoration: underline;
+	}
+	.hc-check-error {
+		color: #b91c1c;
 	}
 	.hc-error {
 		margin: 14px 0 0;

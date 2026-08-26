@@ -386,6 +386,7 @@
 									<span class="sv-sr">Număr de ore {rate.label}</span>
 									<input
 										type="number"
+										name={`hours-${rate.slug}`}
 										inputmode="numeric"
 										min={HOURS_MIN}
 										max={HOURS_MAX}
@@ -1321,8 +1322,9 @@
 		margin-top: 8px;
 	}
 	.sv-rate-stepper button {
-		width: 40px;
-		height: 40px;
+		/* Țintă tactilă de 44 px (WCAG 2.5.8 / iOS HIG). */
+		width: 44px;
+		height: 44px;
 		border-radius: 999px;
 		border: 1px solid var(--border);
 		background: var(--bg-soft);

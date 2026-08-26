@@ -141,7 +141,8 @@ const INPUT = {
 	address: 'Str. Exemplu nr. 1',
 	city: 'Suceava',
 	county: 'Suceava',
-	postalCode: '720001'
+	postalCode: '720001',
+	consentTerms: true as const
 };
 
 /** `error()` din SvelteKit aruncă un HttpError care NU extinde Error — verificăm statusul. */

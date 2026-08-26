@@ -61,7 +61,9 @@ const hoursOrderSchema = v.object({
 	city: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(120))),
 	county: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(120))),
 	postalCode: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(16))),
-	note: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(2000)))
+	note: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(2000))),
+	/** Acordul cu Termenii + GDPR — obligatoriu, ca la comanda de hosting. */
+	consentTerms: v.literal(true)
 });
 
 type ClientRow = typeof table.client.$inferSelect;

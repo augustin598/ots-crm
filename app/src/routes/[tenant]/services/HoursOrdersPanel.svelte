@@ -89,13 +89,13 @@
 			<table class="w-full text-sm">
 				<thead class="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
 					<tr>
-						<th class="text-left font-medium px-4 py-3">Data</th>
-						<th class="text-left font-medium px-4 py-3">Client</th>
-						<th class="text-left font-medium px-4 py-3">Specializare</th>
-						<th class="text-right font-medium px-4 py-3">Ore</th>
-						<th class="text-right font-medium px-4 py-3">Total (cu TVA)</th>
-						<th class="text-left font-medium px-4 py-3">Status</th>
-						<th class="text-left font-medium px-4 py-3">Factură</th>
+						<th scope="col" class="text-left font-medium px-4 py-3">Data</th>
+						<th scope="col" class="text-left font-medium px-4 py-3">Client</th>
+						<th scope="col" class="text-left font-medium px-4 py-3">Specializare</th>
+						<th scope="col" class="text-right font-medium px-4 py-3">Ore</th>
+						<th scope="col" class="text-right font-medium px-4 py-3">Total (cu TVA)</th>
+						<th scope="col" class="text-left font-medium px-4 py-3">Status</th>
+						<th scope="col" class="text-left font-medium px-4 py-3">Factură</th>
 					</tr>
 				</thead>
 				<tbody class="divide-y">
