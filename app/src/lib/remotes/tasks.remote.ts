@@ -1152,6 +1152,71 @@ export const createTask = command(taskSchema, async (data) => {
 		}
 	});
 
+	// Legarea automată de grupul WhatsApp al clientului. Până acum, legarea era
+	// manuală, deci un task creat din interfață nu anunța nimic până când cineva
+	// nu-l lega de mână — ușor de uitat, greu de observat. Legăm doar când
+	// clientul are EXACT un grup bifat: la mai multe, alegerea rămâne a omului.
+	if (clientId) {
+		try {
+			const watchedGroups = await db
+				.select({ id: table.whatsappGroup.id })
+				.from(table.whatsappGroup)
+				.where(
+					and(
+						eq(table.whatsappGroup.tenantId, targetTenantId),
+						eq(table.whatsappGroup.clientId, clientId),
+						eq(table.whatsappGroup.watched, true)
+					)
+				);
+
+			if (watchedGroups.length === 1) {
+				await db
+					.update(table.task)
+					.set({ whatsappGroupId: watchedGroups[0].id, updatedAt: new Date() })
+					.where(eq(table.task.id, taskId));
+
+				const { notifyTaskLinkedToGroup } = await import(
+					'$lib/server/whatsapp/task-notifications'
+				);
+				const [group] = await db
+					.select({ groupJid: table.whatsappGroup.groupJid })
+					.from(table.whatsappGroup)
+					.where(eq(table.whatsappGroup.id, watchedGroups[0].id))
+					.limit(1);
+				const assigneeName = data.assignedToUserId
+					? ((
+							await db
+								.select({ firstName: table.user.firstName, lastName: table.user.lastName })
+								.from(table.user)
+								.where(eq(table.user.id, data.assignedToUserId))
+								.limit(1)
+						)[0] ?? null)
+					: null;
+
+				if (group) {
+					await notifyTaskLinkedToGroup({
+						tenantId: targetTenantId,
+						tenantSlug: event.locals.tenant.slug,
+						taskId,
+						taskTitle: data.title,
+						status: data.status || 'todo',
+						assigneeName: assigneeName
+							? `${assigneeName.firstName ?? ''} ${assigneeName.lastName ?? ''}`.trim() || null
+							: null,
+						dueDate: data.dueDate ? new Date(data.dueDate) : null,
+						actorUserId: event.locals.user.id,
+						groupJid: group.groupJid
+					});
+				}
+			}
+		} catch (error) {
+			logWarning('whatsapp', `legarea automată de grup a eșuat: ${(error as Error).message}`, {
+				tenantId: targetTenantId,
+				metadata: { taskId }
+			});
+		}
+	}
+
 	// Emit task.created hook (always, regardless of assignee)
 	try {
 		const hooks = getHooksManager();

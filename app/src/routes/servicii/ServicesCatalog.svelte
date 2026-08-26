@@ -56,11 +56,19 @@
 	const bySlug = $derived(new Map(catalog.categories.map((c) => [c.slug, c])));
 	const webDevSlugs = $derived(new Set(catalog.webDevSlugs));
 
+	// Tarifele orare stau în aceeași bandă de filtre ca grupurile de servicii, dar nu
+	// sunt un grup: nu au categorii, nu intră în coș. Id-ul e ales să nu se lovească
+	// de niciun `CATEGORY_GROUPS.id`.
+	const RATES_TAB_ID = 'hourly-rates';
+
 	let activeGroupId = $state<string>('all');
+	const showRates = $derived(activeGroupId === RATES_TAB_ID);
 	const visibleGroups = $derived(
-		activeGroupId === 'all'
-			? catalog.groups
-			: catalog.groups.filter((g) => g.id === activeGroupId)
+		showRates
+			? []
+			: activeGroupId === 'all'
+				? catalog.groups
+				: catalog.groups.filter((g) => g.id === activeGroupId)
 	);
 
 	function categoriesInGroup(slugs: string[]): Category[] {
@@ -317,7 +325,43 @@
 					{group.label} <i>{categoriesInGroup(group.slugs).length}</i>
 				</button>
 			{/each}
+			{#if catalog.hourlyRates.length > 0}
+				<button
+					type="button"
+					class="sv-filter"
+					aria-pressed={showRates}
+					onclick={() => (activeGroupId = RATES_TAB_ID)}
+				>
+					Tarife orare <i>{catalog.hourlyRates.length}</i>
+				</button>
+			{/if}
 		</div>
+
+		{#if showRates}
+			<div class="sv-group">
+				<div class="sv-grouphead">
+					<h3>Extra work peste scope</h3>
+					<p>Ce se facturează pe oră, când depășim scope-ul unui pachet fixed-price.</p>
+				</div>
+				<p class="sv-rates-intro">
+					Pachetele de dezvoltare au un scope fix, stabilit înainte de start. Modificările sau
+					funcționalitățile cerute peste el se facturează pe oră, după specializarea implicată:
+				</p>
+				<div class="sv-rategrid">
+					{#each catalog.hourlyRates as rate (rate.label)}
+						<div class="sv-rate">
+							<span class="sv-rate-val">{rate.rate} €<i>/h</i></span>
+							<span class="sv-rate-label">{rate.label}</span>
+						</div>
+					{/each}
+				</div>
+				<p class="sv-fine">
+					Tarifele sunt în EUR, fără TVA. Estimăm orele înainte de a începe și le confirmăm cu
+					tine; nu facturăm muncă neaprobată. Pentru cerințe recurente e de regulă mai avantajos
+					un pachet de mentenanță decât ora de extra work.
+				</p>
+			</div>
+		{/if}
 
 		{#each visibleGroups as group (group.id)}
 			{@const items = categoriesInGroup(group.slugs)}
@@ -371,11 +415,13 @@
 			{/if}
 		{/each}
 
-		<p class="sv-fine">
-			Toate prețurile sunt pentru management și sunt exprimate în EUR, fără TVA. Bugetul media (Ads)
-			și costul platformelor externe (Brevo, Mailchimp, HubSpot etc.) se plătesc separat, direct
-			către furnizor.
-		</p>
+		{#if !showRates}
+			<p class="sv-fine">
+				Toate prețurile sunt pentru management și sunt exprimate în EUR, fără TVA. Bugetul media
+				(Ads) și costul platformelor externe (Brevo, Mailchimp, HubSpot etc.) se plătesc separat,
+				direct către furnizor.
+			</p>
+		{/if}
 	</section>
 
 	<footer class="sv-foot">
@@ -1154,6 +1200,54 @@
 		color: var(--muted);
 	}
 
+	/* ===== Tarife orare ===== */
+	.sv-rates-intro {
+		max-width: 720px;
+		margin: -6px 0 22px;
+		font-size: 14px;
+		line-height: 1.7;
+		color: var(--ink2);
+	}
+	.sv-rategrid {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 16px;
+	}
+	.sv-rate {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		padding: 28px 20px;
+		background: white;
+		border: 1px solid var(--border);
+		border-radius: 18px;
+		text-align: center;
+		transition: all 0.2s;
+	}
+	.sv-rate:hover {
+		transform: translateY(-3px);
+		box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+	}
+	.sv-rate-val {
+		font-size: 34px;
+		font-weight: 800;
+		letter-spacing: -0.03em;
+		line-height: 1;
+		color: var(--ink);
+	}
+	.sv-rate-val i {
+		font-style: normal;
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--muted);
+	}
+	.sv-rate-label {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--ink2);
+	}
+
 	/* ===== Subsol ===== */
 	.sv-foot {
 		margin-top: 56px;
@@ -1197,11 +1291,13 @@
 	@media (prefers-reduced-motion: reduce) {
 		.sv-card,
 		.sv-discount,
+		.sv-rate,
 		.sv-wizard {
 			transition: none;
 		}
 		.sv-card:hover,
 		.sv-discount:hover,
+		.sv-rate:hover,
 		.sv-wizard:hover {
 			transform: none;
 		}
@@ -1209,7 +1305,8 @@
 
 	@media (max-width: 1000px) {
 		.sv-grid,
-		.sv-discounts {
+		.sv-discounts,
+		.sv-rategrid {
 			grid-template-columns: repeat(2, 1fr);
 		}
 	}
