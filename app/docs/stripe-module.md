@@ -525,3 +525,45 @@ http://localhost:5173/<tenant-slug>/api/_debug-stripe-health?action=client-dupli
 - **Deep audit post-implementare:** API Tester agent — descoperit P0 cross-tenant replay + cleanup neprogramat + isActive bypass + VAT ID greșit la non-plătitori + stuck-processing forever
 
 Toate findings-urile P0/P1 din audit-uri sunt rezolvate în commit `2194995`. P2/P3 sunt documentate dar nu blocking pentru producție test mode.
+
+---
+
+## Cumpărare ore de extra work pe `/servicii` (2026-08-26)
+
+Tab-ul „Tarife orare" din pagina publică (cu parolă) vinde ore de Development /
+Design UI/UX / Project Management / DevOps (tarife în `HOURLY_RATES`, cu `slug`
+stabil), 1–100 h, plată cu cardul pe loc (PaymentElement embedded, EUR).
+
+| Fișier | Rol |
+|---|---|
+| `src/lib/logic/hours-pricing.ts` | pur, client-safe: limite, net în cenți, EUR→RON, format curs |
+| `src/lib/server/public-services-guard.ts` | poartă + rate-limit comun cu cererea de ofertă (`public-services-request`) |
+| `src/lib/remotes/public-hours.remote.ts` | `createHoursOrder`: client find-or-create (anti-enumeration ca la hosting), rând `service_hours_order`, PaymentIntent EUR pe BRUT cu `metadata.crmPurpose='hours_purchase'` |
+| `src/lib/server/stripe/hours-purchase.ts` | branch-ul webhook (succeeded/failed): marchează plătit, emite factura, magic link, emailuri |
+| `src/lib/server/stripe/post-payment/emit-keez-hours-invoice.ts` | factura CRM + push Keez, idempotent pe `stripePaymentIntentId` |
+| `src/routes/servicii/HoursCheckoutModal.svelte` | modal 3 pași: date facturare → plată → confirmare |
+| `src/routes/[tenant]/services/HoursOrdersPanel.svelte` | tab „Ore extra work" în admin (`getHoursOrders`) |
+
+**Reguli Keez descoperite la testul cap-coadă (26 aug 2026, chei test + `stripe listen`):**
+- `ERROR_ROMANIA_PARTNER_CURRENCY_ERROR`: Keez refuză facturi în EUR pentru clienți din
+  România → factura are ANTET în RON (`currency='RON'`, `invoiceCurrency=null`,
+  `exchangeRate` = cursul BNR EUR blocat la emitere), iar LINIA rămâne în EUR
+  (`invoice_line_item.currency='EUR'`, `rate` = tarif×100, UM `Ora` = Keez id 5).
+  Mapper-ul trimite `netAmount` în RON și `netAmountCurrency`/`referenceCurrencyCode=EUR`.
+  Sumele din antet (`amount/taxAmount/totalAmount`) sunt în bani RON. Fără curs BNR
+  în DB factura se sare (`bnr_rate_missing`), comanda rămâne plătită, admin vede „Neemisă".
+- `ERROR_SAME_AS_CLIENT`: nu se poate factura propriul CUI (test cu CUI-ul OTS pică).
+- `ERROR_PF_AT_LEAST_ADDRESS`: persoanele fizice au nevoie de adresă → formularul o cere
+  la PF; la firme vine din ANAF (sediul, read-only) sau din CRM când firma e deja client.
+- Seria e cea implicită (OTS), nu OTSH. După push statusul CRM devine `draft` (Keez
+  creează Draft) — același comportament ca la facturile de hosting plătite prin Stripe.
+
+**Idempotență:** `processed_stripe_event` + guard pe `status==='paid'` + emitter pe
+`stripePaymentIntentId` + dedupe-ul emailurilor per factură. `payment_failed` marchează
+`failed` doar din `pending_payment`.
+
+**Test local:** `stripe listen --forward-to localhost:5173/api/stripe/webhook` (secretul
+din `.env` coincide cu al CLI-ului), comanda din browser, apoi
+`stripe payment_intents confirm <pi> --payment-method=pm_card_visa --return-url=…`
+(câmpurile PaymentElement sunt în iframe, testermcp nu le poate completa). DB dev = prod:
+șterge rândurile de test după (`service_hours_order`, factura + linia, clientul PF).
