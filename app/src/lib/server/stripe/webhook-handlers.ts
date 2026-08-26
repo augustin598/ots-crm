@@ -8,6 +8,11 @@ import { runPostPaymentSteps } from './post-payment/dispatcher';
 import { emitKeezFiscalInvoice } from './post-payment/emit-keez-invoice';
 import { notifyHostingPaymentFailed } from '$lib/server/hosting/notifications';
 import { handleStripeInvoicePayment } from './invoice-payment';
+import {
+	HOURS_PURCHASE_PURPOSE,
+	handleHoursPurchaseFailed,
+	handleHoursPurchaseSucceeded
+} from './hours-purchase';
 import { translateDeclineCode } from './decline-codes';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
@@ -593,6 +598,13 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 		return;
 	}
 
+	// Cumpărare de ore extra work de pe /servicii — pipeline propriu (factură
+	// Keez + magic link + emailuri), FĂRĂ provisioning DA.
+	if (md.crmPurpose === HOURS_PURCHASE_PURPOSE) {
+		await handleHoursPurchaseSucceeded(intent);
+		return;
+	}
+
 	const tenantId = md.crmTenantId;
 	const clientId = md.crmClientId;
 	const inquiryId = md.crmHostingInquiryId;
@@ -694,6 +706,11 @@ export async function handlePaymentIntentSucceeded(intent: Stripe.PaymentIntent)
 }
 
 export async function handlePaymentIntentFailed(intent: Stripe.PaymentIntent) {
+	if (intent.metadata?.crmPurpose === HOURS_PURCHASE_PURPOSE) {
+		await handleHoursPurchaseFailed(intent);
+		return;
+	}
+
 	const expectedTenantId = intent.metadata?.crmTenantId ?? null;
 	const inquiryId = intent.metadata?.crmHostingInquiryId ?? null;
 	const clientId = intent.metadata?.crmClientId ?? null;
