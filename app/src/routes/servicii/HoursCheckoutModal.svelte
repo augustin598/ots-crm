@@ -38,6 +38,7 @@
 	import { hoursNetCents } from '$lib/logic/hours-pricing';
 	import { createHoursOrder } from '$lib/remotes/public-hours.remote';
 	import { validateCuiAndFetch } from '$lib/remotes/public-hosting.remote';
+	import { parseAnafAddress } from '$lib/components/checkout/anaf-address';
 
 	type Props = {
 		rate: HoursCheckoutRate;
@@ -78,7 +79,9 @@
 	let cui = $state('');
 	let vatPayer = $state(false);
 	// Adresa de facturare: obligatorie (Keez o cere la persoane fizice și o
-	// tipărește pe factură); la firme se precompletează din ANAF.
+	// tipărește pe factură). La firme vine DOAR din ANAF (sediul social) — nu
+	// se tastează; câmpurile editabile rămân pentru persoane fizice și pentru
+	// cazul în care ANAF nu răspunde.
 	let address = $state('');
 	let city = $state('');
 	let county = $state('');
@@ -107,6 +110,8 @@
 	const cuiError = $derived(
 		billingType === 'company' && cui.replace(/\D/g, '').length < 2 ? 'Scrie CUI-ul firmei.' : null
 	);
+	/** Firmă verificată la ANAF: adresa e cea a sediului, afișată, nu editată. */
+	const addressLocked = $derived(billingType === 'company' && cuiVerified);
 	const addressError = $derived(address.trim().length < 5 ? 'Scrie adresa de facturare.' : null);
 	const cityError = $derived(city.trim().length < 2 ? 'Scrie localitatea.' : null);
 	const detailsValid = $derived(
@@ -130,12 +135,23 @@
 		cuiChecking = true;
 		cuiHint = null;
 		cuiVerified = false;
+		// Adresa anterioară (alt CUI) nu trebuie să rămână pe formular.
+		address = '';
+		city = '';
+		county = '';
+		postalCode = '';
 		try {
 			const res = await validateCuiAndFetch(raw);
 			if (res.valid) {
-				if (!companyName.trim()) companyName = res.data.denumire;
-				if (!address.trim()) address = res.data.adresa;
-				if (!postalCode.trim()) postalCode = res.data.codPostal;
+				// ANAF e sursa de adevăr pentru firmă: denumire, sediu, statut TVA.
+				companyName = res.data.denumire || companyName;
+				postalCode = res.data.codPostal || postalCode;
+				if (res.data.adresa) {
+					const parsed = parseAnafAddress(res.data.adresa);
+					address = parsed.address || res.data.adresa;
+					city = parsed.city ?? city;
+					county = parsed.county ?? county;
+				}
 				vatPayer = res.data.platitorTva;
 				cuiVerified = true;
 			} else {
@@ -460,6 +476,15 @@
 								autocomplete="tel"
 							/>
 						</div>
+						{#if addressLocked}
+							<div class="hc-field hc-span-2">
+								<span class="hc-label">Sediul social (din ANAF)</span>
+								<p class="hc-locked">
+									{address}{city ? `, ${city}` : ''}{county ? `, jud. ${county}` : ''}{postalCode ? `, ${postalCode}` : ''}
+								</p>
+								<span class="hc-hint">Factura se emite pe sediul înregistrat la ANAF.</span>
+							</div>
+						{:else}
 						<div class="hc-field hc-span-2">
 							<label class="hc-label" for="hc-address">Adresă de facturare *</label>
 							<input
@@ -501,6 +526,7 @@
 								autocomplete="address-level1"
 							/>
 						</div>
+						{/if}
 						<div class="hc-field hc-span-2">
 							<label class="hc-label" for="hc-note">Pe ce vrei să folosim orele? (opțional)</label>
 							<textarea
@@ -810,6 +836,16 @@
 		font-size: 11.5px;
 		margin-top: 4px;
 		color: #5f6b7c;
+	}
+	.hc-locked {
+		margin: 0;
+		padding: 11px 14px;
+		background: #f7f8fa;
+		border: 1.5px solid #e5e9f0;
+		border-radius: 9px;
+		font-size: 14px;
+		line-height: 1.45;
+		color: #0b1220;
 	}
 	.hc-hint-err {
 		color: #b91c1c;
