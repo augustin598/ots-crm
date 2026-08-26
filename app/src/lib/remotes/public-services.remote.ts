@@ -14,23 +14,16 @@
  */
 
 import { command, getRequestEvent } from '$app/server';
-import { error, type RequestEvent } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { BUNDLE_TIERS_RULE, CATEGORIES, getCategory, TIERS } from '$lib/constants/ots-catalog';
 import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
-import {
-	PUBLIC_SERVICES_PAGE_KEY,
-	requireUnlockedPublicPage
-} from '$lib/server/public-page-access';
+import { guardPublicServicesSubmission } from '$lib/server/public-services-guard';
 import { notifyAdminsOfPackageRequestInBackground } from '$lib/server/package-requests';
-import { rateLimit } from '$lib/server/redis';
-import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
-
-/** Cereri de ofertă acceptate de la același IP. */
-const SUBMIT_LIMIT = { limit: 8, windowSec: 60 * 60 };
+import { logError, logInfo, serializeError } from '$lib/server/logger';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -49,47 +42,12 @@ function generateRequestId(): string {
 }
 
 /**
- * Garda comună a formularelor publice: poarta cu parolă + rate-limit per IP.
- * Ambele command-uri (serviciu simplu și ofertă multi-serviciu) împart aceeași
- * găleată — altfel un vizitator ar avea dublul limitei doar alternând formularele.
- */
-async function guardPublicSubmission(
-	event: RequestEvent
-): Promise<{ tenantId: string; ip: string }> {
-	const gate = await requireUnlockedPublicPage(event, PUBLIC_SERVICES_PAGE_KEY);
-	if (!gate) {
-		throw error(403, 'Sesiunea a expirat. Reîncarcă pagina și introdu parola din nou.');
-	}
-
-	const ip =
-		event.getClientAddress?.() ??
-		event.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-		'unknown';
-
-	const rl = await rateLimit({
-		kind: 'public-services-request',
-		ip,
-		limit: SUBMIT_LIMIT.limit,
-		windowSec: SUBMIT_LIMIT.windowSec
-	});
-	if (!rl.allowed) {
-		logWarning('packages', 'cerere ofertă publică rate-limited', {
-			tenantId: gate.tenantId,
-			metadata: { ip, count: rl.count }
-		});
-		throw error(429, 'Prea multe cereri trimise. Te rugăm să încerci din nou peste o oră.');
-	}
-
-	return { tenantId: gate.tenantId, ip };
-}
-
-/**
  * @deprecated UI-ul public folosește `submitPublicQuoteRequest` (coș multi-serviciu).
  * Rămâne până se confirmă că nu mai există apelanți; se șterge într-un PR separat.
  */
 export const submitPublicPackageRequest = command(requestSchema, async (data) => {
 	const event = getRequestEvent();
-	const { tenantId } = await guardPublicSubmission(event);
+	const { tenantId } = await guardPublicServicesSubmission(event);
 
 	const category = getCategory(data.categorySlug);
 	if (!category) {
@@ -169,7 +127,7 @@ const quoteSchema = v.object({
  */
 export const submitPublicQuoteRequest = command(quoteSchema, async (data) => {
 	const event = getRequestEvent();
-	const { tenantId } = await guardPublicSubmission(event);
+	const { tenantId } = await guardPublicServicesSubmission(event);
 
 	const seen = new Set<string>();
 	for (const item of data.items) {
