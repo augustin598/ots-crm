@@ -36,7 +36,9 @@
 	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ServicesQuoteModal from './ServicesQuoteModal.svelte';
+	import HoursCheckoutModal, { type HoursCheckoutRate } from './HoursCheckoutModal.svelte';
 	import CartToast, { type CartToastKind } from './CartToast.svelte';
+	import { HOURS_MIN, HOURS_MAX } from '$lib/logic/hours-pricing';
 	import { ServicesCart } from './services-cart.svelte';
 	import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
 	import { dragScroll } from '$lib/actions/drag-scroll';
@@ -73,6 +75,24 @@
 
 	function categoriesInGroup(slugs: string[]): Category[] {
 		return slugs.map((s) => bySlug.get(s)).filter((c): c is Category => c !== undefined);
+	}
+
+	// Orele alese pe fiecare card de tarif; 10 h e pachetul tipic de pornire.
+	// Cumpărarea NU trece prin coșul de ofertă: e plată directă, cu flux propriu.
+	const DEFAULT_HOURS = 10;
+	let hoursBySlug = $state<Record<string, number>>({});
+	let hoursCheckout = $state<HoursCheckoutRate | null>(null);
+
+	function hoursFor(slug: string): number {
+		return hoursBySlug[slug] ?? DEFAULT_HOURS;
+	}
+	function stepHours(slug: string, delta: number) {
+		hoursBySlug[slug] = Math.min(HOURS_MAX, Math.max(HOURS_MIN, hoursFor(slug) + delta));
+	}
+	function setHours(slug: string, raw: string) {
+		const n = Number.parseInt(raw, 10);
+		if (!Number.isFinite(n)) return;
+		hoursBySlug[slug] = Math.min(HOURS_MAX, Math.max(HOURS_MIN, n));
 	}
 
 	let selectedCategory = $state<Category | null>(null);
@@ -345,20 +365,59 @@
 				</div>
 				<p class="sv-rates-intro">
 					Pachetele de dezvoltare au un scope fix, stabilit înainte de start. Modificările sau
-					funcționalitățile cerute peste el se facturează pe oră, după specializarea implicată:
+					funcționalitățile cerute peste el se facturează pe oră, după specializarea implicată.
+					Alege câte ore ai nevoie și plătește cu cardul; factura și accesul în portal vin pe
+					email imediat după plată.
 				</p>
 				<div class="sv-rategrid">
-					{#each catalog.hourlyRates as rate (rate.label)}
+					{#each catalog.hourlyRates as rate (rate.slug)}
+						{@const h = hoursFor(rate.slug)}
 						<div class="sv-rate">
 							<span class="sv-rate-val">{rate.rate} €<i>/h</i></span>
 							<span class="sv-rate-label">{rate.label}</span>
+							<div class="sv-rate-stepper" role="group" aria-label={`Ore ${rate.label}`}>
+								<button
+									type="button"
+									onclick={() => stepHours(rate.slug, -1)}
+									disabled={h <= HOURS_MIN}
+									aria-label="Scade o oră"
+								>−</button>
+								<label class="sv-rate-hours">
+									<span class="sv-sr">Număr de ore {rate.label}</span>
+									<input
+										type="number"
+										inputmode="numeric"
+										min={HOURS_MIN}
+										max={HOURS_MAX}
+										value={h}
+										onchange={(e) => setHours(rate.slug, e.currentTarget.value)}
+									/>
+									<i>h</i>
+								</label>
+								<button
+									type="button"
+									onclick={() => stepHours(rate.slug, 1)}
+									disabled={h >= HOURS_MAX}
+									aria-label="Adaugă o oră"
+								>+</button>
+							</div>
+							<span class="sv-rate-total">{formatEur(rate.rate * h)} <i>fără TVA</i></span>
+							<button
+								type="button"
+								class="sv-btn sv-btn-primary ots-gloss sv-rate-buy"
+								onclick={() =>
+									(hoursCheckout = { slug: rate.slug, label: rate.label, rate: rate.rate, hours: h })}
+							>
+								Cumpără orele <ArrowRightIcon class="h-4 w-4" />
+							</button>
 						</div>
 					{/each}
 				</div>
 				<p class="sv-fine">
-					Tarifele sunt în EUR, fără TVA. Estimăm orele înainte de a începe și le confirmăm cu
-					tine; nu facturăm muncă neaprobată. Pentru cerințe recurente e de regulă mai avantajos
-					un pachet de mentenanță decât ora de extra work.
+					Tarifele sunt în EUR, fără TVA (se adaugă {catalog.vatPercent}% la plată). Orele
+					cumpărate se consumă pe cererile tale, cu estimare confirmată înainte de fiecare
+					lucrare; nu facturăm muncă neaprobată. Pentru cerințe recurente e de regulă mai
+					avantajos un pachet de mentenanță decât ora de extra work.
 				</p>
 			</div>
 		{/if}
@@ -513,6 +572,14 @@
 
 {#if quoteOpen}
 	<ServicesQuoteModal {cart} {catalog} onClose={() => (quoteOpen = false)} />
+{/if}
+
+{#if hoursCheckout}
+	<HoursCheckoutModal
+		rate={hoursCheckout}
+		vatPercent={catalog.vatPercent}
+		onClose={() => (hoursCheckout = null)}
+	/>
 {/if}
 
 
@@ -1246,6 +1313,85 @@
 		font-size: 13px;
 		font-weight: 600;
 		color: var(--ink2);
+	}
+	.sv-rate-stepper {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 8px;
+	}
+	.sv-rate-stepper button {
+		width: 40px;
+		height: 40px;
+		border-radius: 999px;
+		border: 1px solid var(--border);
+		background: var(--bg-soft);
+		font-family: inherit;
+		font-size: 20px;
+		line-height: 1;
+		font-weight: 700;
+		color: var(--ink);
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.sv-rate-stepper button:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.sv-rate-stepper button:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	.sv-rate-stepper button:focus-visible,
+	.sv-rate-hours input:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.sv-rate-hours {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 3px;
+		font-size: 15px;
+		font-weight: 700;
+		color: var(--ink);
+	}
+	.sv-rate-hours input {
+		width: 52px;
+		padding: 6px 4px;
+		text-align: center;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: white;
+		font: inherit;
+		color: inherit;
+		-moz-appearance: textfield;
+		appearance: textfield;
+	}
+	.sv-rate-hours input::-webkit-outer-spin-button,
+	.sv-rate-hours input::-webkit-inner-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+	.sv-rate-hours i {
+		font-style: normal;
+		font-size: 13px;
+		color: var(--muted);
+	}
+	.sv-rate-total {
+		font-size: 14px;
+		font-weight: 700;
+		color: var(--ink2);
+	}
+	.sv-rate-total i {
+		font-style: normal;
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--muted);
+	}
+	.sv-rate-buy {
+		margin-top: 4px;
+		width: 100%;
+		justify-content: center;
 	}
 
 	/* ===== Subsol ===== */
