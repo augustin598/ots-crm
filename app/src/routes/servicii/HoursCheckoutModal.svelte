@@ -77,6 +77,12 @@
 	let companyName = $state('');
 	let cui = $state('');
 	let vatPayer = $state(false);
+	// Adresa de facturare: obligatorie (Keez o cere la persoane fizice și o
+	// tipărește pe factură); la firme se precompletează din ANAF.
+	let address = $state('');
+	let city = $state('');
+	let county = $state('');
+	let postalCode = $state('');
 	let note = $state('');
 	let touched = $state(false);
 
@@ -101,7 +107,11 @@
 	const cuiError = $derived(
 		billingType === 'company' && cui.replace(/\D/g, '').length < 2 ? 'Scrie CUI-ul firmei.' : null
 	);
-	const detailsValid = $derived(!nameError && !emailError && !companyError && !cuiError);
+	const addressError = $derived(address.trim().length < 5 ? 'Scrie adresa de facturare.' : null);
+	const cityError = $derived(city.trim().length < 2 ? 'Scrie localitatea.' : null);
+	const detailsValid = $derived(
+		!nameError && !emailError && !companyError && !cuiError && !addressError && !cityError
+	);
 	const show = (err: string | null) => touched && err !== null;
 	/** Prima eroare în ordinea vizuală a câmpurilor (CUI și firma stau deasupra numelui). */
 	const firstError = $derived.by((): { id: string; message: string } | null => {
@@ -109,6 +119,8 @@
 		if (companyError) return { id: 'hc-company', message: companyError };
 		if (nameError) return { id: 'hc-name', message: nameError };
 		if (emailError) return { id: 'hc-email', message: emailError };
+		if (addressError) return { id: 'hc-address', message: addressError };
+		if (cityError) return { id: 'hc-city', message: cityError };
 		return null;
 	});
 
@@ -122,6 +134,8 @@
 			const res = await validateCuiAndFetch(raw);
 			if (res.valid) {
 				if (!companyName.trim()) companyName = res.data.denumire;
+				if (!address.trim()) address = res.data.adresa;
+				if (!postalCode.trim()) postalCode = res.data.codPostal;
 				vatPayer = res.data.platitorTva;
 				cuiVerified = true;
 			} else {
@@ -166,6 +180,10 @@
 				companyName: billingType === 'company' ? companyName.trim() : undefined,
 				cui: billingType === 'company' ? cui.trim() : undefined,
 				vatPayer: billingType === 'company' ? vatPayer : undefined,
+				address: address.trim(),
+				city: city.trim(),
+				county: county.trim() || undefined,
+				postalCode: postalCode.trim() || undefined,
 				note: note.trim() || undefined
 			});
 			const stripe = await loadStripe(res.publishableKey);
@@ -440,6 +458,47 @@
 								bind:value={contactPhone}
 								maxlength="40"
 								autocomplete="tel"
+							/>
+						</div>
+						<div class="hc-field hc-span-2">
+							<label class="hc-label" for="hc-address">Adresă de facturare *</label>
+							<input
+								id="hc-address"
+								class={['hc-input', show(addressError) && 'hc-input-error']}
+								bind:value={address}
+								maxlength="500"
+								autocomplete="street-address"
+								placeholder="Stradă, număr, bloc, apartament"
+								aria-invalid={show(addressError) ? 'true' : undefined}
+								aria-describedby={show(addressError) ? 'hc-address-err' : undefined}
+							/>
+							{#if show(addressError)}
+								<span id="hc-address-err" class="hc-hint hc-hint-err">{addressError}</span>
+							{/if}
+						</div>
+						<div class="hc-field">
+							<label class="hc-label" for="hc-city">Localitate *</label>
+							<input
+								id="hc-city"
+								class={['hc-input', show(cityError) && 'hc-input-error']}
+								bind:value={city}
+								maxlength="120"
+								autocomplete="address-level2"
+								aria-invalid={show(cityError) ? 'true' : undefined}
+								aria-describedby={show(cityError) ? 'hc-city-err' : undefined}
+							/>
+							{#if show(cityError)}
+								<span id="hc-city-err" class="hc-hint hc-hint-err">{cityError}</span>
+							{/if}
+						</div>
+						<div class="hc-field">
+							<label class="hc-label" for="hc-county">Județ</label>
+							<input
+								id="hc-county"
+								class="hc-input"
+								bind:value={county}
+								maxlength="120"
+								autocomplete="address-level1"
 							/>
 						</div>
 						<div class="hc-field hc-span-2">

@@ -52,6 +52,13 @@ const hoursOrderSchema = v.object({
 	cui: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(12))),
 	/** Din ANAF (autocomplete în modal); decide prefixul `RO` pe vatNumber, ca la hosting. */
 	vatPayer: v.optional(v.boolean(), false),
+	// Adresa de facturare: Keez o cere obligatoriu la persoane fizice
+	// (ERROR_PF_AT_LEAST_ADDRESS) și o tipărește pe orice factură; la firme se
+	// precompletează din ANAF în modal.
+	address: v.pipe(v.string(), v.trim(), v.minLength(5), v.maxLength(500)),
+	city: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(120)),
+	county: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(120))),
+	postalCode: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(16))),
 	note: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(2000)))
 });
 
@@ -137,6 +144,10 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 							status: 'prospect',
 							cui: cleanCui,
 							vatNumber: cleanCui ? (data.vatPayer ? `RO${cleanCui}` : cleanCui) : null,
+							address: data.address,
+							city: data.city,
+							county: data.county || null,
+							postalCode: data.postalCode || null,
 							country: 'RO',
 							legalType: cleanCui ? 'srl' : 'pf',
 							signupSource: 'public-form',
@@ -170,6 +181,34 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 				.limit(1);
 			if (!race) throw err;
 			clientRow = race;
+		}
+	}
+
+	// Client existent fără adresă (ex. creat dintr-o cerere de ofertă): îi
+	// completăm adresa din formular, altfel Keez respinge factura. Nu suprascriem
+	// o adresă existentă — clientul din CRM e sursa de adevăr.
+	if (!clientRow.address?.trim()) {
+		try {
+			await withTursoBusyRetry(
+				() =>
+					db
+						.update(table.client)
+						.set({
+							address: data.address,
+							city: clientRow!.city?.trim() ? clientRow!.city : data.city,
+							county: clientRow!.county?.trim() ? clientRow!.county : data.county || null,
+							postalCode: clientRow!.postalCode?.trim() ? clientRow!.postalCode : data.postalCode || null,
+							updatedAt: new Date()
+						})
+						.where(and(eq(table.client.id, clientRow!.id), eq(table.client.tenantId, tenantId))),
+				{ tenantId, label: 'public-hours/backfillClientAddress' }
+			);
+			clientRow = { ...clientRow, address: data.address, city: clientRow.city || data.city };
+		} catch (err) {
+			logError('packages', `comandă ore: completarea adresei clientului a eșuat — ${serializeError(err).message}`, {
+				tenantId,
+				metadata: { clientId: clientRow.id }
+			});
 		}
 	}
 

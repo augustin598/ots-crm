@@ -137,7 +137,11 @@ const INPUT = {
 	contactPhone: '0722 123 456',
 	companyName: 'Example SRL',
 	cui: 'RO12345678',
-	vatPayer: true
+	vatPayer: true,
+	address: 'Str. Exemplu nr. 1',
+	city: 'Suceava',
+	county: 'Suceava',
+	postalCode: '720001'
 };
 
 /** `error()` din SvelteKit aruncă un HttpError care NU extinde Error — verificăm statusul. */
@@ -228,7 +232,23 @@ describe('createHoursOrder — happy path', () => {
 		expect(c.legalType).toBe('srl');
 		expect(c.name).toBe('Example SRL');
 		expect(c.signupSource).toBe('public-form');
+		expect(c.address).toBe('Str. Exemplu nr. 1');
+		expect(c.city).toBe('Suceava');
 		expect(orderRow().clientId).toBe(c.id);
+	});
+
+	test('client existent FĂRĂ adresă → adresa din formular se completează pe client', async () => {
+		existingClients = [{ id: 'client-9', tenantId: 't1', email: 'alt@x.ro', name: 'Example SRL', address: null, city: null }];
+		await createHoursOrder(INPUT);
+		const upd = updatedRows.find((u) => u.table === 'client');
+		expect(upd?.row.address).toBe('Str. Exemplu nr. 1');
+		expect(upd?.row.city).toBe('Suceava');
+	});
+
+	test('client existent CU adresă → nu i se suprascrie adresa', async () => {
+		existingClients = [{ id: 'client-9', tenantId: 't1', email: 'alt@x.ro', name: 'Example SRL', address: 'Adresa veche', city: 'Iași' }];
+		await createHoursOrder(INPUT);
+		expect(updatedRows.some((u) => u.table === 'client')).toBe(false);
 	});
 
 	test('firmă neplătitoare de TVA → vatNumber fără prefix', async () => {
