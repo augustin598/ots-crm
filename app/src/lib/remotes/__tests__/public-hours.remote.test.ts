@@ -245,6 +245,23 @@ describe('createHoursOrder — happy path', () => {
 		expect(upd?.row.city).toBe('Suceava');
 	});
 
+	test('firmă existentă CU adresă în CRM → merge FĂRĂ adresă în formular (ANAF blocat)', async () => {
+		existingClients = [{ id: 'client-9', tenantId: 't1', email: 'alt@x.ro', name: 'Example SRL', address: 'Str. CRM 5', city: 'Iași' }];
+		const res = await createHoursOrder({ ...INPUT, address: undefined, city: undefined });
+		expect(res.success).toBe(true);
+		expect(updatedRows.some((u) => u.table === 'client')).toBe(false);
+	});
+
+	test('firmă NOUĂ fără adresă → 400 (nu avem de unde s-o luăm)', async () => {
+		await expectHttpError(createHoursOrder({ ...INPUT, address: undefined, city: undefined }), 400);
+		expect(insertedRows).toHaveLength(0);
+	});
+
+	test('client existent FĂRĂ adresă nici în CRM, nici în formular → 400', async () => {
+		existingClients = [{ id: 'client-9', tenantId: 't1', email: 'alt@x.ro', name: 'Example SRL', address: null, city: null }];
+		await expectHttpError(createHoursOrder({ ...INPUT, address: undefined, city: undefined }), 400);
+	});
+
 	test('client existent CU adresă → nu i se suprascrie adresa', async () => {
 		existingClients = [{ id: 'client-9', tenantId: 't1', email: 'alt@x.ro', name: 'Example SRL', address: 'Adresa veche', city: 'Iași' }];
 		await createHoursOrder(INPUT);

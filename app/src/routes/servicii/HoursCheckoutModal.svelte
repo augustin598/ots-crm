@@ -112,8 +112,15 @@
 	);
 	/** Firmă verificată la ANAF: adresa e cea a sediului, afișată, nu editată. */
 	const addressLocked = $derived(billingType === 'company' && cuiVerified);
-	const addressError = $derived(address.trim().length < 5 ? 'Scrie adresa de facturare.' : null);
-	const cityError = $derived(city.trim().length < 2 ? 'Scrie localitatea.' : null);
+	// La firme adresa nu e cerută în formular: vine din ANAF sau, când ANAF e
+	// indisponibil, din CRM dacă firma e deja client (server-ul decide și cere
+	// completarea doar când n-are de unde s-o ia).
+	const addressError = $derived(
+		billingType === 'person' && address.trim().length < 5 ? 'Scrie adresa de facturare.' : null
+	);
+	const cityError = $derived(
+		billingType === 'person' && city.trim().length < 2 ? 'Scrie localitatea.' : null
+	);
 	const detailsValid = $derived(
 		!nameError && !emailError && !companyError && !cuiError && !addressError && !cityError
 	);
@@ -486,7 +493,9 @@
 							</div>
 						{:else}
 						<div class="hc-field hc-span-2">
-							<label class="hc-label" for="hc-address">Adresă de facturare *</label>
+							<label class="hc-label" for="hc-address">
+								Adresă de facturare {billingType === 'person' ? '*' : ''}
+							</label>
 							<input
 								id="hc-address"
 								class={['hc-input', show(addressError) && 'hc-input-error']}
@@ -499,10 +508,14 @@
 							/>
 							{#if show(addressError)}
 								<span id="hc-address-err" class="hc-hint hc-hint-err">{addressError}</span>
+							{:else if billingType === 'company'}
+								<span class="hc-hint">
+									Dacă firma e deja clientul nostru, folosim adresa din CRM; altfel completeaz-o aici.
+								</span>
 							{/if}
 						</div>
 						<div class="hc-field">
-							<label class="hc-label" for="hc-city">Localitate *</label>
+							<label class="hc-label" for="hc-city">Localitate {billingType === 'person' ? '*' : ''}</label>
 							<input
 								id="hc-city"
 								class={['hc-input', show(cityError) && 'hc-input-error']}

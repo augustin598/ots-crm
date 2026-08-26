@@ -53,10 +53,12 @@ const hoursOrderSchema = v.object({
 	/** Din ANAF (autocomplete în modal); decide prefixul `RO` pe vatNumber, ca la hosting. */
 	vatPayer: v.optional(v.boolean(), false),
 	// Adresa de facturare: Keez o cere obligatoriu la persoane fizice
-	// (ERROR_PF_AT_LEAST_ADDRESS) și o tipărește pe orice factură; la firme se
-	// precompletează din ANAF în modal.
-	address: v.pipe(v.string(), v.trim(), v.minLength(5), v.maxLength(500)),
-	city: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(120)),
+	// (ERROR_PF_AT_LEAST_ADDRESS) și o tipărește pe orice factură. La firme vine
+	// din ANAF (modal) sau, când ANAF e indisponibil, din CRM dacă firma e deja
+	// client — de aceea e opțională în schemă și verificată mai jos, după ce
+	// știm dacă clientul există.
+	address: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(500))),
+	city: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(120))),
 	county: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(120))),
 	postalCode: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(16))),
 	note: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(2000)))
@@ -128,7 +130,17 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 		clientRow = existing;
 	}
 
+	const formAddress = data.address?.trim() ?? '';
+	const formCity = data.city?.trim() ?? '';
+	const formHasAddress = formAddress.length >= 5 && formCity.length >= 2;
+	const ADDRESS_REQUIRED_MSG =
+		billingType === 'company'
+			? 'Nu am găsit sediul firmei (ANAF indisponibil). Completează adresa și localitatea.'
+			: 'Completează adresa de facturare și localitatea.';
+
 	if (!clientRow) {
+		// Client nou: adresa e obligatorie (Keez o tipărește; la PF o refuză fără ea).
+		if (!formHasAddress) throw error(400, ADDRESS_REQUIRED_MSG);
 		try {
 			const inserted = await withTursoBusyRetry(
 				() =>
@@ -144,8 +156,8 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 							status: 'prospect',
 							cui: cleanCui,
 							vatNumber: cleanCui ? (data.vatPayer ? `RO${cleanCui}` : cleanCui) : null,
-							address: data.address,
-							city: data.city,
+							address: formAddress,
+							city: formCity,
 							county: data.county || null,
 							postalCode: data.postalCode || null,
 							country: 'RO',
@@ -184,18 +196,19 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 		}
 	}
 
-	// Client existent fără adresă (ex. creat dintr-o cerere de ofertă): îi
-	// completăm adresa din formular, altfel Keez respinge factura. Nu suprascriem
-	// o adresă existentă — clientul din CRM e sursa de adevăr.
+	// Client existent: CRM-ul e sursa de adevăr pentru adresă (nu suprascriem).
+	// Dacă în CRM lipsește (ex. client creat dintr-o cerere de ofertă), o luăm din
+	// formular; fără niciuna, Keez ar respinge factura — cerem completarea.
 	if (!clientRow.address?.trim()) {
+		if (!formHasAddress) throw error(400, ADDRESS_REQUIRED_MSG);
 		try {
 			await withTursoBusyRetry(
 				() =>
 					db
 						.update(table.client)
 						.set({
-							address: data.address,
-							city: clientRow!.city?.trim() ? clientRow!.city : data.city,
+							address: formAddress,
+							city: clientRow!.city?.trim() ? clientRow!.city : formCity,
 							county: clientRow!.county?.trim() ? clientRow!.county : data.county || null,
 							postalCode: clientRow!.postalCode?.trim() ? clientRow!.postalCode : data.postalCode || null,
 							updatedAt: new Date()
@@ -203,7 +216,7 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 						.where(and(eq(table.client.id, clientRow!.id), eq(table.client.tenantId, tenantId))),
 				{ tenantId, label: 'public-hours/backfillClientAddress' }
 			);
-			clientRow = { ...clientRow, address: data.address, city: clientRow.city || data.city };
+			clientRow = { ...clientRow, address: formAddress, city: clientRow.city || formCity };
 		} catch (err) {
 			logError('packages', `comandă ore: completarea adresei clientului a eșuat — ${serializeError(err).message}`, {
 				tenantId,
