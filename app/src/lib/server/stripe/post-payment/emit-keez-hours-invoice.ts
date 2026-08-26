@@ -10,17 +10,31 @@
  *  - seria de facturare e cea implicită a tenantului (OTS), nu cea de hosting;
  *  - linia are cantitate = ore, preț unitar = tariful pe oră, UM „Ora" (Keez id 5);
  *  - fără perioadă de facturare, fără domeniu, fără cale de plată prin OP.
+ *
+ * VALUTA: tarifele sunt în EUR și Stripe încasează EUR, dar Keez refuză facturi
+ * în EUR pentru clienți din România („Facturile pentru clientii din Romania
+ * trebuie sa fie facute in RON" — verificat pe 26 aug 2026). De aceea factura
+ * are ANTET în RON cu cursul BNR blocat la emitere (`invoice.exchangeRate`, ca
+ * la generatorul recurent) și LINIA în EUR: mapper-ul Keez trimite sumele în
+ * RON (`netAmount`) și referința în EUR (`netAmountCurrency`,
+ * `referenceCurrencyCode = EUR`). Fără curs BNR în DB nu emitem — comanda
+ * rămâne plătită, adminul vede „Neemisă" și reia manual după sync-ul BNR.
  */
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
+import { getLatestBnrRateWithDate } from '$lib/server/bnr/client';
 import { pushInvoiceToKeez } from '$lib/server/plugins/keez/auto-push';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
-import { logInfo, logError, serializeError } from '$lib/server/logger';
+import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { vatPercentToBps } from '$lib/utils/vat';
+import { eurCentsToRonCents, formatExchangeRate } from '$lib/logic/hours-pricing';
+
+/** Peste atât cursul e probabil vechi (weekend + sărbătoare = max ~4 zile); avertizăm, nu blocăm. */
+const BNR_RATE_WARN_HOURS = 5 * 24;
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -91,12 +105,36 @@ export async function emitKeezHoursInvoice(params: {
 		return { skipped: true, reason: 'tenant_owner_missing' };
 	}
 
-	// 4. Bani — exact snapshot-ul comenzii (ce a încasat Stripe).
-	const netCents = order.netCents;
-	const taxCents = order.vatCents;
-	const totalCents = order.grossCents;
+	// 4. Bani. Snapshot-ul comenzii e în EUR (ce a încasat Stripe); antetul
+	// facturii e în RON la cursul BNR cel mai recent, blocat pe rând.
+	if (order.currency !== 'EUR') {
+		logError('keez', `emit-keez-hours: valută neașteptată ${order.currency} pe comanda ${orderId}`, {
+			tenantId,
+			metadata: { orderId }
+		});
+		return { skipped: true, reason: 'unexpected_currency' };
+	}
+	const bnr = await getLatestBnrRateWithDate('EUR');
+	if (!bnr || !(bnr.rate > 0)) {
+		logError('keez', `emit-keez-hours: lipsește cursul BNR EUR — factura pentru comanda ${orderId} NU se emite (reia după sync BNR)`, {
+			tenantId,
+			metadata: { orderId }
+		});
+		return { skipped: true, reason: 'bnr_rate_missing' };
+	}
+	const rateAgeHours = (Date.now() - bnr.rateDate.getTime()) / 3_600_000;
+	if (rateAgeHours > BNR_RATE_WARN_HOURS) {
+		logWarning('keez', `emit-keez-hours: cursul BNR EUR are ~${Math.round(rateAgeHours)}h — verifică sync-ul BNR`, {
+			tenantId,
+			metadata: { orderId, rateDate: bnr.rateDate.toISOString() }
+		});
+	}
+	const exchangeRate = bnr.rate;
+	const netCents = eurCentsToRonCents(order.netCents, exchangeRate);
+	const taxCents = eurCentsToRonCents(order.vatCents, exchangeRate);
+	const totalCents = netCents + taxCents;
 	const lineTaxRate = vatPercentToBps(order.vatPercent);
-	const currency = order.currency;
+	const currency = 'RON';
 
 	// 5. Numărul de factură — seria implicită a tenantului (nu OTSH, orele nu-s hosting).
 	let invoiceNumber: string;
@@ -167,16 +205,23 @@ export async function emitKeezHoursInvoice(params: {
 						taxRate: lineTaxRate,
 						taxAmount: taxCents,
 						totalAmount: totalCents,
+						// Antet RON (cerință Keez pentru clienți RO); `invoiceCurrency` rămâne
+						// null la RON, ca la generatorul recurent. Cursul blocat aici e cel pe
+						// care îl folosește mapper-ul Keez pentru sumele de referință în EUR.
 						currency,
-						invoiceCurrency: currency,
+						invoiceCurrency: null,
+						exchangeRate: formatExchangeRate(exchangeRate),
+						taxApplicationType: 'apply',
 						issueDate: now,
 						dueDate: now,
 						paidDate: now,
 						paymentMethod: 'card',
 						stripePaymentIntentId,
-						notes: `Ore extra work ${order.rateLabel} × ${order.hours} h — comandă online /servicii (Stripe ${stripePaymentIntentId})`
+						notes: `Ore extra work ${order.rateLabel} × ${order.hours} h — comandă online /servicii. Încasat ${(order.grossCents / 100).toFixed(2)} EUR prin card (Stripe ${stripePaymentIntentId}), curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`
 					});
 
+					// Linia rămâne în EUR (tarif × ore); mapper-ul o convertește în RON cu
+					// cursul de pe antet și trimite EUR ca `…Currency`.
 					await tx.insert(table.invoiceLineItem).values({
 						id: lineItemId,
 						invoiceId,
@@ -184,9 +229,9 @@ export async function emitKeezHoursInvoice(params: {
 						note: `${order.hours} h × ${order.rateEur} € · Stripe: ${stripePaymentIntentId}`,
 						quantity: order.hours,
 						rate: order.rateEur * 100,
-						amount: netCents,
+						amount: order.netCents,
 						taxRate: lineTaxRate,
-						currency,
+						currency: 'EUR',
 						unitOfMeasure: 'Ora',
 						keezItemExternalId: cachedArticleId
 					});
@@ -213,7 +258,17 @@ export async function emitKeezHoursInvoice(params: {
 
 	logInfo('keez', `emit-keez-hours: factura CRM ${invoiceNumber} creată (${invoiceId})`, {
 		tenantId,
-		metadata: { invoiceId, invoiceNumber, orderId, netCents, taxCents, totalCents, currency }
+		metadata: {
+			invoiceId,
+			invoiceNumber,
+			orderId,
+			netCents,
+			taxCents,
+			totalCents,
+			currency,
+			eurGrossCents: order.grossCents,
+			exchangeRate
+		}
 	});
 
 	// 8. Push în Keez. Eșecul NU anulează factura CRM — staff retrimite din UI.

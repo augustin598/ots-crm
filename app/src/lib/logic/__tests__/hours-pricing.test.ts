@@ -1,5 +1,12 @@
 import { describe, test, expect } from 'bun:test';
-import { HOURS_MIN, HOURS_MAX, isValidHours, hoursNetCents } from '../hours-pricing';
+import {
+	HOURS_MIN,
+	HOURS_MAX,
+	isValidHours,
+	hoursNetCents,
+	eurCentsToRonCents,
+	formatExchangeRate
+} from '../hours-pricing';
 
 describe('isValidHours', () => {
 	test('acceptă limitele și întregii din interval', () => {
@@ -33,5 +40,26 @@ describe('hoursNetCents', () => {
 		expect(() => hoursNetCents(0, 5)).toThrow();
 		expect(() => hoursNetCents(-65, 5)).toThrow();
 		expect(() => hoursNetCents(65.5, 5)).toThrow();
+	});
+});
+
+describe('eurCentsToRonCents', () => {
+	test('convertește cenți EUR în bani RON la cursul dat, rotunjit la ban', () => {
+		expect(eurCentsToRonCents(45500, 5.2534)).toBe(239030); // 455 € × 5,2534 = 2.390,297 lei
+		expect(eurCentsToRonCents(9555, 5.2534)).toBe(50196); // 95,55 € × 5,2534 = 501,96 lei
+		expect(eurCentsToRonCents(0, 5.2534)).toBe(0);
+	});
+	test('aruncă pe curs nepozitiv sau non-finit', () => {
+		expect(() => eurCentsToRonCents(100, 0)).toThrow();
+		expect(() => eurCentsToRonCents(100, -1)).toThrow();
+		expect(() => eurCentsToRonCents(100, NaN)).toThrow();
+	});
+});
+
+describe('formatExchangeRate', () => {
+	test('4 zecimale, cu punct — formatul citit de mapper-ul Keez și de UI', () => {
+		expect(formatExchangeRate(5.2534)).toBe('5.2534');
+		expect(formatExchangeRate(5)).toBe('5.0000');
+		expect(formatExchangeRate(5.25346)).toBe('5.2535');
 	});
 });
