@@ -244,6 +244,84 @@ async function sendApprovalDecisionEmails(args: {
 	return personalEmails;
 }
 
+/**
+ * Leagă task-ul de grupul WhatsApp al clientului, dacă e limpede care e.
+ *
+ * Legarea era manuală, deci un task creat sau mutat pe un client cu grup nu
+ * anunța nimic până când cineva nu-l lega de mână — ușor de uitat, greu de
+ * observat. Legăm doar când clientul are EXACT un grup bifat: la mai multe,
+ * alegerea rămâne a omului. Nu suprascriem niciodată o legătură existentă și
+ * nu aruncăm: salvarea task-ului nu depinde de WhatsApp.
+ */
+async function autoLinkTaskToGroup(args: {
+	tenantId: string;
+	tenantSlug: string;
+	taskId: string;
+	taskTitle: string;
+	clientId: string | null | undefined;
+	status: string;
+	assignedToUserId: string | null;
+	dueDate: Date | null;
+	actorUserId: string;
+}): Promise<void> {
+	if (!args.clientId) return;
+	try {
+		const [existing] = await db
+			.select({ whatsappGroupId: table.task.whatsappGroupId })
+			.from(table.task)
+			.where(eq(table.task.id, args.taskId))
+			.limit(1);
+		if (existing?.whatsappGroupId) return;
+
+		const groups = await db
+			.select({ id: table.whatsappGroup.id, groupJid: table.whatsappGroup.groupJid })
+			.from(table.whatsappGroup)
+			.where(
+				and(
+					eq(table.whatsappGroup.tenantId, args.tenantId),
+					eq(table.whatsappGroup.clientId, args.clientId),
+					eq(table.whatsappGroup.watched, true)
+				)
+			);
+		if (groups.length !== 1) return;
+
+		await db
+			.update(table.task)
+			.set({ whatsappGroupId: groups[0].id, updatedAt: new Date() })
+			.where(eq(table.task.id, args.taskId));
+
+		const assignee = args.assignedToUserId
+			? (
+					await db
+						.select({ firstName: table.user.firstName, lastName: table.user.lastName })
+						.from(table.user)
+						.where(eq(table.user.id, args.assignedToUserId))
+						.limit(1)
+				)[0]
+			: null;
+
+		const { notifyTaskLinkedToGroup } = await import('$lib/server/whatsapp/task-notifications');
+		await notifyTaskLinkedToGroup({
+			tenantId: args.tenantId,
+			tenantSlug: args.tenantSlug,
+			taskId: args.taskId,
+			taskTitle: args.taskTitle,
+			status: args.status,
+			assigneeName: assignee
+				? `${assignee.firstName ?? ''} ${assignee.lastName ?? ''}`.trim() || null
+				: null,
+			dueDate: args.dueDate,
+			actorUserId: args.actorUserId,
+			groupJid: groups[0].groupJid
+		});
+	} catch (error) {
+		logWarning('whatsapp', `legarea automată de grup a eșuat: ${(error as Error).message}`, {
+			tenantId: args.tenantId,
+			metadata: { taskId: args.taskId }
+		});
+	}
+}
+
 const VALID_STATUSES = ['todo', 'in-progress', 'review', 'done', 'cancelled', 'pending-approval', 'blocked'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const VALID_RECURRING_TYPES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
@@ -1152,70 +1230,18 @@ export const createTask = command(taskSchema, async (data) => {
 		}
 	});
 
-	// Legarea automată de grupul WhatsApp al clientului. Până acum, legarea era
-	// manuală, deci un task creat din interfață nu anunța nimic până când cineva
-	// nu-l lega de mână — ușor de uitat, greu de observat. Legăm doar când
-	// clientul are EXACT un grup bifat: la mai multe, alegerea rămâne a omului.
-	if (clientId) {
-		try {
-			const watchedGroups = await db
-				.select({ id: table.whatsappGroup.id })
-				.from(table.whatsappGroup)
-				.where(
-					and(
-						eq(table.whatsappGroup.tenantId, targetTenantId),
-						eq(table.whatsappGroup.clientId, clientId),
-						eq(table.whatsappGroup.watched, true)
-					)
-				);
-
-			if (watchedGroups.length === 1) {
-				await db
-					.update(table.task)
-					.set({ whatsappGroupId: watchedGroups[0].id, updatedAt: new Date() })
-					.where(eq(table.task.id, taskId));
-
-				const { notifyTaskLinkedToGroup } = await import(
-					'$lib/server/whatsapp/task-notifications'
-				);
-				const [group] = await db
-					.select({ groupJid: table.whatsappGroup.groupJid })
-					.from(table.whatsappGroup)
-					.where(eq(table.whatsappGroup.id, watchedGroups[0].id))
-					.limit(1);
-				const assigneeName = data.assignedToUserId
-					? ((
-							await db
-								.select({ firstName: table.user.firstName, lastName: table.user.lastName })
-								.from(table.user)
-								.where(eq(table.user.id, data.assignedToUserId))
-								.limit(1)
-						)[0] ?? null)
-					: null;
-
-				if (group) {
-					await notifyTaskLinkedToGroup({
-						tenantId: targetTenantId,
-						tenantSlug: event.locals.tenant.slug,
-						taskId,
-						taskTitle: data.title,
-						status: data.status || 'todo',
-						assigneeName: assigneeName
-							? `${assigneeName.firstName ?? ''} ${assigneeName.lastName ?? ''}`.trim() || null
-							: null,
-						dueDate: data.dueDate ? new Date(data.dueDate) : null,
-						actorUserId: event.locals.user.id,
-						groupJid: group.groupJid
-					});
-				}
-			}
-		} catch (error) {
-			logWarning('whatsapp', `legarea automată de grup a eșuat: ${(error as Error).message}`, {
-				tenantId: targetTenantId,
-				metadata: { taskId }
-			});
-		}
-	}
+	// Legarea automată de grupul WhatsApp al clientului (vezi autoLinkTaskToGroup).
+	await autoLinkTaskToGroup({
+		tenantId: targetTenantId,
+		tenantSlug: event.locals.tenant.slug,
+		taskId,
+		taskTitle: data.title,
+		clientId,
+		status: data.status || 'todo',
+		assignedToUserId: data.assignedToUserId || null,
+		dueDate: data.dueDate ? new Date(data.dueDate) : null,
+		actorUserId: event.locals.user.id
+	});
 
 	// Emit task.created hook (always, regardless of assignee)
 	try {
@@ -1721,6 +1747,20 @@ export const updateTask = command(
 				}, event.locals.user.email);
 			}
 		}
+
+		// Dacă task-ul a căpătat un client (sau îl avea deja fără grup), îl legăm
+		// acum: „aleg clientul" trebuie să fie de ajuns, fără al doilea pas.
+		await autoLinkTaskToGroup({
+			tenantId: existing.tenantId,
+			tenantSlug: event.locals.tenant.slug,
+			taskId,
+			taskTitle: updateData.title ?? existing.title,
+			clientId: updateData.clientId ?? existing.clientId,
+			status: updateData.status ?? existing.status,
+			assignedToUserId: updateData.assignedToUserId ?? existing.assignedToUserId ?? null,
+			dueDate: updateData.dueDate ? new Date(updateData.dueDate) : (existing.dueDate ?? null),
+			actorUserId: event.locals.user.id
+		});
 
 		// Emit approval.requested hook if status changed to pending-approval
 		if (updateData.status === 'pending-approval' && existing.status !== 'pending-approval') {
