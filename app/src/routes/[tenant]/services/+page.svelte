@@ -15,6 +15,7 @@
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import PercentIcon from '@lucide/svelte/icons/percent';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import ClockIcon from '@lucide/svelte/icons/clock';
 	import CategoryIcon from '$lib/components/services/CategoryIcon.svelte';
 	import DiscountsDialog from '$lib/components/services/DiscountsDialog.svelte';
 	import {
@@ -37,6 +38,7 @@
 	} from '$lib/remotes/packages.remote';
 	import InvoiceItemsPanel from './InvoiceItemsPanel.svelte';
 	import PublicPagePanel from './PublicPagePanel.svelte';
+	import HoursOrdersPanel from './HoursOrdersPanel.svelte';
 	import PackageComparisonDialog from './PackageComparisonDialog.svelte';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import MinusIcon from '@lucide/svelte/icons/minus';
@@ -171,6 +173,10 @@
 		<TabsTrigger value="invoice-items">
 			<PackageIcon class="mr-2 h-4 w-4" />
 			Elemente de facturi
+		</TabsTrigger>
+		<TabsTrigger value="hours">
+			<ClockIcon class="mr-2 h-4 w-4" />
+			Ore extra work
 		</TabsTrigger>
 		<TabsTrigger value="public">
 			<GlobeIcon class="mr-2 h-4 w-4" />
@@ -515,6 +521,10 @@
 
 	<TabsContent value="invoice-items" class="mt-6">
 		<InvoiceItemsPanel />
+	</TabsContent>
+
+	<TabsContent value="hours" class="mt-6">
+		<HoursOrdersPanel />
 	</TabsContent>
 
 	<TabsContent value="public" class="mt-6">

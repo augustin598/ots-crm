@@ -198,3 +198,42 @@ export const updatePackageRequestStatus = command(updateStatusSchema, async (dat
 
 	return { success: true };
 });
+
+// ─── Comenzi de ore extra work (cumpărate cu cardul de pe /servicii) ─────────
+
+export const getHoursOrders = query(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) {
+		throw new Error('Unauthorized');
+	}
+	await requireStaff(event);
+
+	return db
+		.select({
+			id: table.serviceHoursOrder.id,
+			clientId: table.serviceHoursOrder.clientId,
+			rateSlug: table.serviceHoursOrder.rateSlug,
+			rateLabel: table.serviceHoursOrder.rateLabel,
+			rateEur: table.serviceHoursOrder.rateEur,
+			hours: table.serviceHoursOrder.hours,
+			netCents: table.serviceHoursOrder.netCents,
+			grossCents: table.serviceHoursOrder.grossCents,
+			currency: table.serviceHoursOrder.currency,
+			status: table.serviceHoursOrder.status,
+			billingType: table.serviceHoursOrder.billingType,
+			contactName: table.serviceHoursOrder.contactName,
+			contactEmail: table.serviceHoursOrder.contactEmail,
+			contactPhone: table.serviceHoursOrder.contactPhone,
+			companyName: table.serviceHoursOrder.companyName,
+			cui: table.serviceHoursOrder.cui,
+			note: table.serviceHoursOrder.note,
+			invoiceId: table.serviceHoursOrder.invoiceId,
+			stripePaymentIntentId: table.serviceHoursOrder.stripePaymentIntentId,
+			paidAt: table.serviceHoursOrder.paidAt,
+			createdAt: table.serviceHoursOrder.createdAt
+		})
+		.from(table.serviceHoursOrder)
+		.where(eq(table.serviceHoursOrder.tenantId, event.locals.tenant.id))
+		.orderBy(desc(table.serviceHoursOrder.createdAt))
+		.limit(200);
+});
