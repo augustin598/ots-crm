@@ -98,6 +98,14 @@
 	);
 	const detailsValid = $derived(!nameError && !emailError && !companyError && !cuiError);
 	const show = (err: string | null) => touched && err !== null;
+	/** Prima eroare în ordinea vizuală a câmpurilor (CUI și firma stau deasupra numelui). */
+	const firstError = $derived.by((): { id: string; message: string } | null => {
+		if (cuiError) return { id: 'hc-cui', message: cuiError };
+		if (companyError) return { id: 'hc-company', message: companyError };
+		if (nameError) return { id: 'hc-name', message: nameError };
+		if (emailError) return { id: 'hc-email', message: emailError };
+		return null;
+	});
 
 	async function onCuiBlur() {
 		const raw = cui.trim();
@@ -134,9 +142,9 @@
 
 	async function submitDetails() {
 		touched = true;
-		if (!detailsValid) {
-			const firstBad = nameError ? 'hc-name' : emailError ? 'hc-email' : companyError ? 'hc-company' : 'hc-cui';
-			document.getElementById(firstBad)?.focus();
+		if (firstError) {
+			// Cititorul de ecran și utilizatorul de tastatură ajung direct la primul câmp greșit.
+			document.getElementById(firstError.id)?.focus();
 			return;
 		}
 		if (submitting) return;
@@ -205,8 +213,8 @@
 	}
 
 	const footerHint = $derived(
-		step === 1 && touched && !detailsValid
-			? (nameError ?? emailError ?? companyError ?? cuiError)
+		step === 1 && touched && firstError
+			? firstError.message
 			: step === 2 && !paymentReady
 				? 'Se încarcă formularul de plată…'
 				: null
