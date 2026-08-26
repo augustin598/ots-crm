@@ -2357,6 +2357,49 @@ export const servicePackageRequest = sqliteTable('service_package_request', {
 		.default(sql`current_timestamp`)
 });
 
+// Comanda de ore de extra work cumparate cu cardul de pe pagina publica /servicii
+// (tab „Tarife orare"). Snapshot complet de pret (tarif, ore, TVA): tarifele din
+// catalog se schimba in timp, comanda trebuie sa arate ce a platit clientul.
+// `status`:
+//   'pending_payment' → creata, PaymentIntent emis, plata neconfirmata inca
+//   'paid'            → webhook payment_intent.succeeded confirmat; invoice_id populat
+//   'failed'          → payment_intent.payment_failed
+export const serviceHoursOrder = sqliteTable('service_hours_order', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	clientId: text('client_id').references(() => client.id),
+	rateSlug: text('rate_slug').notNull(),
+	rateLabel: text('rate_label').notNull(),
+	rateEur: integer('rate_eur').notNull(), // EUR intregi pe ora, fara TVA (snapshot)
+	hours: integer('hours').notNull(),
+	netCents: integer('net_cents').notNull(),
+	vatCents: integer('vat_cents').notNull(),
+	grossCents: integer('gross_cents').notNull(), // = suma incasata de Stripe
+	vatPercent: integer('vat_percent').notNull(),
+	currency: text('currency').notNull().default('EUR'),
+	billingType: text('billing_type').notNull().default('company'), // 'company' | 'person'
+	contactName: text('contact_name').notNull(),
+	contactEmail: text('contact_email').notNull(),
+	contactPhone: text('contact_phone'),
+	companyName: text('company_name'),
+	cui: text('cui'),
+	note: text('note'),
+	status: text('status').notNull().default('pending_payment'),
+	stripePaymentIntentId: text('stripe_payment_intent_id'),
+	invoiceId: text('invoice_id').references(() => invoice.id),
+	ipAddress: text('ip_address'),
+	userAgent: text('user_agent'),
+	paidAt: timestamp('paid_at', { withTimezone: true, mode: 'date' }),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
 // Acces cu parola pentru paginile publice (ex. catalogul de servicii de la /servicii).
 // O linie per (tenant, pageKey). `passwordHash` e argon2id; `cookieSecret` e secretul
 // HMAC folosit pentru cookie-ul de deblocare — se roteste la fiecare schimbare de parola,
@@ -4504,6 +4547,8 @@ export type Service = typeof service.$inferSelect;
 export type NewService = typeof service.$inferInsert;
 export type ServicePackageRequest = typeof servicePackageRequest.$inferSelect;
 export type NewServicePackageRequest = typeof servicePackageRequest.$inferInsert;
+export type ServiceHoursOrder = typeof serviceHoursOrder.$inferSelect;
+export type NewServiceHoursOrder = typeof serviceHoursOrder.$inferInsert;
 export type Invoice = typeof invoice.$inferSelect;
 export type NewInvoice = typeof invoice.$inferInsert;
 export type InvoiceLineItem = typeof invoiceLineItem.$inferSelect;
