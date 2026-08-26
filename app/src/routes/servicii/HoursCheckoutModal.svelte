@@ -62,7 +62,12 @@
 	};
 
 	const money = $derived(computeVatBreakdown(hoursNetCents(rate.rate, rate.hours), vatPercent));
-	const eur = (cents: number) => formatEur(cents / 100);
+	// Sumele cu TVA au subdiviziuni: „50,40 €", nu „50,4 €" — la plată se afișează
+	// mereu doi zecimali; `formatEur` din catalog e pentru prețurile întregi.
+	const eur = (cents: number) =>
+		Number.isInteger(cents / 100)
+			? formatEur(cents / 100)
+			: `${(cents / 100).toLocaleString('ro-RO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
 	// ── Pas 1: date facturare ──
 	let billingType = $state<'company' | 'person'>('company');
