@@ -12,7 +12,10 @@ mock.module('$env/dynamic/public', () => ({ env: {} }));
 // eager-load schema reală înainte de mock-uri (vezi interviuri-client-assoc.test.ts)
 await import('$lib/server/db/schema');
 mock.module('$lib/server/db', () => ({ db: {} }));
-mock.module('$lib/server/bnr/client', () => ({ loadBnrFxRates: async () => ({}) }));
+mock.module('$lib/server/bnr/client', () => ({
+	loadBnrFxRates: async () => ({}),
+	getLatestBnrRate: async () => null
+}));
 
 const { aggregateSpend, fxRateDateFor } = await import('$lib/server/interviuri/kpi-data');
 
@@ -53,7 +56,7 @@ describe('aggregateSpend', () => {
 		expect(months[1].spend.google).toBeCloseTo(460, 6);
 		expect(warnings).toEqual([]);
 	});
-	test('curs lipsă → suma e exclusă și raportată', () => {
+	test('curs lipsă, fără fallback → suma e exclusă și raportată', () => {
 		const { months, warnings } = aggregateSpend(
 			[{ platform: 'google', periodStart: '2026-01-01', periodEnd: '2026-01-31', spendCents: 10000, currencyCode: 'EUR' }],
 			2026,
@@ -61,7 +64,18 @@ describe('aggregateSpend', () => {
 			TODAY
 		);
 		expect(months).toEqual([]);
-		expect(warnings).toEqual([{ platform: 'google', month: '2026-01', currency: 'EUR' }]);
+		expect(warnings).toEqual([{ platform: 'google', month: '2026-01', currency: 'EUR', approx: false }]);
+	});
+	test('curs lipsă la dată, dar cu cel mai recent curs disponibil → convertit și marcat „aproximat"', () => {
+		const { months, warnings } = aggregateSpend(
+			[{ platform: 'google', periodStart: '2026-01-01', periodEnd: '2026-01-31', spendCents: 10000, currencyCode: 'USD' }],
+			2026,
+			fx,
+			TODAY,
+			{ USD: 4.7 }
+		);
+		expect(months[0].spend.google).toBeCloseTo(470, 6);
+		expect(warnings).toEqual([{ platform: 'google', month: '2026-01', currency: 'USD', approx: true }]);
 	});
 	test('rândurile din alt an sunt ignorate', () => {
 		const { months } = aggregateSpend(

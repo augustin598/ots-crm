@@ -1,7 +1,7 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm';
-import { loadBnrFxRates } from '$lib/server/bnr/client';
+import { getLatestBnrRate, loadBnrFxRates } from '$lib/server/bnr/client';
 import type { FxRates } from '$lib/server/banking/payment-match';
 import {
 	emptySpend,
@@ -36,6 +36,8 @@ export interface FxWarning {
 	platform: PlatformId;
 	month: string; // 'YYYY-MM'
 	currency: string;
+	/** true = convertit la cel mai recent curs disponibil (lipsește istoricul BNR); false = exclus */
+	approx: boolean;
 }
 
 /** Cursul „zilei de facturare" pentru spend lunar = sfârșitul lunii, plafonat la azi. */
@@ -43,12 +45,17 @@ export function fxRateDateFor(periodEnd: string, today: string): string {
 	return periodEnd > today ? today : periodEnd;
 }
 
-/** Agregă în lei pe (lună, platformă) rândurile unui an. Pur — testabil fără DB. */
+/**
+ * Agregă în lei pe (lună, platformă) rândurile unui an. Pur — testabil fără DB.
+ * `latestRates` = cel mai recent curs per valută, folosit DOAR când lipsește
+ * cotația istorică (istoricul BNR din CRM începe în 2026); suma e marcată „aproximat".
+ */
 export function aggregateSpend(
 	rows: SpendRowInput[],
 	year: number,
 	fx: FxRates,
-	today: string
+	today: string,
+	latestRates: Record<string, number> = {}
 ): { months: KpiMonthSpend[]; warnings: FxWarning[] } {
 	const byMonth = new Map<number, SpendByPlatform>();
 	const warnings: FxWarning[] = [];
@@ -62,11 +69,15 @@ export function aggregateSpend(
 			ron = r.spendCents / 100;
 		} else {
 			const rate = fx[fxRateDateFor(r.periodEnd, today)]?.[cur];
-			if (!rate) {
-				warnings.push({ platform: r.platform, month: r.periodStart.slice(0, 7), currency: cur });
+			if (rate) {
+				ron = (r.spendCents / 100) * rate.ronPerUnit;
+			} else if (latestRates[cur]) {
+				ron = (r.spendCents / 100) * latestRates[cur];
+				warnings.push({ platform: r.platform, month: r.periodStart.slice(0, 7), currency: cur, approx: true });
+			} else {
+				warnings.push({ platform: r.platform, month: r.periodStart.slice(0, 7), currency: cur, approx: false });
 				continue;
 			}
-			ron = (r.spendCents / 100) * rate.ronPerUnit;
 		}
 		const s = byMonth.get(monthNum) ?? emptySpend();
 		s[r.platform] += ron;
@@ -271,15 +282,22 @@ export async function loadInterviewKpiData(
 			: (yearList[yearList.length - 1] ?? new Date().getFullYear());
 
 	const foreign = spendRows.filter((r) => (r.currencyCode || 'RON').toUpperCase() !== 'RON');
+	const currencies = [...new Set(foreign.map((r) => r.currencyCode.toUpperCase()))];
 	const fx: FxRates = foreign.length
 		? await loadBnrFxRates(
-				foreign.map((r) => r.currencyCode),
+				currencies,
 				foreign.map((r) => fxRateDateFor(r.periodEnd, today))
 			)
 		: {};
+	// fallback pentru lunile fără istoric BNR: cel mai recent curs cunoscut
+	const latestRates: Record<string, number> = {};
+	for (const c of currencies) {
+		const rate = await getLatestBnrRate(c);
+		if (rate) latestRates[c] = rate;
+	}
 
-	const cur = aggregateSpend(spendRows, year, fx, today);
-	const prev = aggregateSpend(spendRows, year - 1, fx, today);
+	const cur = aggregateSpend(spendRows, year, fx, today, latestRates);
+	const prev = aggregateSpend(spendRows, year - 1, fx, today, latestRates);
 	const [curIv, prevIv, accounts] = await Promise.all([
 		loadInterviews(tenantId, year),
 		loadInterviews(tenantId, year - 1),

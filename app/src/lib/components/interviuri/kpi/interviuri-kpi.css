@@ -1,0 +1,127 @@
+/* ===== OTS — KPI performanță interviuri (clasele ivk-*, portate din Claude Design) ===== */
+/* Se folosește împreună cu interviuri.css (cl-* + iv-*, tokenii --cl-* scopați pe .cl-wrap). */
+
+/* două coloane ca în prototip; minmax(0, …) ca panourile să nu poată împinge pagina în overflow orizontal */
+.ivk-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 14px; align-items: start; }
+@media (max-width: 1200px) { .ivk-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* cardurile KPI: 6 pe rând ca în prototip (interviuri.css le trece pe 3 sub 1200px) */
+.ivk-kpis { width: 100%; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1200px) { .cl-kpis.ivk-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* hero: titlul compact în stânga, iar acțiunile (ani, lună, export) imediat lângă el, pe același rând —
+   nu lipite de marginea dreaptă (cerință utilizator, deviere de la prototip) */
+.ivk-hero { align-items: center; gap: 12px 28px; }
+.ivk-hero-title { flex: 0 1 auto; min-width: 0; max-width: 520px; }
+.ivk-hero h1 { font-size: 22px; line-height: 1.2; }
+.ivk-hero p { font-size: 12.5px; margin-top: 4px; }
+.ivk-hero .cl-hero-actions { flex: 0 1 auto; margin-left: 0; justify-content: flex-start; }
+
+/* hero cost card */
+.ivk-hero-cost { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
+.ivk-big { font-size: 40px; font-weight: 800; letter-spacing: -.03em; color: var(--cl-text); font-variant-numeric: tabular-nums; line-height: 1; }
+.ivk-big span { font-size: 17px; font-weight: 700; color: var(--cl-text-3); margin-left: 6px; letter-spacing: 0; }
+.ivk-delta { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+.ivk-delta.up { background: var(--cl-danger-50); color: #b91c1c; }
+.ivk-delta.down { background: var(--cl-success-50); color: #047857; }
+.ivk-delta.flat { background: var(--cl-surface-2); color: var(--cl-text-3); }
+.dark .ivk-delta.up { color: #f87171; }
+.dark .ivk-delta.down { color: #34d399; }
+
+/* composition bar */
+.ivk-comp-bar { display: flex; height: 30px; border-radius: 9px; overflow: hidden; border: 1px solid var(--cl-border); background: var(--cl-surface-2); }
+.ivk-comp-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; min-width: 2px; transition: width .4s cubic-bezier(.4,0,.2,1); white-space: nowrap; overflow: hidden; }
+
+/* source rows */
+.ivk-src-list { display: flex; flex-direction: column; gap: 8px; }
+.ivk-src-row { display: grid; grid-template-columns: 34px 1fr 96px 74px; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--cl-border); border-radius: 11px; background: var(--cl-surface); }
+.ivk-src-row.total { background: var(--cl-surface-2); border-color: var(--cl-border-strong); }
+.ivk-src-ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; }
+.ivk-src-name { font-size: 13px; font-weight: 700; color: var(--cl-text); display: flex; align-items: center; gap: 7px; }
+.ivk-src-sub { font-size: 11px; color: var(--cl-text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ivk-amt { font-size: 14.5px; font-weight: 800; color: var(--cl-text); text-align: right; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.ivk-amt small { font-weight: 600; font-size: 11px; color: var(--cl-text-3); }
+.ivk-share { font-size: 11.5px; font-weight: 700; color: var(--cl-text-3); text-align: right; font-variant-numeric: tabular-nums; }
+.ivk-live { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 2px 6px; border-radius: 999px; background: var(--cl-success-50); color: #047857; }
+.ivk-live .dot { width: 5px; height: 5px; border-radius: 50%; background: #10b981; }
+.ivk-manual { background: var(--cl-accent-50); color: var(--cl-accent-600); }
+.ivk-manual .dot { background: var(--cl-accent); }
+.dark .ivk-live { color: #34d399; }
+.dark .ivk-manual { color: #93c5fd; }
+
+/* fixed costs editor */
+/* coloane compacte (prototipul avea 66/104/104/100) ca denumirea să rămână lizibilă și în panoul de ~550px */
+.ivk-fx-head, .ivk-fx-row { display: grid; grid-template-columns: 26px minmax(0,1fr) 56px 12px 84px 84px 84px 26px; gap: 8px; align-items: center; }
+.ivk-fx-head { padding: 0 4px 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--cl-text-3); }
+.ivk-fx-head .r, .ivk-fx-row .r { text-align: right; }
+.ivk-fx-row { padding: 7px 4px; border-top: 1px solid var(--cl-border); }
+.ivk-fx-row.off { opacity: .45; }
+.ivk-fx-row .cl-input { padding: 6px 8px; font-size: 12.5px; width: 100%; }
+.ivk-fx-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ivk-fx-x { font-size: 11px; color: var(--cl-text-3); text-align: center; }
+.ivk-fx-name-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ivk-fx-note { padding: 3px 8px !important; font-size: 11px !important; color: var(--cl-text-3); border-color: transparent !important; background: transparent !important; }
+.ivk-fx-note:hover, .ivk-fx-note:focus { border-color: var(--cl-border) !important; background: var(--cl-surface) !important; }
+.ivk-fx-total { font-size: 13.5px; font-weight: 800; color: var(--cl-text); text-align: right; font-variant-numeric: tabular-nums; }
+.ivk-fx-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--cl-border); }
+.ivk-fx-sum { margin-left: auto; text-align: right; }
+.ivk-fx-sum-lbl { font-size: 11px; color: var(--cl-text-3); font-weight: 600; }
+.ivk-fx-sum-val { font-size: 18px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ivk-check { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--cl-border-strong); background: var(--cl-surface); cursor: pointer; display: grid; place-items: center; padding: 0; color: transparent; }
+.ivk-check.on { background: var(--cl-accent); border-color: var(--cl-accent); color: #fff; }
+.ivk-check:disabled { cursor: not-allowed; }
+
+/* mode toggle */
+.ivk-mode { display: inline-flex; gap: 3px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); border-radius: 9px; padding: 3px; }
+.ivk-mode button { border: 0; background: transparent; border-radius: 6px; padding: 6px 11px; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--cl-text-2); cursor: pointer; }
+.ivk-mode button.active { background: var(--cl-surface); color: var(--cl-text); box-shadow: 0 1px 2px rgba(15,23,42,.08); }
+
+/* trend */
+.ivk-trend { display: flex; align-items: flex-end; gap: 10px; height: 210px; padding: 4px 2px 0; }
+.ivk-trend-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; min-width: 0; }
+.ivk-trend-cpi { font-size: 12px; font-weight: 800; color: var(--cl-text); font-variant-numeric: tabular-nums; }
+.ivk-trend-stack-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.ivk-trend-stack { width: 100%; max-width: 52px; display: flex; flex-direction: column-reverse; border-radius: 6px; overflow: hidden; border: 1px solid var(--cl-border); }
+.ivk-trend-seg { width: 100%; }
+.ivk-trend-lbl { font-size: 10.5px; color: var(--cl-text-3); font-weight: 600; }
+.ivk-trend-n { font-size: 10px; color: var(--cl-text-3); font-variant-numeric: tabular-nums; }
+.ivk-trend-col.sel .ivk-trend-lbl { color: var(--cl-accent); font-weight: 800; }
+/* coloanele sunt butoane (click = filtrare pe lună) */
+button.ivk-trend-col { border: 0; background: transparent; padding: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 8px; }
+button.ivk-trend-col:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
+
+.ivk-note { display: flex; gap: 9px; padding: 10px 14px; border-radius: 10px; font-size: 12px; line-height: 1.5; background: var(--cl-surface-2); color: var(--cl-text-2); border: 1px solid var(--cl-border); }
+.ivk-note svg { flex-shrink: 0; margin-top: 2px; color: var(--cl-text-3); }
+.ivk-note b { color: var(--cl-text); }
+.ivk-note.warn { background: var(--cl-warn-50); border-color: var(--cl-warn); }
+.ivk-note.warn svg { color: var(--cl-warn); }
+.ivk-note.danger { background: var(--cl-danger-50); border-color: var(--cl-danger); }
+.ivk-note.danger svg { color: var(--cl-danger); }
+.ivk-banners { display: flex; flex-direction: column; gap: 8px; }
+
+.ivk-pad { padding: 0 28px; }
+.ivk-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--cl-surface-2); color: var(--cl-text-3); border: 1px solid var(--cl-border); }
+.ivk-cpi-cell { font-size: 13.5px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.ivk-bar-mini { height: 6px; border-radius: 3px; background: var(--cl-surface-2); overflow: hidden; margin-top: 5px; }
+.ivk-bar-mini i { display: block; height: 100%; border-radius: 3px; }
+
+/* tabele: rând selectat / total */
+.ivk-row-sel { background: var(--cl-accent-50); }
+.cl-list-table tbody tr.ivk-row-sel:hover { background: var(--cl-accent-50); }
+.ivk-total-row { background: var(--cl-surface-2); cursor: default; }
+.cl-list-table tbody tr.ivk-total-row:hover { background: var(--cl-surface-2); }
+.cl-list-table tbody tr.ivk-static { cursor: default; }
+.cl-list-table tbody tr.ivk-static:hover { background: transparent; }
+.cl-list-table tbody tr:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: -2px; }
+.cl-list-table th.num, .cl-list-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* focus / disabled */
+.ivk-check:focus-visible, .ivk-mode button:focus-visible, .cl-btn-secondary:focus-visible, .cl-btn-primary:focus-visible, .cl-icon-btn:focus-visible, .iv-year-pill:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
+.ivk-fx-row .cl-input:disabled, .ivk-fx-row .cl-select:disabled { opacity: .7; cursor: not-allowed; }
+.cl-btn-secondary:disabled { opacity: .6; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+	.ivk-fx-head { display: none; }
+	.ivk-fx-row { grid-template-columns: 30px minmax(0,1fr) 60px 12px 90px 90px 90px 30px; }
+	.ivk-src-row { grid-template-columns: 34px 1fr 90px 60px; }
+}

@@ -178,7 +178,7 @@ export const syncInterviewAdsBudgets = command(async () => {
 			results.push({ id: p.id, label: p.label, ok: true });
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			logError('interviuri-kpi', `Sync ${p.id} failed: ${message}`, {
+			logError('interviuri', `Sync ${p.id} failed: ${message}`, {
 				tenantId,
 				userId: event.locals.user!.id
 			});
