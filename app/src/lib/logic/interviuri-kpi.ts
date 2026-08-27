@@ -19,7 +19,8 @@ export const PLATFORMS: PlatformMeta[] = [
 	{
 		id: 'tiktok',
 		label: 'TikTok Ads',
-		color: '#111827',
+		// variabilă CSS: #111827 în light, deschis în dark (altfel dispare pe fundal închis)
+		color: 'var(--ivk-tiktok, #111827)',
 		soft: 'rgba(17,24,39,.07)',
 		channels: ['TikTok']
 	},
@@ -175,6 +176,10 @@ export interface KpiResult {
 	cpiAds: number | null;
 	monthRows: KpiMonthRow[];
 	channelRows: KpiChannelRow[];
+	/** spend al platformelor fără niciun interviu din canalele lor — nu apare în niciun rând pe canal */
+	unallocatedAds: number;
+	/** fixe nealocate (mod „plătite" fără interviuri din surse plătite, sau fără interviuri deloc) */
+	unallocatedFixed: number;
 }
 
 /** Împărțirile la zero dau null — se afișează „—", niciodată 0 sau ∞. */
@@ -279,6 +284,9 @@ export function computeKpi(input: KpiInput): KpiResult {
 		})
 		.sort((a, b) => b.n - a.n);
 
+	const allocatedAds = channelRows.reduce((s, r) => s + r.ads, 0);
+	const allocatedFixed = channelRows.reduce((s, r) => s + r.fixed, 0);
+
 	return {
 		year: data.year,
 		scopeMonths,
@@ -295,7 +303,9 @@ export function computeKpi(input: KpiInput): KpiResult {
 		cpiOk: ratio(total, nOk),
 		cpiAds: ratio(adsTotal, nPaid),
 		monthRows,
-		channelRows
+		channelRows,
+		unallocatedAds: Math.max(0, adsTotal - allocatedAds),
+		unallocatedFixed: Math.max(0, fixedTotal - allocatedFixed)
 	};
 }
 

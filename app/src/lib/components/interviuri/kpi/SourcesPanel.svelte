@@ -46,7 +46,13 @@
 		</div>
 	</div>
 
-	<div class="ivk-comp-bar" role="img" aria-label="Ponderea surselor în bugetul total">
+	<div
+		class="ivk-comp-bar"
+		role="img"
+		aria-label="Ponderea surselor în bugetul total: {segs
+			.map((s) => `${s.label} ${pct(s.amount, total)}%`)
+			.join(', ') || 'fără buget'}"
+	>
 		{#each segs as s (s.id)}
 			{@const w = total ? (s.amount / total) * 100 : 0}
 			<div class="ivk-comp-seg" style="width:{w}%;background:{s.color}" title="{s.label}: {fmtLei(s.amount)}">

@@ -1,7 +1,7 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm';
-import { getLatestBnrRate, loadBnrFxRates } from '$lib/server/bnr/client';
+import { getLatestBnrRates, loadBnrFxRates } from '$lib/server/bnr/client';
 import type { FxRates } from '$lib/server/banking/payment-match';
 import {
 	emptySpend,
@@ -289,11 +289,15 @@ export async function loadInterviewKpiData(
 				foreign.map((r) => fxRateDateFor(r.periodEnd, today))
 			)
 		: {};
-	// fallback pentru lunile fără istoric BNR: cel mai recent curs cunoscut
+	// fallback pentru lunile fără istoric BNR: cel mai recent curs cunoscut, PER UNITATE
+	// (BNR publică HUF/JPY la 100 de unități → rate / multiplier, ca în resolveFxRates)
 	const latestRates: Record<string, number> = {};
-	for (const c of currencies) {
-		const rate = await getLatestBnrRate(c);
-		if (rate) latestRates[c] = rate;
+	if (currencies.length) {
+		for (const r of await getLatestBnrRates()) {
+			if (currencies.includes(r.currency) && r.rate > 0) {
+				latestRates[r.currency] = r.rate / (r.multiplier || 1);
+			}
+		}
 	}
 
 	const cur = aggregateSpend(spendRows, year, fx, today, latestRates);
@@ -331,7 +335,8 @@ export async function loadInterviewKpiData(
 		previous,
 		linkedClients: clientIds.length,
 		hasAdsData: cur.months.length > 0,
-		fxWarnings: cur.warnings,
+		// și anul precedent: delta „față de anul trecut" e calculată pe aceleași aproximări
+		fxWarnings: [...cur.warnings, ...prev.warnings],
 		lastSyncedAt: lastSynced?.toISOString() ?? null
 	};
 }

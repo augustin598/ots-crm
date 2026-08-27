@@ -26,7 +26,9 @@
 	const totals = $derived.by(() => {
 		const n = rows.reduce((s, r) => s + r.n, 0);
 		const ok = rows.reduce((s, r) => s + r.ok, 0);
-		const ads = Object.fromEntries(PLATFORM_IDS.map((id) => [id, rows.reduce((s, r) => s + r.ads[id], 0)])) as Record<string, number>;
+		const ads = Object.fromEntries(
+			PLATFORM_IDS.map((id) => [id, rows.reduce((s, r) => s + r.ads[id], 0)])
+		) as Record<string, number>;
 		const fixed = rows.reduce((s, r) => s + r.fixed, 0);
 		const total = rows.reduce((s, r) => s + r.total, 0);
 		return { n, ok, ads, fixed, total, cpi: n ? total / n : null };
@@ -35,18 +37,12 @@
 	function pick(r: KpiMonthRow) {
 		onPick(selMonth === r.monthNum ? 'all' : r.monthNum);
 	}
-	function onKey(e: KeyboardEvent, r: KpiMonthRow) {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			pick(r);
-		}
-	}
 </script>
 
 <div class="cl-section" style="padding:0">
 	<div class="cl-section-head" style="padding:18px 20px 14px; margin-bottom:0">
 		<h3><CalendarIcon size={15} /> Detaliu lunar {year}</h3>
-		<p class="cl-section-sub" style="margin-left:auto">click pe o lună pentru a filtra toată pagina</p>
+		<p class="cl-section-sub" style="margin-left:auto">clic pe o lună pentru a filtra toată pagina</p>
 	</div>
 	<div style="overflow-x:auto">
 		<table class="cl-list-table">
@@ -64,16 +60,22 @@
 			<tbody>
 				{#each rows as r (r.monthNum)}
 					{@const sel = selMonth === r.monthNum}
-					<tr
-						class={sel ? 'ivk-row-sel' : ''}
-						tabindex="0"
-						role="button"
-						aria-pressed={sel}
-						aria-label="{r.month}: {sel ? 'elimină filtrul' : 'filtrează pe această lună'}"
-						onclick={() => pick(r)}
-						onkeydown={(e) => onKey(e, r)}
-					>
-						<td style="font-weight:600">{r.month}</td>
+					<!-- rândul rămâne semantic (cifrele se citesc); tastatura folosește butonul-lună din prima celulă -->
+					<tr class={sel ? 'ivk-row-sel' : ''} onclick={() => pick(r)}>
+						<td>
+							<button
+								type="button"
+								class="ivk-month-btn"
+								aria-pressed={sel}
+								aria-label="{r.month}: {sel ? 'elimină filtrul' : 'filtrează pagina pe această lună'}"
+								onclick={(e) => {
+									e.stopPropagation();
+									pick(r);
+								}}
+							>
+								{r.month}
+							</button>
+						</td>
 						<td class="num">{r.n}</td>
 						<td class="num">{r.ok}</td>
 						{#each platforms as p (p.id)}
@@ -87,8 +89,10 @@
 				{#if rows.length === 0}
 					<tr class="ivk-static"><td colspan={6 + platforms.length}><div class="cl-budget-empty">Fără date pentru {year}.</div></td></tr>
 				{/if}
+			</tbody>
+			<tfoot>
 				<tr class="ivk-total-row">
-					<td style="font-weight:800">Total {year}</td>
+					<th scope="row" style="text-align:left; padding:12px 14px; font-weight:800; font-size:13px; color:var(--cl-text); text-transform:none; letter-spacing:0; background:transparent; border:0">Total {year}</th>
 					<td class="num" style="font-weight:800">{totals.n}</td>
 					<td class="num" style="font-weight:800">{totals.ok}</td>
 					{#each platforms as p (p.id)}<td class="num" style="font-weight:700">{fmtLei(totals.ads[p.id])}</td>{/each}
@@ -96,7 +100,7 @@
 					<td class="num" style="font-weight:800">{fmtLei(totals.total)}</td>
 					<td class="num ivk-cpi-cell">{fmtLeiFine(totals.cpi)}</td>
 				</tr>
-			</tbody>
+			</tfoot>
 		</table>
 	</div>
 </div>

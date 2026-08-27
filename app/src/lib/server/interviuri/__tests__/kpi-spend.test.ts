@@ -14,7 +14,7 @@ await import('$lib/server/db/schema');
 mock.module('$lib/server/db', () => ({ db: {} }));
 mock.module('$lib/server/bnr/client', () => ({
 	loadBnrFxRates: async () => ({}),
-	getLatestBnrRate: async () => null
+	getLatestBnrRates: async () => []
 }));
 
 const { aggregateSpend, fxRateDateFor } = await import('$lib/server/interviuri/kpi-data');

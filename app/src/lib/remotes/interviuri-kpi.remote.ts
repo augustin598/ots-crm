@@ -15,6 +15,7 @@ import { syncMetaAdsInvoicesForTenant } from '$lib/server/meta-ads/sync';
 import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
 import { logError } from '$lib/server/logger';
+import { getRedis } from '$lib/server/redis';
 import { PLATFORMS, type PlatformId } from '$lib/logic/interviuri-kpi';
 
 /**
@@ -114,8 +115,8 @@ export const createMarketingFixedCost = command(
 			unitAmountCents: 0,
 			frequency: 'monthly',
 			active: true,
-			// rândurile noi merg la coadă, după implicitele 10/20/30
-			sortOrder: 100 + (now.getTime() % 100000),
+			// rândurile noi merg la coadă, după implicitele 10/20/30, în ordinea creării (monoton)
+			sortOrder: Math.floor(now.getTime() / 1000),
 			...toDbPatch(data ?? {}),
 			createdBy: event.locals.user!.id,
 			createdAt: now,
@@ -162,28 +163,44 @@ export interface SyncPlatformResult {
 	error?: string;
 }
 
-/** Re-sincronizează cele trei conturi; o platformă picată nu blochează restul. */
+/** Cât ține lock-ul de sync (Google poate dura ~2 min); expiră singur dacă procesul moare. */
+const SYNC_LOCK_TTL_SEC = 600;
+
+/**
+ * Re-sincronizează cele trei conturi; o platformă picată nu blochează restul.
+ * Lock per tenant în Redis: un al doilea click (sau alt pod) nu pornește sync-uri paralele.
+ */
 export const syncInterviewAdsBudgets = command(async () => {
 	const event = await requireStaffCtx();
 	const tenantId = event.locals.tenant!.id;
+	const redis = getRedis();
+	const lockKey = `${tenantId}:interviuri-kpi:sync-lock`;
+	const acquired = await redis.set(lockKey, String(Date.now()), 'EX', SYNC_LOCK_TTL_SEC, 'NX');
+	if (!acquired) {
+		throw new Error('O sincronizare a bugetelor e deja în curs — așteaptă să se termine.');
+	}
 	const runners: Record<PlatformId, () => Promise<unknown>> = {
 		meta: () => syncMetaAdsInvoicesForTenant(tenantId),
 		tiktok: () => syncTiktokAdsSpendingForTenant(tenantId),
 		google: () => syncGoogleAdsInvoicesForTenant(tenantId)
 	};
 	const results: SyncPlatformResult[] = [];
-	for (const p of PLATFORMS) {
-		try {
-			await runners[p.id]();
-			results.push({ id: p.id, label: p.label, ok: true });
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			logError('interviuri', `Sync ${p.id} failed: ${message}`, {
-				tenantId,
-				userId: event.locals.user!.id
-			});
-			results.push({ id: p.id, label: p.label, ok: false, error: message.slice(0, 200) });
+	try {
+		for (const p of PLATFORMS) {
+			try {
+				await runners[p.id]();
+				results.push({ id: p.id, label: p.label, ok: true });
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				logError('interviuri', `Sync ${p.id} failed: ${message}`, {
+					tenantId,
+					userId: event.locals.user!.id
+				});
+				results.push({ id: p.id, label: p.label, ok: false, error: message.slice(0, 200) });
+			}
 		}
+	} finally {
+		await redis.del(lockKey).catch(() => {});
 	}
 	return { results, syncedAt: new Date().toISOString() };
 });

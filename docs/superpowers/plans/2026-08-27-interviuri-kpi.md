@@ -17,7 +17,9 @@
 1. Filtrul `studio` din spec NU are UI în prototip → nu se implementează (conturile de ads sunt per client, nu per studio; nu s-ar putea împărți corect).
 2. `valid_from`/`valid_to` sunt în schemă, în logică (testate) și acceptate de comenzi, dar editorul inline din prototip nu are coloane pentru ele → fără UI în această iterație (follow-up).
 3. Endpoint-urile REST din spec sunt înlocuite de remote functions; CSV = client-side.
-4. „Sincronizează bugetele" rulează cele trei sync-uri existente (`syncMetaAdsInvoicesForTenant`, `syncTiktokAdsSpendingForTenant`, `syncGoogleAdsInvoicesForTenant`) secvențial, fiecare în try/catch; poate dura zeci de secunde (Google descarcă și facturi).
+4. „Sincronizează bugetele" rulează cele trei sync-uri existente (`syncMetaAdsInvoicesForTenant`, `syncTiktokAdsSpendingForTenant`, `syncGoogleAdsInvoicesForTenant`) secvențial, fiecare în try/catch, sub lock Redis per tenant; durează ~2 minute (Google descarcă și facturi).
+5. **Cerute de utilizator în timpul testării (după implementare):** titlul hero compact în stânga cu acțiunile lângă el (nu lipite dreapta); editorul de cheltuieli fixe s-a mutat într-un **modal** („Setări cheltuieli"), panoul din pagină e rezumat read-only + comutatorul de alocare; grid-ul rămâne pe 2 coloane ca în prototip (utilizatorul a respins trecerea pe o coloană sub 1500px).
+6. Din audit (a11y): pe pagina KPI tokenul `--cl-text-3` e `#64748b` (contrast 4,8:1) și verdele KPI `#047857`; TikTok folosește `var(--ivk-tiktok)` (deschis în dark); rândurile lunare sunt semantice cu buton-lună pentru tastatură.
 
 **Teste:** `bun run test interviuri-kpi` (Bun, proces per fișier). Logica pură + agregarea spend + gating-ul de rol/tenant pe comenzi sunt testate unitar; UI-ul se verifică în browser (testermcp) + design-auditor.
 
@@ -29,7 +31,7 @@
 - Create: `app/src/lib/logic/interviuri-kpi.ts`
 - Test: `app/src/lib/logic/__tests__/interviuri-kpi.test.ts`
 
-- [ ] **Step 1: Scrie testele** (`app/src/lib/logic/__tests__/interviuri-kpi.test.ts`)
+- [x] **Step 1: Scrie testele** (`app/src/lib/logic/__tests__/interviuri-kpi.test.ts`)
 
 ```ts
 import { describe, test, expect } from 'bun:test';
@@ -243,9 +245,9 @@ describe('formatare ro-RO', () => {
 });
 ```
 
-- [ ] **Step 2: Rulează → FAIL** — `cd app && bun run test interviuri-kpi` → „Cannot find module '$lib/logic/interviuri-kpi'".
+- [x] **Step 2: Rulează → FAIL** — `cd app && bun run test interviuri-kpi` → „Cannot find module '$lib/logic/interviuri-kpi'".
 
-- [ ] **Step 3: Implementează** `app/src/lib/logic/interviuri-kpi.ts`
+- [x] **Step 3: Implementează** `app/src/lib/logic/interviuri-kpi.ts`
 
 ```ts
 // KPI performanță interviuri — formulele de cost pe interviu.
@@ -550,8 +552,8 @@ export function buildKpiCsv(rows: KpiMonthRow[]): string {
 }
 ```
 
-- [ ] **Step 4: Rulează → PASS** — `bun run test interviuri-kpi`.
-- [ ] **Step 5: Commit** — `git add app/src/lib/logic/interviuri-kpi.ts app/src/lib/logic/__tests__/interviuri-kpi.test.ts && git commit -m "feat(interviuri-kpi): modul pur cu formulele de cost pe interviu + teste"`
+- [x] **Step 4: Rulează → PASS** — `bun run test interviuri-kpi`.
+- [x] **Step 5: Commit** — `git add app/src/lib/logic/interviuri-kpi.ts app/src/lib/logic/__tests__/interviuri-kpi.test.ts && git commit -m "feat(interviuri-kpi): modul pur cu formulele de cost pe interviu + teste"`
 
 ---
 
@@ -562,8 +564,8 @@ export function buildKpiCsv(rows: KpiMonthRow[]): string {
 - Create: `app/drizzle/0495_marketing_fixed_cost.sql`, `app/drizzle/0496_marketing_fixed_cost_tenant_idx.sql`
 - Modify: `app/drizzle/meta/_journal.json`
 
-- [ ] **Step 1: grep nume** — `grep -rn "marketing_fixed_cost" app/drizzle app/src | head` → gol (memoria: fără dublete).
-- [ ] **Step 2: Schema** (după `NewInterview`):
+- [x] **Step 1: grep nume** — `grep -rn "marketing_fixed_cost" app/drizzle app/src | head` → gol (memoria: fără dublete).
+- [x] **Step 2: Schema** (după `NewInterview`):
 
 ```ts
 // Cheltuieli fixe de marketing (pagina Interviuri → KPI Performanță). Editate manual,
@@ -602,7 +604,7 @@ export type MarketingFixedCost = typeof marketingFixedCost.$inferSelect;
 export type NewMarketingFixedCost = typeof marketingFixedCost.$inferInsert;
 ```
 
-- [ ] **Step 3: Migrări** (FĂRĂ `IF NOT EXISTS`; un statement per fișier)
+- [x] **Step 3: Migrări** (FĂRĂ `IF NOT EXISTS`; un statement per fișier)
 
 `app/drizzle/0495_marketing_fixed_cost.sql`:
 ```sql
@@ -632,8 +634,8 @@ CREATE INDEX `marketing_fixed_cost_tenant_idx` ON `marketing_fixed_cost` (`tenan
 ```
 Journal: două intrări noi, `idx` 495/496, `when` 1785398836928469/…470, `version: "6"`, `breakpoints: true`.
 
-- [ ] **Step 4: Aplică** — înainte: verifică pe remote `select max(created_at) from __drizzle_migrations` ≥ `when` al lui 0494 (memoria „jurnal when sub remote"); apoi `cd app && bun run db:migrate`; verifică `PRAGMA table_info(marketing_fixed_cost)`.
-- [ ] **Step 5: Commit** — `git add app/src/lib/server/db/schema.ts app/drizzle/0495_marketing_fixed_cost.sql app/drizzle/0496_marketing_fixed_cost_tenant_idx.sql app/drizzle/meta/_journal.json && git commit -m "feat(interviuri-kpi): tabel marketing_fixed_cost + migrări"`
+- [x] **Step 4: Aplică** — înainte: verifică pe remote `select max(created_at) from __drizzle_migrations` ≥ `when` al lui 0494 (memoria „jurnal when sub remote"); apoi `cd app && bun run db:migrate`; verifică `PRAGMA table_info(marketing_fixed_cost)`.
+- [x] **Step 5: Commit** — `git add app/src/lib/server/db/schema.ts app/drizzle/0495_marketing_fixed_cost.sql app/drizzle/0496_marketing_fixed_cost_tenant_idx.sql app/drizzle/meta/_journal.json && git commit -m "feat(interviuri-kpi): tabel marketing_fixed_cost + migrări"`
 
 ---
 
@@ -643,7 +645,7 @@ Journal: două intrări noi, `idx` 495/496, `when` 1785398836928469/…470, `ver
 - Create: `app/src/lib/server/interviuri/kpi-data.ts`
 - Test: `app/src/lib/server/interviuri/__tests__/kpi-spend.test.ts`
 
-- [ ] **Step 1: Test**
+- [x] **Step 1: Test**
 
 ```ts
 import { describe, test, expect, mock } from 'bun:test';
@@ -704,8 +706,8 @@ describe('aggregateSpend', () => {
 });
 ```
 
-- [ ] **Step 2: Rulează → FAIL.**
-- [ ] **Step 3: Implementează** `app/src/lib/server/interviuri/kpi-data.ts`
+- [x] **Step 2: Rulează → FAIL.**
+- [x] **Step 3: Implementează** `app/src/lib/server/interviuri/kpi-data.ts`
 
 ```ts
 import { db } from '$lib/server/db';
@@ -903,8 +905,8 @@ export async function loadInterviewKpiData(tenantId: string, requestedYear?: num
 }
 ```
 
-- [ ] **Step 4: Rulează → PASS.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(interviuri-kpi): agregare spend pe lună/platformă cu conversie BNR + loader"`
+- [x] **Step 4: Rulează → PASS.**
+- [x] **Step 5: Commit** — `git commit -m "feat(interviuri-kpi): agregare spend pe lună/platformă cu conversie BNR + loader"`
 
 ---
 
@@ -915,7 +917,7 @@ export async function loadInterviewKpiData(tenantId: string, requestedYear?: num
 - Create: `app/src/lib/remotes/interviuri-kpi.remote.ts`
 - Test: `app/src/lib/remotes/__tests__/interviuri-kpi-fixed-costs.test.ts`
 
-- [ ] **Step 1: Test** (pattern din `interviuri-client-assoc.test.ts`)
+- [x] **Step 1: Test** (pattern din `interviuri-client-assoc.test.ts`)
 
 ```ts
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
@@ -1015,8 +1017,8 @@ describe('gating rol pe cheltuieli fixe', () => {
 });
 ```
 
-- [ ] **Step 2: Rulează → FAIL.**
-- [ ] **Step 3: Server module** `app/src/lib/server/interviuri/fixed-costs.ts`
+- [x] **Step 2: Rulează → FAIL.**
+- [x] **Step 3: Server module** `app/src/lib/server/interviuri/fixed-costs.ts`
 
 ```ts
 import { db } from '$lib/server/db';
@@ -1076,7 +1078,7 @@ export function fixedCostWhere(tenantId: string, id: string) {
 }
 ```
 
-- [ ] **Step 4: Remote** `app/src/lib/remotes/interviuri-kpi.remote.ts`
+- [x] **Step 4: Remote** `app/src/lib/remotes/interviuri-kpi.remote.ts`
 
 ```ts
 import { query, command, getRequestEvent } from '$app/server';
@@ -1234,8 +1236,8 @@ export const syncInterviewAdsBudgets = command(async () => {
 });
 ```
 
-- [ ] **Step 5: Rulează → PASS** (`bun run test interviuri-kpi`).
-- [ ] **Step 6: Commit** — `git commit -m "feat(interviuri-kpi): cheltuieli fixe (seed/reset) + remote functions cu gating owner/admin"`
+- [x] **Step 5: Rulează → PASS** (`bun run test interviuri-kpi`).
+- [x] **Step 6: Commit** — `git commit -m "feat(interviuri-kpi): cheltuieli fixe (seed/reset) + remote functions cu gating owner/admin"`
 
 ---
 
@@ -1244,7 +1246,7 @@ export const syncInterviewAdsBudgets = command(async () => {
 **Files:**
 - Modify: `app/src/lib/config/sidebar-nav.ts:245`
 
-- [ ] **Step 1:** înlocuiește linia:
+- [x] **Step 1:** înlocuiește linia:
 ```ts
 			{
 				id: 'interviuri',
@@ -1257,7 +1259,7 @@ export const syncInterviewAdsBudgets = command(async () => {
 			},
 ```
 (Părintele rămâne navigabil — `OtsSidebar` face `goto(itemHref)` + toggle pe click; caretul apare automat pentru `children`.)
-- [ ] **Step 2:** `bun run test sidebar` (regresii pe testele existente ale nav-ului) → PASS; commit `feat(interviuri-kpi): sub-item „KPI Performanță" în sidebar`.
+- [x] **Step 2:** `bun run test sidebar` (regresii pe testele existente ale nav-ului) → PASS; commit `feat(interviuri-kpi): sub-item „KPI Performanță" în sidebar`.
 
 ---
 
@@ -1280,7 +1282,7 @@ Stări definite înainte de markup (design flow):
 - **Empty**: an fără nimic → grafic „Fără date pentru {year}.", tabele cu rând „Niciun interviu în perioada selectată.".
 - **Banner** (`.ivk-note`): (a) `linkedClients === 0` → „Interviurile nu sunt asociate niciunui client, deci bugetele de ads nu pot fi citite. Asociază-le din pagina Interviuri."; (b) `!hasAdsData` → „Pentru {year} nu există cheltuieli de ads sincronizate — se afișează doar cheltuielile fixe."; (c) `fxWarnings.length` → „Sume în {valută} excluse (fără curs BNR): …".
 
-- [ ] **Step 1: CSS** — copiază `interviuri-kpi-styles.css` din prototip în `interviuri-kpi.css` și adaugă la final:
+- [x] **Step 1: CSS** — copiază `interviuri-kpi-styles.css` din prototip în `interviuri-kpi.css` și adaugă la final:
 ```css
 /* coloanele din grafic sunt butoane (click = filtrare pe lună) */
 button.ivk-trend-col { border: 0; background: transparent; padding: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 8px; }
@@ -1294,7 +1296,7 @@ button.ivk-trend-col:focus-visible { outline: 2px solid var(--cl-accent); outlin
 @media (max-width: 900px) { .ivk-fx-head { display: none; } .ivk-fx-row { grid-template-columns: 30px minmax(0,1fr) 60px 12px 90px 90px 90px 30px; } }
 ```
 
-- [ ] **Step 2: PlatformIcon.svelte**
+- [x] **Step 2: PlatformIcon.svelte**
 ```svelte
 <script lang="ts">
 	import IconTiktok from '$lib/components/marketing/icon-tiktok.svelte';
@@ -1306,19 +1308,19 @@ button.ivk-trend-col:focus-visible { outline: 2px solid var(--cl-accent); outlin
 {#if id === 'tiktok'}<IconTiktok class={className} />{:else if id === 'google'}<IconGoogleAds class={className} />{:else}<IconFacebook class={className} />{/if}
 ```
 
-- [ ] **Step 3: SourcesPanel.svelte** — props `platforms: Array<KpiPlatformInfo & { amount: number }>`, `adsTotal`, `fixedTotal`, `months`, `syncing`, `onSync`, `lastSync: string`; markup identic cu `SourcesPanel` din JSX (bară stivuită → rânduri platformă cu badge „live" + cont → rând fixe „manual" `{months} luni × lei/lună` → rând total cu „ultima sincronizare"); buton „Sincronizează bugetele" `disabled={syncing}` cu text „Se sincronizează…".
+- [x] **Step 3: SourcesPanel.svelte** — props `platforms: Array<KpiPlatformInfo & { amount: number }>`, `adsTotal`, `fixedTotal`, `months`, `syncing`, `onSync`, `lastSync: string`; markup identic cu `SourcesPanel` din JSX (bară stivuită → rânduri platformă cu badge „live" + cont → rând fixe „manual" `{months} luni × lei/lună` → rând total cu „ultima sincronizare"); buton „Sincronizează bugetele" `disabled={syncing}` cu text „Se sincronizează…".
 
-- [ ] **Step 4: FixedCostsPanel.svelte** — props `rows`, `canEdit`, `months`, `fixedTotal`, `fixedMonthly`, `mode`, `onChange(id, patch)`, `onDelete(id)`, `onAdd()`, `onReset()`, `onModeChange(mode)`; grid `ivk-fx-head/ivk-fx-row` identic; checkbox = `<button role="checkbox" aria-checked>`; inputuri `oninput` → `onChange` (parent debounce 400 ms); frecvență `<select>`; „Adaugă cheltuială"/„Resetează" (confirm nativ la reset); footer cu comutatorul de mod + „Total fix în perioadă"; când `!canEdit` toate controalele sunt `disabled` și sub titlu apare „doar Owner/Admin pot edita".
+- [x] **Step 4: FixedCostsPanel.svelte** — props `rows`, `canEdit`, `months`, `fixedTotal`, `fixedMonthly`, `mode`, `onChange(id, patch)`, `onDelete(id)`, `onAdd()`, `onReset()`, `onModeChange(mode)`; grid `ivk-fx-head/ivk-fx-row` identic; checkbox = `<button role="checkbox" aria-checked>`; inputuri `oninput` → `onChange` (parent debounce 400 ms); frecvență `<select>`; „Adaugă cheltuială"/„Resetează" (confirm nativ la reset); footer cu comutatorul de mod + „Total fix în perioadă"; când `!canEdit` toate controalele sunt `disabled` și sub titlu apare „doar Owner/Admin pot edita".
 
-- [ ] **Step 5: CostTrend.svelte** — props `rows: KpiMonthRow[]`, `year`, `selMonth`, `onPick(m)`, `platforms` (cu `amount`); coloane `<button class="ivk-trend-col" aria-pressed>` cu cifra cost/interviu sus, stiva (segmente pe platformă + fixe la opacitate .55), luna (3 litere), „N intv."; legendă `iv-legend` cu sumele pe platformă + „Cheltuieli fixe".
+- [x] **Step 5: CostTrend.svelte** — props `rows: KpiMonthRow[]`, `year`, `selMonth`, `onPick(m)`, `platforms` (cu `amount`); coloane `<button class="ivk-trend-col" aria-pressed>` cu cifra cost/interviu sus, stiva (segmente pe platformă + fixe la opacitate .55), luna (3 litere), „N intv."; legendă `iv-legend` cu sumele pe platformă + „Cheltuieli fixe".
 
-- [ ] **Step 6: ChannelCostTable.svelte** — props `rows: KpiChannelRow[]`, `channelMeta`, `mode`; tabel `cl-list-table` cu coloanele din spec, tag „organic", `ivk-bar-mini` sub nume (lățime = total/maxTotal), „—" pentru 0/null.
+- [x] **Step 6: ChannelCostTable.svelte** — props `rows: KpiChannelRow[]`, `channelMeta`, `mode`; tabel `cl-list-table` cu coloanele din spec, tag „organic", `ivk-bar-mini` sub nume (lățime = total/maxTotal), „—" pentru 0/null.
 
-- [ ] **Step 7: MonthlyDetailTable.svelte** — props `rows`, `year`, `selMonth`, `onPick`, `platforms`; rânduri clicabile (`onclick` + `onkeydown` Enter/Space, `tabindex=0`, `aria-selected`), rând total `ivk-total-row`.
+- [x] **Step 7: MonthlyDetailTable.svelte** — props `rows`, `year`, `selMonth`, `onPick`, `platforms`; rânduri clicabile (`onclick` + `onkeydown` Enter/Space, `tabindex=0`, `aria-selected`), rând total `ivk-total-row`.
 
-- [ ] **Step 8: InterviewsKpiView.svelte** — orchestrarea: query-uri (`getInterviewKpiData` derived pe `selectedYear`, `getMarketingFixedCosts`, `getInterviewChannels`), stare (`selectedYear`/`mode` persistate în `localStorage` `ots_iv_kpi_v1`, `month`), overlay optimist `edits` + debounce 400 ms + `toast.error` la eșec, `computeKpi`/`computeDelta`, sync cu `.updates(kpiQuery)`, export CSV (`buildKpiCsv` → Blob), crumbs `Marketing & Ads › Interviuri › KPI Performanță`, hero, 6 carduri KPI, card rezumat, grid Sources+Fixed, trend, tabel canal, tabel lunar, bannere.
+- [x] **Step 8: InterviewsKpiView.svelte** — orchestrarea: query-uri (`getInterviewKpiData` derived pe `selectedYear`, `getMarketingFixedCosts`, `getInterviewChannels`), stare (`selectedYear`/`mode` persistate în `localStorage` `ots_iv_kpi_v1`, `month`), overlay optimist `edits` + debounce 400 ms + `toast.error` la eșec, `computeKpi`/`computeDelta`, sync cu `.updates(kpiQuery)`, export CSV (`buildKpiCsv` → Blob), crumbs `Marketing & Ads › Interviuri › KPI Performanță`, hero, 6 carduri KPI, card rezumat, grid Sources+Fixed, trend, tabel canal, tabel lunar, bannere.
 
-- [ ] **Step 9: Pagina** `app/src/routes/[tenant]/interviuri/kpi/+page.svelte`
+- [x] **Step 9: Pagina** `app/src/routes/[tenant]/interviuri/kpi/+page.svelte`
 ```svelte
 <script lang="ts">
 	import { page } from '$app/state';
@@ -1330,14 +1332,14 @@ button.ivk-trend-col:focus-visible { outline: 2px solid var(--cl-accent); outlin
 <InterviewsKpiView homeHref={`/${tenant}`} interviewsHref={`/${tenant}/interviuri`} />
 ```
 
-- [ ] **Step 10:** `svelte-autofixer` pe fiecare componentă; `/build-check`; commit `feat(interviuri-kpi): pagina KPI Performanță 1:1 cu prototipul`.
+- [x] **Step 10:** `svelte-autofixer` pe fiecare componentă; `/build-check`; commit `feat(interviuri-kpi): pagina KPI Performanță 1:1 cu prototipul`.
 
 ---
 
 ### Task 7: Verificare în browser + audit design + docs
 
-- [ ] testermcp: `/ots/interviuri/kpi` — golden path: pagina se încarcă cu date reale; pills an; select lună filtrează hero/KPI/compunere/tabel canal + evidențiază luna în grafic (criteriul 4); click pe coloană/rând lunar = același filtru; dezactivare rând fix → KPI-urile, graficul și ambele tabele se schimbă instant (criteriul 2); adăugare rând → persistă după refresh (criteriul 3); editare 4×8000 → total/lună 32.000; export CSV descarcă; „Sincronizează bugetele" → loading → `synced_at` nou fără reload (criteriul 7); sidebar: caret pe Interviuri, copil activ; dark mode.
-- [ ] Criteriul 5 pe date reale: suma coloanelor TikTok+Google+Meta din „Detaliu lunar" = cardul „Buget ads" (tot anul și o lună).
-- [ ] design-auditor + web-design-guidelines pe componentele noi; repară Critical/High.
-- [ ] Doc scurt `app/docs/interviuri-kpi.md`: surse de date, formule, mapare canale, ipoteze (client-linked spend, curs BNR sfârșit de lună, valid_from/to fără UI).
-- [ ] `bun run test` complet → 0 fail; commit; propune deploy (întreabă production/staging, așteaptă „go").
+- [x] testermcp: `/ots/interviuri/kpi` — golden path: pagina se încarcă cu date reale; pills an; select lună filtrează hero/KPI/compunere/tabel canal + evidențiază luna în grafic (criteriul 4); click pe coloană/rând lunar = același filtru; dezactivare rând fix → KPI-urile, graficul și ambele tabele se schimbă instant (criteriul 2); adăugare rând → persistă după refresh (criteriul 3); editare 4×8000 → total/lună 32.000; export CSV descarcă; „Sincronizează bugetele" → loading → `synced_at` nou fără reload (criteriul 7); sidebar: caret pe Interviuri, copil activ; dark mode.
+- [x] Criteriul 5 pe date reale: suma coloanelor TikTok+Google+Meta din „Detaliu lunar" = cardul „Buget ads" (tot anul și o lună).
+- [x] design-auditor + web-design-guidelines pe componentele noi; repară Critical/High.
+- [x] Doc scurt `app/docs/interviuri-kpi.md`: surse de date, formule, mapare canale, ipoteze (client-linked spend, curs BNR sfârșit de lună, valid_from/to fără UI).
+- [x] `bun run test` complet → 0 fail; commit; propune deploy (întreabă production/staging, așteaptă „go").

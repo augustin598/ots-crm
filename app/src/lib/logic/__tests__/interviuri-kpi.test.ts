@@ -247,6 +247,15 @@ describe('cost pe canal', () => {
 			expect(k.channelRows[i - 1].n).toBeGreaterThanOrEqual(k.channelRows[i].n);
 		}
 	});
+	test('platformă cu spend dar fără interviuri din canalele ei → buget nealocat, raportat', () => {
+		const k = base({ month: 3 }); // martie: doar „Nespecificat"; spend tiktok 3000 + google 500 + meta 200
+		expect(k.channelRows.map((r) => r.channel)).toEqual(['Nespecificat']);
+		expect(k.unallocatedAds).toBeCloseTo(3700, 6);
+		expect(k.unallocatedFixed).toBe(0); // „toate": Nespecificat ia toate fixele
+		const kp = base({ month: 3, mode: 'platite' });
+		expect(kp.unallocatedFixed).toBeCloseTo(35440, 6); // niciun interviu plătit → fixele nealocate
+		expect(base().unallocatedAds).toBeCloseTo(0, 6);
+	});
 	test('canal necunoscut (neinclus în channelOrder) apare totuși', () => {
 		const d = year2026();
 		d.interviews.push({ monthNum: 1, channel: 'Canal nou', status: 'in_evaluare' });
@@ -290,6 +299,19 @@ describe('delta față de perioada anterioară', () => {
 			computeDelta({
 				current: base({ month: 1 }),
 				month: 1,
+				previous: null,
+				fixedRows: DEFAULT_ROWS,
+				mode: 'toate',
+				channelOrder: CHANNELS
+			})
+		).toBeNull();
+	});
+	test('luna precedentă din scop fără interviuri (cpi null) → null, nu sare peste ea', () => {
+		// aprilie n-are interviuri → pentru mai, „luna precedentă" e aprilie cu cpi null
+		expect(
+			computeDelta({
+				current: base({ month: 5 }),
+				month: 5,
 				previous: null,
 				fixedRows: DEFAULT_ROWS,
 				mode: 'toate',

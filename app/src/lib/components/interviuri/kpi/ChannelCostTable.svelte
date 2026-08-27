@@ -7,15 +7,27 @@
 	let {
 		rows,
 		channelMeta,
-		mode
+		mode,
+		unallocatedAds = 0,
+		unallocatedFixed = 0
 	}: {
 		rows: KpiChannelRow[];
 		channelMeta: Record<string, ChannelMeta>;
 		mode: FixedMode;
+		unallocatedAds?: number;
+		unallocatedFixed?: number;
 	} = $props();
 
 	const maxTotal = $derived(Math.max(1, ...rows.map((r) => r.total)));
-	const colorOf = (ch: string) => channelMeta[ch]?.color ?? '#94a3b8';
+	// culoarea canalului TikTok (#111827) ar dispărea în dark → aceeași variabilă ca platforma
+	const colorOf = (ch: string) => {
+		const c = channelMeta[ch]?.color ?? '#94a3b8';
+		return c.toLowerCase() === '#111827' ? 'var(--ivk-tiktok, #111827)' : c;
+	};
+	const softOf = (ch: string) => {
+		const c = channelMeta[ch]?.color ?? '#94a3b8';
+		return c.toLowerCase() === '#111827' ? 'rgba(100,116,139,.15)' : `${c}1a`;
+	};
 	const iconOf = (ch: string) => channelMeta[ch]?.icon ?? 'circle-help';
 </script>
 
@@ -47,7 +59,7 @@
 					<tr class="ivk-static">
 						<td>
 							<div class="iv-attr-name">
-								<span class="iv-attr-ic" style="background:{color}1a;color:{color}"><ChannelIcon icon={iconOf(r.channel)} size={14} /></span>
+								<span class="iv-attr-ic" style="background:{softOf(r.channel)};color:{color}"><ChannelIcon icon={iconOf(r.channel)} size={14} /></span>
 								<span>{r.channel}</span>
 								{#if !r.paid}<span class="ivk-tag">organic</span>{/if}
 							</div>
@@ -68,4 +80,11 @@
 			</tbody>
 		</table>
 	</div>
+	{#if Math.round(unallocatedAds) > 0 || Math.round(unallocatedFixed) > 0}
+		<div class="cl-budget-empty" style="padding:10px 20px 14px">
+			Nealocat pe canale (nu apare în tabel):
+			{#if Math.round(unallocatedAds) > 0}<b>{fmtLei(unallocatedAds)}</b> ads pe platforme fără interviuri din canalele lor{/if}{#if Math.round(unallocatedAds) > 0 && Math.round(unallocatedFixed) > 0};
+			{/if}{#if Math.round(unallocatedFixed) > 0}<b>{fmtLei(unallocatedFixed)}</b> cheltuieli fixe fără interviuri din surse plătite{/if}.
+		</div>
+	{/if}
 </div>

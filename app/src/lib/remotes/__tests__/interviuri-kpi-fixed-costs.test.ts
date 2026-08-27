@@ -46,6 +46,25 @@ mock.module('$lib/server/logger', () => ({
 	logWarning: () => {}
 }));
 
+// Redis fals: lock-ul de sync (SET NX) + ștergerea lui
+let lockHeld = false;
+const redisCalls: string[] = [];
+mock.module('$lib/server/redis', () => ({
+	getRedis: () => ({
+		set: async (key: string) => {
+			redisCalls.push(`set ${key}`);
+			if (lockHeld) return null;
+			lockHeld = true;
+			return 'OK';
+		},
+		del: async (key: string) => {
+			redisCalls.push(`del ${key}`);
+			lockHeld = false;
+			return 1;
+		}
+	})
+}));
+
 const updateCalls: Array<{ set: any; where: unknown }> = [];
 const deleteCalls: Array<{ where: unknown }> = [];
 const inserted: any[] = [];
@@ -172,8 +191,9 @@ describe('gating rol pe cheltuieli fixe', () => {
 });
 
 describe('sincronizare bugete', () => {
-	test('o platformă picată nu blochează restul; rezultat per platformă', async () => {
+	test('o platformă picată nu blochează restul; rezultat per platformă; lock-ul e eliberat', async () => {
 		currentEvent = ev('member');
+		redisCalls.length = 0;
 		const r = await remote.syncInterviewAdsBudgets();
 		expect(r.results.map((x: any) => [x.id, x.ok])).toEqual([
 			['tiktok', true],
@@ -182,5 +202,15 @@ describe('sincronizare bugete', () => {
 		]);
 		expect(r.results.find((x: any) => x.id === 'google')!.error).toMatch(/Google jos/);
 		expect(typeof r.syncedAt).toBe('string');
+		expect(redisCalls).toEqual(['set t1:interviuri-kpi:sync-lock', 'del t1:interviuri-kpi:sync-lock']);
+		expect(lockHeld).toBe(false);
+	});
+	test('lock deja ținut (alt click / alt pod) → eroare, fără sync', async () => {
+		currentEvent = ev('member');
+		lockHeld = true;
+		redisCalls.length = 0;
+		await expect(remote.syncInterviewAdsBudgets()).rejects.toThrow(/deja în curs/);
+		expect(redisCalls).toEqual(['set t1:interviuri-kpi:sync-lock']);
+		lockHeld = false;
 	});
 });

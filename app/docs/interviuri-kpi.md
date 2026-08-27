@@ -71,13 +71,20 @@ Rotunjirea se face doar la afișare (`fmtLei` fără zecimale, `fmtLeiFine` o ze
 ## Comportament UI
 
 - Query-ul aduce **tot anul** (+ anul precedent); filtrarea pe lună e în client, instant.
-- Anul și comutatorul „toate | plătite" sunt persistate în `localStorage` (`ots_iv_kpi_v1`), ca în prototip.
-- Editorul de cheltuieli e optimist: overlay local + salvare cu debounce 400 ms (`updateMarketingFixedCost`);
-  bifa „activ" salvează imediat; la eroare → toast + revenire la valoarea din server.
+- Anul NU se persistă (serverul alege cel mai recent an cu date; un an salvat ar dubla query-ul la
+  încărcare); comutatorul „toate | plătite" e persistat în `localStorage` (`ots_iv_kpi_v1`).
+- Panoul „Cheltuieli fixe" din pagină e un rezumat read-only; editarea se face în modalul
+  „Setări cheltuieli" (`FixedCostsModal.svelte`, deviere cerută de utilizator față de prototip).
+- Editorul e optimist: overlay local + salvare cu debounce 400 ms (`updateMarketingFixedCost`);
+  bifa „activ" salvează imediat; overlay-ul se scoate doar când nu mai e nicio cerere în zbor pe rând
+  (altfel o cerere veche ar șterge tastele de după ea); la eroare → toast + valoarea din server.
 - Scrierea pe cheltuieli fixe: doar `owner`/`admin` (`canEdit` din query dezactivează controalele).
 - „Sincronizează bugetele" rulează secvențial `syncMetaAdsInvoicesForTenant`,
   `syncTiktokAdsSpendingForTenant`, `syncGoogleAdsInvoicesForTenant` (fiecare în try/catch) și
-  reîncarcă query-ul; poate dura zeci de secunde (Google descarcă și facturi).
+  reîncarcă query-ul; poate dura ~2 minute (Google descarcă și facturi). Lock per tenant în Redis
+  (`{tenantId}:interviuri-kpi:sync-lock`, TTL 10 min) — al doilea click primește „deja în curs".
+- Tabelul pe canal afișează sub el bugetul **nealocat** (platformă cu spend dar fără interviuri din
+  canalele ei; fixe în modul „plătite" fără interviuri plătite) ca suma coloanelor să fie explicabilă.
 - Export CSV se generează în browser din rândurile lunare afișate (o coloană per platformă).
 
 ## Neimplementate încă (follow-up)
