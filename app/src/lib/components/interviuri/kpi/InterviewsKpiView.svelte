@@ -49,7 +49,13 @@
 	import ChannelCostTable from './ChannelCostTable.svelte';
 	import MonthlyDetailTable from './MonthlyDetailTable.svelte';
 
-	let { homeHref, interviewsHref }: { homeHref: string; interviewsHref: string } = $props();
+	// isClient = view-ul rulează în portalul clientului: serverul scopează datele pe
+	// clientul din sesiune; sync-ul și editarea cheltuielilor sunt doar pentru staff.
+	let {
+		homeHref,
+		interviewsHref,
+		isClient = false
+	}: { homeHref: string; interviewsHref: string; isClient?: boolean } = $props();
 
 	const uid = $props.id();
 	const LS_KEY = 'ots_iv_kpi_v1';
@@ -306,8 +312,10 @@
 	<div class="cl-crumbs">
 		<a href={homeHref} aria-label="Dashboard"><FolderIcon size={12} /></a>
 		<span class="sep">›</span>
-		<span>Marketing &amp; Ads</span>
-		<span class="sep">›</span>
+		{#if !isClient}
+			<span>Marketing &amp; Ads</span>
+			<span class="sep">›</span>
+		{/if}
 		<a href={interviewsHref}>Interviuri</a>
 		<span class="sep">›</span>
 		<strong>KPI Performanță</strong>
@@ -509,6 +517,7 @@
 					months={monthsCount}
 					{syncing}
 					onSync={sync}
+					canSync={!isClient}
 					{lastSync}
 				/>
 				<FixedCostsPanel

@@ -14,6 +14,7 @@
 		months,
 		syncing,
 		onSync,
+		canSync = true,
 		lastSync
 	}: {
 		platforms: SourcePlatform[];
@@ -22,6 +23,8 @@
 		months: number;
 		syncing: boolean;
 		onSync: () => void;
+		/** false în portalul clientului — sync-ul e doar pentru staff */
+		canSync?: boolean;
 		lastSync: string;
 	} = $props();
 
@@ -38,12 +41,14 @@
 <div class="cl-section">
 	<div class="cl-section-head">
 		<h3><DollarSignIcon size={15} /> Compunerea bugetului</h3>
-		<div class="cl-section-actions" style="margin-left:auto">
-			<button type="button" class="cl-btn-secondary cl-btn-sm" onclick={onSync} disabled={syncing} aria-busy={syncing}>
-				<RepeatIcon size={12} class={syncing ? 'animate-spin' : ''} />
-				{syncing ? 'Se sincronizează…' : 'Sincronizează bugetele'}
-			</button>
-		</div>
+		{#if canSync}
+			<div class="cl-section-actions" style="margin-left:auto">
+				<button type="button" class="cl-btn-secondary cl-btn-sm" onclick={onSync} disabled={syncing} aria-busy={syncing}>
+					<RepeatIcon size={12} class={syncing ? 'animate-spin' : ''} />
+					{syncing ? 'Se sincronizează…' : 'Sincronizează bugetele'}
+				</button>
+			</div>
+		{/if}
 	</div>
 
 	<div

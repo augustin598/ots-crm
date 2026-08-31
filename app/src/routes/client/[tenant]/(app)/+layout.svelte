@@ -219,7 +219,15 @@
 									id: 'interviuri',
 									label: 'Interviuri',
 									icon: 'interviuri' as const,
-									href: '/interviuri'
+									href: '/interviuri',
+									children: [
+										{
+											id: 'interviuri-kpi',
+											label: 'KPI Performanță',
+											icon: 'reports' as const,
+											href: '/interviuri/kpi'
+										}
+									]
 								}
 							]
 						: [])

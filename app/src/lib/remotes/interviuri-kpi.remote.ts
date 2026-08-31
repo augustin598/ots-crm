@@ -16,12 +16,14 @@ import { syncTiktokAdsSpendingForTenant } from '$lib/server/tiktok-ads/sync';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
 import { logError } from '$lib/server/logger';
 import { getRedis } from '$lib/server/redis';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 import { PLATFORMS, type PlatformId } from '$lib/logic/interviuri-kpi';
 
 /**
  * Pagina Interviuri → KPI Performanță (cost pe interviu).
- * Citire: orice user staff (ca pagina Interviuri). Scriere pe cheltuielile fixe:
- * doar owner/admin. Userii de portal sunt respinși de requireStaff.
+ * Citire: staff (orice rol) SAU user de portal cu flag-ul `interviuri` — portalul
+ * vede DOAR datele clientului din sesiune (interviuri, spend, conturi), read-only.
+ * Scriere pe cheltuielile fixe: doar owner/admin (staff). Sync: doar staff.
  */
 
 function requireCtx() {
@@ -33,6 +35,26 @@ async function requireStaffCtx() {
 	const event = requireCtx();
 	await requireStaff(event);
 	return event;
+}
+/**
+ * Context de CITIRE: staff → tot tenantul; user de portal cu flag-ul `interviuri`
+ * → scoping forțat pe clientul din sesiune (pattern getInterviews). Layout-ul
+ * gate-uiește doar navigarea — remote-ul verifică singur, altfel flag-ul e cosmetic.
+ */
+async function requireReadCtx() {
+	const event = requireCtx();
+	if (event.locals.isClientUser && event.locals.client) {
+		const flags = await getRequestAccessFlags({
+			tenantId: event.locals.tenant!.id,
+			clientId: event.locals.client.id,
+			userEmail: event.locals.user!.email,
+			isPrimary: event.locals.clientUser?.isPrimary ?? false
+		});
+		if (!flags.interviuri) throw new Error('Nu ai acces la interviuri');
+		return { event, clientScopeId: event.locals.client.id as string };
+	}
+	await requireStaff(event);
+	return { event, clientScopeId: null as string | null };
 }
 function isMarketingAdmin(event: ReturnType<typeof requireCtx>): boolean {
 	const role = event.locals.tenantUser?.role;
@@ -53,16 +75,20 @@ export const getInterviewKpiData = query(
 		})
 	),
 	async (args) => {
-		const event = await requireStaffCtx();
-		return loadInterviewKpiData(event.locals.tenant!.id, args?.year);
+		const { event, clientScopeId } = await requireReadCtx();
+		return loadInterviewKpiData(event.locals.tenant!.id, args?.year, clientScopeId);
 	}
 );
 
 export const getMarketingFixedCosts = query(async () => {
-	const event = await requireStaffCtx();
+	const { event, clientScopeId } = await requireReadCtx();
 	const tenantId = event.locals.tenant!.id;
-	await ensureFixedCostsSeeded(tenantId, event.locals.user!.id);
-	return { rows: await listFixedCosts(tenantId), canEdit: isMarketingAdmin(event) };
+	// seed-ul implicit doar pe citirile staff — portalul nu scrie nimic
+	if (!clientScopeId) await ensureFixedCostsSeeded(tenantId, event.locals.user!.id);
+	return {
+		rows: await listFixedCosts(tenantId),
+		canEdit: clientScopeId ? false : isMarketingAdmin(event)
+	};
 });
 
 // ===================== Commands =====================

@@ -79,6 +79,15 @@ Rotunjirea se face doar la afișare (`fmtLei` fără zecimale, `fmtLeiFine` o ze
   bifa „activ" salvează imediat; overlay-ul se scoate doar când nu mai e nicio cerere în zbor pe rând
   (altfel o cerere veche ar șterge tastele de după ea); la eroare → toast + valoarea din server.
 - Scrierea pe cheltuieli fixe: doar `owner`/`admin` (`canEdit` din query dezactivează controalele).
+- **Portalul clientului**: `/client/[tenant]/interviuri/kpi` (sub-item „KPI Performanță" sub
+  Interviuri, gated de flag-ul `interviuri` — ruta `/interviuri/*` e deja mapată în
+  `portal-access.routeRequiresAccess`). Serverul scopează TOT pe clientul din sesiune
+  (`loadInterviewKpiData(..., scopeClientId)`): interviuri, spend, conturi, ani. Read-only:
+  fără buton de sync (`canSync=false`), fără editare cheltuieli, fără seed la citire.
+- **Roluri & Permisiuni** (matricea din Team se generează din `$lib/access/catalog.ts`):
+  `admin.marketing.interviewKpi.view` (toate rolurile staff) și
+  `admin.marketing.fixedCosts.manage` (owner/admin, aliniat cu enforcement-ul din remote);
+  descrierea `portal.interviuri.view` menționează pagina KPI.
 - „Sincronizează bugetele" rulează secvențial `syncMetaAdsInvoicesForTenant`,
   `syncTiktokAdsSpendingForTenant`, `syncGoogleAdsInvoicesForTenant` (fiecare în try/catch) și
   reîncarcă query-ul; poate dura ~2 minute (Google descarcă și facturi). Lock per tenant în Redis

@@ -167,6 +167,22 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		description: 'Sincronizare facturi, storno, validare, e-Factura, importuri.'
 	},
 
+	// Marketing (Interviuri → KPI Performanță)
+	{
+		id: 'admin.marketing.interviewKpi.view',
+		domain: 'admin',
+		groupLabel: 'Marketing',
+		label: 'Vezi KPI interviuri',
+		description: 'Pagina Interviuri → KPI Performanță (cost pe interviu, bugete ads + cheltuieli fixe).'
+	},
+	{
+		id: 'admin.marketing.fixedCosts.manage',
+		domain: 'admin',
+		groupLabel: 'Marketing',
+		label: 'Editare cheltuieli fixe marketing',
+		description: 'Adaugă, modifică, dezactivează sau resetează cheltuielile fixe din KPI interviuri.'
+	},
+
 	// Hosting (DirectAdmin plugin)
 	{
 		id: 'admin.hosting.view',
@@ -368,7 +384,8 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		domain: 'portal',
 		groupLabel: 'Cont companie',
 		label: 'Interviuri',
-		description: 'Vezi și gestionează interviurile programate ale companiei.'
+		description:
+			'Vezi și gestionează interviurile programate ale companiei, inclusiv pagina KPI Performanță (cost pe interviu).'
 	},
 	{
 		id: 'portal.team.manage',
@@ -425,6 +442,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Integrations
 		'admin.integrations.manage',
 		'admin.keez.write',
+		// Marketing (KPI interviuri)
+		'admin.marketing.interviewKpi.view',
+		'admin.marketing.fixedCosts.manage',
 		// Hosting
 		'admin.hosting.view',
 		'admin.hosting.manage',
@@ -464,6 +484,9 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Integrations
 		'admin.integrations.manage',
 		'admin.keez.write',
+		// Marketing (KPI interviuri)
+		'admin.marketing.interviewKpi.view',
+		'admin.marketing.fixedCosts.manage',
 		// Hosting
 		'admin.hosting.view',
 		'admin.hosting.manage',
@@ -495,6 +518,8 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 		// Hosting — view + manage accounts (no servers/import)
 		'admin.hosting.view',
 		'admin.hosting.manage',
+		// Marketing (KPI interviuri — doar vizualizare)
+		'admin.marketing.interviewKpi.view',
 		// Operations
 		'admin.keez.write',
 		'admin.apiKeys.manage'
@@ -502,6 +527,8 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 	member: [
 		// Campaigns — only create
 		'admin.campaigns.create',
+		// Marketing (KPI interviuri — doar vizualizare)
+		'admin.marketing.interviewKpi.view',
 		// Hosting — read only
 		'admin.hosting.view',
 		// Operations
@@ -510,6 +537,8 @@ export const ROLE_DEFAULTS: Readonly<Record<AdminRoleId, ReadonlyArray<Capabilit
 	viewer: [
 		// Operations only — read-only across the system
 		'admin.apiKeys.manage',
+		// Marketing (KPI interviuri — doar vizualizare)
+		'admin.marketing.interviewKpi.view',
 		// Hosting — read only
 		'admin.hosting.view'
 	]

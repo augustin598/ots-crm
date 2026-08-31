@@ -30,8 +30,17 @@ mock.module('$lib/server/get-actor', () => ({
 		return { type: 'staff', user: { id: 'u1' } };
 	}
 }));
+const kpiCalls: unknown[][] = [];
 mock.module('$lib/server/interviuri/kpi-data', () => ({
-	loadInterviewKpiData: async () => ({ years: [] })
+	loadInterviewKpiData: async (...args: unknown[]) => {
+		kpiCalls.push(args);
+		return { years: [] };
+	}
+}));
+// Flag-urile de acces ale userului de portal (contact secundar) — controlabile per test.
+let portalFlags: Record<string, boolean> = {};
+mock.module('$lib/server/portal-access', () => ({
+	getRequestAccessFlags: async () => portalFlags
 }));
 mock.module('$lib/server/meta-ads/sync', () => ({ syncMetaAdsInvoicesForTenant: async () => ({}) }));
 mock.module('$lib/server/tiktok-ads/sync', () => ({ syncTiktokAdsSpendingForTenant: async () => ({}) }));
@@ -141,10 +150,30 @@ describe('gating rol pe cheltuieli fixe', () => {
 		await expect(remote.resetMarketingFixedCosts()).rejects.toThrow(/Owner\/Admin/);
 		expect(updateCalls.length + deleteCalls.length + inserted.length).toBe(0);
 	});
-	test('userul de portal e respins și la citire', async () => {
+	test('portal FĂRĂ flag-ul interviuri → respins la citire', async () => {
 		currentEvent = ev('owner', { isClientUser: true, client: { id: 'c1' } });
-		await expect(remote.getMarketingFixedCosts()).rejects.toThrow(/Unauthorized/);
-		await expect(remote.getInterviewKpiData(undefined)).rejects.toThrow(/Unauthorized/);
+		portalFlags = { interviuri: false };
+		await expect(remote.getMarketingFixedCosts()).rejects.toThrow(/Nu ai acces/);
+		await expect(remote.getInterviewKpiData(undefined)).rejects.toThrow(/Nu ai acces/);
+	});
+	test('portal CU flag: citire scopată pe clientul din sesiune, read-only, fără seed', async () => {
+		currentEvent = ev('owner', { isClientUser: true, client: { id: 'c1' } });
+		portalFlags = { interviuri: true };
+		kpiCalls.length = 0;
+		const kpi = await remote.getInterviewKpiData({ year: 2026 });
+		expect(kpi).toEqual({ years: [] });
+		// tenant, an, clientScopeId din SESIUNE (nu din payload)
+		expect(kpiCalls[0]).toEqual(['t1', 2026, 'c1']);
+		const fc = await remote.getMarketingFixedCosts();
+		expect(fc.canEdit).toBe(false);
+		expect(inserted.length).toBe(0); // niciun seed din portal
+	});
+	test('portal: scrierile rămân respinse chiar cu flag', async () => {
+		currentEvent = ev('owner', { isClientUser: true, client: { id: 'c1' } });
+		portalFlags = { interviuri: true };
+		await expect(remote.updateMarketingFixedCost({ id: 'fc1', name: 'x' })).rejects.toThrow(/Unauthorized/);
+		await expect(remote.resetMarketingFixedCosts()).rejects.toThrow(/Unauthorized/);
+		await expect(remote.syncInterviewAdsBudgets()).rejects.toThrow(/Unauthorized/);
 	});
 	test('owner: update-ul filtrează pe id ȘI tenant; sumele ajung în cenți', async () => {
 		currentEvent = ev('owner');

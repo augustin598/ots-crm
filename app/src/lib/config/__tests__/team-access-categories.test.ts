@@ -10,6 +10,7 @@ import {
 	legacyFlagsToCapabilities,
 	capabilitiesToLegacyFlags,
 	routeRequiresCapability,
+	rolesForCapability,
 	CLIENT_PRESET_CAPABILITIES
 } from '$lib/access/catalog';
 
@@ -78,5 +79,26 @@ describe('access categories: content + interviuri', () => {
 		expect(CLIENT_PRESET_CAPABILITIES.marketing).toContain('portal.content.view');
 		expect(CLIENT_PRESET_CAPABILITIES.marketing).not.toContain('portal.interviuri.view');
 		expect(CLIENT_PRESET_CAPABILITIES.viewer).not.toContain('portal.content.view');
+	});
+
+	it('KPI interviuri: ruta din portal e acoperită de portal.interviuri.view', () => {
+		expect(routeRequiresCapability('/client/ots/interviuri/kpi', 'ots')).toBe(
+			'portal.interviuri.view'
+		);
+	});
+
+	it('KPI interviuri: capabilitățile admin există și au rolurile decise în matrice', () => {
+		expect(CAPABILITY_IDS).toContain('admin.marketing.interviewKpi.view');
+		expect(CAPABILITY_IDS).toContain('admin.marketing.fixedCosts.manage');
+		// vizualizarea = orice rol staff (remote-ul cere doar requireStaff)
+		expect(rolesForCapability('admin.marketing.interviewKpi.view')).toEqual([
+			'owner',
+			'admin',
+			'manager',
+			'member',
+			'viewer'
+		]);
+		// editarea cheltuielilor fixe = owner/admin (aliniat cu enforcement-ul din remote)
+		expect(rolesForCapability('admin.marketing.fixedCosts.manage')).toEqual(['owner', 'admin']);
 	});
 });

@@ -219,7 +219,18 @@ async function loadAccountLabels(
 	return { meta: accountLabel(meta), tiktok: accountLabel(tiktok), google: accountLabel(google) };
 }
 
-async function loadInterviews(tenantId: string, year: number): Promise<KpiInterview[]> {
+async function loadInterviews(
+	tenantId: string,
+	year: number,
+	clientId?: string | null
+): Promise<KpiInterview[]> {
+	let where = and(
+		eq(table.interview.tenantId, tenantId),
+		gte(table.interview.dataInterviu, `${year}-01-01`),
+		lte(table.interview.dataInterviu, `${year}-12-31`)
+	);
+	// Portal: FIECARE client își vede doar interviurile lui (scoping forțat din sesiune).
+	if (clientId) where = and(where, eq(table.interview.clientId, clientId));
 	const rows = await db
 		.select({
 			dataInterviu: table.interview.dataInterviu,
@@ -234,13 +245,7 @@ async function loadInterviews(tenantId: string, year: number): Promise<KpiInterv
 				eq(table.interviewChannel.tenantId, tenantId)
 			)
 		)
-		.where(
-			and(
-				eq(table.interview.tenantId, tenantId),
-				gte(table.interview.dataInterviu, `${year}-01-01`),
-				lte(table.interview.dataInterviu, `${year}-12-31`)
-			)
-		);
+		.where(where);
 	return rows.map((r) => ({
 		monthNum: Number(r.dataInterviu.slice(5, 7)) || 1,
 		channel: r.channelName ?? 'Nespecificat',
@@ -250,23 +255,37 @@ async function loadInterviews(tenantId: string, year: number): Promise<KpiInterv
 	}));
 }
 
-/** Toate datele de care are nevoie pagina pentru un an (+ anul precedent, pentru delta). */
+/**
+ * Toate datele de care are nevoie pagina pentru un an (+ anul precedent, pentru delta).
+ * `scopeClientId` (portalul clientului): TOT (interviuri, spend, conturi, ani) se
+ * restrânge la acel client — niciodată date ale altor clienți din tenant.
+ */
 export async function loadInterviewKpiData(
 	tenantId: string,
-	requestedYear?: number
+	requestedYear?: number,
+	scopeClientId?: string | null
 ): Promise<InterviewKpiData> {
 	const today = new Date().toISOString().slice(0, 10);
 
-	const clientRows = await db
-		.selectDistinct({ clientId: table.interview.clientId })
-		.from(table.interview)
-		.where(and(eq(table.interview.tenantId, tenantId), isNotNull(table.interview.clientId)));
-	const clientIds = clientRows.map((r) => r.clientId).filter((x): x is string => !!x);
+	let clientIds: string[];
+	if (scopeClientId) {
+		clientIds = [scopeClientId];
+	} else {
+		const clientRows = await db
+			.selectDistinct({ clientId: table.interview.clientId })
+			.from(table.interview)
+			.where(and(eq(table.interview.tenantId, tenantId), isNotNull(table.interview.clientId)));
+		clientIds = clientRows.map((r) => r.clientId).filter((x): x is string => !!x);
+	}
 
+	let yearWhere = eq(table.interview.tenantId, tenantId);
+	if (scopeClientId) {
+		yearWhere = and(yearWhere, eq(table.interview.clientId, scopeClientId)) as typeof yearWhere;
+	}
 	const yearRows = await db
 		.select({ y: sql<string>`substr(${table.interview.dataInterviu}, 1, 4)` })
 		.from(table.interview)
-		.where(eq(table.interview.tenantId, tenantId))
+		.where(yearWhere)
 		.groupBy(sql`substr(${table.interview.dataInterviu}, 1, 4)`);
 	const years = new Set<number>(yearRows.map((r) => Number(r.y)).filter((y) => y > 2000));
 
@@ -280,6 +299,7 @@ export async function loadInterviewKpiData(
 		requestedYear && yearList.includes(requestedYear)
 			? requestedYear
 			: (yearList[yearList.length - 1] ?? new Date().getFullYear());
+	const scopeArg = scopeClientId ?? null;
 
 	const foreign = spendRows.filter((r) => (r.currencyCode || 'RON').toUpperCase() !== 'RON');
 	const currencies = [...new Set(foreign.map((r) => r.currencyCode.toUpperCase()))];
@@ -303,8 +323,8 @@ export async function loadInterviewKpiData(
 	const cur = aggregateSpend(spendRows, year, fx, today, latestRates);
 	const prev = aggregateSpend(spendRows, year - 1, fx, today, latestRates);
 	const [curIv, prevIv, accounts] = await Promise.all([
-		loadInterviews(tenantId, year),
-		loadInterviews(tenantId, year - 1),
+		loadInterviews(tenantId, year, scopeArg),
+		loadInterviews(tenantId, year - 1, scopeArg),
 		loadAccountLabels(tenantId, clientIds)
 	]);
 
