@@ -9,8 +9,10 @@ import {
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc, inArray, sql, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNotNull, sql, gte, lte } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { computeArticleScores } from '$lib/content/seo-score';
+import { logWarning } from '$lib/server/logger';
 import { HEYLUX_SOURCE_URLS } from '$lib/server/content/heylux-sources';
 import { launchContentExtractionJob } from '$lib/server/content/content-pipeline';
 import {
@@ -47,6 +49,51 @@ function htmlWordCount(html: string | null | undefined): number {
 		.replace(/&[a-z#0-9]+;/gi, ' ')
 		.trim();
 	return text ? text.split(/\s+/).length : 0;
+}
+
+/**
+ * Recalculează și persistă scorurile SEO/AEO/GEO ale unui articol după orice
+ * mutație de conținut. Best-effort: un eșec aici nu trebuie să strice mutația
+ * principală (scorurile se pot regenera oricând cu „Recalculează scoruri").
+ */
+async function refreshArticleScores(tenantId: string, articleId: string): Promise<void> {
+	try {
+		const rows = await db
+			.select({
+				generatedHtml: table.contentArticle.generatedHtml,
+				generatedTitle: table.contentArticle.generatedTitle,
+				seoTitle: table.contentArticle.seoTitle,
+				metaDescription: table.contentArticle.metaDescription,
+				focusKeyword: table.contentArticle.focusKeyword,
+				slug: table.contentArticle.slug,
+				featuredImageUrl: table.contentArticle.featuredImageUrl,
+				seoScore: table.contentArticle.seoScore,
+				aeoScore: table.contentArticle.aeoScore,
+				geoScore: table.contentArticle.geoScore
+			})
+			.from(table.contentArticle)
+			.where(
+				and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId))
+			)
+			.limit(1);
+		const a = rows[0];
+		if (!a) return;
+		const s = computeArticleScores(a);
+		if (s.seoScore === a.seoScore && s.aeoScore === a.aeoScore && s.geoScore === a.geoScore) {
+			return;
+		}
+		// fără updatedAt: recalcularea scorului nu e o editare de conținut
+		await db
+			.update(table.contentArticle)
+			.set(s)
+			.where(
+				and(eq(table.contentArticle.id, articleId), eq(table.contentArticle.tenantId, tenantId))
+			);
+	} catch (e) {
+		logWarning('content', `Recalcularea scorurilor a eșuat pentru articolul ${articleId}`, {
+			metadata: { error: e instanceof Error ? e.message : String(e) }
+		});
+	}
 }
 
 export const getContentArticles = query(
@@ -296,6 +343,7 @@ export const updateContentArticle = command(
 			.where(
 				and(eq(table.contentArticle.id, input.id), eq(table.contentArticle.tenantId, tenantId))
 			);
+		await refreshArticleScores(tenantId, input.id);
 		return { ok: true };
 	}
 );
@@ -357,6 +405,7 @@ async function doRewrite(tenantId: string, articleId: string) {
 				updatedAt: new Date()
 			})
 			.where(eq(table.contentArticle.id, articleId));
+		await refreshArticleScores(tenantId, articleId);
 		return { ok: true };
 	} catch (e) {
 		await db
@@ -434,7 +483,16 @@ export const generateArticleFromBrief = command(
 			extractStatus: 'ok',
 			generatedAt: now,
 			createdAt: now,
-			updatedAt: now
+			updatedAt: now,
+			...computeArticleScores({
+				generatedHtml: gen.html,
+				generatedTitle: gen.title,
+				seoTitle: gen.seoTitle,
+				metaDescription: gen.metaDescription,
+				focusKeyword: gen.focusKeyword,
+				slug: gen.slug,
+				featuredImageUrl: null
+			})
 		});
 		return { ok: true, id };
 	}
@@ -484,6 +542,7 @@ export const modifyArticle = command(
 					updatedAt: new Date()
 				})
 				.where(eq(table.contentArticle.id, articleId));
+			await refreshArticleScores(tenantId, articleId);
 			return { ok: true };
 		} catch (e) {
 			await db
@@ -537,6 +596,7 @@ export const humanizeArticle = command(v.string(), async (articleId) => {
 				updatedAt: new Date()
 			})
 			.where(eq(table.contentArticle.id, articleId));
+		await refreshArticleScores(tenantId, articleId);
 		return { ok: true };
 	} catch (e) {
 		await db
@@ -600,7 +660,59 @@ export const generateArticleSeo = command(v.string(), async (articleId) => {
 			updatedAt: new Date()
 		})
 		.where(eq(table.contentArticle.id, articleId));
+	await refreshArticleScores(tenantId, articleId);
 	return { ok: true, ...seo };
+});
+
+/**
+ * Recalculează scorurile SEO/AEO/GEO pentru TOATE articolele cu conținut generat
+ * (butonul „Recalculează scoruri" din hub-ul SEO & GEO & AEO + backfill inițial).
+ * Idempotent: scrie doar rândurile ale căror scoruri s-au schimbat.
+ */
+export const recalculateContentScores = command(async () => {
+	const event = getRequestEvent();
+	if (!event?.locals.user || !event?.locals.tenant) svelteError(401, 'Unauthorized');
+	await requireStaff(event);
+	const tenantId = event.locals.tenant.id;
+
+	const rows = await db
+		.select({
+			id: table.contentArticle.id,
+			generatedHtml: table.contentArticle.generatedHtml,
+			generatedTitle: table.contentArticle.generatedTitle,
+			seoTitle: table.contentArticle.seoTitle,
+			metaDescription: table.contentArticle.metaDescription,
+			focusKeyword: table.contentArticle.focusKeyword,
+			slug: table.contentArticle.slug,
+			featuredImageUrl: table.contentArticle.featuredImageUrl,
+			seoScore: table.contentArticle.seoScore,
+			aeoScore: table.contentArticle.aeoScore,
+			geoScore: table.contentArticle.geoScore
+		})
+		.from(table.contentArticle)
+		.where(
+			and(
+				eq(table.contentArticle.tenantId, tenantId),
+				isNotNull(table.contentArticle.generatedHtml)
+			)
+		);
+
+	let updated = 0;
+	// secvențial: Turso are un singur writer; volumele sunt de ordinul sutelor
+	for (const a of rows) {
+		const s = computeArticleScores(a);
+		if (s.seoScore === a.seoScore && s.aeoScore === a.aeoScore && s.geoScore === a.geoScore) {
+			continue;
+		}
+		await db
+			.update(table.contentArticle)
+			.set(s)
+			.where(
+				and(eq(table.contentArticle.id, a.id), eq(table.contentArticle.tenantId, tenantId))
+			);
+		updated++;
+	}
+	return { scanned: rows.length, updated };
 });
 
 /** Reset failed/thin rows back to pending, then relaunch. */
