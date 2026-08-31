@@ -164,7 +164,10 @@ export async function fetchPagespeed(
 				headers: { accept: 'application/json' }
 			});
 			if (!response.ok) {
-				const retryable = response.status === 429 || response.status >= 500;
+				// 429 fără cheie = cota anonimă partajată Google, epuizată permanent —
+				// retry-ul e inutil; utilul e mesajul: configurează PSI_API_KEY.
+				const anonymousQuota = response.status === 429 && !apiKey;
+				const retryable = !anonymousQuota && (response.status === 429 || response.status >= 500);
 				let detail = '';
 				try {
 					const body = (await response.json()) as { error?: { message?: string } };
@@ -172,8 +175,11 @@ export async function fetchPagespeed(
 				} catch {
 					// corp non-JSON — păstrăm doar statusul
 				}
+				const hint = anonymousQuota
+					? 'Lipsește PSI_API_KEY — creează o cheie gratuită în Google Cloud (PageSpeed Insights API) și pune-o în .env. '
+					: '';
 				throw new PsiApiError(
-					`PSI ${response.status}${detail ? `: ${detail}` : ''} (${strategy} ${url})`,
+					`${hint}PSI ${response.status}${detail ? `: ${detail}` : ''} (${strategy} ${url})`,
 					response.status,
 					retryable
 				);

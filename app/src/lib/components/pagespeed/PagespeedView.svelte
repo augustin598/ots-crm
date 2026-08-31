@@ -2,7 +2,6 @@
 	// PageSpeed Insights — pagina principală (SEO Links → PageSpeed).
 	// Port 1:1 din design (pagespeed.jsx), cu date reale din remote functions.
 	import './pagespeed.css';
-	import FolderIcon from '@lucide/svelte/icons/folder';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import XIcon from '@lucide/svelte/icons/x';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -37,7 +36,7 @@
 	} from '$lib/remotes/pagespeed.remote';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { confirmDialog } from '$lib/components/ui/confirm-dialog';
-	import { PSI_DAYS, isoWeekLabel, nextRunDate, psiScoreLevel, type PsiStrategy } from '$lib/logic/pagespeed';
+	import { PSI_DAYS, isoWeekKey, isoWeekLabel, nextRunDate, psiScoreLevel, type PsiStrategy } from '$lib/logic/pagespeed';
 	import { psiFmtDate, psiFmtDateTime, psiInitials, psiTileColor } from './lib';
 	import PsiDonut from './PsiDonut.svelte';
 	import PsiSpark from './PsiSpark.svelte';
@@ -51,8 +50,6 @@
 	import SiteDrawer from './SiteDrawer.svelte';
 	import MailPreviewModal from './MailPreviewModal.svelte';
 	import type { PsiSettings, PsiSitePayload, PsiSiteRow } from './types';
-
-	let { homeHref }: { homeHref: string } = $props();
 
 	// ---- date din remote ----
 	const sitesQuery = $derived(getPagespeedSites());
@@ -218,11 +215,10 @@
 	const dayName = $derived(PSI_DAYS[settings.dayOfWeek - 1] ?? 'Luni');
 	const nextRun = $derived(nextRunDate(settings.dayOfWeek, settings.hour));
 	const nextRunDays = $derived(Math.max(0, Math.ceil((nextRun.getTime() - Date.now()) / 86400000)));
-	const currentWeekLabel = $derived(isoWeekLabel(isoWeekKeyNow()));
-	function isoWeekKeyNow() {
-		// eticheta săptămânii curente pentru titlul tabelului
-		return trend?.weeks[trend.weeks.length - 1]?.id ?? '';
-	}
+	// eticheta săptămânii curente (fallback local când nu există încă măsurători)
+	const currentWeekLabel = $derived(
+		isoWeekLabel(trend?.weeks[trend.weeks.length - 1]?.id ?? isoWeekKey(new Date()))
+	);
 	const stratLabel = $derived(
 		settings.strategies.length === 2
 			? 'mobil + desktop'
@@ -316,14 +312,8 @@
 	}
 </script>
 
+<!-- fără breadcrumb propriu: layout-ul [tenant] afișează deja breadcrumb-ul paginii -->
 <div class="cl-wrap" data-screen-label="PageSpeed Insights">
-	<div class="cl-crumbs">
-		<a href={homeHref} aria-label="Dashboard"><FolderIcon size={12} /></a>
-		<span class="sep">/</span><a href={homeHref}>Marketing &amp; Ads</a>
-		<span class="sep">/</span><a href="{homeHref}/seo-links">Linkuri SEO</a>
-		<span class="sep">/</span><strong>PageSpeed Insights</strong>
-	</div>
-
 	<div class="cl-hero">
 		<div>
 			<h1>PageSpeed Insights</h1>
