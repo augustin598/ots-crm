@@ -161,7 +161,8 @@ describe('gating rol pe cheltuieli fixe', () => {
 		portalFlags = { interviuri: true };
 		kpiCalls.length = 0;
 		const kpi = await remote.getInterviewKpiData({ year: 2026 });
-		expect(kpi).toEqual({ years: [] });
+		// mock-ul întoarce doar { years } — comparăm ca unknown, nu pe tipul complet
+		expect(kpi as unknown).toEqual({ years: [] });
 		// tenant, an, clientScopeId din SESIUNE (nu din payload)
 		expect(kpiCalls[0]).toEqual(['t1', 2026, 'c1']);
 		const fc = await remote.getMarketingFixedCosts();
