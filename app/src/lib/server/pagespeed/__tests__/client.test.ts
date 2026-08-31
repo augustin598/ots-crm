@@ -36,16 +36,65 @@ describe('parsePsiResponse', () => {
 		expect(parsed.fieldCls).toBe(0.08);
 	});
 
-	test('oportunități: doar cele cu economie > 0, sortate descrescător', () => {
+	test('recomandări: audituri picate cu economii, sortate (performanță întâi, desc)', () => {
 		expect(parsed.opportunities.map((o) => o.id)).toEqual([
 			'render-blocking-resources',
-			'unused-javascript'
+			'unused-javascript',
+			'link-name'
 		]);
-		expect(parsed.opportunities[0]).toEqual({
-			id: 'render-blocking-resources',
-			title: 'Eliminați resursele care blochează redarea',
-			savingsMs: 1350
+		const first = parsed.opportunities[0];
+		expect(first.title).toBe('Eliminați resursele care blochează redarea');
+		expect(first.savingsMs).toBe(1350);
+		expect(first.category).toBe('performance');
+		expect(first.displayValue).toBe('Economii estimate de 1.350 ms');
+		// descrierea vine fără link-urile markdown
+		expect(first.description).toContain('Solicitările blochează redarea');
+		expect(first.description).not.toContain('](');
+	});
+
+	test('recomandări: elementele afectate (URL-uri cu durată/greutate, selectori DOM)', () => {
+		const render = parsed.opportunities.find((o) => o.id === 'render-blocking-resources')!;
+		expect(render.items[0]).toEqual({
+			label: 'https://www.heylux.ro/wp-content/css/frontend.min.css',
+			detail: '6,9 KB · 480 ms'
 		});
+		const unusedJs = parsed.opportunities.find((o) => o.id === 'unused-javascript')!;
+		expect(unusedJs.items[0].detail).toContain('176 KB');
+
+		const linkName = parsed.opportunities.find((o) => o.id === 'link-name')!;
+		expect(linkName.category).toBe('accessibility');
+		expect(linkName.savingsMs).toBe(0);
+		expect(linkName.items.map((i) => i.label)).toEqual([
+			'a.custom-mobile-logo-link',
+			'a.elementor-icon'
+		]);
+		expect(linkName.items[0].detail).toContain('<a href=');
+	});
+
+	test('recomandări: details.items non-array (debugdata) nu crapă parserul', () => {
+		const weird = parsePsiResponse({
+			lighthouseResult: {
+				categories: {
+					performance: { score: 0.5, auditRefs: [{ id: 'weird-audit' }] }
+				},
+				audits: {
+					'weird-audit': {
+						title: 'Audit ciudat',
+						score: 0.3,
+						details: { type: 'debugdata', items: { nu: 'e array' } }
+					}
+				}
+			}
+		});
+		// nu crapă; fără economie și fără elemente, insight-ul de performanță e filtrat ca zgomot
+		expect(weird.opportunities).toEqual([]);
+	});
+
+	test('recomandări: auditurile trecute (score 1) și metricile de bază nu apar', () => {
+		const ids = parsed.opportunities.map((o) => o.id);
+		expect(ids).not.toContain('modern-image-formats'); // scor 1, economie 0
+		expect(ids).not.toContain('color-contrast'); // trece
+		expect(ids).not.toContain('largest-contentful-paint'); // grup „metrics"
 	});
 
 	test('câmpuri lipsă → null, fără crash', () => {

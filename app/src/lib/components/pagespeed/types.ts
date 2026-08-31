@@ -32,8 +32,25 @@ export interface PsiMeasurement {
 	fieldInpMs: number | null;
 	fieldCls: number | null;
 	fieldSampleCount: number | null;
-	opportunities: { id: string; title: string; savingsMs: number }[] | null;
+	opportunities: PsiOpportunityUi[] | null;
 }
+
+/** Recomandare de îmbunătățire; câmpurile extinse există doar pe măsurătorile noi. */
+export interface PsiOpportunityUi {
+	id: string;
+	title: string;
+	savingsMs: number;
+	category?: 'performance' | 'accessibility' | 'best-practices' | 'seo';
+	displayValue?: string;
+	description?: string;
+	items?: { label: string; detail?: string }[];
+}
+
+export const PSI_OPP_CATEGORY_LABELS: Record<string, string> = {
+	accessibility: 'Accesibilitate',
+	'best-practices': 'Bune practici',
+	seo: 'SEO'
+};
 
 export interface PsiStrategyData {
 	last: PsiMeasurement | null;

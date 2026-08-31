@@ -27,7 +27,7 @@
 	} from '$lib/logic/pagespeed';
 	import { PSI_LVL, psiDialog, psiFmtDate, psiFmtDateTime } from './lib';
 	import PsiFav from './PsiFav.svelte';
-	import type { PsiMeasurement, PsiSiteRow } from './types';
+	import { PSI_OPP_CATEGORY_LABELS, type PsiMeasurement, type PsiSiteRow } from './types';
 
 	let {
 		site,
@@ -282,13 +282,35 @@
 				{#if opportunities && opportunities.length > 0}
 					<div class="cl-section">
 						<div class="cl-section-head">
-							<h3><ZapIcon size={15} /> Oportunități de optimizare</h3>
-							<p class="cl-section-sub" style="margin-left: auto">economie estimată de PageSpeed</p>
+							<h3><ZapIcon size={15} /> Ce e de îmbunătățit</h3>
+							<p class="cl-section-sub" style="margin-left: auto">recomandările PageSpeed + elementele afectate</p>
 						</div>
 						{#each opportunities as o (o.id)}
-							<div class="psi-opp">
-								<span>{o.title}</span>
-								<span class="psi-opp-save psi-ni">−{(o.savingsMs / 1000).toFixed(2).replace('.', ',')} s</span>
+							<div class="psi-opp-block">
+								<div class="psi-opp">
+									<span>
+										{o.title}
+										{#if o.category && o.category !== 'performance'}
+											<span class="psi-tag" style="margin-left: 6px">{PSI_OPP_CATEGORY_LABELS[o.category] ?? o.category}</span>
+										{/if}
+									</span>
+									<span class="psi-opp-save psi-ni">
+										{o.savingsMs > 0 ? `−${(o.savingsMs / 1000).toFixed(2).replace('.', ',')} s` : ''}
+									</span>
+								</div>
+								{#if o.description}
+									<p class="psi-opp-desc">{o.description}</p>
+								{/if}
+								{#if o.items && o.items.length > 0}
+									<div class="psi-opp-items">
+										{#each o.items as item, i (i)}
+											<div class="psi-opp-item">
+												<span class="psi-opp-item-label" title={item.label}>{item.label}</span>
+												{#if item.detail}<span class="psi-opp-item-detail" title={item.detail}>{item.detail}</span>{/if}
+											</div>
+										{/each}
+									</div>
+								{/if}
 							</div>
 						{/each}
 					</div>

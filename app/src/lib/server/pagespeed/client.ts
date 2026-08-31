@@ -20,10 +20,23 @@ export class PsiApiError extends Error {
 	}
 }
 
+export interface PsiOpportunityItem {
+	/** URL-ul resursei sau selectorul DOM al elementului afectat. */
+	label: string;
+	/** Detaliu scurt: greutate/durată pentru resurse, snippet HTML pentru elemente. */
+	detail?: string;
+}
+
 export interface PsiOpportunity {
 	id: string;
 	title: string;
+	category: 'performance' | 'accessibility' | 'best-practices' | 'seo';
 	savingsMs: number;
+	displayValue?: string;
+	/** Descrierea auditului, fără link-urile markdown. */
+	description?: string;
+	/** Elementele afectate (max 5), ca în raportul PageSpeed web. */
+	items: PsiOpportunityItem[];
 }
 
 /** Rezultatul parsat al unei rulări PSI — mapare 1:1 pe coloanele pagespeed_measurement. */
@@ -47,20 +60,36 @@ export interface PsiResult {
 	opportunities: PsiOpportunity[];
 }
 
+type PsiRawItem = {
+	url?: string;
+	totalBytes?: number;
+	wastedMs?: number;
+	wastedBytes?: number;
+	node?: { selector?: string; snippet?: string; nodeLabel?: string };
+	source?: { url?: string };
+};
+
+type PsiRawAudit = {
+	title?: string;
+	description?: string;
+	displayValue?: string;
+	score?: number | null;
+	scoreDisplayMode?: string;
+	numericValue?: number;
+	metricSavings?: Record<string, number>;
+	details?: { type?: string; overallSavingsMs?: number; items?: PsiRawItem[] };
+};
+
 type PsiRaw = {
 	loadingExperience?: {
 		metrics?: Record<string, { percentile?: number }>;
 	};
 	lighthouseResult?: {
-		categories?: Record<string, { score?: number | null }>;
-		audits?: Record<
+		categories?: Record<
 			string,
-			{
-				title?: string;
-				numericValue?: number;
-				details?: { type?: string; overallSavingsMs?: number; items?: unknown[] };
-			}
+			{ score?: number | null; auditRefs?: { id: string; weight?: number; group?: string }[] }
 		>;
+		audits?: Record<string, PsiRawAudit>;
 	};
 };
 
@@ -73,6 +102,90 @@ function auditMs(audits: NonNullable<PsiRaw['lighthouseResult']>['audits'], key:
 	return v == null ? null : Math.round(v);
 }
 
+const OPP_CATEGORIES = ['performance', 'accessibility', 'best-practices', 'seo'] as const;
+const MAX_OPPORTUNITIES = 12;
+const MAX_ITEMS_PER_OPPORTUNITY = 5;
+
+function stripMarkdownLinks(text: string): string {
+	return text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+}
+
+function formatKb(bytes: number): string {
+	const kb = bytes / 1024;
+	return kb < 10 ? `${kb.toFixed(1).replace('.', ',')} KB` : `${Math.round(kb)} KB`;
+}
+
+function opportunityItem(item: PsiRawItem): PsiOpportunityItem | null {
+	if (item.node?.selector) {
+		return {
+			label: item.node.selector,
+			detail: (item.node.snippet ?? item.node.nodeLabel ?? '').slice(0, 160) || undefined
+		};
+	}
+	const url = item.url ?? item.source?.url;
+	if (!url) return null;
+	const parts: string[] = [];
+	if (item.totalBytes != null) parts.push(formatKb(item.totalBytes));
+	if (item.wastedMs != null) parts.push(`${Math.round(item.wastedMs)} ms`);
+	else if (item.wastedBytes != null) parts.push(`${formatKb(item.wastedBytes)} irosiți`);
+	return { label: url.slice(0, 200), detail: parts.join(' · ') || undefined };
+}
+
+/**
+ * Recomandările de îmbunătățire, ca în raportul PageSpeed web: auditurile picate
+ * din fiecare categorie, cu economia estimată (Lighthouse ≥ 10 o raportează prin
+ * `metricSavings`, cele vechi prin `details.overallSavingsMs`) și elementele
+ * afectate (URL-uri de resurse sau selectori DOM).
+ */
+function extractOpportunities(
+	cats: NonNullable<NonNullable<PsiRaw['lighthouseResult']>['categories']>,
+	audits: NonNullable<NonNullable<PsiRaw['lighthouseResult']>['audits']>
+): PsiOpportunity[] {
+	const out: PsiOpportunity[] = [];
+	const seen = new Set<string>();
+	for (const category of OPP_CATEGORIES) {
+		for (const ref of cats[category]?.auditRefs ?? []) {
+			if (seen.has(ref.id) || ref.group === 'metrics') continue;
+			const audit = audits[ref.id];
+			if (!audit) continue;
+			const mode = audit.scoreDisplayMode;
+			if (mode === 'notApplicable' || mode === 'manual' || mode === 'informative') continue;
+			const savingsMs = Math.round(
+				Math.max(
+					audit.details?.overallSavingsMs ?? 0,
+					...Object.values(audit.metricSavings ?? {}).map((v) => v ?? 0)
+				)
+			);
+			const failing = audit.score != null && audit.score < 0.9;
+			if (!failing && savingsMs <= 0) continue;
+			// în răspunsurile reale, unele audituri au `details.items` non-array (ex. debugdata)
+			const items = (Array.isArray(audit.details?.items) ? audit.details.items : [])
+				.map(opportunityItem)
+				.filter((i): i is PsiOpportunityItem => !!i)
+				.slice(0, MAX_ITEMS_PER_OPPORTUNITY);
+			// „insights" de performanță fără economie și fără elemente = zgomot, nu recomandare
+			if (category === 'performance' && savingsMs <= 0 && items.length === 0) continue;
+			seen.add(ref.id);
+			out.push({
+				id: ref.id,
+				title: audit.title ?? ref.id,
+				category,
+				savingsMs,
+				displayValue: audit.displayValue || undefined,
+				description: audit.description
+					? stripMarkdownLinks(audit.description).slice(0, 240)
+					: undefined,
+				items
+			});
+		}
+	}
+	// performanța întâi (după economie), apoi restul categoriilor în ordinea de mai sus
+	const categoryRank = (c: PsiOpportunity['category']) => OPP_CATEGORIES.indexOf(c);
+	return out
+		.sort((a, b) => categoryRank(a.category) - categoryRank(b.category) || b.savingsMs - a.savingsMs)
+		.slice(0, MAX_OPPORTUNITIES);
+}
+
 export function parsePsiResponse(raw: unknown): PsiResult {
 	const data = (raw ?? {}) as PsiRaw;
 	const lh = data.lighthouseResult ?? {};
@@ -82,18 +195,7 @@ export function parsePsiResponse(raw: unknown): PsiResult {
 
 	const clsRaw = audits['cumulative-layout-shift']?.numericValue;
 	const fieldClsRaw = field?.CUMULATIVE_LAYOUT_SHIFT_SCORE?.percentile;
-
-	const opportunities: PsiOpportunity[] = Object.entries(audits)
-		.filter(
-			([, a]) => a?.details?.type === 'opportunity' && (a.details.overallSavingsMs ?? 0) > 0
-		)
-		.map(([id, a]) => ({
-			id,
-			title: a.title ?? id,
-			savingsMs: Math.round(a.details?.overallSavingsMs ?? 0)
-		}))
-		.sort((a, b) => b.savingsMs - a.savingsMs)
-		.slice(0, 6);
+	const opportunities = extractOpportunities(cats, audits);
 
 	return {
 		performance: score100(cats.performance),

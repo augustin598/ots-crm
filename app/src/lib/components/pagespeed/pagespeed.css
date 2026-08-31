@@ -320,9 +320,15 @@
 .psi-mrow-scale { height: 6px; border-radius: 999px; background: var(--cl-surface-2); position: relative; overflow: hidden; border: 1px solid var(--cl-border); }
 .psi-mrow-scale i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; }
 
-.psi-opp { display: grid; grid-template-columns: 1fr 96px; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--cl-border); font-size: 12.5px; color: var(--cl-text); }
-.psi-opp:last-child { border-bottom: 0; }
+.psi-opp { display: grid; grid-template-columns: 1fr 96px; gap: 12px; align-items: center; padding: 10px 0 4px; font-size: 12.5px; color: var(--cl-text); font-weight: 600; }
 .psi-opp-save { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; font-size: 13px; }
+.psi-opp-block { border-bottom: 1px solid var(--cl-border); padding-bottom: 10px; }
+.psi-opp-block:last-child { border-bottom: 0; padding-bottom: 0; }
+.psi-opp-desc { margin: 0 0 4px; font-size: 11.5px; color: var(--cl-text-3); line-height: 1.45; }
+.psi-opp-items { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); border-radius: 8px; padding: 8px 10px; }
+.psi-opp-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.psi-opp-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--cl-text-2); }
+.psi-opp-item-detail { flex: none; font-size: 11px; color: var(--cl-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
 
 /* email preview */
 .psi-mail { border: 1px solid var(--cl-border); border-radius: 12px; overflow: hidden; background: var(--cl-surface); }

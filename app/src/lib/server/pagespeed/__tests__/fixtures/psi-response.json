@@ -5,10 +5,22 @@
 	"loadingExperience": {
 		"id": "https://example.ro/",
 		"metrics": {
-			"LARGEST_CONTENTFUL_PAINT_MS": { "percentile": 2143, "category": "AVERAGE" },
-			"INTERACTION_TO_NEXT_PAINT": { "percentile": 190, "category": "FAST" },
-			"CUMULATIVE_LAYOUT_SHIFT_SCORE": { "percentile": 8, "category": "FAST" },
-			"FIRST_CONTENTFUL_PAINT_MS": { "percentile": 1698, "category": "FAST" }
+			"LARGEST_CONTENTFUL_PAINT_MS": {
+				"percentile": 2143,
+				"category": "AVERAGE"
+			},
+			"INTERACTION_TO_NEXT_PAINT": {
+				"percentile": 190,
+				"category": "FAST"
+			},
+			"CUMULATIVE_LAYOUT_SHIFT_SCORE": {
+				"percentile": 8,
+				"category": "FAST"
+			},
+			"FIRST_CONTENTFUL_PAINT_MS": {
+				"percentile": 1698,
+				"category": "FAST"
+			}
 		},
 		"overall_category": "AVERAGE"
 	},
@@ -17,37 +29,215 @@
 		"finalUrl": "https://example.ro/",
 		"lighthouseVersion": "12.6.0",
 		"categories": {
-			"performance": { "id": "performance", "score": 0.58 },
-			"accessibility": { "id": "accessibility", "score": 0.87 },
-			"best-practices": { "id": "best-practices", "score": 0.93 },
-			"seo": { "id": "seo", "score": 0.99 }
+			"performance": {
+				"id": "performance",
+				"score": 0.58,
+				"auditRefs": [
+					{
+						"id": "render-blocking-resources",
+						"weight": 0,
+						"group": "diagnostics"
+					},
+					{
+						"id": "unused-javascript",
+						"weight": 0,
+						"group": "diagnostics"
+					},
+					{
+						"id": "modern-image-formats",
+						"weight": 0,
+						"group": "diagnostics"
+					},
+					{
+						"id": "largest-contentful-paint",
+						"weight": 25,
+						"group": "metrics"
+					}
+				]
+			},
+			"accessibility": {
+				"id": "accessibility",
+				"score": 0.87,
+				"auditRefs": [
+					{
+						"id": "link-name",
+						"weight": 7,
+						"group": "a11y-names-labels"
+					},
+					{
+						"id": "color-contrast",
+						"weight": 7,
+						"group": "a11y-color-contrast"
+					}
+				]
+			},
+			"best-practices": {
+				"id": "best-practices",
+				"score": 0.93,
+				"auditRefs": [
+					{
+						"id": "errors-in-console",
+						"weight": 1
+					}
+				]
+			},
+			"seo": {
+				"id": "seo",
+				"score": 0.99,
+				"auditRefs": [
+					{
+						"id": "meta-description",
+						"weight": 5
+					}
+				]
+			}
 		},
 		"audits": {
-			"largest-contentful-paint": { "numericValue": 3421.5, "displayValue": "3,4 s" },
-			"cumulative-layout-shift": { "numericValue": 0.083, "displayValue": "0,083" },
-			"total-blocking-time": { "numericValue": 412.4, "displayValue": "410 ms" },
-			"first-contentful-paint": { "numericValue": 1834.2, "displayValue": "1,8 s" },
-			"speed-index": { "numericValue": 4211.0, "displayValue": "4,2 s" },
-			"interaction-to-next-paint": { "numericValue": 246, "displayValue": "246 ms" },
-			"server-response-time": { "numericValue": 512.3, "displayValue": "510 ms" },
-			"total-byte-weight": { "numericValue": 2891342, "displayValue": "2,9 MB" },
+			"largest-contentful-paint": {
+				"numericValue": 3421.5,
+				"displayValue": "3,4 s"
+			},
+			"cumulative-layout-shift": {
+				"numericValue": 0.083,
+				"displayValue": "0,083"
+			},
+			"total-blocking-time": {
+				"numericValue": 412.4,
+				"displayValue": "410 ms"
+			},
+			"first-contentful-paint": {
+				"numericValue": 1834.2,
+				"displayValue": "1,8 s"
+			},
+			"speed-index": {
+				"numericValue": 4211.0,
+				"displayValue": "4,2 s"
+			},
+			"interaction-to-next-paint": {
+				"numericValue": 246,
+				"displayValue": "246 ms"
+			},
+			"server-response-time": {
+				"numericValue": 512.3,
+				"displayValue": "510 ms"
+			},
+			"total-byte-weight": {
+				"numericValue": 2891342,
+				"displayValue": "2,9 MB"
+			},
 			"network-requests": {
-				"details": { "type": "table", "items": [{}, {}, {}] }
+				"details": {
+					"type": "table",
+					"items": [
+						{},
+						{},
+						{}
+					]
+				}
 			},
 			"render-blocking-resources": {
 				"id": "render-blocking-resources",
 				"title": "Eliminați resursele care blochează redarea",
-				"details": { "type": "opportunity", "overallSavingsMs": 1350 }
+				"details": {
+					"type": "opportunity",
+					"overallSavingsMs": 1350,
+					"items": [
+						{
+							"url": "https://www.heylux.ro/wp-content/css/frontend.min.css",
+							"totalBytes": 7065,
+							"wastedMs": 480
+						},
+						{
+							"url": "https://fonts.googleapis.com/css2?family=Inter",
+							"totalBytes": 1200,
+							"wastedMs": 230
+						}
+					]
+				},
+				"score": 0.5,
+				"displayValue": "Economii estimate de 1.350 ms",
+				"description": "Solicitările blochează redarea inițială a paginii. [Află mai multe](https://web.dev/render-blocking-resources/).",
+				"metricSavings": {
+					"LCP": 150,
+					"FCP": 1350
+				}
 			},
 			"unused-javascript": {
 				"id": "unused-javascript",
 				"title": "Reduceți codul JavaScript nefolosit",
-				"details": { "type": "opportunity", "overallSavingsMs": 900 }
+				"details": {
+					"type": "opportunity",
+					"overallSavingsMs": 900,
+					"items": [
+						{
+							"url": "https://www.heylux.ro/wp-content/plugins/elementor/app.js",
+							"totalBytes": 250000,
+							"wastedBytes": 180000
+						}
+					]
+				},
+				"score": 0.6,
+				"displayValue": "Economii estimate de 900 ms",
+				"metricSavings": {
+					"LCP": 900
+				}
 			},
 			"modern-image-formats": {
 				"id": "modern-image-formats",
 				"title": "Difuzați imagini în formate moderne",
-				"details": { "type": "opportunity", "overallSavingsMs": 0 }
+				"details": {
+					"type": "opportunity",
+					"overallSavingsMs": 0
+				},
+				"score": 1
+			},
+			"link-name": {
+				"id": "link-name",
+				"score": 0,
+				"scoreDisplayMode": "binary",
+				"title": "Linkurile nu au un nume care se poate distinge",
+				"description": "Textul linkurilor care se poate distinge îmbunătățește navigarea. [Află cum](https://web.dev/link-name/).",
+				"details": {
+					"type": "table",
+					"items": [
+						{
+							"node": {
+								"selector": "a.custom-mobile-logo-link",
+								"snippet": "<a href=\"https://www.heylux.ro/\" class=\"custom-mobile-logo-link\">",
+								"nodeLabel": "logo"
+							}
+						},
+						{
+							"node": {
+								"selector": "a.elementor-icon",
+								"snippet": "<a class=\"elementor-icon\" href=\"https://www.tiktok.com/@heyluxstudio\">",
+								"nodeLabel": "tiktok"
+							}
+						}
+					]
+				}
+			},
+			"color-contrast": {
+				"id": "color-contrast",
+				"score": 1,
+				"scoreDisplayMode": "binary",
+				"title": "Contrast suficient",
+				"details": {
+					"type": "table",
+					"items": []
+				}
+			},
+			"errors-in-console": {
+				"id": "errors-in-console",
+				"score": 1,
+				"scoreDisplayMode": "binary",
+				"title": "Fără erori în consolă"
+			},
+			"meta-description": {
+				"id": "meta-description",
+				"score": 1,
+				"scoreDisplayMode": "binary",
+				"title": "Documentul are meta description"
 			}
 		}
 	},
