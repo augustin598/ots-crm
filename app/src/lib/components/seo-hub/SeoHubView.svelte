@@ -551,7 +551,11 @@
 				/>
 			{:else}
 				<div class="cl-budget-empty" style="padding: 30px 0; text-align: center">
-					Graficul apare după primele articole analizate — apasă „Recalculează scoruri".
+					{#if totalArticles > 0}
+						Nicio analiză în ultimele 6 săptămâni — graficul se umple pe măsură ce se generează articole noi.
+					{:else}
+						Graficul apare după primele articole analizate — pornește din modulul Content.
+					{/if}
 				</div>
 			{/if}
 		</div>

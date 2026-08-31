@@ -49,7 +49,7 @@
 .sh-hbar-val { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
 
 /* ============ Recomandări ============ */
-.sh-recs { display: flex; flex-direction: column; }
+.sh-recs { display: flex; flex-direction: column; max-height: 480px; overflow-y: auto; }
 .sh-rec { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--cl-border); }
 .sh-rec:last-child { border-bottom: 0; }
 .sh-rec-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 5px; }
