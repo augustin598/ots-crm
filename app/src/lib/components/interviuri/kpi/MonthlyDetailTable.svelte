@@ -1,6 +1,9 @@
 <script lang="ts">
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import PlatformIcon from './PlatformIcon.svelte';
 	import {
+		FIXED_COLOR,
 		fmtLei,
 		fmtLeiFine,
 		PLATFORM_IDS,
@@ -51,8 +54,14 @@
 					<th scope="col">Luna</th>
 					<th scope="col" class="num">Interviuri</th>
 					<th scope="col" class="num">Admise</th>
-					{#each platforms as p (p.id)}<th scope="col" class="num">{p.label}</th>{/each}
-					<th scope="col" class="num">Cheltuieli fixe</th>
+					{#each platforms as p (p.id)}
+						<th scope="col" class="num">
+							<span class="ivk-th-ic"><span class="ivk-th-svg" style="color:{p.color}"><PlatformIcon id={p.id} class="ivk-th-icon" /></span>{p.label}</span>
+						</th>
+					{/each}
+					<th scope="col" class="num">
+						<span class="ivk-th-ic"><span class="ivk-th-svg" style="color:{FIXED_COLOR}"><UsersIcon size={13} /></span>Cheltuieli fixe</span>
+					</th>
 					<th scope="col" class="num">Buget total</th>
 					<th scope="col" class="num">Cost / interviu</th>
 				</tr>

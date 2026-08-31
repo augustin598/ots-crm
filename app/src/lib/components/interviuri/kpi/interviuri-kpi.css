@@ -98,6 +98,11 @@
 .ivk-fx-modal .ivk-fx-head, .ivk-fx-modal .ivk-fx-row { min-width: 620px; }
 .ivk-fx-modal .ivk-fx-foot { gap: 8px; }
 
+/* iconițe reprezentative în antetul tabelului lunar */
+.ivk-th-ic { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
+.ivk-th-svg { display: inline-flex; }
+.ivk-th-svg svg, .ivk-th-svg .ivk-th-icon { width: 13px; height: 13px; }
+
 /* butonul-lună din tabelul lunar (rândul rămâne semantic, clicabil cu mouse-ul) */
 .ivk-month-btn { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; border-radius: 4px; }
 .ivk-month-btn:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
