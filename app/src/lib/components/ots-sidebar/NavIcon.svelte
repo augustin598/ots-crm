@@ -10,6 +10,7 @@
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import LinkIcon from '@lucide/svelte/icons/link';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import GaugeIcon from '@lucide/svelte/icons/gauge';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import RocketIcon from '@lucide/svelte/icons/rocket';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
@@ -71,6 +72,8 @@
 	<FileDownIcon class={className} />
 {:else if icon === 'seo-links'}
 	<LinkIcon class={className} />
+{:else if icon === 'pagespeed'}
+	<GaugeIcon class={className} />
 {:else if icon === 'content'}
 	<FileTextIcon class={className} />
 {:else if icon === 'wordpress'}

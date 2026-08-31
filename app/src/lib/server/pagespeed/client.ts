@@ -120,7 +120,8 @@ export function parsePsiResponse(raw: unknown): PsiResult {
 }
 
 type FetchDeps = {
-	fetch?: typeof fetch;
+	/** injectabil în teste — semnătura minimă de care avem nevoie */
+	fetch?: (url: string, init?: RequestInit) => Promise<Response>;
 	sleep?: (ms: number) => Promise<void>;
 };
 

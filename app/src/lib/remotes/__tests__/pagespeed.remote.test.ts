@@ -117,7 +117,7 @@ describe('savePagespeedSite', () => {
 		cms: 'WordPress',
 		alertThreshold: 5,
 		active: true,
-		strategies: ['mobile', 'desktop'],
+		strategies: ['mobile', 'desktop'] as ('mobile' | 'desktop')[],
 		pages: [{ url: 'exemplu.ro', label: 'Homepage' }]
 	};
 
@@ -232,7 +232,7 @@ describe('savePagespeedSettings', () => {
 	const valid = {
 		dayOfWeek: 1,
 		hour: '07:00',
-		strategies: ['mobile', 'desktop'],
+		strategies: ['mobile', 'desktop'] as ('mobile' | 'desktop')[],
 		recipients: ['seo@onetopsolution.ro'],
 		alertThreshold: 5,
 		onlyOnDrop: false,

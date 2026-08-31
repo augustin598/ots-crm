@@ -22,10 +22,11 @@ function generateId() {
 
 function requireTenantEvent() {
 	const event = getRequestEvent();
-	if (!event?.locals.user || !event?.locals.tenant) {
+	const tenant = event?.locals.tenant;
+	if (!event?.locals.user || !tenant) {
 		throw error(401, 'Unauthorized');
 	}
-	return event;
+	return { event, tenantId: tenant.id };
 }
 
 type MeasurementRow = typeof table.pagespeedMeasurement.$inferSelect;
@@ -40,9 +41,8 @@ export interface PagespeedStrategyData {
 
 /** Site-urile tenantului + ultimele măsurători pe fiecare strategie. */
 export const getPagespeedSites = query(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 
 	const sites = await db
 		.select({
@@ -77,6 +77,7 @@ export const getPagespeedSites = query(async () => {
 				.from(table.pagespeedMeasurement)
 				.where(inArray(table.pagespeedMeasurement.siteId, siteIds))
 				.orderBy(desc(table.pagespeedMeasurement.measuredAt))
+				.limit(siteIds.length * 60)
 		: [];
 
 	// grupăm în JS: pe (site, strategie), în ordine descrescătoare a timpului
@@ -92,6 +93,45 @@ export const getPagespeedSites = query(async () => {
 	for (const m of measurements) {
 		if (!lastScanAt || m.measuredAt > lastScanAt) lastScanAt = m.measuredAt;
 	}
+
+	// seria de trend: media scorului Performance pe site-urile active, pe ultimele
+	// 10 săptămâni ISO (cea mai recentă măsurătoare ok per site+strategie+săptămână)
+	const { isoWeekKey, isoWeekLabel } = await import('$lib/logic/pagespeed');
+	const activeSiteIds = new Set(sites.filter((s) => s.active).map((s) => s.id));
+	const trendWeeks: { id: string; label: string }[] = [];
+	{
+		const now = new Date();
+		for (let back = 9; back >= 0; back--) {
+			const d = new Date(now.getTime() - back * 7 * 86400000);
+			const id = isoWeekKey(d);
+			trendWeeks.push({ id, label: isoWeekLabel(id) });
+		}
+	}
+	const trendSeries = (strategy: PsiStrategy): (number | null)[] =>
+		trendWeeks.map((week) => {
+			const perSite = new Map<string, number>();
+			// measurements e sortat desc — prima potrivire per site e cea mai recentă din săptămână
+			for (const m of measurements) {
+				if (
+					m.weekKey === week.id &&
+					m.strategy === strategy &&
+					m.status === 'ok' &&
+					m.performance != null &&
+					activeSiteIds.has(m.siteId) &&
+					!perSite.has(m.siteId)
+				) {
+					perSite.set(m.siteId, m.performance);
+				}
+			}
+			if (!perSite.size) return null;
+			const values = [...perSite.values()];
+			return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+		});
+	const trend = {
+		weeks: trendWeeks,
+		mobile: trendSeries('mobile'),
+		desktop: trendSeries('desktop')
+	};
 
 	const strategyData = (siteId: string, strategy: PsiStrategy): PagespeedStrategyData => {
 		const rows = bySiteStrategy.get(`${siteId}:${strategy}`) ?? [];
@@ -116,6 +156,7 @@ export const getPagespeedSites = query(async () => {
 
 	return {
 		lastScanAt,
+		trend,
 		sites: sites.map((s) => {
 			const mobile = strategyData(s.id, 'mobile');
 			const lastOkMobile = mobile.last?.status === 'ok' ? mobile.last : mobile.prev;
@@ -143,9 +184,8 @@ export const getPagespeedSites = query(async () => {
 
 /** Istoricul complet al unui site (pentru drawer): măsurători pe ambele strategii. */
 export const getPagespeedSiteHistory = query(v.pipe(v.string(), v.minLength(1)), async (siteId) => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 
 	const [site] = await db
 		.select()
@@ -190,13 +230,13 @@ const DEFAULT_SETTINGS = {
 
 /** Setările raportului săptămânal (sau default-urile, dacă nu s-au salvat încă). */
 export const getPagespeedSettings = query(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
 
 	const [row] = await db
 		.select()
 		.from(table.pagespeedSettings)
-		.where(eq(table.pagespeedSettings.tenantId, event.locals.tenant.id))
+		.where(eq(table.pagespeedSettings.tenantId, tenantId))
 		.limit(1);
 
 	if (!row) return { ...DEFAULT_SETTINGS, saved: false };
@@ -229,9 +269,8 @@ const settingsSchema = v.object({
 });
 
 export const savePagespeedSettings = command(settingsSchema, async (params) => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 	const now = new Date();
 
 	const [existing] = await db
@@ -303,9 +342,8 @@ function normalizeUrl(raw: string): string {
 }
 
 export const savePagespeedSite = command(siteSchema, async (params) => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 	const now = new Date();
 
 	const pages = params.pages.map((p) => ({ url: normalizeUrl(p.url), label: p.label || 'Pagină' }));
@@ -356,9 +394,8 @@ export const savePagespeedSite = command(siteSchema, async (params) => {
 });
 
 export const deletePagespeedSite = command(v.pipe(v.string(), v.minLength(1)), async (siteId) => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 
 	const [existing] = await db
 		.select({ id: table.pagespeedSite.id })
@@ -376,13 +413,13 @@ export const deletePagespeedSite = command(v.pipe(v.string(), v.minLength(1)), a
 
 /** Istoricul rapoartelor săptămânale trimise. */
 export const getPagespeedReports = query(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
 
 	const rows = await db
 		.select()
 		.from(table.pagespeedReport)
-		.where(eq(table.pagespeedReport.tenantId, event.locals.tenant.id))
+		.where(eq(table.pagespeedReport.tenantId, tenantId))
 		.orderBy(desc(table.pagespeedReport.weekKey))
 		.limit(12);
 
@@ -396,10 +433,9 @@ export const getPagespeedReports = query(async () => {
 export const startPagespeedScan = command(
 	v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
 	async (siteIds) => {
-		const event = requireTenantEvent();
+		const { event, tenantId } = requireTenantEvent();
 		await requireStaff(event);
-		const tenantId = event.locals.tenant.id;
-
+	
 		const active = await getScanProgress(tenantId);
 		if (active && !active.finishedAt) {
 			throw error(409, 'O scanare este deja în curs pentru acest cont');
@@ -416,9 +452,9 @@ export const startPagespeedScan = command(
 
 /** Starea scanării curente (null când nu rulează nimic). */
 export const getPagespeedScanStatus = query(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	return getScanProgress(event.locals.tenant.id);
+	return getScanProgress(tenantId);
 });
 
 /**
@@ -427,9 +463,8 @@ export const getPagespeedScanStatus = query(async () => {
  * de raport al săptămânii cu nota „trimis manual".
  */
 export const sendPagespeedReportNow = command(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 
 	const [settings] = await db
 		.select()
@@ -507,9 +542,8 @@ export const sendPagespeedReportNow = command(async () => {
 
 /** Datele raportului curent, pentru modalul de previzualizare din UI. */
 export const getPagespeedReportPreview = query(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const tenantId = event.locals.tenant.id;
 
 	const [settings] = await db
 		.select()
@@ -526,11 +560,11 @@ export const getPagespeedReportPreview = query(async () => {
 
 /** Clienții tenantului, pentru dropdown-ul din modalul de site. */
 export const getPagespeedClients = query(async () => {
-	const event = requireTenantEvent();
+	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
 	return db
 		.select({ id: table.client.id, name: table.client.name })
 		.from(table.client)
-		.where(eq(table.client.tenantId, event.locals.tenant.id))
+		.where(eq(table.client.tenantId, tenantId))
 		.orderBy(table.client.name);
 });

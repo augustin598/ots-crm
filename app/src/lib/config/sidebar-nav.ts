@@ -19,6 +19,7 @@ export type IconKey =
 	| 'banking'
 	| 'supplier-invoices'
 	| 'seo-links'
+	| 'pagespeed'
 	| 'content'
 	| 'wordpress'
 	| 'marketing'
@@ -251,7 +252,15 @@ export const SIDEBAR_NAV: NavGroup[] = [
 					{ id: 'iv-kpi', label: 'KPI Performanță', icon: 'reports', href: '/interviuri/kpi' }
 				]
 			},
-			{ id: 'seo-links', label: 'Linkuri SEO', icon: 'seo-links', href: '/seo-links' },
+			{
+				id: 'seo-links',
+				label: 'Linkuri SEO',
+				icon: 'seo-links',
+				href: '/seo-links',
+				children: [
+					{ id: 'seo-pagespeed', label: 'PageSpeed', icon: 'pagespeed', href: '/seo-links/pagespeed' }
+				]
+			},
 			{ id: 'content', label: 'Content', icon: 'content', href: '/content' },
 			{ id: 'wordpress', label: 'WordPress', icon: 'wordpress', href: '/wordpress' },
 			{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', href: '/whatsapp' }
