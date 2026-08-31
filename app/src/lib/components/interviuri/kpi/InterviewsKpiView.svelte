@@ -507,30 +507,32 @@
 			</div>
 		</div>
 
-		<!-- surse + cheltuieli fixe -->
+		<!-- cheltuieli fixe: card full-width, pe rândul lui, imediat sub rezumat -->
 		<div class="ivk-pad" style="padding-top:14px">
-			<div class="ivk-grid">
-				<SourcesPanel
-					{platforms}
-					adsTotal={kpi.adsTotal}
-					fixedTotal={kpi.fixedTotal}
-					months={monthsCount}
-					{syncing}
-					onSync={sync}
-					canSync={!isClient}
-					{lastSync}
-				/>
-				<FixedCostsPanel
-					rows={fixedRows}
-					{canEdit}
-					months={monthsCount}
-					fixedTotal={kpi.fixedTotal}
-					fixedMonthly={kpi.fixedMonthly}
-					{mode}
-					onOpenEditor={() => (fixedModalOpen = true)}
-					onModeChange={(m) => (mode = m)}
-				/>
-			</div>
+			<FixedCostsPanel
+				rows={fixedRows}
+				{canEdit}
+				months={monthsCount}
+				fixedTotal={kpi.fixedTotal}
+				fixedMonthly={kpi.fixedMonthly}
+				{mode}
+				onOpenEditor={() => (fixedModalOpen = true)}
+				onModeChange={(m) => (mode = m)}
+			/>
+		</div>
+
+		<!-- compunerea bugetului -->
+		<div class="ivk-pad" style="padding-top:14px">
+			<SourcesPanel
+				{platforms}
+				adsTotal={kpi.adsTotal}
+				fixedTotal={kpi.fixedTotal}
+				months={monthsCount}
+				{syncing}
+				onSync={sync}
+				canSync={!isClient}
+				{lastSync}
+			/>
 		</div>
 
 		<!-- trend -->
