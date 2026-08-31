@@ -365,7 +365,7 @@
 		</div>
 	</div>
 
-	{#if loadError || (data && (data.linkedClients === 0 || !data.hasAdsData || data.fxWarnings.length))}
+	{#if loadError || (data && (data.linkedClients === 0 || !data.hasAdsData || data.fxWarnings.some((w) => !w.approx)))}
 		<div class="ivk-pad ivk-banners" style="padding-bottom:14px">
 			{#if loadError}
 				<div class="ivk-note danger" role="alert">
@@ -400,15 +400,8 @@
 					</div>
 				</div>
 			{/if}
-			{#if data && data.fxWarnings.some((w) => w.approx)}
-				<div class="ivk-note">
-					<InfoIcon size={14} />
-					<div>
-						Fără istoric BNR pentru {fxSummary(data.fxWarnings.filter((w) => w.approx))} — sumele
-						sunt convertite la cel mai recent curs disponibil.
-					</div>
-				</div>
-			{/if}
+			<!-- conversiile aproximate (fallback la ultimul curs BNR) nu se mai afișează — zgomot (cerință user);
+			     rămâne doar avertismentul pentru sume EXCLUSE efectiv din totaluri -->
 			{#if data && data.fxWarnings.some((w) => !w.approx)}
 				<div class="ivk-note warn">
 					<TriangleAlertIcon size={14} />
