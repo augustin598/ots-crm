@@ -36,6 +36,7 @@
 		sendPagespeedReportNow
 	} from '$lib/remotes/pagespeed.remote';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
+	import { confirmDialog } from '$lib/components/ui/confirm-dialog';
 	import { PSI_DAYS, isoWeekLabel, nextRunDate, psiScoreLevel, type PsiStrategy } from '$lib/logic/pagespeed';
 	import { psiFmtDate, psiFmtDateTime, psiInitials, psiTileColor } from './lib';
 	import PsiDonut from './PsiDonut.svelte';
@@ -262,6 +263,11 @@
 
 	async function removeSite(id: string) {
 		const domain = sites.find((s) => s.id === id)?.domain ?? 'Site';
+		const ok = await confirmDialog({
+			title: 'Scoate din monitorizare',
+			description: `Scoți ${domain} din monitorizare? Istoricul măsurătorilor se șterge definitiv.`
+		});
+		if (!ok) return;
 		try {
 			await deletePagespeedSite(id).updates(sitesQuery);
 			editing = null;
@@ -331,7 +337,7 @@
 		<div class="cl-hero-actions">
 			<div class="cl-search">
 				<SearchIcon size={14} />
-				<input placeholder="Caută domeniu sau client..." bind:value={q} />
+				<input placeholder="Caută domeniu sau client..." aria-label="Caută domeniu sau client" bind:value={q} />
 				{#if q}
 					<button class="cl-search-clear" onclick={() => (q = '')} aria-label="Șterge căutarea"><XIcon size={12} /></button>
 				{/if}
@@ -505,7 +511,17 @@
 						{#each filtered as r (r.site.id)}
 							{@const st = scan?.perSite?.[r.site.id]}
 							{@const lastOk = r.site.data[strategy].last?.status === 'ok' ? r.site.data[strategy].last : r.site.data[strategy].prev}
-							<tr onclick={() => (openId = r.site.id)}>
+							<tr
+								tabindex="0"
+								aria-label="Deschide raportul pentru {r.site.domain}"
+								onclick={() => (openId = r.site.id)}
+								onkeydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										openId = r.site.id;
+									}
+								}}
+							>
 								<td>
 									<div class="psi-site">
 										<span class="psi-fav" style:background={psiTileColor(r.site.id)}>{psiInitials(r.site.domain)}</span>
@@ -552,7 +568,7 @@
 										<a
 											class="cl-icon-btn"
 											title="Deschide în PageSpeed Insights"
-											href={psiLink(r.site.pages[0]?.url ?? '')}
+											href={psiLink(r.site.pages[0]?.url ?? `https://${r.site.domain}/`)}
 											target="_blank"
 											rel="noreferrer"
 										>
@@ -693,7 +709,7 @@
 		<MailPreviewModal {settings} sending={sendingNow} onclose={() => (preview = false)} onsend={sendNow} />
 	{/if}
 	{#if toast}
-		<div class="psi-toast"><CheckIcon size={14} /> {toast}</div>
+		<div class="psi-toast" role="status" aria-live="polite"><CheckIcon size={14} /> {toast}</div>
 	{/if}
 </div>
 

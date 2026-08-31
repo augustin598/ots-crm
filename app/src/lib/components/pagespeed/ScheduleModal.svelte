@@ -8,7 +8,7 @@
 	import PsiSwitch from './PsiSwitch.svelte';
 	import PsiStratIcon from './PsiStratIcon.svelte';
 	import { PSI_DAYS, PSI_HOURS, nextRunDate, type PsiStrategy } from '$lib/logic/pagespeed';
-	import { psiFmtDate } from './lib';
+	import { psiDialog, psiFmtDate } from './lib';
 	import type { PsiSettings } from './types';
 
 	let {
@@ -66,25 +66,28 @@
 	}
 	function addRecipient() {
 		if (!emailValid) return;
-		set('recipients', [...sched.recipients, recipient.trim()]);
+		const value = recipient.trim().toLowerCase();
+		// dedup: cheia din {#each} e emailul — un duplicat ar crăpa lista
+		if (!sched.recipients.includes(value)) {
+			set('recipients', [...sched.recipients, value]);
+		}
 		recipient = '';
 	}
 </script>
 
-<div
-	class="psi-modal-back"
-	onclick={onclose}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
+<div class="psi-modal-back" onclick={onclose} role="presentation">
 	<div
 		class="psi-modal"
 		style="width: 640px"
 		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
+		onkeydown={(e) => {
+			e.stopPropagation();
+			if (e.key === 'Escape') onclose();
+		}}
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
+		{@attach psiDialog}
 		aria-label="Raport săptămânal"
 	>
 		<div class="psi-modal-head">

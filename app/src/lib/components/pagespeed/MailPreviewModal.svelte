@@ -5,6 +5,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import { getPagespeedReportPreview } from '$lib/remotes/pagespeed.remote';
+	import { psiDialog } from './lib';
 	import { PSI_DAYS, psiFmt, psiScoreLevel } from '$lib/logic/pagespeed';
 	import type { PsiSettings } from './types';
 
@@ -26,19 +27,18 @@
 	const alerts = $derived(data ? data.rows.filter((r) => r.alert) : []);
 </script>
 
-<div
-	class="psi-modal-back"
-	onclick={onclose}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
+<div class="psi-modal-back" onclick={onclose} role="presentation">
 	<div
 		class="psi-modal lg"
 		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
+		onkeydown={(e) => {
+			e.stopPropagation();
+			if (e.key === 'Escape') onclose();
+		}}
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
+		{@attach psiDialog}
 		aria-label="Previzualizare raport săptămânal"
 	>
 		<div class="psi-modal-head">

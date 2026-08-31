@@ -9,13 +9,45 @@ export const PSI_LVL: Record<PsiLevel, string> = {
 	none: '#cbd5e1'
 };
 
-/** Culoarea textului din donut, per nivel (contrast pe suprafață albă). */
+/** Culoarea textului din donut, per nivel — tokeni CSS ca să funcționeze și pe dark. */
 export const PSI_LVL_TEXT: Record<PsiLevel, string> = {
-	good: '#047857',
-	ni: '#b45309',
-	poor: '#b91c1c',
+	good: 'var(--psi-good-text)',
+	ni: 'var(--psi-ni-text)',
+	poor: 'var(--psi-poor-text)',
 	none: 'var(--cl-text-3)'
 };
+
+/**
+ * Attachment pentru dialoguri/drawere: focus la deschidere, trap de Tab în interior,
+ * restaurarea focusului la închidere. Escape se tratează separat prin onkeydown.
+ */
+export function psiDialog(node: HTMLElement) {
+	const previous = document.activeElement as HTMLElement | null;
+	node.focus();
+	const onKey = (e: KeyboardEvent) => {
+		if (e.key !== 'Tab') return;
+		const focusables = [
+			...node.querySelectorAll<HTMLElement>(
+				'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			)
+		];
+		if (!focusables.length) return;
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
+	};
+	node.addEventListener('keydown', onKey);
+	return () => {
+		node.removeEventListener('keydown', onKey);
+		previous?.focus?.();
+	};
+}
 
 export function psiInitials(domain: string | null | undefined): string {
 	return (domain || '?').replace(/^www\./, '').slice(0, 2).toUpperCase();

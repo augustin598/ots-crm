@@ -10,7 +10,8 @@
 	--cl-border-strong: #d5dbe5;
 	--cl-text: #0f172a;
 	--cl-text-2: #475569;
-	--cl-text-3: #94a3b8;
+	/* #64748b (nu #94a3b8 din design): textul terțiar apare la 10.5–12px — AA cere ≥ 4.5:1 */
+	--cl-text-3: #64748b;
 	--cl-accent: #1877f2;
 	--cl-accent-600: #0d5cc7;
 	--cl-accent-50: #e7f0fe;
@@ -284,7 +285,7 @@
 
 /* destinatari */
 .psi-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
-.psi-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); font-size: 12px; font-weight: 600; color: var(--cl-text-2); }
+.psi-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); font-size: 12px; font-weight: 600; color: var(--cl-text-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .psi-chip button { border: 0; background: transparent; padding: 2px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: var(--cl-text-3); }
 .psi-chip button:hover { color: var(--cl-danger); background: var(--cl-danger-50); }
 .psi-chip-add { display: flex; gap: 8px; margin-top: 10px; }
@@ -342,7 +343,7 @@
 /* pagini testate */
 .psi-page-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--cl-border); font-size: 12.5px; }
 .psi-page-row:last-child { border-bottom: 0; }
-.psi-page-url { color: var(--cl-text-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.psi-page-url { color: var(--cl-text-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .psi-page-lbl { font-weight: 700; color: var(--cl-text); flex: none; }
 
 /* modale */
@@ -358,3 +359,12 @@
 
 .psi-table-scroll { overflow-x: auto; }
 .psi-table-scroll .cl-list-table { min-width: 1120px; }
+
+/* rândurile din tabelul principal sunt și țintă de tastatură (deschid drawerul) */
+.cl-list-table tbody tr:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+	.psi-spin { animation: none; }
+	.psi-drawer, .psi-modal-back, .psi-drawer-back { animation: none; }
+	.psi-banner-track i, .cl-switch-slider, .cl-switch-slider::before { transition: none; }
+}

@@ -7,6 +7,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import PsiSwitch from './PsiSwitch.svelte';
 	import PsiStratIcon from './PsiStratIcon.svelte';
+	import { psiDialog } from './lib';
 	import type { PsiStrategy } from '$lib/logic/pagespeed';
 	import { PSI_CMS_OPTIONS, type PsiSitePayload, type PsiSiteRow } from './types';
 
@@ -94,19 +95,18 @@
 	}
 </script>
 
-<div
-	class="psi-modal-back"
-	onclick={onclose}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
+<div class="psi-modal-back" onclick={onclose} role="presentation">
 	<div
 		class="psi-modal"
 		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
+		onkeydown={(e) => {
+			e.stopPropagation();
+			if (e.key === 'Escape') onclose();
+		}}
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
+		{@attach psiDialog}
 		aria-label={editing ? 'Editează site-ul monitorizat' : 'Adaugă site în monitorizare'}
 	>
 		<div class="psi-modal-head">

@@ -25,7 +25,7 @@
 		type PsiMetricKey,
 		type PsiStrategy
 	} from '$lib/logic/pagespeed';
-	import { PSI_LVL, psiFmtDate, psiFmtDateTime, psiInitials, psiTileColor } from './lib';
+	import { PSI_LVL, psiDialog, psiFmtDate, psiFmtDateTime, psiInitials, psiTileColor } from './lib';
 	import type { PsiMeasurement, PsiSiteRow } from './types';
 
 	let {
@@ -96,19 +96,18 @@
 	}
 </script>
 
-<div
-	class="psi-drawer-back"
-	onclick={onclose}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
+<div class="psi-drawer-back" onclick={onclose} role="presentation">
 	<div
 		class="psi-drawer"
 		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
+		onkeydown={(e) => {
+			e.stopPropagation();
+			if (e.key === 'Escape') onclose();
+		}}
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
+		{@attach psiDialog}
 		aria-label="Detalii {site.domain}"
 	>
 		<div class="psi-drawer-head">
@@ -145,7 +144,7 @@
 					<button class="cl-btn-secondary cl-btn-sm" onclick={() => onrescan(site.id)} disabled={scanning}>
 						<RefreshCwIcon size={12} /> Rescanează
 					</button>
-					<a class="cl-btn-secondary cl-btn-sm" href={psiLink(site.pages[0]?.url ?? '')} target="_blank" rel="noreferrer">
+					<a class="cl-btn-secondary cl-btn-sm" href={psiLink(site.pages[0]?.url ?? `https://${site.domain}/`)} target="_blank" rel="noreferrer">
 						<ExternalLinkIcon size={12} /> PageSpeed Insights
 					</a>
 				</div>
@@ -153,6 +152,15 @@
 
 			{#if historyQuery.loading && !history}
 				<div class="cl-section"><div class="cl-budget-empty" style="padding: 26px 0">Se încarcă istoricul…</div></div>
+			{:else if historyQuery.error}
+				<div class="cl-section">
+					<div class="psi-mail-alert" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+						<b style="margin: 0">Istoricul nu a putut fi încărcat.</b>
+						<button class="cl-btn-secondary cl-btn-sm" onclick={() => historyQuery.refresh()}>
+							<RefreshCwIcon size={12} /> Reîncearcă
+						</button>
+					</div>
+				</div>
 			{:else if !last}
 				<div class="cl-section">
 					<div class="cl-budget-empty" style="padding: 26px 0">
