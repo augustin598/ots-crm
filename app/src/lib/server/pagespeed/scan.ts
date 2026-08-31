@@ -31,7 +31,8 @@ export interface ScanSummary {
 }
 
 export function scanProgressKey(tenantId: string): string {
-	return `pagespeed:scan:${tenantId}`;
+	// convenția proiectului: toate cheile Redis încep cu tenantId
+	return `${tenantId}:pagespeed:scan`;
 }
 
 function generateId(): string {
