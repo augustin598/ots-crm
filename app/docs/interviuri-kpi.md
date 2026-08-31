@@ -70,6 +70,10 @@ Rotunjirea se face doar la afișare (`fmtLei` fără zecimale, `fmtLeiFine` o ze
 
 ## Comportament UI
 
+- **Istoric BNR complet din 2024**: `bnr_exchange_rate` a fost backfill-uit (31.08.2026, 19.613
+  rânduri din arhivele anuale `curs.bnr.ro/files/xml/years/`) — conversiile USD folosesc cursul
+  REAL al fiecărei luni; fallback-ul la „cel mai recent curs" rămâne doar pentru goluri viitoare.
+  Re-rulare/verificare: `scripts/bnr-backfill-history.ts` + `scripts/audit-interviuri-kpi.ts`.
 - Query-ul aduce **tot anul** (+ anul precedent); filtrarea pe lună e în client, instant.
 - Anul NU se persistă (serverul alege cel mai recent an cu date; un an salvat ar dubla query-ul la
   încărcare); comutatorul „toate | plătite" e persistat în `localStorage` (`ots_iv_kpi_v1`).
