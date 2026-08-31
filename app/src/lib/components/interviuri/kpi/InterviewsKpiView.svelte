@@ -521,6 +521,17 @@
 			/>
 		</div>
 
+		<!-- cost pe canal — imediat sub panoul Cheltuieli fixe: comutatorul de alocare îi schimbă cifrele -->
+		<div class="ivk-pad" style="padding-top:14px">
+			<ChannelCostTable
+				rows={kpi.channelRows}
+				{channelMeta}
+				{mode}
+				unallocatedAds={kpi.unallocatedAds}
+				unallocatedFixed={kpi.unallocatedFixed}
+			/>
+		</div>
+
 		<!-- compunerea bugetului -->
 		<div class="ivk-pad" style="padding-top:14px">
 			<SourcesPanel
@@ -532,17 +543,6 @@
 				onSync={sync}
 				canSync={!isClient}
 				{lastSync}
-			/>
-		</div>
-
-		<!-- cost pe canal — fix sub „Compunerea bugetului": comutatorul de alocare îi schimbă cifrele -->
-		<div class="ivk-pad" style="padding-top:14px">
-			<ChannelCostTable
-				rows={kpi.channelRows}
-				{channelMeta}
-				{mode}
-				unallocatedAds={kpi.unallocatedAds}
-				unallocatedFixed={kpi.unallocatedFixed}
 			/>
 		</div>
 
