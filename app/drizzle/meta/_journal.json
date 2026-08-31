@@ -3443,6 +3443,20 @@
       "when": 1785398836928468,
       "tag": "0494_service_hours_order_pi_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 495,
+      "version": "6",
+      "when": 1785398836928469,
+      "tag": "0495_marketing_fixed_cost",
+      "breakpoints": true
+    },
+    {
+      "idx": 496,
+      "version": "6",
+      "when": 1785398836928470,
+      "tag": "0496_marketing_fixed_cost_tenant_idx",
+      "breakpoints": true
     }
   ]
 }

@@ -32,7 +32,7 @@
 }
 
 /* ---- dark mode ---- */
-:global(.dark) .cl-wrap {
+.dark .cl-wrap {
 	--cl-bg: #0b1120;
 	--cl-surface: #111827;
 	--cl-surface-2: #0f1626;
@@ -164,9 +164,9 @@
 .iv-st.ok { background: var(--cl-success-50); color: #047857; }
 .iv-st.no { background: var(--cl-danger-50); color: #b91c1c; }
 .iv-st.wait { background: var(--cl-warn-50); color: #b45309; }
-:global(.dark) .iv-st.ok { color: #34d399; }
-:global(.dark) .iv-st.no { color: #f87171; }
-:global(.dark) .iv-st.wait { color: #fbbf24; }
+.dark .iv-st.ok { color: #34d399; }
+.dark .iv-st.no { color: #f87171; }
+.dark .iv-st.wait { color: #fbbf24; }
 
 /* Attribution panel */
 .iv-attr-list { display: flex; flex-direction: column; gap: 12px; }

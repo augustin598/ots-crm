@@ -242,7 +242,15 @@ export const SIDEBAR_NAV: NavGroup[] = [
 					{ id: 'leads-tiktok', label: 'TikTok Ads', icon: 'tiktok', href: '/leads/tiktok-ads' }
 				]
 			},
-			{ id: 'interviuri', label: 'Interviuri', icon: 'interviuri', href: '/interviuri' },
+			{
+				id: 'interviuri',
+				label: 'Interviuri',
+				icon: 'interviuri',
+				href: '/interviuri',
+				children: [
+					{ id: 'iv-kpi', label: 'KPI Performanță', icon: 'reports', href: '/interviuri/kpi' }
+				]
+			},
 			{ id: 'seo-links', label: 'Linkuri SEO', icon: 'seo-links', href: '/seo-links' },
 			{ id: 'content', label: 'Content', icon: 'content', href: '/content' },
 			{ id: 'wordpress', label: 'WordPress', icon: 'wordpress', href: '/wordpress' },

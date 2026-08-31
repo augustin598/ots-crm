@@ -46,6 +46,7 @@ export type LogSource =
 	| 'wordpress'
 	| 'whmcs'
 	| 'packages'
+	| 'interviuri'
 	| 'telegram'
 	| 'ads-monitor'
 	| 'google-calendar'

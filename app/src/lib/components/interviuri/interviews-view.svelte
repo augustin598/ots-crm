@@ -480,7 +480,7 @@
 
 	<!-- KPIs -->
 	<div class="cl-hero" style="padding-top:0; padding-bottom:0">
-		<div class="cl-kpis" style="width:100%; grid-template-columns:repeat(6, 1fr)">
+		<div class="cl-kpis" style="width:100%; grid-template-columns:repeat(6, minmax(0, 1fr))">
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background:rgba(24,119,242,.08); color:#1877F2">
 					<UserPlusIcon size={16} />

@@ -6359,3 +6359,38 @@ export const interview = sqliteTable(
 
 export type Interview = typeof interview.$inferSelect;
 export type NewInterview = typeof interview.$inferInsert;
+
+// Cheltuieli fixe de marketing (pagina Interviuri → KPI Performanță). Editate manual,
+// per tenant; sumele în CENȚI ca restul CRM-ului. valid_from/valid_to = 'YYYY-MM'.
+export const marketingFixedCost = sqliteTable(
+	'marketing_fixed_cost',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		name: text('name').notNull().default(''),
+		note: text('note'),
+		qty: real('qty').notNull().default(1),
+		unitAmountCents: integer('unit_amount_cents').notNull().default(0),
+		unitLabel: text('unit_label'),
+		frequency: text('frequency').notNull().default('monthly'), // 'monthly' | 'yearly'
+		active: boolean('active').notNull().default(true),
+		validFrom: text('valid_from'), // 'YYYY-MM' sau null
+		validTo: text('valid_to'),
+		sortOrder: integer('sort_order').notNull().default(100),
+		createdBy: text('created_by').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantIdx: index('marketing_fixed_cost_tenant_idx').on(t.tenantId)
+	})
+);
+
+export type MarketingFixedCost = typeof marketingFixedCost.$inferSelect;
+export type NewMarketingFixedCost = typeof marketingFixedCost.$inferInsert;
