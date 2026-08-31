@@ -3457,6 +3457,62 @@
       "when": 1785398836928470,
       "tag": "0496_marketing_fixed_cost_tenant_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 497,
+      "version": "6",
+      "when": 1785398836928471,
+      "tag": "0497_pagespeed_site",
+      "breakpoints": true
+    },
+    {
+      "idx": 498,
+      "version": "6",
+      "when": 1785398836928472,
+      "tag": "0498_pagespeed_site_tenant_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 499,
+      "version": "6",
+      "when": 1785398836928473,
+      "tag": "0499_pagespeed_measurement",
+      "breakpoints": true
+    },
+    {
+      "idx": 500,
+      "version": "6",
+      "when": 1785398836928474,
+      "tag": "0500_pagespeed_measurement_site_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 501,
+      "version": "6",
+      "when": 1785398836928475,
+      "tag": "0501_pagespeed_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 502,
+      "version": "6",
+      "when": 1785398836928476,
+      "tag": "0502_pagespeed_settings_tenant_unique_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 503,
+      "version": "6",
+      "when": 1785398836928477,
+      "tag": "0503_pagespeed_report",
+      "breakpoints": true
+    },
+    {
+      "idx": 504,
+      "version": "6",
+      "when": 1785398836928478,
+      "tag": "0504_pagespeed_report_tenant_week_idx",
+      "breakpoints": true
     }
   ]
 }

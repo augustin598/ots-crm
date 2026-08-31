@@ -6394,3 +6394,157 @@ export const marketingFixedCost = sqliteTable(
 
 export type MarketingFixedCost = typeof marketingFixedCost.$inferSelect;
 export type NewMarketingFixedCost = typeof marketingFixedCost.$inferInsert;
+
+// ===== PageSpeed Insights (SEO Links → PageSpeed) =====
+
+export const pagespeedSite = sqliteTable(
+	'pagespeed_site',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id').references(() => client.id),
+		domain: text('domain').notNull(),
+		name: text('name').notNull(),
+		cms: text('cms').notNull().default('WordPress'),
+		/** [{ url, label }] — prima pagină este cea măsurată și raportată. */
+		pages: jsonb('pages').notNull().default([]),
+		/** ['mobile'] | ['desktop'] | ambele. */
+		strategies: jsonb('strategies').notNull().default(['mobile', 'desktop']),
+		alertThreshold: integer('alert_threshold').notNull().default(5),
+		active: boolean('active').notNull().default(true),
+		pausedAt: timestamp('paused_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantIdx: index('pagespeed_site_tenant_idx').on(t.tenantId)
+	})
+);
+
+export const pagespeedMeasurement = sqliteTable(
+	'pagespeed_measurement',
+	{
+		id: text('id').primaryKey(),
+		siteId: text('site_id')
+			.notNull()
+			.references(() => pagespeedSite.id, { onDelete: 'cascade' }),
+		strategy: text('strategy', { enum: ['mobile', 'desktop'] }).notNull(),
+		measuredAt: timestamp('measured_at', { withTimezone: true, mode: 'date' }).notNull(),
+		weekKey: text('week_key').notNull(), // ex. '2026-W36'
+		status: text('status', { enum: ['ok', 'failed'] }).notNull().default('ok'),
+		errorMessage: text('error_message'),
+		performance: integer('performance'),
+		accessibility: integer('accessibility'),
+		bestPractices: integer('best_practices'),
+		seo: integer('seo'),
+		lcpMs: integer('lcp_ms'),
+		cls: real('cls'),
+		tbtMs: integer('tbt_ms'),
+		fcpMs: integer('fcp_ms'),
+		speedIndexMs: integer('speed_index_ms'),
+		inpMs: integer('inp_ms'),
+		ttfbMs: integer('ttfb_ms'),
+		totalBytes: integer('total_bytes'),
+		requestCount: integer('request_count'),
+		// date reale CrUX (p75 / 28 zile), null când originea nu are volum
+		fieldLcpMs: integer('field_lcp_ms'),
+		fieldInpMs: integer('field_inp_ms'),
+		fieldCls: real('field_cls'),
+		fieldSampleCount: integer('field_sample_count'),
+		/** top oportunități [{ id, title, savingsMs }]. */
+		opportunities: jsonb('opportunities'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		siteStrategyIdx: index('pagespeed_measurement_site_strategy_idx').on(
+			t.siteId,
+			t.strategy,
+			t.measuredAt
+		)
+	})
+);
+
+export const pagespeedSettings = sqliteTable(
+	'pagespeed_settings',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		/** 1 = Luni … 7 = Duminică. */
+		dayOfWeek: integer('day_of_week').notNull().default(1),
+		hour: text('hour').notNull().default('07:00'),
+		strategies: jsonb('strategies').notNull().default(['mobile', 'desktop']),
+		recipients: jsonb('recipients').notNull().default([]),
+		alertThreshold: integer('alert_threshold').notNull().default(5),
+		onlyOnDrop: boolean('only_on_drop').notNull().default(false),
+		includeOpportunities: boolean('include_opportunities').notNull().default(true),
+		attachPdf: boolean('attach_pdf').notNull().default(false),
+		sendToClient: boolean('send_to_client').notNull().default(false),
+		isEnabled: boolean('is_enabled').notNull().default(true),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantUnique: uniqueIndex('pagespeed_settings_tenant_unique_idx').on(t.tenantId)
+	})
+);
+
+export const pagespeedReport = sqliteTable(
+	'pagespeed_report',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		weekKey: text('week_key').notNull(),
+		sentAt: timestamp('sent_at', { withTimezone: true, mode: 'date' }),
+		siteCount: integer('site_count').notNull().default(0),
+		avgMobile: integer('avg_mobile'),
+		avgDesktop: integer('avg_desktop'),
+		deltaMobile: integer('delta_mobile'),
+		alertCount: integer('alert_count').notNull().default(0),
+		status: text('status', { enum: ['sent', 'partial', 'skipped', 'failed'] })
+			.notNull()
+			.default('sent'),
+		note: text('note'),
+		recipients: jsonb('recipients').notNull().default([]),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantWeekIdx: uniqueIndex('pagespeed_report_tenant_week_idx').on(t.tenantId, t.weekKey)
+	})
+);
+
+export const pagespeedSiteRelations = relations(pagespeedSite, ({ one, many }) => ({
+	client: one(client, { fields: [pagespeedSite.clientId], references: [client.id] }),
+	measurements: many(pagespeedMeasurement)
+}));
+
+export const pagespeedMeasurementRelations = relations(pagespeedMeasurement, ({ one }) => ({
+	site: one(pagespeedSite, {
+		fields: [pagespeedMeasurement.siteId],
+		references: [pagespeedSite.id]
+	})
+}));
+
+export type PagespeedSite = typeof pagespeedSite.$inferSelect;
+export type NewPagespeedSite = typeof pagespeedSite.$inferInsert;
+export type PagespeedMeasurement = typeof pagespeedMeasurement.$inferSelect;
+export type NewPagespeedMeasurement = typeof pagespeedMeasurement.$inferInsert;
+export type PagespeedSettings = typeof pagespeedSettings.$inferSelect;
+export type PagespeedReport = typeof pagespeedReport.$inferSelect;
