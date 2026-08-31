@@ -3513,6 +3513,27 @@
       "when": 1785398836928478,
       "tag": "0504_pagespeed_report_tenant_week_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 505,
+      "version": "6",
+      "when": 1785398836928479,
+      "tag": "0505_content_article_seo_score",
+      "breakpoints": true
+    },
+    {
+      "idx": 506,
+      "version": "6",
+      "when": 1785398836928480,
+      "tag": "0506_content_article_aeo_score",
+      "breakpoints": true
+    },
+    {
+      "idx": 507,
+      "version": "6",
+      "when": 1785398836928481,
+      "tag": "0507_content_article_geo_score",
+      "breakpoints": true
     }
   ]
 }

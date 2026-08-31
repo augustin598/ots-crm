@@ -2149,6 +2149,11 @@ export const contentArticle = sqliteTable('content_article', {
 	seoTitle: text('seo_title'),
 	metaDescription: text('meta_description'),
 	focusKeyword: text('focus_keyword'),
+	// Scoruri persistate din analyzeSeo() (0..100, null = fără conținut generat analizabil);
+	// scrise de refreshArticleScores() la fiecare mutație de conținut + backfill.
+	seoScore: integer('seo_score'),
+	aeoScore: integer('aeo_score'),
+	geoScore: integer('geo_score'),
 	targetWpSiteId: text('target_wp_site_id'),
 	wpPostId: integer('wp_post_id'),
 	wpCategories: text('wp_categories'), // JSON [{id, name, slug}] — categoriile postării pe WP
