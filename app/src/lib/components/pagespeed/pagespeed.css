@@ -227,6 +227,8 @@
 /* nume site în tabel */
 .psi-site { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .psi-fav { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #fff; flex: none; letter-spacing: -.02em; }
+.psi-fav-img { background: var(--cl-surface-2); border: 1px solid var(--cl-border); overflow: hidden; }
+.psi-fav-img img { display: block; object-fit: contain; }
 .psi-site-l1 { font-size: 13px; font-weight: 700; color: var(--cl-text); display: flex; align-items: center; gap: 6px; }
 .psi-site-l2 { font-size: 11.5px; color: var(--cl-text-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
 

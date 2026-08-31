@@ -37,7 +37,8 @@
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { confirmDialog } from '$lib/components/ui/confirm-dialog';
 	import { PSI_DAYS, isoWeekKey, isoWeekLabel, nextRunDate, psiScoreLevel, type PsiStrategy } from '$lib/logic/pagespeed';
-	import { psiFmtDate, psiFmtDateTime, psiInitials, psiTileColor } from './lib';
+	import { psiFmtDate, psiFmtDateTime } from './lib';
+	import PsiFav from './PsiFav.svelte';
 	import PsiDonut from './PsiDonut.svelte';
 	import PsiSpark from './PsiSpark.svelte';
 	import PsiDelta from './PsiDelta.svelte';
@@ -514,7 +515,7 @@
 							>
 								<td>
 									<div class="psi-site">
-										<span class="psi-fav" style:background={psiTileColor(r.site.id)}>{psiInitials(r.site.domain)}</span>
+										<PsiFav id={r.site.id} domain={r.site.domain} url={r.site.pages[0]?.url} />
 										<div style="min-width: 0">
 											<div class="psi-site-l1">
 												{r.site.domain}

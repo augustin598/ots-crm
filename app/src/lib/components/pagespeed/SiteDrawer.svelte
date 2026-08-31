@@ -25,7 +25,8 @@
 		type PsiMetricKey,
 		type PsiStrategy
 	} from '$lib/logic/pagespeed';
-	import { PSI_LVL, psiDialog, psiFmtDate, psiFmtDateTime, psiInitials, psiTileColor } from './lib';
+	import { PSI_LVL, psiDialog, psiFmtDate, psiFmtDateTime } from './lib';
+	import PsiFav from './PsiFav.svelte';
 	import type { PsiMeasurement, PsiSiteRow } from './types';
 
 	let {
@@ -111,11 +112,7 @@
 		aria-label="Detalii {site.domain}"
 	>
 		<div class="psi-drawer-head">
-			<span
-				class="psi-fav"
-				style:background={psiTileColor(site.id)}
-				style="width: 40px; height: 40px; border-radius: 11px; font-size: 14px">{psiInitials(site.domain)}</span
-			>
+			<PsiFav id={site.id} domain={site.domain} url={site.pages[0]?.url} size={40} radius={11} fontSize={14} />
 			<div style="min-width: 0">
 				<div style="display: flex; align-items: center; gap: 8px">
 					<h3 style="margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -.02em">{site.domain}</h3>
