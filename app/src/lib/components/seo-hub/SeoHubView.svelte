@@ -237,7 +237,7 @@
 		<div class="cl-hero-actions">
 			<div class="cl-search">
 				<SearchIcon size={14} />
-				<input placeholder="Caută website sau client..." aria-label="Caută website sau client" bind:value={q} />
+				<input placeholder="Caută website sau client…" aria-label="Caută website sau client" bind:value={q} />
 				{#if q}
 					<button class="cl-search-clear" onclick={() => (q = '')} aria-label="Șterge căutarea"><XIcon size={12} /></button>
 				{/if}
@@ -484,13 +484,28 @@
 								</td>
 								<td class="num">
 									<div style="display: flex; gap: 6px; justify-content: flex-end">
-										<a class="cl-icon-btn" title="Articolele website-ului (Content)" href="{base}/content/{w.id}">
+										<a
+											class="cl-icon-btn"
+											title="Articolele website-ului (Content)"
+											aria-label="Articolele {w.domain} în Content"
+											href="{base}/content/{w.id}"
+										>
 											<FileTextIcon size={13} />
 										</a>
-										<a class="cl-icon-btn" title="Linkuri SEO" href="{base}/seo-links">
+										<a
+											class="cl-icon-btn"
+											title="Linkuri SEO"
+											aria-label="Linkuri SEO pentru {w.domain}"
+											href="{base}/seo-links"
+										>
 											<LinkIcon size={13} />
 										</a>
-										<a class="cl-icon-btn" title="PageSpeed Insights" href="{base}/seo-links/pagespeed">
+										<a
+											class="cl-icon-btn"
+											title="PageSpeed Insights"
+											aria-label="PageSpeed Insights pentru {w.domain}"
+											href="{base}/seo-links/pagespeed"
+										>
 											<GaugeIcon size={13} />
 										</a>
 									</div>
@@ -636,7 +651,8 @@
 				<h3><ActivityIcon size={15} /> Ultimele scanări PageSpeed</h3>
 				<p class="cl-section-sub" style="margin-left: auto">scor mobil · date reale CrUX pentru CWV</p>
 			</div>
-			<table class="cl-list-table">
+			<div class="psi-table-scroll">
+			<table class="cl-list-table" style="min-width: 640px">
 				<thead>
 					<tr>
 						<th>Website</th>
@@ -666,6 +682,7 @@
 					{/each}
 				</tbody>
 			</table>
+			</div>
 		</div>
 	</div>
 

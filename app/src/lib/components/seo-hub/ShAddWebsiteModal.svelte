@@ -70,6 +70,9 @@
 					<input
 						id="sh-add-url"
 						class="cl-input"
+						type="url"
+						spellcheck={false}
+						autocomplete="off"
 						placeholder="https://exemplu.ro"
 						bind:value={url}
 						onkeydown={(e) => e.key === 'Enter' && submit()}
