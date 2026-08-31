@@ -261,6 +261,11 @@
 .psi-banner-track { flex: 1; height: 6px; border-radius: 999px; background: rgba(24,119,242,.18); overflow: hidden; min-width: 120px; }
 .psi-banner-track i { display: block; height: 100%; background: var(--cl-accent); border-radius: 999px; transition: width .3s ease; }
 
+/* butonul de scanare afișează și data ultimei rulări, pe rândul doi */
+.psi-scan-btn { padding-top: 5px; padding-bottom: 5px; }
+.psi-scan-btn-txt { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.2; }
+.psi-last-scan { font-size: 10px; font-weight: 500; color: var(--cl-text-3); white-space: nowrap; }
+
 /* eroare încărcare */
 .psi-load-error { margin: 16px 28px; padding: 14px 16px; border: 1px solid #fecaca; background: var(--cl-danger-50); border-radius: 12px; font-size: 13px; color: var(--psi-poor-text); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dark .psi-load-error { border-color: rgba(242,83,79,.35); }

@@ -318,12 +318,6 @@
 	<div class="cl-hero">
 		<div>
 			<h1>PageSpeed Insights</h1>
-			<p>
-				<strong>{sites.filter((s) => s.active).length}</strong> site-uri monitorizate · scanare automată
-				<strong>{dayName.toLowerCase()}, {settings.hour}</strong> · ultima rulare
-				<strong>{lastScanAt ? psiFmtDateTime(lastScanAt) : '—'}</strong>{#if alerts.length > 0}&nbsp;·
-					<strong class="danger">{alerts.length} {alerts.length === 1 ? 'alertă' : 'alerte'}</strong> în {currentWeekLabel}{/if}
-			</p>
 		</div>
 		<div class="cl-hero-actions">
 			<div class="cl-search">
@@ -335,9 +329,14 @@
 			</div>
 			<button class="cl-btn-secondary" onclick={() => (showSched = true)}><SettingsIcon size={13} /> Setări raport</button>
 			<button class="cl-btn-secondary" onclick={() => (preview = true)}><MailIcon size={13} /> Previzualizează raportul</button>
-			<button class="cl-btn-secondary" onclick={() => runScan()} disabled={scanRunning}>
+			<button class="cl-btn-secondary psi-scan-btn" onclick={() => runScan()} disabled={scanRunning}>
 				<RefreshCwIcon size={13} />
-				{scanRunning ? 'Se scanează…' : 'Rulează scanare acum'}
+				<span class="psi-scan-btn-txt">
+					{scanRunning ? 'Se scanează…' : 'Rulează scanare acum'}
+					{#if lastScanAt && !scanRunning}
+						<span class="psi-last-scan">ultima: {psiFmtDateTime(lastScanAt)}</span>
+					{/if}
+				</span>
 			</button>
 			<button class="cl-btn-primary" onclick={() => (editing = 'new')}><PlusIcon size={13} /> Adaugă site</button>
 		</div>
