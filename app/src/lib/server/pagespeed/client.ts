@@ -127,7 +127,7 @@ type FetchDeps = {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export function buildPsiUrl(url: string, strategy: PsiStrategy, apiKey: string): string {
+export function buildPsiUrl(url: string, strategy: PsiStrategy, apiKey: string | null): string {
 	const params = new URLSearchParams();
 	params.set('url', url);
 	params.set('strategy', strategy);
@@ -136,7 +136,7 @@ export function buildPsiUrl(url: string, strategy: PsiStrategy, apiKey: string):
 	params.append('category', 'best-practices');
 	params.append('category', 'seo');
 	params.set('locale', 'ro');
-	params.set('key', apiKey);
+	if (apiKey) params.set('key', apiKey);
 	return `${PSI_ENDPOINT}?${params.toString()}`;
 }
 
@@ -149,10 +149,9 @@ export async function fetchPagespeed(
 	strategy: PsiStrategy,
 	deps: FetchDeps = {}
 ): Promise<PsiResult> {
-	const apiKey = env.PSI_API_KEY;
-	if (!apiKey) {
-		throw new PsiApiError('PSI_API_KEY lipsește din variabilele de mediu', 0, false);
-	}
+	// Fără cheie, PSI acceptă un volum mic de cereri (util în dev); în producție
+	// cheia din PSI_API_KEY ridică limita la cota configurată în Google Cloud.
+	const apiKey = env.PSI_API_KEY || null;
 	const doFetch = deps.fetch ?? fetch;
 	const sleep = deps.sleep ?? defaultSleep;
 	const requestUrl = buildPsiUrl(url, strategy, apiKey);
