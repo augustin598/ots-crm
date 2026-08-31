@@ -9,6 +9,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import LinkIcon from '@lucide/svelte/icons/link';
+	import SearchCheckIcon from '@lucide/svelte/icons/search-check';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import GaugeIcon from '@lucide/svelte/icons/gauge';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
@@ -70,6 +71,8 @@
 	<CreditCardIcon class={className} />
 {:else if icon === 'supplier-invoices'}
 	<FileDownIcon class={className} />
+{:else if icon === 'seo'}
+	<SearchCheckIcon class={className} />
 {:else if icon === 'seo-links'}
 	<LinkIcon class={className} />
 {:else if icon === 'pagespeed'}

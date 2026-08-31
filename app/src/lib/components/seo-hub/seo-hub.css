@@ -1,0 +1,73 @@
+/* ===== Hub SEO & GEO & AEO — doar clase sh-* peste vocabularul cl-*/psi-* ===== */
+/* Tokenii vin din pagespeed.css (scopați pe .cl-wrap); aici doar layout specific.  */
+
+/* culorile celor trei axe — folosite consecvent în bare, grafic și legendă */
+.cl-wrap {
+	--sh-seo: var(--cl-accent);
+	--sh-aeo: #06b6d4;
+	--sh-geo: #8b5cf6;
+}
+
+/* ============ Legendă compactă ============ */
+.sh-legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 0 28px 14px; }
+.sh-legend-item { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--cl-text-2); background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: 10px; padding: 8px 12px; flex: 1 1 240px; }
+.sh-legend-item i { width: 10px; height: 10px; border-radius: 3px; flex: none; transform: translateY(1px); }
+.sh-legend-item b { color: var(--cl-text); font-weight: 700; }
+
+/* ============ Carduri modul ============ */
+.sh-modules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 0 28px 14px; }
+@media (max-width: 1100px) { .sh-modules { grid-template-columns: 1fr; } }
+.sh-module { display: flex; flex-direction: column; gap: 12px; background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: 12px; padding: 16px 18px; text-decoration: none; color: var(--cl-text); transition: border-color .12s, box-shadow .12s; }
+.sh-module:hover { border-color: var(--cl-accent); box-shadow: 0 4px 16px rgba(24, 119, 242, .08); }
+.sh-module-head { display: flex; align-items: center; gap: 10px; }
+.sh-module-ic { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+.sh-module-name { font-size: 13.5px; font-weight: 800; letter-spacing: -.01em; }
+.sh-module-sub { font-size: 11.5px; color: var(--cl-text-3); margin-top: 1px; }
+.sh-module-arrow { margin-left: auto; color: var(--cl-text-3); }
+.sh-module-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sh-module-stat b { display: block; font-size: 17px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sh-module-stat span { font-size: 10.5px; color: var(--cl-text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+
+/* ============ Bare triple SEO/AEO/GEO ============ */
+.sh-bars { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
+.sh-bar { display: grid; grid-template-columns: 30px 1fr 28px; gap: 7px; align-items: center; }
+.sh-bar-lbl { font-size: 9.5px; font-weight: 700; color: var(--cl-text-3); text-transform: uppercase; letter-spacing: .05em; }
+.sh-bar-track { height: 5px; border-radius: 999px; background: var(--psi-track); overflow: hidden; }
+.sh-bar-track i { display: block; height: 100%; border-radius: 999px; }
+.sh-bar-val { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* ============ Gauge semicerc (scor general) ============ */
+.sh-gauge { position: relative; display: inline-grid; place-items: center; }
+.sh-gauge b { position: absolute; bottom: 0; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+
+/* ============ Bare orizontale (articole pe stare / linkuri pe status) ============ */
+.sh-hbars { display: flex; flex-direction: column; gap: 10px; }
+.sh-hbar { display: grid; grid-template-columns: 150px 1fr 44px; gap: 10px; align-items: center; }
+.sh-hbar-lbl { font-size: 12px; font-weight: 600; color: var(--cl-text-2); }
+.sh-hbar-track { height: 8px; border-radius: 999px; background: var(--psi-track); overflow: hidden; }
+.sh-hbar-track i { display: block; height: 100%; border-radius: 999px; }
+.sh-hbar-val { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* ============ Recomandări ============ */
+.sh-recs { display: flex; flex-direction: column; }
+.sh-rec { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--cl-border); }
+.sh-rec:last-child { border-bottom: 0; }
+.sh-rec-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 5px; }
+.sh-rec-dot.mare { background: var(--cl-danger); }
+.sh-rec-dot.medie { background: var(--cl-warn); }
+.sh-rec-dot.mică { background: var(--cl-text-3); }
+.sh-rec-body { min-width: 0; flex: 1; }
+.sh-rec-title { font-size: 12.5px; font-weight: 700; color: var(--cl-text); display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sh-rec-meta { font-size: 11px; color: var(--cl-text-3); margin-top: 2px; }
+.sh-rec-impact { font-size: 11.5px; color: var(--cl-text-2); margin-top: 3px; line-height: 1.4; }
+
+/* ============ Grile de panouri ============ */
+.sh-panels { display: grid; grid-template-columns: 3fr 2fr; gap: 14px; padding: 0 28px 14px; align-items: stretch; }
+@media (max-width: 1100px) { .sh-panels { grid-template-columns: 1fr; } }
+
+/* KPI-uri: pe ecrane late rămân 6 pe rând */
+@media (max-width: 1400px) { .sh-kpis { grid-template-columns: repeat(3, 1fr) !important; } }
+@media (max-width: 800px) { .sh-kpis { grid-template-columns: repeat(2, 1fr) !important; } }
+
+/* sumarul din hero */
+.sh-hero-sum { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }

@@ -18,6 +18,7 @@ export type IconKey =
 	| 'invoice-stripe'
 	| 'banking'
 	| 'supplier-invoices'
+	| 'seo'
 	| 'seo-links'
 	| 'pagespeed'
 	| 'content'
@@ -56,6 +57,8 @@ export interface NavItem {
 	requiredRole?: RoleRequirement;
 	/** If set, item only shows when the plugin with this name is active for the tenant. */
 	requiredPlugin?: string;
+	/** Breadcrumbs pe acest item (și pe copiii lui) încep cu eticheta grupului din sidebar. */
+	groupCrumb?: boolean;
 }
 
 export interface NavGroup {
@@ -253,15 +256,24 @@ export const SIDEBAR_NAV: NavGroup[] = [
 				]
 			},
 			{
-				id: 'seo-links',
-				label: 'Linkuri SEO',
-				icon: 'seo-links',
-				href: '/seo-links',
+				// Hub-ul „SEO & GEO & AEO" grupează cele trei module existente; rutele
+				// nu se mută fizic — doar navigația le regrupează sub /seo.
+				id: 'seo',
+				label: 'SEO & GEO & AEO',
+				icon: 'seo',
+				href: '/seo',
+				groupCrumb: true,
 				children: [
-					{ id: 'seo-pagespeed', label: 'PageSpeed', icon: 'pagespeed', href: '/seo-links/pagespeed' }
+					{ id: 'seo-links', label: 'Linkuri SEO', icon: 'seo-links', href: '/seo-links' },
+					{
+						id: 'seo-pagespeed',
+						label: 'PageSpeed Insights',
+						icon: 'pagespeed',
+						href: '/seo-links/pagespeed'
+					},
+					{ id: 'content', label: 'Content', icon: 'content', href: '/content' }
 				]
 			},
-			{ id: 'content', label: 'Content', icon: 'content', href: '/content' },
 			{ id: 'wordpress', label: 'WordPress', icon: 'wordpress', href: '/wordpress' },
 			{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', href: '/whatsapp' }
 		]
@@ -426,15 +438,30 @@ export function buildBreadcrumbs(
 	// Walk the segments, accumulating href and matching against nav items.
 	const flat = flattenNav(groups);
 	const out: Breadcrumb[] = [];
+	// itemul de nav care a produs fiecare crumb (null = segment doar umanizat)
+	const outItems: (FlatNavItem | null)[] = [];
 	let acc = '';
 	for (const seg of segments) {
 		acc += `/${seg}`;
 		const matched = flat.find((it) => it.href === acc);
 		if (matched) {
+			// Frați în nav dar imbricați în URL (ex. /seo-links → /seo-links/pagespeed,
+			// ambii copii ai hub-ului SEO): al doilea îl ÎNLOCUIEȘTE pe primul —
+			// ierarhia de navigație îi arată ca frați, nu părinte/copil.
+			const prev = outItems[outItems.length - 1];
+			if (
+				matched.parentId &&
+				prev?.parentId === matched.parentId &&
+				prev.id !== matched.id
+			) {
+				out.pop();
+				outItems.pop();
+			}
 			out.push({
 				label: matched.parentLabel ? `${matched.label}` : matched.label,
 				href: `${pathPrefix}${acc}`
 			});
+			outItems.push(matched);
 			// If this is a child item, prepend the parent group/item context.
 			if (matched.parentLabel && out.length === 1) {
 				const parent = flat.find(
@@ -442,6 +469,7 @@ export function buildBreadcrumbs(
 				);
 				if (parent && parent.href) {
 					out.unshift({ label: parent.label, href: `${pathPrefix}${parent.href}` });
+					outItems.unshift(parent);
 				}
 			}
 		} else if (looksLikeId(seg)) {
@@ -449,6 +477,19 @@ export function buildBreadcrumbs(
 			continue;
 		} else {
 			out.push({ label: humaniseSegment(seg) });
+			outItems.push(null);
+		}
+	}
+	// Itemele marcate cu groupCrumb (hub-ul SEO) încep cu eticheta grupului din sidebar.
+	const first = outItems[0];
+	if (first) {
+		const withFlag = first.groupCrumb
+			? first
+			: first.parentId
+				? flat.find((p) => p.id === first.parentId && p.parentLabel === undefined && p.groupCrumb)
+				: undefined;
+		if (withFlag?.groupCrumb) {
+			out.unshift({ label: withFlag.groupLabel });
 		}
 	}
 	return out;

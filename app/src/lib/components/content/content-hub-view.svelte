@@ -13,11 +13,14 @@
 
 	// basePath: rădăcina modulului („/ots/content" în admin, „/client/ots/content" în portal).
 	// homeHref: unde duce breadcrumb-ul de acasă. isClient: ascunde detalii interne (profil/WP).
+	// seoHubHref (doar admin): Content e subpagină a hub-ului „SEO & GEO & AEO" → crumb intermediar.
 	let {
 		basePath,
 		homeHref,
-		isClient = false
-	}: { basePath: string; homeHref: string; isClient?: boolean } = $props();
+		isClient = false,
+		seoHubHref = null
+	}: { basePath: string; homeHref: string; isClient?: boolean; seoHubHref?: string | null } =
+		$props();
 
 	const websites = $derived(await getContentWebsites());
 
@@ -62,6 +65,10 @@
 	<div class="cl-crumbs">
 		<a href={homeHref} aria-label="Acasă"><HomeIcon size={15} /></a>
 		<span class="sep">›</span>
+		{#if seoHubHref}
+			<a href={seoHubHref}>SEO &amp; GEO &amp; AEO</a>
+			<span class="sep">›</span>
+		{/if}
 		<strong>Content</strong>
 	</div>
 
