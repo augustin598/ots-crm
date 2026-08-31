@@ -309,17 +309,18 @@
 </script>
 
 <div class="cl-wrap">
-	<div class="cl-crumbs">
-		<a href={homeHref} aria-label="Dashboard"><FolderIcon size={12} /></a>
-		<span class="sep">›</span>
-		{#if !isClient}
+	<!-- în portal breadcrumb-ul vine din layout (fundal alb) — nu-l dublăm (cerință user) -->
+	{#if !isClient}
+		<div class="cl-crumbs">
+			<a href={homeHref} aria-label="Dashboard"><FolderIcon size={12} /></a>
+			<span class="sep">›</span>
 			<span>Marketing &amp; Ads</span>
 			<span class="sep">›</span>
-		{/if}
-		<a href={interviewsHref}>Interviuri</a>
-		<span class="sep">›</span>
-		<strong>KPI Performanță</strong>
-	</div>
+			<a href={interviewsHref}>Interviuri</a>
+			<span class="sep">›</span>
+			<strong>KPI Performanță</strong>
+		</div>
+	{/if}
 
 	<div class="cl-hero ivk-hero">
 		<div class="ivk-hero-title">
