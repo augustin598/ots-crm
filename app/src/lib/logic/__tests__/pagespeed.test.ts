@@ -8,6 +8,7 @@ import {
 	psiFmt,
 	isoWeekKey,
 	isoWeekLabel,
+	isoWeekInterval,
 	cwvPass,
 	nextRunDate,
 	PSI_DAYS,
@@ -88,6 +89,11 @@ describe('isoWeekKey / isoWeekLabel', () => {
 	});
 	test('label scurt S<nn>', () => {
 		expect(isoWeekLabel('2026-W35')).toBe('S35');
+	});
+
+	test('isoWeekInterval — luni–duminică, format românesc', () => {
+		expect(isoWeekInterval('2026-W36')).toBe('31 aug. – 6 sept. 2026');
+		expect(isoWeekInterval('2026-W35')).toBe('24 – 30 aug. 2026');
 	});
 });
 

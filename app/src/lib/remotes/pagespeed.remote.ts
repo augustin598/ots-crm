@@ -421,6 +421,109 @@ export const getPagespeedScanStatus = query(async () => {
 	return getScanProgress(event.locals.tenant.id);
 });
 
+/**
+ * Trimite raportul săptămânii curente ACUM, către destinatarii din setări
+ * (butonul „Trimite acum" din previzualizare). Actualizează/creează rândul
+ * de raport al săptămânii cu nota „trimis manual".
+ */
+export const sendPagespeedReportNow = command(async () => {
+	const event = requireTenantEvent();
+	await requireStaff(event);
+	const tenantId = event.locals.tenant.id;
+
+	const [settings] = await db
+		.select()
+		.from(table.pagespeedSettings)
+		.where(eq(table.pagespeedSettings.tenantId, tenantId))
+		.limit(1);
+	const recipients = (settings?.recipients as string[] | undefined) ?? [];
+	if (!recipients.length) {
+		throw error(400, 'Niciun destinatar configurat — adaugă destinatari în Setări raport');
+	}
+
+	const { buildPagespeedReportData } = await import('$lib/server/pagespeed/report');
+	const { sendPagespeedReportEmail } = await import('$lib/server/email');
+	const { isoWeekKey } = await import('$lib/logic/pagespeed');
+
+	const now = new Date();
+	const weekKey = isoWeekKey(now);
+	const data = await buildPagespeedReportData(tenantId, weekKey, {
+		includeOpportunities: settings?.includeOpportunities ?? true,
+		attachPdf: settings?.attachPdf ?? false
+	});
+	const threshold = settings?.alertThreshold ?? 5;
+
+	let failed = 0;
+	for (const recipient of recipients) {
+		try {
+			await sendPagespeedReportEmail(tenantId, recipient, data, threshold);
+		} catch {
+			failed++;
+		}
+	}
+
+	const reportValues = {
+		sentAt: now,
+		siteCount: data.siteCount,
+		avgMobile: data.avgMobile,
+		avgDesktop: data.avgDesktop,
+		deltaMobile: data.deltaMobile,
+		alertCount: data.alertCount,
+		status: (failed > 0 ? 'partial' : 'sent') as 'partial' | 'sent',
+		note: failed > 0 ? `trimis manual · ${failed} emailuri eșuate` : 'trimis manual',
+		recipients
+	};
+	const [existingReport] = await db
+		.select({ id: table.pagespeedReport.id })
+		.from(table.pagespeedReport)
+		.where(
+			and(
+				eq(table.pagespeedReport.tenantId, tenantId),
+				eq(table.pagespeedReport.weekKey, weekKey)
+			)
+		)
+		.limit(1);
+	if (existingReport) {
+		await db
+			.update(table.pagespeedReport)
+			.set(reportValues)
+			.where(
+				and(
+					eq(table.pagespeedReport.id, existingReport.id),
+					eq(table.pagespeedReport.tenantId, tenantId)
+				)
+			);
+	} else {
+		await db.insert(table.pagespeedReport).values({
+			id: generateId(),
+			tenantId,
+			weekKey,
+			...reportValues,
+			createdAt: now
+		});
+	}
+	return { sent: recipients.length - failed, failed };
+});
+
+/** Datele raportului curent, pentru modalul de previzualizare din UI. */
+export const getPagespeedReportPreview = query(async () => {
+	const event = requireTenantEvent();
+	await requireStaff(event);
+	const tenantId = event.locals.tenant.id;
+
+	const [settings] = await db
+		.select()
+		.from(table.pagespeedSettings)
+		.where(eq(table.pagespeedSettings.tenantId, tenantId))
+		.limit(1);
+	const { buildPagespeedReportData } = await import('$lib/server/pagespeed/report');
+	const { isoWeekKey } = await import('$lib/logic/pagespeed');
+	return buildPagespeedReportData(tenantId, isoWeekKey(new Date()), {
+		includeOpportunities: settings?.includeOpportunities ?? true,
+		attachPdf: settings?.attachPdf ?? false
+	});
+});
+
 /** Clienții tenantului, pentru dropdown-ul din modalul de site. */
 export const getPagespeedClients = query(async () => {
 	const event = requireTenantEvent();

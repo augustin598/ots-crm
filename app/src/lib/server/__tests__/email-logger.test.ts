@@ -37,8 +37,13 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 33 types (32 + stripe-statements, extrase Stripe 2026-08-05)', () => {
-		expect(EMAIL_TYPES.length).toBe(33);
+	test('has exactly 34 types (33 + pagespeed-report, raport PageSpeed 2026-08-31)', () => {
+		expect(EMAIL_TYPES.length).toBe(34);
+	});
+
+	test('includes the PageSpeed report type', () => {
+		expect(EMAIL_TYPES).toContain('pagespeed-report');
+		expect(isEmailType('pagespeed-report')).toBe(true);
 	});
 
 	test('includes the Stripe statements type', () => {

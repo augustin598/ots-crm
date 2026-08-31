@@ -63,6 +63,35 @@ export function isoWeekLabel(weekKey: string): string {
 	return `S${Number(weekKey.slice(-2))}`;
 }
 
+/** Ziua de luni (UTC) a săptămânii ISO date. */
+export function isoWeekMonday(weekKey: string): Date {
+	const [yearStr, weekStr] = weekKey.split('-W');
+	const year = Number(yearStr);
+	const week = Number(weekStr);
+	// 4 ianuarie e mereu în W1; luni W1 = 4 ian − (ziua săptămânii − 1)
+	const jan4 = new Date(Date.UTC(year, 0, 4));
+	const dow = jan4.getUTCDay() || 7;
+	const mondayW1 = new Date(Date.UTC(year, 0, 4 - (dow - 1)));
+	return new Date(mondayW1.getTime() + (week - 1) * 7 * 86400000);
+}
+
+const RO_MONTHS_SHORT = [
+	'ian.', 'feb.', 'mar.', 'apr.', 'mai', 'iun.',
+	'iul.', 'aug.', 'sept.', 'oct.', 'nov.', 'dec.'
+];
+
+/** Intervalul luni–duminică al săptămânii ISO, format românesc: „24 – 30 aug. 2026". */
+export function isoWeekInterval(weekKey: string): string {
+	const monday = isoWeekMonday(weekKey);
+	const sunday = new Date(monday.getTime() + 6 * 86400000);
+	const m1 = RO_MONTHS_SHORT[monday.getUTCMonth()];
+	const m2 = RO_MONTHS_SHORT[sunday.getUTCMonth()];
+	if (m1 === m2) {
+		return `${monday.getUTCDate()} – ${sunday.getUTCDate()} ${m2} ${sunday.getUTCFullYear()}`;
+	}
+	return `${monday.getUTCDate()} ${m1} – ${sunday.getUTCDate()} ${m2} ${sunday.getUTCFullYear()}`;
+}
+
 /** Verdict Core Web Vitals pe datele reale CrUX (p75): LCP ≤ 2,5 s, INP ≤ 200 ms, CLS ≤ 0,1. */
 export function cwvPass(
 	field: { lcpMs: number | null; inpMs: number | null; cls: number | null } | null | undefined

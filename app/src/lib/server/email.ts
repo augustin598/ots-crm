@@ -3683,6 +3683,75 @@ export async function sendAdPaymentDigestEmail(
 	);
 }
 
+/**
+ * Raportul săptămânal PageSpeed Insights. `data` este JSON serializabil, deci
+ * emailul se poate re-trimite din admin prin registry (PDF-ul se regenerează
+ * din aceleași date la fiecare încercare).
+ */
+export async function sendPagespeedReportEmail(
+	tenantId: string,
+	recipientEmail: string,
+	data: import('$lib/server/pagespeed/report').PagespeedReportData,
+	alertThreshold: number
+): Promise<void> {
+	const subject = `Raport PageSpeed — ${data.weekLabel} (${data.interval})`;
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: recipientEmail,
+			subject,
+			emailType: 'pagespeed-report',
+			metadata: { weekKey: data.weekKey, siteCount: data.siteCount, alertCount: data.alertCount },
+			htmlBody: '',
+			payload: {
+				sendFn: 'sendPagespeedReportEmail',
+				args: [tenantId, recipientEmail, data, alertThreshold]
+			}
+		},
+		async () => {
+			const [{ renderPagespeedReportBodyHtml, renderPagespeedReportText }, brand] =
+				await Promise.all([import('$lib/server/pagespeed/report'), fetchTenantBrand(tenantId)]);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: `Raport PageSpeed Insights — ${data.weekLabel}`,
+				subtitle: `Săptămâna ${data.interval} · ${data.siteCount} site-uri scanate`,
+				bodyHtml: renderPagespeedReportBodyHtml(data, alertThreshold),
+				previewTitle: subject
+			});
+
+			const attachments: NonNullable<nodemailer.SendMailOptions['attachments']> = [
+				...(brand.logoAttachment ? [brand.logoAttachment] : [])
+			];
+			if (data.attachPdf) {
+				const { generatePagespeedReportPdf } = await import('$lib/server/pagespeed/report-pdf');
+				attachments.push({
+					filename: `raport-pagespeed-${data.weekKey.toLowerCase()}.pdf`,
+					content: await generatePagespeedReportPdf(data),
+					contentType: 'application/pdf'
+				});
+			}
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: recipientEmail,
+				subject,
+				html,
+				text: renderPagespeedReportText(data),
+				attachments
+			};
+		}
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Outbox replay registry — used by `retryEmailLog`, `retryAllFailedEmails`,
 // and the `email_retry` scheduler task to replay a failed email by `sendFn` name.
@@ -3719,7 +3788,8 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendContractSigningEmail,
 	sendPackageRequestEmail,
 	sendAdPaymentAlertEmail,
-	sendAdPaymentDigestEmail
+	sendAdPaymentDigestEmail,
+	sendPagespeedReportEmail
 	// NOTE: Intentionally omitted (payload: null, not replay-able):
 	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
 	//   (contain single-use auth tokens that must not be persisted)

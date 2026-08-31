@@ -48,6 +48,8 @@ import { processHostingRenewalReminder } from './tasks/hosting-renewal-reminder'
 import { processHostingExpiryGuard } from './tasks/hosting-expiry-guard';
 import { processContentAutoPublish } from './tasks/content-auto-publish';
 import { processContentAutoGenerate } from './tasks/content-auto-generate';
+import { processPagespeedWeeklyReport } from './tasks/pagespeed-weekly-report';
+import { processPagespeedScan } from './tasks/pagespeed-scan';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -205,7 +207,9 @@ const taskHandlers: Record<string, TaskHandler> = {
 	hosting_renewal_reminder: processHostingRenewalReminder,
 	hosting_expiry_guard: processHostingExpiryGuard,
 	content_auto_publish: processContentAutoPublish,
-	content_auto_generate: processContentAutoGenerate
+	content_auto_generate: processContentAutoGenerate,
+	pagespeed_weekly_report: () => processPagespeedWeeklyReport(),
+	pagespeed_scan: processPagespeedScan
 };
 
 /**
@@ -356,7 +360,8 @@ export const startScheduler = async () => {
 		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor',
 		'directadmin-sync-accounts', 'directadmin-sync-packages',
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
-		'content-auto-publish', 'content-auto-generate'
+		'content-auto-publish', 'content-auto-generate',
+		'pagespeed-weekly-report'
 	]);
 
 	try {
@@ -1124,6 +1129,20 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] content-auto-generate registered (30 6 * * * Europe/Bucharest, LIVE)');
 
+	// PageSpeed weekly report — ORAR: fiecare tenant are zi + oră proprii în
+	// pagespeed_settings; jobul compară cu calendarul Bucureștiului și rulează doar
+	// la potrivire. Idempotent prin unique (tenant_id, week_key) pe pagespeed_report.
+	await schedulerQueue.add(
+		'pagespeed-weekly-report',
+		{ type: 'pagespeed_weekly_report', params: {} },
+		{
+			repeat: { pattern: '0 * * * *', tz: 'Europe/Bucharest' },
+			jobId: 'pagespeed-weekly-report',
+			attempts: 1
+		}
+	);
+	logInfo('scheduler', '[scheduler] pagespeed-weekly-report registered (0 * * * * Europe/Bucharest)');
+
 	// Content auto-publish — orar. Publică articolele programate scadente pe WordPress.
 	await schedulerQueue.add(
 		'content-auto-publish',
@@ -1185,7 +1204,9 @@ export const JOB_LABELS: Record<string, string> = {
 	hosting_renewal_reminder: 'Reminder Reînnoire Hosting (14/7/1z înainte)',
 	hosting_expiry_guard: 'Auto-suspendare Hosting (proforme neplătite, grație 10z)',
 	content_auto_publish: 'Auto-publicare Conținut Programat (WordPress)',
-	content_auto_generate: 'Auto-generare Conținut (mod auto)'
+	content_auto_generate: 'Auto-generare Conținut (mod auto)',
+	pagespeed_weekly_report: 'Raport Săptămânal PageSpeed (per tenant, zi/oră din setări)',
+	pagespeed_scan: 'Scanare PageSpeed (manuală, din UI)'
 };
 
 /** Default params for jobs that need specific parameters */
