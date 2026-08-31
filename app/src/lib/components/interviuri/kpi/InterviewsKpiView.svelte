@@ -535,12 +535,7 @@
 			/>
 		</div>
 
-		<!-- trend -->
-		<div class="ivk-pad" style="padding-top:14px">
-			<CostTrend rows={kpi.monthRows} {year} selMonth={month} onPick={pickMonth} {platforms} />
-		</div>
-
-		<!-- cost pe canal -->
+		<!-- cost pe canal — fix sub „Compunerea bugetului": comutatorul de alocare îi schimbă cifrele -->
 		<div class="ivk-pad" style="padding-top:14px">
 			<ChannelCostTable
 				rows={kpi.channelRows}
@@ -549,6 +544,11 @@
 				unallocatedAds={kpi.unallocatedAds}
 				unallocatedFixed={kpi.unallocatedFixed}
 			/>
+		</div>
+
+		<!-- trend -->
+		<div class="ivk-pad" style="padding-top:14px">
+			<CostTrend rows={kpi.monthRows} {year} selMonth={month} onPick={pickMonth} {platforms} />
 		</div>
 
 		<!-- detaliu lunar -->

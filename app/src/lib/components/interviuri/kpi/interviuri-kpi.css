@@ -24,7 +24,8 @@
 .ivk-hero-title { flex: 0 1 auto; min-width: 0; max-width: 520px; }
 .ivk-hero h1 { font-size: 22px; line-height: 1.2; }
 .ivk-hero p { font-size: 12.5px; margin-top: 4px; }
-.ivk-hero .cl-hero-actions { flex: 0 1 auto; margin-left: 0; justify-content: flex-start; }
+/* acțiunile stau maxim la dreapta (cerință user 31.08; înlocuiește varianta „lângă titlu") */
+.ivk-hero .cl-hero-actions { flex: 0 1 auto; margin-left: auto; justify-content: flex-end; }
 
 /* hero cost card */
 .ivk-hero-cost { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
