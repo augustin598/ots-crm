@@ -1,0 +1,55 @@
+{
+	"captchaResult": "CAPTCHA_NOT_NEEDED",
+	"kind": "pagespeedonline#result",
+	"id": "https://example.ro/",
+	"loadingExperience": {
+		"id": "https://example.ro/",
+		"metrics": {
+			"LARGEST_CONTENTFUL_PAINT_MS": { "percentile": 2143, "category": "AVERAGE" },
+			"INTERACTION_TO_NEXT_PAINT": { "percentile": 190, "category": "FAST" },
+			"CUMULATIVE_LAYOUT_SHIFT_SCORE": { "percentile": 8, "category": "FAST" },
+			"FIRST_CONTENTFUL_PAINT_MS": { "percentile": 1698, "category": "FAST" }
+		},
+		"overall_category": "AVERAGE"
+	},
+	"lighthouseResult": {
+		"requestedUrl": "https://example.ro/",
+		"finalUrl": "https://example.ro/",
+		"lighthouseVersion": "12.6.0",
+		"categories": {
+			"performance": { "id": "performance", "score": 0.58 },
+			"accessibility": { "id": "accessibility", "score": 0.87 },
+			"best-practices": { "id": "best-practices", "score": 0.93 },
+			"seo": { "id": "seo", "score": 0.99 }
+		},
+		"audits": {
+			"largest-contentful-paint": { "numericValue": 3421.5, "displayValue": "3,4 s" },
+			"cumulative-layout-shift": { "numericValue": 0.083, "displayValue": "0,083" },
+			"total-blocking-time": { "numericValue": 412.4, "displayValue": "410 ms" },
+			"first-contentful-paint": { "numericValue": 1834.2, "displayValue": "1,8 s" },
+			"speed-index": { "numericValue": 4211.0, "displayValue": "4,2 s" },
+			"interaction-to-next-paint": { "numericValue": 246, "displayValue": "246 ms" },
+			"server-response-time": { "numericValue": 512.3, "displayValue": "510 ms" },
+			"total-byte-weight": { "numericValue": 2891342, "displayValue": "2,9 MB" },
+			"network-requests": {
+				"details": { "type": "table", "items": [{}, {}, {}] }
+			},
+			"render-blocking-resources": {
+				"id": "render-blocking-resources",
+				"title": "Eliminați resursele care blochează redarea",
+				"details": { "type": "opportunity", "overallSavingsMs": 1350 }
+			},
+			"unused-javascript": {
+				"id": "unused-javascript",
+				"title": "Reduceți codul JavaScript nefolosit",
+				"details": { "type": "opportunity", "overallSavingsMs": 900 }
+			},
+			"modern-image-formats": {
+				"id": "modern-image-formats",
+				"title": "Difuzați imagini în formate moderne",
+				"details": { "type": "opportunity", "overallSavingsMs": 0 }
+			}
+		}
+	},
+	"analysisUTCTimestamp": "2026-08-31T07:00:00.000Z"
+}
