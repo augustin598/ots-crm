@@ -452,9 +452,14 @@
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background:rgba(245,158,11,.08); color:#f59e0b"><UsersIcon size={16} /></div>
 				<div>
-					<div class="cl-kpi-lbl">Cheltuieli fixe</div>
+					<div class="cl-kpi-lbl">Cheltuieli fixe în perioadă</div>
 					<div class="cl-kpi-val">{kpi ? fmtLei(kpi.fixedTotal) : '—'}</div>
-					<div class="cl-kpi-sub">{kpi ? `${fmtLei(kpi.fixedMonthly)}/lună · ${plural(kpi.activeFixedRows, 'rând', 'rânduri')}` : '—'}</div>
+					<!-- calculul explicit: lunar × luni în scop (cerință user — „cum ai calculat?") -->
+					<div class="cl-kpi-sub">
+						{kpi
+							? `${fmtLei(kpi.fixedMonthly)}/lună × ${monthsCount} ${monthsLabel} · ${plural(kpi.activeFixedRows, 'rând activ', 'rânduri active')}`
+							: '—'}
+					</div>
 				</div>
 			</div>
 			<div class="cl-kpi">
