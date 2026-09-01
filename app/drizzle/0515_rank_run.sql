@@ -1,0 +1,22 @@
+CREATE TABLE `rank_run` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
+	`project_id` text NOT NULL REFERENCES `rank_project`(`id`) ON DELETE cascade,
+	`day_key` text NOT NULL,
+	`trigger` text NOT NULL DEFAULT 'cron',
+	`triggered_by` text,
+	`provider` text NOT NULL DEFAULT 'scraper',
+	`started_at` text NOT NULL,
+	`finished_at` text,
+	`keywords_checked` integer NOT NULL DEFAULT 0,
+	`up` integer NOT NULL DEFAULT 0,
+	`down` integer NOT NULL DEFAULT 0,
+	`flat` integer NOT NULL DEFAULT 0,
+	`failed` integer NOT NULL DEFAULT 0,
+	`avg_position` real,
+	`visibility` real,
+	`alerts` integer NOT NULL DEFAULT 0,
+	`status` text NOT NULL DEFAULT 'running',
+	`error_note` text,
+	`created_at` text NOT NULL DEFAULT current_timestamp
+);

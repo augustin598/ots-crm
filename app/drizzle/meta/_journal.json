@@ -3534,6 +3534,125 @@
       "when": 1785398836928481,
       "tag": "0507_content_article_geo_score",
       "breakpoints": true
+    },
+    {
+      "idx": 508,
+      "version": "6",
+      "when": 1785398836928482,
+      "tag": "0508_rank_project",
+      "breakpoints": true
+    },
+    {
+      "idx": 509,
+      "version": "6",
+      "when": 1785398836928483,
+      "tag": "0509_rank_project_tenant_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 510,
+      "version": "6",
+      "when": 1785398836928484,
+      "tag": "0510_rank_keyword",
+      "breakpoints": true
+    },
+    {
+      "idx": 511,
+      "version": "6",
+      "when": 1785398836928485,
+      "tag": "0511_rank_keyword_project_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 512,
+      "version": "6",
+      "when": 1785398836928486,
+      "tag": "0512_rank_keyword_project_kw_loc_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 513,
+      "version": "6",
+      "when": 1785398836928487,
+      "tag": "0513_rank_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 514,
+      "version": "6",
+      "when": 1785398836928488,
+      "tag": "0514_rank_snapshot_kw_device_day_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 515,
+      "version": "6",
+      "when": 1785398836928489,
+      "tag": "0515_rank_run",
+      "breakpoints": true
+    },
+    {
+      "idx": 516,
+      "version": "6",
+      "when": 1785398836928490,
+      "tag": "0516_rank_run_project_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 517,
+      "version": "6",
+      "when": 1785398836928491,
+      "tag": "0517_rank_alert",
+      "breakpoints": true
+    },
+    {
+      "idx": 518,
+      "version": "6",
+      "when": 1785398836928492,
+      "tag": "0518_rank_alert_tenant_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 519,
+      "version": "6",
+      "when": 1785398836928493,
+      "tag": "0519_rank_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 520,
+      "version": "6",
+      "when": 1785398836928494,
+      "tag": "0520_rank_settings_tenant_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 521,
+      "version": "6",
+      "when": 1785398836928495,
+      "tag": "0521_rank_report",
+      "breakpoints": true
+    },
+    {
+      "idx": 522,
+      "version": "6",
+      "when": 1785398836928496,
+      "tag": "0522_rank_report_tenant_week_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 523,
+      "version": "6",
+      "when": 1785398836928497,
+      "tag": "0523_serp_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 524,
+      "version": "6",
+      "when": 1785398836928498,
+      "tag": "0524_serp_integration_tenant_uidx",
+      "breakpoints": true
     }
   ]
 }
