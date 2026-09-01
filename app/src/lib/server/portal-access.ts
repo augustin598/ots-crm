@@ -31,7 +31,8 @@ export type AccessCategory =
 	| 'budgets'
 	| 'hosting'
 	| 'content'
-	| 'interviuri';
+	| 'interviuri'
+	| 'seo';
 
 export type AccessFlags = Record<AccessCategory, boolean>;
 
@@ -47,7 +48,8 @@ export const ACCESS_CATEGORIES: readonly AccessCategory[] = [
 	'budgets',
 	'hosting',
 	'content',
-	'interviuri'
+	'interviuri',
+	'seo'
 ] as const;
 
 export const ALL_ACCESS_TRUE: AccessFlags = {
@@ -62,7 +64,8 @@ export const ALL_ACCESS_TRUE: AccessFlags = {
 	budgets: true,
 	hosting: true,
 	content: true,
-	interviuri: true
+	interviuri: true,
+	seo: true
 };
 
 export const NO_ACCESS: AccessFlags = {
@@ -77,7 +80,8 @@ export const NO_ACCESS: AccessFlags = {
 	budgets: false,
 	hosting: false,
 	content: false,
-	interviuri: false
+	interviuri: false,
+	seo: false
 };
 
 type SecondaryEmailAccessRow = {
@@ -173,5 +177,8 @@ export function routeRequiresAccess(pathname: string, tenantSlug: string): Acces
 	if (rest.startsWith('/hosting')) return 'hosting';
 	if (rest.startsWith('/content')) return 'content';
 	if (rest.startsWith('/interviuri')) return 'interviuri';
+	// hub-ul SEO & GEO & AEO + PageSpeed (portal) — o singură categorie
+	if (rest.startsWith('/seo')) return 'seo';
+	if (rest.startsWith('/pagespeed')) return 'seo';
 	return null;
 }

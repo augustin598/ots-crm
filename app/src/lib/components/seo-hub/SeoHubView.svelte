@@ -40,9 +40,27 @@
 	import ShAddWebsiteModal from './ShAddWebsiteModal.svelte';
 	import type { SeoHubData } from './types';
 
-	let { data }: { data: SeoHubData } = $props();
+	// isClient: varianta din portalul clientului — fără acțiuni de staff (Adaugă
+	// website, Recalculează), fără filtrul de client și fără detaliile de integrare.
+	// moduleHrefs: destinațiile modulelor (admin: /seo-links…, portal: /backlinks…).
+	let {
+		data,
+		isClient = false,
+		moduleHrefs
+	}: {
+		data: SeoHubData;
+		isClient?: boolean;
+		moduleHrefs?: { seoLinks: string; pagespeed: string; content: string };
+	} = $props();
 
 	const base = $derived(`/${page.params.tenant}`);
+	const hrefs = $derived(
+		moduleHrefs ?? {
+			seoLinks: `${base}/seo-links`,
+			pagespeed: `${base}/seo-links/pagespeed`,
+			content: `${base}/content`
+		}
+	);
 	const nf = new Intl.NumberFormat('ro-RO');
 
 	// ---- stare UI ----
@@ -245,11 +263,13 @@
 			<button class="cl-btn-secondary" onclick={exportCsv} disabled={filtered.length === 0}>
 				<DownloadIcon size={13} /> Export raport
 			</button>
-			<button class="cl-btn-secondary" onclick={recalculate} disabled={recalculating}>
-				<RefreshCwIcon size={13} />
-				{recalculating ? 'Se recalculează…' : 'Recalculează scoruri'}
-			</button>
-			<button class="cl-btn-primary" onclick={() => (showAdd = true)}><PlusIcon size={13} /> Adaugă website</button>
+			{#if !isClient}
+				<button class="cl-btn-secondary" onclick={recalculate} disabled={recalculating}>
+					<RefreshCwIcon size={13} />
+					{recalculating ? 'Se recalculează…' : 'Recalculează scoruri'}
+				</button>
+				<button class="cl-btn-primary" onclick={() => (showAdd = true)}><PlusIcon size={13} /> Adaugă website</button>
+			{/if}
 		</div>
 	</div>
 
@@ -334,7 +354,7 @@
 	</div>
 
 	<div class="sh-modules">
-		<a class="sh-module" href="{base}/seo-links">
+		<a class="sh-module" href={hrefs.seoLinks}>
 			<div class="sh-module-head">
 				<span class="sh-module-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><NewspaperIcon size={17} /></span>
 				<div>
@@ -349,7 +369,7 @@
 				<div class="sh-module-stat"><b>{nf.format(Math.round(data.linkTotals.costCents / 100))}</b><span>Buget RON</span></div>
 			</div>
 		</a>
-		<a class="sh-module" href="{base}/seo-links/pagespeed">
+		<a class="sh-module" href={hrefs.pagespeed}>
 			<div class="sh-module-head">
 				<span class="sh-module-ic" style="background: rgba(16,185,129,.08); color: #10b981"><GaugeIcon size={17} /></span>
 				<div>
@@ -364,7 +384,7 @@
 				<div class="sh-module-stat"><b>{nf.format(data.lastScans.length)}</b><span>Site-uri</span></div>
 			</div>
 		</a>
-		<a class="sh-module" href="{base}/content">
+		<a class="sh-module" href={hrefs.content}>
 			<div class="sh-module-head">
 				<span class="sh-module-ic" style="background: rgba(139,92,246,.08); color: #8b5cf6"><FileTextIcon size={17} /></span>
 				<div>
@@ -394,14 +414,16 @@
 			{/each}
 		</div>
 		<div class="cl-toolbar-spacer"></div>
-		<div class="cl-select-wrap">
-			<span class="cl-select-lbl">Client</span>
-			<select class="cl-select" bind:value={clientF} aria-label="Filtru client">
-				{#each clientOptions as c (c)}
-					<option value={c}>{c === 'all' ? 'Toți clienții' : c}</option>
-				{/each}
-			</select>
-		</div>
+		{#if !isClient}
+			<div class="cl-select-wrap">
+				<span class="cl-select-lbl">Client</span>
+				<select class="cl-select" bind:value={clientF} aria-label="Filtru client">
+					{#each clientOptions as c (c)}
+						<option value={c}>{c === 'all' ? 'Toți clienții' : c}</option>
+					{/each}
+				</select>
+			</div>
+		{/if}
 		<div class="cl-select-wrap">
 			<span class="cl-select-lbl">Sortare</span>
 			<select class="cl-select" bind:value={sort} aria-label="Sortare">
@@ -432,7 +454,7 @@
 							<th class="num">PageSpeed</th>
 							<th class="num">Articole</th>
 							<th class="num">Linkuri presă</th>
-							<th>Integrări</th>
+							{#if !isClient}<th>Integrări</th>{/if}
 							<th class="num">Evoluție SEO</th>
 							<th class="num">Acțiuni</th>
 						</tr>
@@ -446,7 +468,9 @@
 										<PsiFav id={w.id} domain={w.domain} url={w.url} />
 										<div style="min-width: 0">
 											<div class="psi-site-l1">{w.domain}</div>
-											<div class="psi-site-l2">{w.clientName ?? 'fără client'}{w.name ? ` · ${w.name}` : ''}</div>
+											<div class="psi-site-l2">
+												{isClient ? (w.name ?? w.url) : `${w.clientName ?? 'fără client'}${w.name ? ` · ${w.name}` : ''}`}
+											</div>
 										</div>
 									</div>
 								</td>
@@ -467,12 +491,14 @@
 									<div style="font-weight: 800; font-size: 14px">{nf.format(w.links.total)}</div>
 									<div class="psi-site-l2" style="max-width: none">{w.links.published} publicate</div>
 								</td>
-								<td>
-									<div style="display: flex; gap: 6px; flex-wrap: wrap">
-										<span class="psi-tag {w.wpConnected ? 'ok' : 'danger'}">WP</span>
-										<span class="psi-tag {w.hasProfile ? 'ok' : 'danger'}">Profil</span>
-									</div>
-								</td>
+								{#if !isClient}
+									<td>
+										<div style="display: flex; gap: 6px; flex-wrap: wrap">
+											<span class="psi-tag {w.wpConnected ? 'ok' : 'danger'}">WP</span>
+											<span class="psi-tag {w.hasProfile ? 'ok' : 'danger'}">Profil</span>
+										</div>
+									</td>
+								{/if}
 								<td class="num">
 									<div style="display: flex; justify-content: flex-end">
 										{#if sparkVals.length >= 2}
@@ -488,7 +514,7 @@
 											class="cl-icon-btn"
 											title="Articolele website-ului (Content)"
 											aria-label="Articolele {w.domain} în Content"
-											href="{base}/content/{w.id}"
+											href="{hrefs.content}/{w.id}"
 										>
 											<FileTextIcon size={13} />
 										</a>
@@ -496,7 +522,7 @@
 											class="cl-icon-btn"
 											title="Linkuri SEO"
 											aria-label="Linkuri SEO pentru {w.domain}"
-											href="{base}/seo-links"
+											href={hrefs.seoLinks}
 										>
 											<LinkIcon size={13} />
 										</a>
@@ -504,7 +530,7 @@
 											class="cl-icon-btn"
 											title="PageSpeed Insights"
 											aria-label="PageSpeed Insights pentru {w.domain}"
-											href="{base}/seo-links/pagespeed"
+											href={hrefs.pagespeed}
 										>
 											<GaugeIcon size={13} />
 										</a>
@@ -514,14 +540,18 @@
 						{/each}
 						{#if filtered.length === 0}
 							<tr style="cursor: default">
-								<td colspan="9">
+								<td colspan={isClient ? 8 : 9}>
 									<div class="cl-empty" style="padding: 40px 0; border: 0; background: transparent">
 										<SearchIcon size={20} />
 										<h3>Niciun website</h3>
 										<p>
-											{websites.length === 0
-												? 'Adaugă primul website cu butonul „Adaugă website".'
-												: 'Schimbă filtrele sau adaugă un website nou.'}
+											{#if isClient}
+												{websites.length === 0 ? 'Nu există încă website-uri monitorizate pentru compania ta.' : 'Schimbă filtrele sau căutarea.'}
+											{:else}
+												{websites.length === 0
+													? 'Adaugă primul website cu butonul „Adaugă website".'
+													: 'Schimbă filtrele sau adaugă un website nou.'}
+											{/if}
 										</p>
 									</div>
 								</td>
@@ -589,7 +619,9 @@
 			<div class="cl-section-head">
 				<h3><ListChecksIcon size={15} /> Recomandări deschise</h3>
 				<p class="cl-section-sub" style="margin-left: auto">
-					generate din regulile de monitorizare: profil, WordPress, publicări, PageSpeed/CWV, linkuri, AEO
+					{isClient
+						? 'generate automat din performanța site-urilor tale'
+						: 'generate din regulile de monitorizare: profil, WordPress, publicări, PageSpeed/CWV, linkuri, AEO'}
 				</p>
 			</div>
 			{#if data.recommendations.length > 0}
@@ -603,7 +635,7 @@
 									<span class="psi-tag info">{r.type}</span>
 								</div>
 								<div class="sh-rec-meta">
-									{r.websiteLabel} · responsabil {r.clientName ?? '—'} · termen {new Date(r.due).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })}
+									{r.websiteLabel}{isClient ? '' : ` · responsabil ${r.clientName ?? '—'}`} · termen {new Date(r.due).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })}
 								</div>
 								<div class="sh-rec-impact">{r.impact}</div>
 							</div>
@@ -619,7 +651,7 @@
 		<div class="cl-section">
 			<div class="cl-section-head">
 				<h3><NewspaperIcon size={15} /> Linkuri de presă pe status</h3>
-				<a class="cl-btn-mini" style="margin-left: auto" href="{base}/seo-links">
+				<a class="cl-btn-mini" style="margin-left: auto" href={hrefs.seoLinks}>
 					Deschide modulul <ChevronRightIcon size={11} />
 				</a>
 			</div>
@@ -690,7 +722,7 @@
 		</div>
 	</div>
 
-	{#if showAdd}
+	{#if showAdd && !isClient}
 		<ShAddWebsiteModal
 			clients={data.clients}
 			saving={addingWebsite}

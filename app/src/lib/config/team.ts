@@ -12,7 +12,8 @@ export const ACCESS_CATEGORIES = [
 	'budgets',
 	'hosting',
 	'content',
-	'interviuri'
+	'interviuri',
+	'seo'
 ] as const;
 
 export type AccessCategory = (typeof ACCESS_CATEGORIES)[number];
@@ -30,7 +31,8 @@ const ALL_ACCESS_TRUE: AccessFlags = {
 	budgets: true,
 	hosting: true,
 	content: true,
-	interviuri: true
+	interviuri: true,
+	seo: true
 };
 
 const NO_ACCESS: AccessFlags = {
@@ -45,7 +47,8 @@ const NO_ACCESS: AccessFlags = {
 	budgets: false,
 	hosting: false,
 	content: false,
-	interviuri: false
+	interviuri: false,
+	seo: false
 };
 
 /**
@@ -64,7 +67,8 @@ export const ACCESS_CATEGORY_LABELS: Record<AccessCategory, string> = {
 	budgets: 'Bugete',
 	hosting: 'Hosting',
 	content: 'Content',
-	interviuri: 'Interviuri'
+	interviuri: 'Interviuri',
+	seo: 'SEO & PageSpeed'
 };
 
 /** Copie fresh a flag-urilor „totul oprit" — pt fallback-uri în UI. */
@@ -215,7 +219,8 @@ export const CLIENT_ROLE_PRESETS: ReadonlyArray<ClientRolePresetDef> = [
 			backlinks: true,
 			budgets: true,
 			content: true,
-			interviuri: true
+			interviuri: true,
+			seo: true
 			// accessData rămâne false
 		})
 	},
@@ -230,7 +235,8 @@ export const CLIENT_ROLE_PRESETS: ReadonlyArray<ClientRolePresetDef> = [
 			marketing: true,
 			reports: true,
 			backlinks: true,
-			content: true
+			content: true,
+			seo: true
 		})
 	},
 	{

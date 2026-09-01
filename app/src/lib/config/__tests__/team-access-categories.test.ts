@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
+
+// portal-access importă db (→ $env/dynamic/private, indisponibil în bun test);
+// testăm doar funcțiile pure de mapare, deci db-ul poate fi gol.
+mock.module('$lib/server/db', () => ({ db: {} }));
 import {
 	ACCESS_CATEGORIES,
 	CLIENT_ROLE_PRESETS,
@@ -100,5 +104,51 @@ describe('access categories: content + interviuri', () => {
 		]);
 		// editarea cheltuielilor fixe = owner/admin (aliniat cu enforcement-ul din remote)
 		expect(rolesForCapability('admin.marketing.fixedCosts.manage')).toEqual(['owner', 'admin']);
+	});
+});
+
+describe('access category: seo (hub SEO & GEO & AEO + PageSpeed în portal)', () => {
+	it('mirror-ul client conține seo, cu eticheta decisă', async () => {
+		expect(ACCESS_CATEGORIES).toContain('seo');
+		const { ACCESS_CATEGORY_LABELS } = await import('$lib/config/team');
+		expect(ACCESS_CATEGORY_LABELS.seo).toBe('SEO & PageSpeed');
+	});
+
+	it('presetele au valorile decise pentru seo', () => {
+		const byId = Object.fromEntries(CLIENT_ROLE_PRESETS.map((p) => [p.id, p.flags])) as Record<
+			string,
+			AccessFlags
+		>;
+		expect(byId.owner.seo).toBe(true);
+		expect(byId.manager.seo).toBe(true);
+		expect(byId.marketing.seo).toBe(true);
+		expect(byId.viewer.seo).toBe(false);
+	});
+
+	it('catalogul are portal.seo.view + conversia legacy acoperă seo', () => {
+		expect(CAPABILITY_IDS).toContain('portal.seo.view');
+		expect(legacyFlagsToCapabilities({ seo: true })).toContain('portal.seo.view');
+		expect(capabilitiesToLegacyFlags(['portal.seo.view']).seo).toBe(true);
+	});
+
+	it('rutele portal /seo și /pagespeed cer portal.seo.view', () => {
+		expect(routeRequiresCapability('/client/ots/seo', 'ots')).toBe('portal.seo.view');
+		expect(routeRequiresCapability('/client/ots/pagespeed', 'ots')).toBe('portal.seo.view');
+	});
+
+	it('routeRequiresAccess (legacy) mapează /seo și /pagespeed pe categoria seo', async () => {
+		const { routeRequiresAccess } = await import('$lib/server/portal-access');
+		expect(routeRequiresAccess('/client/ots/seo', 'ots')).toBe('seo');
+		expect(routeRequiresAccess('/client/ots/pagespeed', 'ots')).toBe('seo');
+		// backlinks/content rămân pe categoriile lor
+		expect(routeRequiresAccess('/client/ots/backlinks', 'ots')).toBe('backlinks');
+		expect(routeRequiresAccess('/client/ots/content', 'ots')).toBe('content');
+	});
+
+	it('presetele din catalog includ portal.seo.view conform deciziei', () => {
+		expect(CLIENT_PRESET_CAPABILITIES.owner).toContain('portal.seo.view');
+		expect(CLIENT_PRESET_CAPABILITIES.manager).toContain('portal.seo.view');
+		expect(CLIENT_PRESET_CAPABILITIES.marketing).toContain('portal.seo.view');
+		expect(CLIENT_PRESET_CAPABILITIES.viewer).not.toContain('portal.seo.view');
 	});
 });

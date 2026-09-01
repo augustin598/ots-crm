@@ -193,6 +193,24 @@
 								}
 							]
 						: []),
+					...(access.seo
+						? [
+								{
+									id: 'seo',
+									label: 'SEO & GEO & AEO',
+									icon: 'seo' as const,
+									href: '/seo',
+									children: [
+										{
+											id: 'seo-pagespeed',
+											label: 'PageSpeed Insights',
+											icon: 'pagespeed' as const,
+											href: '/pagespeed'
+										}
+									]
+								}
+							]
+						: []),
 					...(access.backlinks
 						? [
 								{

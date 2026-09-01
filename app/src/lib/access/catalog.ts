@@ -388,6 +388,14 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 			'Vezi și gestionează interviurile programate ale companiei, inclusiv pagina KPI Performanță (cost pe interviu).'
 	},
 	{
+		id: 'portal.seo.view',
+		domain: 'portal',
+		groupLabel: 'Campanii & Marketing',
+		label: 'SEO & PageSpeed',
+		description:
+			'Vezi hub-ul SEO & GEO & AEO și scanările PageSpeed — doar site-urile companiei tale.'
+	},
+	{
 		id: 'portal.team.manage',
 		domain: 'portal',
 		groupLabel: 'Cont companie',
@@ -567,7 +575,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.budgets.view',
 		'portal.hosting.view',
 		'portal.content.view',
-		'portal.interviuri.view'
+		'portal.interviuri.view',
+		'portal.seo.view'
 	],
 	manager: [
 		'portal.invoices.view',
@@ -580,7 +589,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.budgets.view',
 		'portal.hosting.view',
 		'portal.content.view',
-		'portal.interviuri.view'
+		'portal.interviuri.view',
+		'portal.seo.view'
 		// no accessData
 	],
 	marketing: [
@@ -588,7 +598,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.marketing.view',
 		'portal.reports.view',
 		'portal.backlinks.view',
-		'portal.content.view'
+		'portal.content.view',
+		'portal.seo.view'
 	],
 	viewer: ['portal.reports.view']
 };
@@ -609,7 +620,8 @@ const LEGACY_FLAG_TO_CAP: Record<string, Capability> = {
 	budgets: 'portal.budgets.view',
 	hosting: 'portal.hosting.view',
 	content: 'portal.content.view',
-	interviuri: 'portal.interviuri.view'
+	interviuri: 'portal.interviuri.view',
+	seo: 'portal.seo.view'
 };
 
 export function legacyFlagsToCapabilities(
@@ -655,6 +667,8 @@ export function routeRequiresCapability(
 	if (rest.startsWith('/hosting')) return 'portal.hosting.view';
 	if (rest.startsWith('/content')) return 'portal.content.view';
 	if (rest.startsWith('/interviuri')) return 'portal.interviuri.view';
+	if (rest.startsWith('/seo')) return 'portal.seo.view';
+	if (rest.startsWith('/pagespeed')) return 'portal.seo.view';
 	if (rest.startsWith('/team')) return 'portal.team.manage';
 	return null;
 }

@@ -168,3 +168,31 @@ Culori: SEO albastru `var(--cl-accent)`, AEO cyan #06b6d4, GEO violet #8b5cf6 �
 - [x] Criterii de acceptare (spec §7) bifate una câte una.
 - [x] Review (superpowers:requesting-code-review), fix, commit final, push. Propune deploy și AȘTEAPTĂ „go".
 - [x] `graphify . --update`.
+
+---
+
+## Extensie (01 sep): permisiuni + portal client („fiecare cu ale lui")
+
+Cerință user: paginile SEO apar și în portalul clientului, strict cu site-urile/linkurile/PageSpeed-ul clientului din sesiune. Admin: rutele rămân pe convenția existentă (membership + requireStaff; rutele admin NU sunt gate-uite per-capability nicăieri în proiect). Portal: categorie NOUĂ de acces `seo`.
+
+### Task 9: Categoria `seo` (TDD pe team-access-categories.test.ts)
+- `portal-access.ts`: type + ACCESS_CATEGORIES + ALL_ACCESS_TRUE + NO_ACCESS + routeRequiresAccess('/seo'|'/pagespeed' → 'seo')
+- `config/team.ts`: mirror categorii + label „SEO & PageSpeed" + presets (owner/manager/marketing = true, viewer = false)
+- `access/catalog.ts`: capability `portal.seo.view` (grup „Campanii & Marketing") + LEGACY_FLAG_TO_CAP + CLIENT_PRESET_CAPABILITIES + routeRequiresCapability
+- Secure default: accessFlags JSON existente fără cheia `seo` → parseAccessFlags dă false (secundarii cer bifă explicită; primarul are ALL_TRUE)
+
+### Task 10: Refactor agregare → `$lib/server/seo-hub.ts`
+`buildSeoHubData(tenantId, { clientId? })` — TOATE interogările primesc filtrul clientId când e dat (clientWebsite, seoLink, pagespeedSite, contentArticle prin website-uri); discovery doar pentru staff (portal → null). Admin `+page.server.ts` deleghează.
+
+### Task 11: `SeoHubView` — prop `isClient` + `moduleHrefs`
+isClient ascunde: Adaugă website, Recalculează scoruri, filtrul de client, numele clientului din meta. moduleHrefs: admin → /seo-links, /seo-links/pagespeed, /content; portal → /backlinks, /pagespeed, /content.
+
+### Task 12: Pagini portal
+- `(app)/seo/+page.server.ts` (+ .svelte): clientId din locals.client (403 dacă lipsește), buildSeoHubData scoped
+- `(app)/pagespeed/+page.server.ts` (+ .svelte + `PagespeedClientView.svelte`): siturile PageSpeed cu clientId-ul sesiunii, READ-ONLY (fără scan/editare/setări) — extract `buildPagespeedSites(tenantId, { clientId? })` în `$lib/server/pagespeed/sites-data.ts`, refolosit de remote-ul admin
+
+### Task 13: Nav portal ((app)/+layout.svelte)
+Grupul Marketing: item „SEO & GEO & AEO" (/seo) cu copil „PageSpeed Insights" (/pagespeed), gated `access.seo`.
+
+### Task 14–15: Verificare
+teste (categorii + rute), autofixer, svelte-check, testermcp cu magic link de client (scripts/_gen-test-magic-link.ts): vizibilitate nav, date DOAR ale clientului, 403 pe /seo fără flag.
