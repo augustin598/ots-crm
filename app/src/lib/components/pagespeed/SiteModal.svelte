@@ -174,7 +174,8 @@
 				<div class="cl-field">
 					<label for="psi-site-cms">Platformă</label>
 					<select id="psi-site-cms" class="cl-select" style="width: 100%" bind:value={cms}>
-						{#each PSI_CMS_OPTIONS as option (option)}
+						<!-- o valoare istorică din DB care nu mai e în listă rămâne selectabilă -->
+						{#each [...new Set([...PSI_CMS_OPTIONS, ...(site?.cms ? [site.cms] : [])])] as option (option)}
 							<option value={option}>{option}</option>
 						{/each}
 					</select>

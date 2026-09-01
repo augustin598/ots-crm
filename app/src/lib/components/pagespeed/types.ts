@@ -108,6 +108,8 @@ export const PSI_CMS_OPTIONS = [
 	'Next.js',
 	'Shopify',
 	'Magento',
+	'vBulletin',
+	'phpBB',
 	'HTML static',
 	'Altul'
 ];
