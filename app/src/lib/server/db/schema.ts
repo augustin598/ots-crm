@@ -6553,3 +6553,307 @@ export type PagespeedMeasurement = typeof pagespeedMeasurement.$inferSelect;
 export type NewPagespeedMeasurement = typeof pagespeedMeasurement.$inferInsert;
 export type PagespeedSettings = typeof pagespeedSettings.$inferSelect;
 export type PagespeedReport = typeof pagespeedReport.$inferSelect;
+
+// ===== Rank Tracker (SEO → Poziții Google) =====
+
+export const rankProject = sqliteTable(
+	'rank_project',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id').references(() => client.id),
+		domain: text('domain').notNull(),
+		name: text('name').notNull(),
+		/** „<domeniu Google>|<hl>", ex. „google.ro|ro". */
+		locale: text('locale').notNull().default('google.ro|ro'),
+		/** Locațiile urmărite, ex. ['București', 'România']. */
+		locations: jsonb('locations').notNull().default(['România']),
+		/** Domeniile competitorilor urmăriți în top 10. */
+		competitors: jsonb('competitors').notNull().default([]),
+		/** ['desktop'] | ['mobile'] | ambele. */
+		devices: jsonb('devices').notNull().default(['desktop', 'mobile']),
+		alertThreshold: integer('alert_threshold').notNull().default(5),
+		active: boolean('active').notNull().default(true),
+		pausedAt: timestamp('paused_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantIdx: index('rank_project_tenant_idx').on(t.tenantId)
+	})
+);
+
+export const rankKeyword = sqliteTable(
+	'rank_keyword',
+	{
+		id: text('id').primaryKey(),
+		projectId: text('project_id')
+			.notNull()
+			.references(() => rankProject.id, { onDelete: 'cascade' }),
+		keyword: text('keyword').notNull(),
+		tag: text('tag'),
+		/** Locația specifică a acestui keyword (gol = locația implicită a proiectului). */
+		location: text('location').notNull().default(''),
+		volume: integer('volume'),
+		volumeUpdatedAt: timestamp('volume_updated_at', { withTimezone: true, mode: 'date' }),
+		difficulty: integer('difficulty'),
+		targetUrl: text('target_url'),
+		active: boolean('active').notNull().default(true),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		projectIdx: index('rank_keyword_project_idx').on(t.projectId),
+		projectKwLocUnique: uniqueIndex('rank_keyword_project_kw_loc_uidx').on(
+			t.projectId,
+			t.keyword,
+			t.location
+		)
+	})
+);
+
+export const rankSnapshot = sqliteTable(
+	'rank_snapshot',
+	{
+		id: text('id').primaryKey(),
+		keywordId: text('keyword_id')
+			.notNull()
+			.references(() => rankKeyword.id, { onDelete: 'cascade' }),
+		device: text('device', { enum: ['desktop', 'mobile'] }).notNull(),
+		checkedAt: timestamp('checked_at', { withTimezone: true, mode: 'date' }).notNull(),
+		/** Cheia zilei 'YYYY-MM-DD' pe ora Europe/Bucharest — o linie per (keyword, device, zi). */
+		dayKey: text('day_key').notNull(),
+		/** Poziția organică; null = peste 100 (afișat „100+"). */
+		position: integer('position'),
+		page: integer('page'),
+		rankingUrl: text('ranking_url'),
+		/** ['ai','snippet','local','paa','images','video','shopping','ads']. */
+		serpFeatures: jsonb('serp_features').notNull().default([]),
+		aiOverview: text('ai_overview', { enum: ['absent', 'present', 'cited'] })
+			.notNull()
+			.default('absent'),
+		/** { „notino.ro": 2, „sephora.ro": 6 } — pozițiile competitorilor din top 10. */
+		competitors: jsonb('competitors').notNull().default({}),
+		/** Primele 10 organice [{ position, domain, url, title, snippet }]. */
+		topResults: jsonb('top_results').notNull().default([]),
+		provider: text('provider').notNull().default('scraper'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		kwDeviceDayUnique: uniqueIndex('rank_snapshot_kw_device_day_uidx').on(
+			t.keywordId,
+			t.device,
+			t.dayKey
+		)
+	})
+);
+
+export const rankRun = sqliteTable(
+	'rank_run',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		projectId: text('project_id')
+			.notNull()
+			.references(() => rankProject.id, { onDelete: 'cascade' }),
+		dayKey: text('day_key').notNull(),
+		trigger: text('trigger', { enum: ['cron', 'manual'] }).notNull().default('cron'),
+		/** userId-ul care a declanșat manual rularea (null la cron). */
+		triggeredBy: text('triggered_by'),
+		provider: text('provider', { enum: ['scraper', 'dataforseo'] }).notNull().default('scraper'),
+		startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull(),
+		finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+		keywordsChecked: integer('keywords_checked').notNull().default(0),
+		up: integer('up').notNull().default(0),
+		down: integer('down').notNull().default(0),
+		flat: integer('flat').notNull().default(0),
+		failed: integer('failed').notNull().default(0),
+		avgPosition: real('avg_position'),
+		visibility: real('visibility'),
+		alerts: integer('alerts').notNull().default(0),
+		status: text('status', { enum: ['running', 'ok', 'partial', 'interrupted'] })
+			.notNull()
+			.default('running'),
+		errorNote: text('error_note'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		projectIdx: index('rank_run_project_idx').on(t.projectId, t.startedAt)
+	})
+);
+
+export const rankAlert = sqliteTable(
+	'rank_alert',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		keywordId: text('keyword_id')
+			.notNull()
+			.references(() => rankKeyword.id, { onDelete: 'cascade' }),
+		runId: text('run_id')
+			.notNull()
+			.references(() => rankRun.id, { onDelete: 'cascade' }),
+		device: text('device', { enum: ['desktop', 'mobile'] }).notNull(),
+		type: text('type', { enum: ['drop', 'out_of_top10', 'lost'] }).notNull(),
+		delta: integer('delta'),
+		fromPosition: integer('from_position'),
+		toPosition: integer('to_position'),
+		notifiedAt: timestamp('notified_at', { withTimezone: true, mode: 'date' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantIdx: index('rank_alert_tenant_idx').on(t.tenantId, t.createdAt)
+	})
+);
+
+export const rankSettings = sqliteTable(
+	'rank_settings',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		/** Ora verificării zilnice, „HH:00" Europe/Bucharest. */
+		checkHour: text('check_hour').notNull().default('06:00'),
+		/** 1 = Luni … 7 = Duminică. */
+		reportDay: integer('report_day').notNull().default(1),
+		reportHour: text('report_hour').notNull().default('07:00'),
+		recipients: jsonb('recipients').notNull().default([]),
+		sendToClient: boolean('send_to_client').notNull().default(false),
+		attachPdf: boolean('attach_pdf').notNull().default(true),
+		archiveToClient: boolean('archive_to_client').notNull().default(true),
+		alertsEnabled: boolean('alerts_enabled').notNull().default(true),
+		providerMode: text('provider_mode', { enum: ['scraper', 'dataforseo', 'auto'] })
+			.notNull()
+			.default('scraper'),
+		isEnabled: boolean('is_enabled').notNull().default(true),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantUnique: uniqueIndex('rank_settings_tenant_uidx').on(t.tenantId)
+	})
+);
+
+export const rankReport = sqliteTable(
+	'rank_report',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		weekKey: text('week_key').notNull(),
+		sentAt: timestamp('sent_at', { withTimezone: true, mode: 'date' }),
+		projectCount: integer('project_count').notNull().default(0),
+		keywordCount: integer('keyword_count').notNull().default(0),
+		avgPosition: real('avg_position'),
+		visibility: real('visibility'),
+		deltaVisibility: real('delta_visibility'),
+		/** Top 5 urcări [{ keyword, domain, from, to, delta }]. */
+		topUp: jsonb('top_up').notNull().default([]),
+		topDown: jsonb('top_down').notNull().default([]),
+		/** { '1-3': n, '4-10': n, … } distribuția pe buckete. */
+		distribution: jsonb('distribution').notNull().default({}),
+		alertCount: integer('alert_count').notNull().default(0),
+		status: text('status', { enum: ['sent', 'partial', 'skipped', 'failed'] })
+			.notNull()
+			.default('sent'),
+		note: text('note'),
+		recipients: jsonb('recipients').notNull().default([]),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantWeekUnique: uniqueIndex('rank_report_tenant_week_uidx').on(t.tenantId, t.weekKey)
+	})
+);
+
+export const serpIntegration = sqliteTable(
+	'serp_integration',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		provider: text('provider').notNull().default('dataforseo'),
+		loginEncrypted: text('login_encrypted').notNull(),
+		passwordEncrypted: text('password_encrypted').notNull(),
+		isActive: boolean('is_active').notNull().default(true),
+		lastTestedAt: timestamp('last_tested_at', { withTimezone: true, mode: 'date' }),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantUnique: uniqueIndex('serp_integration_tenant_uidx').on(t.tenantId)
+	})
+);
+
+export const rankProjectRelations = relations(rankProject, ({ one, many }) => ({
+	client: one(client, { fields: [rankProject.clientId], references: [client.id] }),
+	keywords: many(rankKeyword),
+	runs: many(rankRun)
+}));
+
+export const rankKeywordRelations = relations(rankKeyword, ({ one, many }) => ({
+	project: one(rankProject, { fields: [rankKeyword.projectId], references: [rankProject.id] }),
+	snapshots: many(rankSnapshot)
+}));
+
+export const rankSnapshotRelations = relations(rankSnapshot, ({ one }) => ({
+	keyword: one(rankKeyword, { fields: [rankSnapshot.keywordId], references: [rankKeyword.id] })
+}));
+
+export const rankRunRelations = relations(rankRun, ({ one }) => ({
+	project: one(rankProject, { fields: [rankRun.projectId], references: [rankProject.id] })
+}));
+
+export const rankAlertRelations = relations(rankAlert, ({ one }) => ({
+	keyword: one(rankKeyword, { fields: [rankAlert.keywordId], references: [rankKeyword.id] }),
+	run: one(rankRun, { fields: [rankAlert.runId], references: [rankRun.id] })
+}));
+
+export type RankProject = typeof rankProject.$inferSelect;
+export type NewRankProject = typeof rankProject.$inferInsert;
+export type RankKeyword = typeof rankKeyword.$inferSelect;
+export type NewRankKeyword = typeof rankKeyword.$inferInsert;
+export type RankSnapshot = typeof rankSnapshot.$inferSelect;
+export type NewRankSnapshot = typeof rankSnapshot.$inferInsert;
+export type RankRun = typeof rankRun.$inferSelect;
+export type NewRankRun = typeof rankRun.$inferInsert;
+export type RankAlert = typeof rankAlert.$inferSelect;
+export type NewRankAlert = typeof rankAlert.$inferInsert;
+export type RankSettings = typeof rankSettings.$inferSelect;
+export type NewRankSettings = typeof rankSettings.$inferInsert;
+export type RankReport = typeof rankReport.$inferSelect;
+export type SerpIntegration = typeof serpIntegration.$inferSelect;
+export type NewSerpIntegration = typeof serpIntegration.$inferInsert;
