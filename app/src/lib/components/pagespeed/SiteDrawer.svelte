@@ -19,7 +19,6 @@
 	import {
 		PSI_THRESHOLDS,
 		cwvPass,
-		isoWeekLabel,
 		psiFmt,
 		psiMetricLevel,
 		type PsiMetricKey,
@@ -87,8 +86,15 @@
 		});
 	});
 
+	// eticheta fiecărui punct = data măsurătorii („31 aug."), nu codul de săptămână
 	const chartWeeks = $derived(
-		okRows.map((r) => ({ id: r.id, label: isoWeekLabel(r.weekKey) }))
+		okRows.map((r) => {
+			const d = typeof r.measuredAt === 'string' ? new Date(r.measuredAt) : r.measuredAt;
+			return {
+				id: r.id,
+				label: d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })
+			};
+		})
 	);
 	const chartValues = $derived(okRows.map((r) => r.performance));
 

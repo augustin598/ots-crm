@@ -11,7 +11,7 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import SearchIcon from '@lucide/svelte/icons/search';
 
-	import { psiScoreLevel, isoWeekKey, isoWeekLabel, type PsiStrategy } from '$lib/logic/pagespeed';
+	import { psiScoreLevel, isoWeekKey, isoWeekInterval, type PsiStrategy } from '$lib/logic/pagespeed';
 	import { psiFmtDateTime } from './lib';
 	import PsiFav from './PsiFav.svelte';
 	import PsiDonut from './PsiDonut.svelte';
@@ -70,7 +70,7 @@
 	const cwvPassCount = $derived(rows.filter((r) => r.cwv === true).length);
 	const cwvKnownCount = $derived(rows.filter((r) => r.cwv != null).length);
 	const currentWeekLabel = $derived(
-		isoWeekLabel(data.trend.weeks[data.trend.weeks.length - 1]?.id ?? isoWeekKey(new Date()))
+		isoWeekInterval(data.trend.weeks[data.trend.weeks.length - 1]?.id ?? isoWeekKey(new Date()))
 	);
 
 	function psiLink(url: string): string {

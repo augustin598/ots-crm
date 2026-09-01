@@ -5,7 +5,7 @@
 import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { cwvPass, isoWeekKey, isoWeekLabel } from '$lib/logic/pagespeed';
+import { cwvPass, isoWeekKey, isoWeekShortDate } from '$lib/logic/pagespeed';
 import { seoOverall } from '$lib/content/seo-score';
 import {
 	buildSeoRecommendations,
@@ -306,7 +306,8 @@ export async function buildSeoHubData(
 	const weeks: { id: string; label: string }[] = [];
 	for (let back = WEEKS - 1; back >= 0; back--) {
 		const id = isoWeekKey(new Date(now.getTime() - back * 7 * 86400000));
-		weeks.push({ id, label: isoWeekLabel(id) });
+		// eticheta = data de luni („31 aug.”), nu codul ISO „S36”
+		weeks.push({ id, label: isoWeekShortDate(id) });
 	}
 	type Acc = { seo: number[]; aeo: number[]; geo: number[] };
 	const globalByWeek = new Map<string, Acc>();

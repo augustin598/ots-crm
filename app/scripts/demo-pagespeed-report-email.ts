@@ -66,11 +66,11 @@ const bodyHtml = renderPagespeedReportBodyHtml(data, 5);
 
 const html = `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Raport PageSpeed — ${data.weekLabel}</title></head>
+<head><meta charset="utf-8"><title>Raport PageSpeed — ${data.interval}</title></head>
 <body style="margin: 0; padding: 0; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
 	<div style="max-width: 600px; margin: 0 auto; padding: 32px 20px;">
 		<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 32px;">
-			<h1 style="color: #1877f2; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">Raport PageSpeed Insights — ${data.weekLabel}</h1>
+			<h1 style="color: #1877f2; font-size: 22px; margin: 0 0 6px 0; line-height: 1.2;">Raport PageSpeed Insights</h1>
 			<p style="color: #6b7280; font-size: 13px; margin: 0 0 24px 0;">Săptămâna ${data.interval} · ${data.siteCount} site-uri scanate</p>
 			<div style="height: 1px; background-color: #e5e7eb; margin: 0 0 24px 0;"></div>
 			${bodyHtml}

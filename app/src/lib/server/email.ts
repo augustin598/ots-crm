@@ -3694,7 +3694,7 @@ export async function sendPagespeedReportEmail(
 	data: import('$lib/server/pagespeed/report').PagespeedReportData,
 	alertThreshold: number
 ): Promise<void> {
-	const subject = `Raport PageSpeed — ${data.weekLabel} (${data.interval})`;
+	const subject = `Raport PageSpeed — ${data.interval}`;
 
 	await sendWithPersistence(
 		{
@@ -3722,7 +3722,7 @@ export async function sendPagespeedReportEmail(
 			const html = renderBrandedEmail({
 				themeColor: brand.themeColor,
 				headerLogoHtml: brand.headerLogoHtml,
-				title: `Raport PageSpeed Insights — ${data.weekLabel}`,
+				title: 'Raport PageSpeed Insights',
 				subtitle: `Săptămâna ${data.interval} · ${data.siteCount} site-uri scanate`,
 				bodyHtml: renderPagespeedReportBodyHtml(data, alertThreshold),
 				previewTitle: subject

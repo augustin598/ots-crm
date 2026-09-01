@@ -151,7 +151,7 @@ export function renderPagespeedReportText(data: PagespeedReportData): string {
 			`${r.domain}: mobil ${r.mobile ?? '-'} (${r.deltaMobile == null ? '-' : (r.deltaMobile > 0 ? '+' : '') + r.deltaMobile}), desktop ${r.desktop ?? '-'}${r.failed ? ' [esuat]' : ''}`
 	);
 	return [
-		`Raport PageSpeed — ${data.weekLabel} (${data.interval})`,
+		`Raport PageSpeed — ${data.interval}`,
 		'',
 		`Scor mediu mobil: ${data.avgMobile ?? '-'} | desktop: ${data.avgDesktop ?? '-'} | Trec CWV: ${data.cwvPassCount}/${data.cwvKnownCount || data.siteCount}`,
 		'',

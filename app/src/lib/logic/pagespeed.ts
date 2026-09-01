@@ -80,6 +80,12 @@ const RO_MONTHS_SHORT = [
 	'iul.', 'aug.', 'sept.', 'oct.', 'nov.', 'dec.'
 ];
 
+/** Data de luni a săptămânii ISO, scurt: „31 aug." — pentru axele graficelor. */
+export function isoWeekShortDate(weekKey: string): string {
+	const monday = isoWeekMonday(weekKey);
+	return `${monday.getUTCDate()} ${RO_MONTHS_SHORT[monday.getUTCMonth()]}`;
+}
+
 /** Intervalul luni–duminică al săptămânii ISO, format românesc: „24 – 30 aug. 2026". */
 export function isoWeekInterval(weekKey: string): string {
 	const monday = isoWeekMonday(weekKey);

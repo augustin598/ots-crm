@@ -60,7 +60,7 @@
 			{:else if data}
 				<div class="psi-mail">
 					<div class="psi-mail-head">
-						<h4>Raport PageSpeed Insights — {data.weekLabel}</h4>
+						<h4>Raport PageSpeed Insights</h4>
 						<p>Săptămâna {data.interval} · {data.siteCount} site-uri scanate · One Top Solution</p>
 					</div>
 					<div class="psi-mail-kpis">

@@ -40,7 +40,7 @@ export async function generatePagespeedReportPdf(data: PagespeedReportData): Pro
 			doc.registerFont('Bold', FONT_BOLD);
 
 			doc.font('Bold').fontSize(18).fillColor('#0f172a')
-				.text(`Raport PageSpeed Insights — ${data.weekLabel}`, ML, ML);
+				.text(`Raport PageSpeed Insights — ${data.interval}`, ML, ML);
 			doc.font('Regular').fontSize(10).fillColor('#64748b')
 				.text(`Săptămâna ${data.interval} · ${data.siteCount} site-uri scanate`, ML, doc.y + 4);
 

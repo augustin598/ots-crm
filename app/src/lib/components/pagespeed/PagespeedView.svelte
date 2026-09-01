@@ -36,7 +36,7 @@
 	} from '$lib/remotes/pagespeed.remote';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { confirmDialog } from '$lib/components/ui/confirm-dialog';
-	import { PSI_DAYS, isoWeekKey, isoWeekLabel, nextRunDate, psiScoreLevel, type PsiStrategy } from '$lib/logic/pagespeed';
+	import { PSI_DAYS, isoWeekInterval, isoWeekKey, nextRunDate, psiScoreLevel, type PsiStrategy } from '$lib/logic/pagespeed';
 	import { psiFmtDate, psiFmtDateTime } from './lib';
 	import PsiFav from './PsiFav.svelte';
 	import PsiDonut from './PsiDonut.svelte';
@@ -217,8 +217,9 @@
 	const nextRun = $derived(nextRunDate(settings.dayOfWeek, settings.hour));
 	const nextRunDays = $derived(Math.max(0, Math.ceil((nextRun.getTime() - Date.now()) / 86400000)));
 	// eticheta săptămânii curente (fallback local când nu există încă măsurători)
-	const currentWeekLabel = $derived(
-		isoWeekLabel(trend?.weeks[trend.weeks.length - 1]?.id ?? isoWeekKey(new Date()))
+	// intervalul săptămânii curente, în clar („31 aug. – 6 sept. 2026"), nu codul ISO „S36"
+	const currentWeekInterval = $derived(
+		isoWeekInterval(trend?.weeks[trend.weeks.length - 1]?.id ?? isoWeekKey(new Date()))
 	);
 	const stratLabel = $derived(
 		settings.strategies.length === 2
@@ -304,7 +305,7 @@
 		try {
 			const result = await sendPagespeedReportNow(undefined).updates(reportsQuery);
 			preview = false;
-			showToast(`Raport ${currentWeekLabel} trimis către ${result.sent} destinatari`);
+			showToast(`Raportul săptămânii (${currentWeekInterval}) trimis către ${result.sent} destinatari`);
 		} catch (error) {
 			showToast(remoteErrorMessage(error, 'Raportul nu a putut fi trimis'));
 		} finally {
@@ -389,7 +390,7 @@
 					<div class="cl-kpi-lbl">Scăderi peste prag</div>
 					<div class="cl-kpi-val {alerts.length ? 'cl-text-danger' : ''}">{alerts.length}</div>
 					<div class="cl-kpi-sub">
-						{alerts.length ? alerts.map((a) => a.site.domain).join(', ') : `nicio scădere în ${currentWeekLabel}`}
+						{alerts.length ? alerts.map((a) => a.site.domain).join(', ') : 'nicio scădere săptămâna aceasta'}
 					</div>
 				</div>
 			</div>
@@ -474,7 +475,7 @@
 		<div class="cl-section" style="padding: 0">
 			<div class="cl-section-head" style="padding: 16px 20px 12px; margin-bottom: 0">
 				<h3>
-					<ActivityIcon size={15} /> Măsurători {strategy === 'mobile' ? 'mobil' : 'desktop'} · săptămâna {currentWeekLabel}
+					<ActivityIcon size={15} /> Măsurători {strategy === 'mobile' ? 'mobil' : 'desktop'} · săptămâna {currentWeekInterval}
 				</h3>
 				<p class="cl-section-sub" style="margin-left: auto">click pe un rând pentru raportul complet Lighthouse</p>
 			</div>
@@ -641,7 +642,7 @@
 				<tbody>
 					{#each reports as rp (rp.id)}
 						<tr style="cursor: default">
-							<td style="font-weight: 700">{isoWeekLabel(rp.weekKey)}</td>
+							<td style="font-weight: 700; white-space: nowrap">{isoWeekInterval(rp.weekKey)}</td>
 							<td>
 								{rp.sentAt ? psiFmtDateTime(rp.sentAt) : '—'}
 								{#if rp.note}<div class="psi-site-l2">{rp.note}</div>{/if}

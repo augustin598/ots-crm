@@ -4,7 +4,7 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { cwvPass, isoWeekKey, isoWeekLabel, type PsiStrategy } from '$lib/logic/pagespeed';
+import { cwvPass, isoWeekKey, isoWeekShortDate, type PsiStrategy } from '$lib/logic/pagespeed';
 
 const SPARK_POINTS = 10;
 
@@ -87,7 +87,8 @@ export async function buildPagespeedSites(tenantId: string, opts: PagespeedSites
 		for (let back = 9; back >= 0; back--) {
 			const d = new Date(now.getTime() - back * 7 * 86400000);
 			const id = isoWeekKey(d);
-			trendWeeks.push({ id, label: isoWeekLabel(id) });
+			// eticheta = data de luni („31 aug."), nu codul ISO „S36" — lizibil pentru oricine
+			trendWeeks.push({ id, label: isoWeekShortDate(id) });
 		}
 	}
 	const trendSeries = (strategy: PsiStrategy): (number | null)[] =>
