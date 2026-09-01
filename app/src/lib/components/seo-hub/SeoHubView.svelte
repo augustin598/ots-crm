@@ -273,8 +273,9 @@
 		</div>
 	</div>
 
-	<div class="cl-hero" style="padding-top: 0; padding-bottom: 0">
-		<div class="cl-kpis sh-kpis" style="width: 100%; grid-template-columns: repeat(6, 1fr)">
+	<!-- .psi-pad (nu .cl-hero): container simplu cu gutter 28px, cu ritmul vertical de 14px -->
+	<div class="psi-pad" style="padding-bottom: 14px">
+		<div class="cl-kpis sh-kpis">
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><SparklesIcon size={16} /></div>
 				<div>

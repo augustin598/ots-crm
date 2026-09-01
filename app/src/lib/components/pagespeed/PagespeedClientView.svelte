@@ -100,7 +100,7 @@
 	</div>
 
 	<div class="cl-hero" style="padding-top: 0; padding-bottom: 14px">
-		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(3, 1fr)">
+		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr))">
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><PsiStratIcon {strategy} size={16} /></div>
 				<div>

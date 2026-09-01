@@ -361,7 +361,7 @@
 	{/if}
 
 	<div class="cl-hero" style="padding-top: 0; padding-bottom: 0">
-		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(6, 1fr)">
+		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(6, minmax(0, 1fr))">
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><SmartphoneIcon size={16} /></div>
 				<div>
