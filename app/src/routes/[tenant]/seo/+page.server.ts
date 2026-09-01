@@ -126,14 +126,17 @@ export const load: PageServerLoad = async (event): Promise<SeoHubData> => {
 				.where(eq(table.seoLink.tenantId, tenantId))
 				.groupBy(table.seoLink.clientId),
 
+			// doar site-urile active: cele în pauză nu intră în medii, tabel sau recomandări
+			// (aceeași convenție ca media din modulul PageSpeed)
 			db
 				.select({
 					id: table.pagespeedSite.id,
-					domain: table.pagespeedSite.domain,
-					active: table.pagespeedSite.active
+					domain: table.pagespeedSite.domain
 				})
 				.from(table.pagespeedSite)
-				.where(eq(table.pagespeedSite.tenantId, tenantId)),
+				.where(
+					and(eq(table.pagespeedSite.tenantId, tenantId), eq(table.pagespeedSite.active, true))
+				),
 
 			db
 				.select({
@@ -216,6 +219,7 @@ export const load: PageServerLoad = async (event): Promise<SeoHubData> => {
 	}
 	const psByDomain = new Map<string, PsSummary>();
 	const lastScans: {
+		siteId: string;
 		domain: string;
 		measuredAt: Date;
 		mobile: number | null;
@@ -243,6 +247,7 @@ export const load: PageServerLoad = async (event): Promise<SeoHubData> => {
 		psByDomain.set(site.domain.toLowerCase(), summary);
 		if (rows[0]) {
 			lastScans.push({
+				siteId: site.id,
 				domain: site.domain,
 				measuredAt: rows[0].measuredAt,
 				mobile: summary.mobile,
@@ -298,8 +303,14 @@ export const load: PageServerLoad = async (event): Promise<SeoHubData> => {
 		const aeo = avgOrNull(w.aeoAvg);
 		const geo = avgOrNull(w.geoAvg);
 		const failed = num(w.failed);
+		// aceleași semnale ca recomandările PageSpeed (scor slab SAU CWV picate),
+		// plus regulile de bază din spec: fără profil / fără WordPress / publicări eșuate
 		const needsAttention =
-			(ps?.mobile != null && ps.mobile < 50) || !w.profileId || !w.wpSiteId || failed > 0;
+			(ps?.mobile != null && ps.mobile < 50) ||
+			ps?.cwv === false ||
+			!w.profileId ||
+			!w.wpSiteId ||
+			failed > 0;
 		return {
 			id: w.id,
 			name: w.name,

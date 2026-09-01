@@ -2,6 +2,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq, gte } from 'drizzle-orm';
 import { nextSlots } from '$lib/content/publish-schedule';
+import { computeArticleScores } from '$lib/content/seo-score';
 import { generateArticle } from '$lib/server/content/article-generator';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 
@@ -132,6 +133,7 @@ async function generateAndScheduleSource(
 			generatedTitle: gen.title,
 			generatedExcerpt: gen.excerpt,
 			generatedHtml: gen.html,
+			wordCount: htmlWordCount(gen.html),
 			seoTitle: gen.seoTitle,
 			metaDescription: gen.metaDescription,
 			focusKeyword: gen.focusKeyword,
@@ -141,7 +143,26 @@ async function generateAndScheduleSource(
 			scheduledAt: at,
 			publishStatus,
 			generatedAt: new Date(),
-			updatedAt: new Date()
+			updatedAt: new Date(),
+			// scorurile persistate se scriu la ORICE mutație de conținut (hub-ul SEO
+			// citește doar coloanele, nu recalculează) — la fel ca în content-articles.remote
+			...computeArticleScores({
+				generatedHtml: gen.html,
+				generatedTitle: gen.title,
+				seoTitle: gen.seoTitle,
+				metaDescription: gen.metaDescription,
+				focusKeyword: gen.focusKeyword,
+				slug: gen.slug,
+				featuredImageUrl: a.featuredImageUrl
+			})
 		})
 		.where(eq(table.contentArticle.id, articleId));
+}
+
+function htmlWordCount(html: string | null | undefined): number {
+	const text = (html ?? '')
+		.replace(/<[^>]*>/g, ' ')
+		.replace(/&[a-z#0-9]+;/gi, ' ')
+		.trim();
+	return text ? text.split(/\s+/).length : 0;
 }

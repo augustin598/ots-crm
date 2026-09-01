@@ -54,6 +54,7 @@ export interface SeoHubData {
 	};
 	clients: { id: string; name: string }[];
 	lastScans: {
+		siteId: string;
 		domain: string;
 		measuredAt: string;
 		mobile: number | null;

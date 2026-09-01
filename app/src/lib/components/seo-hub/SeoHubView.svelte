@@ -589,7 +589,7 @@
 			<div class="cl-section-head">
 				<h3><ListChecksIcon size={15} /> Recomandări deschise</h3>
 				<p class="cl-section-sub" style="margin-left: auto">
-					generate din aceleași reguli ca tab-ul „Necesită atenție"
+					generate din regulile de monitorizare: profil, WordPress, publicări, PageSpeed/CWV, linkuri, AEO
 				</p>
 			</div>
 			{#if data.recommendations.length > 0}
@@ -667,7 +667,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each data.lastScans as s (s.domain)}
+					{#each data.lastScans as s (s.siteId)}
 						<tr style="cursor: default">
 							<td style="font-weight: 700">{s.domain}</td>
 							<td>{psiFmtDateTime(s.measuredAt)}</td>
