@@ -47,7 +47,8 @@
 	--cl-border-strong: #334155;
 	--cl-text: #e5e7eb;
 	--cl-text-2: #a3b1c6;
-	--cl-text-3: #6b7a90;
+	/* #8291a7: ≥4.5:1 pe --cl-surface — textul terțiar apare la 10–11px */
+	--cl-text-3: #8291a7;
 	--cl-accent: #3b8bf5;
 	--cl-accent-600: #1877f2;
 	--cl-accent-50: rgba(59, 139, 245, 0.16);
@@ -119,7 +120,7 @@
 .cl-select-wrap { display: inline-flex; align-items: center; gap: 8px; }
 .cl-select-lbl { font-size: 12px; color: var(--cl-text-3); }
 .cl-select { border: 1px solid var(--cl-border); border-radius: 7px; padding: 6px 28px 6px 10px; font-size: 12.5px; background: var(--cl-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 8px center; appearance: none; color: var(--cl-text); font-family: inherit; cursor: pointer; }
-.cl-select:focus { outline: 0; border-color: var(--cl-accent); }
+.cl-select:focus { outline: 0; border-color: var(--cl-accent); box-shadow: 0 0 0 3px var(--cl-accent-50); }
 
 /* ============ KPI ============ */
 .cl-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
@@ -127,7 +128,7 @@
 .cl-kpi-ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; }
 .cl-kpi-lbl { font-size: 11px; font-weight: 600; color: var(--cl-text-3); text-transform: uppercase; letter-spacing: .05em; }
 .cl-kpi-val { font-size: 19px; font-weight: 800; color: var(--cl-text); letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
-.cl-kpi-sub { font-size: 11px; color: var(--cl-text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; }
+.cl-kpi-sub { font-size: 11px; color: var(--cl-text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1200px) { .cl-kpis { grid-template-columns: repeat(3, 1fr) !important; } }
 
 /* ============ Sections ============ */
@@ -303,7 +304,7 @@
 .psi-drawer { width: 760px; max-width: 94vw; background: var(--cl-bg); height: 100vh; display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(15,23,42,.18); animation: psi-slide .22s cubic-bezier(.32,.72,0,1); }
 @keyframes psi-slide { from { transform: translateX(28px); opacity: .6; } }
 .psi-drawer-head { padding: 18px 22px; background: var(--cl-surface); border-bottom: 1px solid var(--cl-border); display: flex; align-items: flex-start; gap: 14px; }
-.psi-drawer-body { flex: 1; overflow-y: auto; padding: 16px 22px 60px; display: flex; flex-direction: column; gap: 14px; }
+.psi-drawer-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 16px 22px 60px; display: flex; flex-direction: column; gap: 14px; }
 .psi-drawer-close { margin-left: auto; border: 1px solid var(--cl-border); background: var(--cl-surface); width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; color: var(--cl-text-2); flex: none; }
 .psi-drawer-close:hover { background: var(--cl-surface-2); color: var(--cl-text); }
 
@@ -367,7 +368,7 @@
 .psi-modal-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--cl-accent-50); color: var(--cl-accent); flex: none; }
 .psi-modal-title { font-size: 15.5px; font-weight: 800; color: var(--cl-text); letter-spacing: -.01em; }
 .psi-modal-sub { font-size: 12px; color: var(--cl-text-3); margin-top: 2px; }
-.psi-modal-body { padding: 18px 20px 22px; overflow-y: auto; }
+.psi-modal-body { padding: 18px 20px 22px; overflow-y: auto; overscroll-behavior: contain; }
 .psi-modal-foot { display: flex; gap: 9px; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--cl-border); background: var(--cl-surface-2); }
 
 .psi-table-scroll { overflow-x: auto; }

@@ -43,9 +43,13 @@
 	let active = $state(site?.active ?? true);
 	// svelte-ignore state_referenced_locally
 	let strategies = $state<PsiStrategy[]>(site ? [...site.strategies] : ['mobile', 'desktop']);
+	// cheie stabilă per rând (nu indexul): la ștergerea unui rând din mijloc,
+	// bind:value ar rămâne altfel legat de obiectele shift-ate
+	let pageKey = 0;
+	const withKey = (p: { url: string; label: string }) => ({ ...p, _k: pageKey++ });
 	// svelte-ignore state_referenced_locally
 	let pages = $state(
-		site ? site.pages.map((p) => ({ ...p })) : [{ url: '', label: 'Homepage' }]
+		(site ? site.pages.map((p) => ({ ...p })) : [{ url: '', label: 'Homepage' }]).map(withKey)
 	);
 	let err = $state('');
 
@@ -142,7 +146,7 @@
 					<label for="psi-page-url-0">Pagini testate <span class="cl-req">*</span></label>
 					<span class="cl-hint">prima pagină este cea raportată în tabel</span>
 				</div>
-				{#each pages as p, i (i)}
+				{#each pages as p, i (p._k)}
 					<div style="display: grid; grid-template-columns: 150px 1fr 32px; gap: 8px; margin-top: 8px">
 						<input class="cl-input" placeholder="Etichetă" bind:value={p.label} aria-label="Etichetă pagină" />
 						<input
@@ -156,7 +160,7 @@
 							class="cl-icon-btn"
 							title="Șterge pagina"
 							disabled={pages.length === 1}
-							onclick={() => (pages = pages.filter((_, j) => j !== i))}
+							onclick={() => (pages = pages.filter((x) => x._k !== p._k))}
 						>
 							<Trash2Icon size={13} />
 						</button>
@@ -165,7 +169,7 @@
 				<button
 					class="cl-btn-mini"
 					style="margin-top: 9px"
-					onclick={() => (pages = [...pages, { url: '', label: 'Pagină' }])}
+					onclick={() => (pages = [...pages, withKey({ url: '', label: 'Pagină' })])}
 				>
 					<PlusIcon size={11} /> Adaugă pagină
 				</button>
@@ -186,6 +190,7 @@
 						{#each ['mobile', 'desktop'] as const as s (s)}
 							<button
 								class={strategies.includes(s) ? 'active' : ''}
+								aria-pressed={strategies.includes(s)}
 								title={strategies.includes(s) ? 'Se testează' : 'Adaugă strategia'}
 								onclick={() => toggleStrategy(s)}
 							>

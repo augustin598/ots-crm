@@ -397,22 +397,26 @@ export const sendPagespeedReportNow = command(async () => {
 });
 
 /** Datele raportului curent, pentru modalul de previzualizare din UI. */
-export const getPagespeedReportPreview = query(async () => {
-	const { event, tenantId } = requireTenantEvent();
-	await requireStaff(event);
+export const getPagespeedReportPreview = query(
+	// opțional: o săptămână istorică („2026-W35") — altfel săptămâna curentă
+	v.optional(v.pipe(v.string(), v.regex(/^\d{4}-W\d{2}$/))),
+	async (weekKey) => {
+		const { event, tenantId } = requireTenantEvent();
+		await requireStaff(event);
 
-	const [settings] = await db
-		.select()
-		.from(table.pagespeedSettings)
-		.where(eq(table.pagespeedSettings.tenantId, tenantId))
-		.limit(1);
-	const { buildPagespeedReportData } = await import('$lib/server/pagespeed/report');
-	const { isoWeekKey } = await import('$lib/logic/pagespeed');
-	return buildPagespeedReportData(tenantId, isoWeekKey(new Date()), {
-		includeOpportunities: settings?.includeOpportunities ?? true,
-		attachPdf: settings?.attachPdf ?? false
-	});
-});
+		const [settings] = await db
+			.select()
+			.from(table.pagespeedSettings)
+			.where(eq(table.pagespeedSettings.tenantId, tenantId))
+			.limit(1);
+		const { buildPagespeedReportData } = await import('$lib/server/pagespeed/report');
+		const { isoWeekKey } = await import('$lib/logic/pagespeed');
+		return buildPagespeedReportData(tenantId, weekKey ?? isoWeekKey(new Date()), {
+			includeOpportunities: settings?.includeOpportunities ?? true,
+			attachPdf: settings?.attachPdf ?? false
+		});
+	}
+);
 
 /** Clienții tenantului, pentru dropdown-ul din modalul de site. */
 export const getPagespeedClients = query(async () => {

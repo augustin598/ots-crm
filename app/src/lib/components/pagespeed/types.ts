@@ -54,6 +54,8 @@ export const PSI_OPP_CATEGORY_LABELS: Record<string, string> = {
 
 export interface PsiStrategyData {
 	last: PsiMeasurement | null;
+	/** Cea mai recentă măsurătoare REUȘITĂ (poate fi = last). Scorurile se afișează de aici. */
+	lastOk: PsiMeasurement | null;
 	prev: PsiMeasurement | null;
 	delta: number | null;
 	spark: number[];

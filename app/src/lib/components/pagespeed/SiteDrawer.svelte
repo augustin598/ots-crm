@@ -137,7 +137,7 @@
 			<div style="display: flex; align-items: center; gap: 10px">
 				<div class="psi-seg">
 					{#each ['mobile', 'desktop'] as const as s (s)}
-						<button class={strategy === s ? 'active' : ''} onclick={() => (strategy = s)}>
+						<button class={strategy === s ? 'active' : ''} aria-pressed={strategy === s} onclick={() => (strategy = s)}>
 							<PsiStratIcon strategy={s} />
 							{s === 'mobile' ? 'Mobil' : 'Desktop'}
 						</button>

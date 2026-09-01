@@ -107,7 +107,7 @@
 						Europe/Bucharest · {sched.recipients.length} destinatari · {stratLabel}
 					</div>
 				</div>
-				<span class="psi-tag ok" style="margin-left: auto">activ</span>
+				{#if sched.isEnabled}<span class="psi-tag ok" style="margin-left: auto">activ</span>{:else}<span class="psi-tag" style="margin-left: auto">oprit</span>{/if}
 			</div>
 
 			<div class="psi-sched-grid">
@@ -145,6 +145,7 @@
 						{#each ['mobile', 'desktop'] as const as s (s)}
 							<button
 								class={sched.strategies.includes(s) ? 'active' : ''}
+								aria-pressed={sched.strategies.includes(s)}
 								title={sched.strategies.includes(s) ? 'Inclus în raport' : 'Adaugă în raport'}
 								onclick={() => toggleStrategy(s)}
 							>
@@ -195,6 +196,8 @@
 					<input
 						id="psi-sched-recipient"
 						class="cl-input"
+						type="email"
+						autocomplete="email"
 						placeholder="email@client.ro"
 						bind:value={recipient}
 						onkeydown={(e) => e.key === 'Enter' && addRecipient()}

@@ -51,7 +51,7 @@
 	const rows = $derived<Row[]>(
 		sites.map((site) => {
 			const d = site.data[strategy];
-			const lastOk = d.last?.status === 'ok' ? d.last : d.prev;
+			const lastOk = d.lastOk;
 			return {
 				site,
 				perf: lastOk?.performance ?? null,
@@ -90,7 +90,7 @@
 		<div class="cl-hero-actions">
 			<div class="psi-seg">
 				{#each ['mobile', 'desktop'] as const as s (s)}
-					<button class={strategy === s ? 'active' : ''} onclick={() => (strategy = s)}>
+					<button class={strategy === s ? 'active' : ''} aria-pressed={strategy === s} onclick={() => (strategy = s)}>
 						<PsiStratIcon strategy={s} />
 						{s === 'mobile' ? 'Mobil' : 'Desktop'}
 					</button>
@@ -102,7 +102,7 @@
 	<div class="cl-hero" style="padding-top: 0; padding-bottom: 14px">
 		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(3, 1fr)">
 			<div class="cl-kpi">
-				<div class="cl-kpi-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><SmartphoneIcon size={16} /></div>
+				<div class="cl-kpi-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><PsiStratIcon {strategy} size={16} /></div>
 				<div>
 					<div class="cl-kpi-lbl">Scor mediu {strategy === 'mobile' ? 'mobil' : 'desktop'}</div>
 					<div class="cl-kpi-val psi-{psiScoreLevel(avg)}">{avg ?? '—'}</div>
@@ -154,7 +154,7 @@
 					</thead>
 					<tbody>
 						{#each rows as r (r.site.id)}
-							{@const lastOk = r.site.data[strategy].last?.status === 'ok' ? r.site.data[strategy].last : r.site.data[strategy].prev}
+							{@const lastOk = r.site.data[strategy].lastOk}
 							<tr style="cursor: default">
 								<td>
 									<div class="psi-site">

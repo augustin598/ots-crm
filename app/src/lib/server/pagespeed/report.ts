@@ -67,7 +67,12 @@ export async function buildPagespeedReportData(
 		: [];
 
 	const latest = (siteId: string, strategy: PsiStrategy) => {
-		const rows = measurements.filter((m) => m.siteId === siteId && m.strategy === strategy);
+		// doar măsurătorile de până la sfârșitul săptămânii cerute — un raport istoric
+		// arată datele acelei săptămâni, nu cele mai noi (comparația lexicografică pe
+		// „YYYY-Www" este corectă cronologic)
+		const rows = measurements.filter(
+			(m) => m.siteId === siteId && m.strategy === strategy && m.weekKey <= weekKey
+		);
 		const ok = rows.filter((m) => m.status === 'ok');
 		return { any: rows[0] ?? null, last: ok[0] ?? null, prev: ok[1] ?? null };
 	};

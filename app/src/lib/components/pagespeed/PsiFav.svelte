@@ -20,8 +20,10 @@
 		fontSize?: number;
 	} = $props();
 
-	let failed = $state(false);
+	// starea de eroare e legată de sursa curentă — la schimbarea URL-ului se reia încercarea
+	let failedFor = $state<string | null>(null);
 	const src = $derived(getFaviconUrl(url || domain));
+	const failed = $derived(failedFor === src);
 </script>
 
 {#if src && !failed}
@@ -37,7 +39,7 @@
 			width={Math.round(size * 0.66)}
 			height={Math.round(size * 0.66)}
 			loading="lazy"
-			onerror={() => (failed = true)}
+			onerror={() => (failedFor = src)}
 		/>
 	</span>
 {:else}

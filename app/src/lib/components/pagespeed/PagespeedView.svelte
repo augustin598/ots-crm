@@ -100,6 +100,8 @@
 	let openId = $state<string | null>(null);
 	let editing = $state<'new' | PsiSiteRow | null>(null);
 	let preview = $state(false);
+	/** săptămâna previzualizată: null = cea curentă, altfel weekKey-ul raportului istoric */
+	let previewWeek = $state<string | null>(null);
 	let showSched = $state(false);
 	let savingSite = $state(false);
 	let savingSched = $state(false);
@@ -130,13 +132,12 @@
 		sites.map((site) => {
 			const d = site.data[strategy];
 			const m = site.data.mobile;
-			const lastOk = d.last?.status === 'ok' ? d.last : d.prev;
 			return {
 				site,
-				perf: lastOk?.performance ?? null,
+				perf: d.lastOk?.performance ?? null,
 				delta: d.delta,
-				perfM: (m.last?.status === 'ok' ? m.last : m.prev)?.performance ?? null,
-				perfD: (site.data.desktop.last?.status === 'ok' ? site.data.desktop.last : site.data.desktop.prev)?.performance ?? null,
+				perfM: m.lastOk?.performance ?? null,
+				perfD: site.data.desktop.lastOk?.performance ?? null,
 				deltaM: m.delta,
 				spark: d.spark,
 				cwv: site.cwv,
@@ -329,7 +330,13 @@
 				{/if}
 			</div>
 			<button class="cl-btn-secondary" onclick={() => (showSched = true)}><SettingsIcon size={13} /> Setări raport</button>
-			<button class="cl-btn-secondary" onclick={() => (preview = true)}><MailIcon size={13} /> Previzualizează raportul</button>
+			<button
+				class="cl-btn-secondary"
+				onclick={() => {
+					previewWeek = null;
+					preview = true;
+				}}><MailIcon size={13} /> Previzualizează raportul</button
+			>
 			<button class="cl-btn-secondary psi-scan-btn" onclick={() => runScan()} disabled={scanRunning}>
 				<RefreshCwIcon size={13} />
 				<span class="psi-scan-btn-txt">
@@ -419,7 +426,7 @@
 
 	{#if scan && scanRunning}
 		<div class="psi-pad" style="padding-top: 16px">
-			<div class="psi-banner">
+			<div class="psi-banner" role="status" aria-live="polite">
 				<span class="psi-spin"></span>
 				<span class="psi-banner-txt">
 					Se interoghează PageSpeed Insights API · {scan.done}/{scan.total}{scan.current ? ` · ${scan.current}` : ''}
@@ -437,7 +444,7 @@
 				['cwv', 'Trec CWV', rows.filter((r) => r.site.active && r.cwv === true).length],
 				['paused', 'În pauză', rows.filter((r) => !r.site.active).length]
 			] as const as [id, lbl, n] (id)}
-				<button class={['cl-tab', tab === id && 'active']} onclick={() => (tab = id)}>
+				<button class={['cl-tab', tab === id && 'active']} aria-pressed={tab === id} onclick={() => (tab = id)}>
 					{lbl}<span class={['cl-tab-count', id === 'attention' && n > 0 && 'cl-tab-count-danger']}>{n}</span>
 				</button>
 			{/each}
@@ -445,7 +452,7 @@
 		<div class="cl-toolbar-spacer"></div>
 		<div class="psi-seg">
 			{#each ['mobile', 'desktop'] as const as s (s)}
-				<button class={strategy === s ? 'active' : ''} onclick={() => (strategy = s)}>
+				<button class={strategy === s ? 'active' : ''} aria-pressed={strategy === s} onclick={() => (strategy = s)}>
 					<PsiStratIcon strategy={s} />
 					{s === 'mobile' ? 'Mobil' : 'Desktop'}
 				</button>
@@ -501,7 +508,7 @@
 						{/if}
 						{#each filtered as r (r.site.id)}
 							{@const st = scan?.perSite?.[r.site.id]}
-							{@const lastOk = r.site.data[strategy].last?.status === 'ok' ? r.site.data[strategy].last : r.site.data[strategy].prev}
+							{@const lastOk = r.site.data[strategy].lastOk}
 							<tr
 								tabindex="0"
 								aria-label="Deschide raportul pentru {r.site.domain}"
@@ -662,7 +669,14 @@
 							</td>
 							<td class="num">
 								<div style="display: flex; gap: 6px; justify-content: flex-end">
-									<button class="cl-icon-btn" title="Vezi raportul" onclick={() => (preview = true)}><EyeIcon size={13} /></button>
+									<button
+										class="cl-icon-btn"
+										title="Vezi raportul săptămânii {isoWeekInterval(rp.weekKey)}"
+										onclick={() => {
+											previewWeek = rp.weekKey;
+											preview = true;
+										}}><EyeIcon size={13} /></button
+									>
 								</div>
 							</td>
 						</tr>
@@ -697,7 +711,13 @@
 		/>
 	{/if}
 	{#if preview}
-		<MailPreviewModal {settings} sending={sendingNow} onclose={() => (preview = false)} onsend={sendNow} />
+		<MailPreviewModal
+			{settings}
+			weekKey={previewWeek}
+			sending={sendingNow}
+			onclose={() => (preview = false)}
+			onsend={sendNow}
+		/>
 	{/if}
 	{#if toast}
 		<div class="psi-toast" role="status" aria-live="polite"><CheckIcon size={14} /> {toast}</div>

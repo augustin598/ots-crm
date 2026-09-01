@@ -11,17 +11,22 @@
 
 	let {
 		settings,
+		weekKey = null,
 		sending = false,
 		onclose,
 		onsend
 	}: {
 		settings: PsiSettings;
+		/** săptămână istorică („2026-W35") sau null = săptămâna curentă */
+		weekKey?: string | null;
 		sending?: boolean;
 		onclose: () => void;
 		onsend: () => void;
 	} = $props();
 
-	const previewQuery = $derived(getPagespeedReportPreview());
+	const previewQuery = $derived(getPagespeedReportPreview(weekKey ?? undefined));
+	// trimiterea manuală funcționează doar pe săptămâna curentă
+	const allowSend = $derived(weekKey == null);
 	const data = $derived(previewQuery.current);
 	const dayName = $derived(PSI_DAYS[settings.dayOfWeek - 1] ?? 'Luni');
 	const alerts = $derived(data ? data.rows.filter((r) => r.alert) : []);
@@ -56,7 +61,10 @@
 			{#if previewQuery.loading && !data}
 				<div class="cl-budget-empty" style="padding: 30px 0; text-align: center">Se generează previzualizarea…</div>
 			{:else if previewQuery.error}
-				<div class="psi-mail-alert">Previzualizarea nu a putut fi generată. Încearcă din nou.</div>
+				<div class="psi-mail-alert" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+					Previzualizarea nu a putut fi generată.
+					<button class="cl-btn-secondary cl-btn-sm" onclick={() => previewQuery.refresh()}>Reîncearcă</button>
+				</div>
 			{:else if data}
 				<div class="psi-mail">
 					<div class="psi-mail-head">
@@ -134,9 +142,11 @@
 		</div>
 		<div class="psi-modal-foot">
 			<button class="cl-btn-secondary" onclick={onclose}>Închide</button>
-			<button class="cl-btn-primary" disabled={sending || !settings.recipients.length} onclick={onsend}>
-				<SendIcon size={13} /> Trimite acum
-			</button>
+			{#if allowSend}
+				<button class="cl-btn-primary" disabled={sending || !settings.recipients.length} onclick={onsend}>
+					<SendIcon size={13} /> Trimite acum
+				</button>
+			{/if}
 		</div>
 	</div>
 </div>

@@ -65,7 +65,7 @@ function psiHash(s: string): number {
 /** Culoare stabilă de „favicon" derivată din id (identică vizual cu designul). */
 export function psiTileColor(id: string): string {
 	const h = Math.round((psiHash(id || 'x') / 4294967296) * 360);
-	return `oklch(0.58 0.13 ${h})`;
+	return `oklch(0.48 0.13 ${h})`;
 }
 
 /** Formatare dată+oră românească scurtă: „24 aug. 2026, 07:04". */

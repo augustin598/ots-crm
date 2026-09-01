@@ -12,6 +12,8 @@ type MeasurementRow = typeof table.pagespeedMeasurement.$inferSelect;
 
 export interface PagespeedStrategyData {
 	last: MeasurementRow | null;
+	/** Cea mai recentă măsurătoare REUȘITĂ (poate fi = last). UI-ul afișează scorurile de aici. */
+	lastOk: MeasurementRow | null;
 	prev: MeasurementRow | null;
 	/** Trendul din spec: diferența față de măsurătoarea anterioară, același site + strategie. */
 	delta: number | null;
@@ -125,6 +127,7 @@ export async function buildPagespeedSites(tenantId: string, opts: PagespeedSites
 		const prevOk = ok[1] ?? null;
 		return {
 			last,
+			lastOk,
 			prev: prevOk,
 			delta:
 				lastOk?.performance != null && prevOk?.performance != null
@@ -143,7 +146,7 @@ export async function buildPagespeedSites(tenantId: string, opts: PagespeedSites
 		trend,
 		sites: sites.map((s) => {
 			const mobile = strategyData(s.id, 'mobile');
-			const lastOkMobile = mobile.last?.status === 'ok' ? mobile.last : mobile.prev;
+			const lastOkMobile = mobile.lastOk;
 			return {
 				...s,
 				pages: s.pages as { url: string; label: string }[],
