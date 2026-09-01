@@ -22,7 +22,15 @@
 	let url = $state('');
 	let name = $state('');
 
-	const urlValid = $derived(/^https?:\/\/.+\..+/.test(url.trim()));
+	// validare reală cu URL() (second opinion Gemini) — serverul re-validează cu v.url()
+	const urlValid = $derived.by(() => {
+		try {
+			const u = new URL(url.trim());
+			return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname.includes('.');
+		} catch {
+			return false;
+		}
+	});
 	const valid = $derived(!!clientId && urlValid);
 
 	function submit() {

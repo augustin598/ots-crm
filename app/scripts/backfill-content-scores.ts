@@ -55,26 +55,31 @@ async function main() {
 		.where(isNotNull(schema.contentArticle.generatedHtml));
 
 	console.log(`[backfill] ${rows.length} articole cu conținut generat`);
-	let updated = 0;
-	let unchanged = 0;
-	for (const a of rows) {
-		const s = computeArticleScores(a);
-		if (s.seoScore === a.seoScore && s.aeoScore === a.aeoScore && s.geoScore === a.geoScore) {
-			unchanged++;
-			continue;
-		}
-		if (APPLY) {
-			await db
-				.update(schema.contentArticle)
-				.set(s)
-				.where(
-					and(
-						eq(schema.contentArticle.id, a.id),
-						eq(schema.contentArticle.tenantId, a.tenantId)
+	const changed = rows
+		.map((a) => ({ a, s: computeArticleScores(a) }))
+		.filter(
+			({ a, s }) => s.seoScore !== a.seoScore || s.aeoScore !== a.aeoScore || s.geoScore !== a.geoScore
+		);
+	const unchanged = rows.length - changed.length;
+	const updated = changed.length;
+	if (APPLY) {
+		// loturi db.batch — un round-trip Turso per 50 de update-uri, nu unul per articol
+		const BATCH = 50;
+		for (let i = 0; i < changed.length; i += BATCH) {
+			const chunk = changed.slice(i, i + BATCH).map(({ a, s }) =>
+				db
+					.update(schema.contentArticle)
+					.set(s)
+					.where(
+						and(
+							eq(schema.contentArticle.id, a.id),
+							eq(schema.contentArticle.tenantId, a.tenantId)
+						)
 					)
-				);
+			);
+			await db.batch(chunk as [(typeof chunk)[number], ...typeof chunk]);
+			console.log(`[backfill] lot ${Math.min(i + BATCH, changed.length)}/${changed.length}`);
 		}
-		updated++;
 	}
 	console.log(
 		`[backfill] ${DRY_RUN ? '(dry-run) ar actualiza' : 'actualizate'} ${updated} · neschimbate ${unchanged}`

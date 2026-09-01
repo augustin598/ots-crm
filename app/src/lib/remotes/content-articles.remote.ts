@@ -697,22 +697,26 @@ export const recalculateContentScores = command(async () => {
 			)
 		);
 
-	let updated = 0;
-	// secvențial: Turso are un singur writer; volumele sunt de ordinul sutelor
-	for (const a of rows) {
-		const s = computeArticleScores(a);
-		if (s.seoScore === a.seoScore && s.aeoScore === a.aeoScore && s.geoScore === a.geoScore) {
-			continue;
-		}
-		await db
-			.update(table.contentArticle)
-			.set(s)
-			.where(
-				and(eq(table.contentArticle.id, a.id), eq(table.contentArticle.tenantId, tenantId))
-			);
-		updated++;
+	// doar rândurile ale căror scoruri se schimbă (idempotent), trimise în loturi
+	// db.batch — un singur round-trip Turso per lot, nu un UPDATE per articol
+	// (second opinion Gemini: bucla secvențială nu scala peste câteva sute de articole)
+	const changed = rows
+		.map((a) => ({ id: a.id, scores: computeArticleScores(a), prev: a }))
+		.filter(
+			({ scores: s, prev: a }) =>
+				s.seoScore !== a.seoScore || s.aeoScore !== a.aeoScore || s.geoScore !== a.geoScore
+		);
+	const BATCH = 50;
+	for (let i = 0; i < changed.length; i += BATCH) {
+		const chunk = changed.slice(i, i + BATCH).map(({ id, scores }) =>
+			db
+				.update(table.contentArticle)
+				.set(scores)
+				.where(and(eq(table.contentArticle.id, id), eq(table.contentArticle.tenantId, tenantId)))
+		);
+		await db.batch(chunk as [(typeof chunk)[number], ...typeof chunk]);
 	}
-	return { scanned: rows.length, updated };
+	return { scanned: rows.length, updated: changed.length };
 });
 
 /** Reset failed/thin rows back to pending, then relaunch. */
