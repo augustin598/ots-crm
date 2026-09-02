@@ -252,3 +252,12 @@ export function parseLocale(locale: string): { googleDomain: string; hl: string;
 	const gl = m ? m[1] : 'us';
 	return { googleDomain, hl, gl };
 }
+
+/**
+ * Forma canonică a unui cuvânt cheie pentru comparații: fără spații în plus, litere
+ * mici. Google nu face diferență între „Studio Videochat" și „studio  videochat".
+ * Folosită și la potrivirea interogărilor din GSC cu cuvintele urmărite.
+ */
+export function normalizeKeyword(input: string): string {
+	return input.trim().replace(/\s+/g, ' ').toLowerCase();
+}

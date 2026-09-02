@@ -11,7 +11,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { requireStaff } from '$lib/server/get-actor';
 import { getSchedulerQueue } from '$lib/server/scheduler';
-import { RANK_HOURS } from '$lib/logic/rank-tracker';
+import { RANK_HOURS, normalizeKeyword } from '$lib/logic/rank-tracker';
 import { buildRankProjects, buildRankProjectDetail } from '$lib/server/rank-tracker/projects-data';
 import { getRankRunProgress, rankRunProgressKey } from '$lib/server/rank-tracker/run';
 import { getRedis } from '$lib/server/redis';
@@ -27,14 +27,6 @@ function requireTenantEvent() {
 	const tenant = event?.locals.tenant;
 	if (!event?.locals.user || !tenant) throw error(401, 'Unauthorized');
 	return { event, tenantId: tenant.id, userId: event.locals.user.id as string };
-}
-
-/**
- * Forma canonică a unui cuvânt cheie pentru comparații: fără spații în plus, litere mici.
- * Google nu face diferență între „Studio Videochat" și „studio  videochat".
- */
-function normalizeKeyword(input: string): string {
-	return input.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function normalizeDomain(input: string): string {
