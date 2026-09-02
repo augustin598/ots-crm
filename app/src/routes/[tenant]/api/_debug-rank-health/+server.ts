@@ -72,6 +72,24 @@ export const GET: RequestHandler = async (event) => {
 		lastRuns
 	};
 
+	// Starea motorului adaptiv (ritm curent, blocări, cooldown, buget) — ops la un click.
+	let engine: Record<string, unknown> | null = null;
+	try {
+		const { loadEngineState } = await import('$lib/server/rank-tracker/engine-store');
+		const st = await loadEngineState();
+		engine = {
+			paceMs: st.paceMs,
+			blockCount: st.blockCount,
+			cooldownUntil: st.cooldownUntil ? new Date(st.cooldownUntil).toISOString() : null,
+			queriesToday: st.queriesToday,
+			dayKey: st.dayKey,
+			successStreak: st.successStreak
+		};
+	} catch {
+		/* fără Redis, fără stare */
+	}
+	Object.assign(base, { engine });
+
 	if (event.url.searchParams.get('probe') !== '1') return json(base);
 
 	// Probă reală prin scraper.

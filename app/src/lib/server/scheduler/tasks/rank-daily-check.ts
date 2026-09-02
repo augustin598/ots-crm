@@ -3,10 +3,12 @@
 // one-shot `rank_project_check` per proiect activ care NU a rulat deja azi.
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { rankSettings, rankProject, rankRun } from '$lib/server/db/schema';
+import { rankSettings, rankProject, rankRun, rankKeyword } from '$lib/server/db/schema';
 import { logInfo, serializeError, logWarning } from '$lib/server/logger';
 import { getSchedulerQueue } from '$lib/server/scheduler';
 import { rankDayKey } from '$lib/logic/rank-tracker';
+import { planWindows } from '$lib/logic/scrape-engine';
+import { loadEngineState } from '$lib/server/rank-tracker/engine-store';
 
 const BUCHAREST_TZ = 'Europe/Bucharest';
 
@@ -21,7 +23,7 @@ function bucharestHour(d: Date): number {
 
 export interface RankDailyDeps {
 	loadEnabledSettings?: () => Promise<{ tenantId: string; checkHour: string }[]>;
-	loadActiveProjects?: (tenantId: string) => Promise<{ id: string }[]>;
+	loadActiveProjects?: (tenantId: string) => Promise<{ id: string; queries?: number }[]>;
 	hasRunToday?: (projectId: string, dayKey: string) => Promise<boolean>;
 	enqueue?: (jobId: string, params: Record<string, unknown>, delayMs?: number) => Promise<void>;
 }
@@ -39,10 +41,22 @@ async function defaultLoadEnabledSettings() {
 }
 
 async function defaultLoadActiveProjects(tenantId: string) {
-	return db
-		.select({ id: rankProject.id })
+	// Include numărul de interogări (cuvinte × dispozitive) — motorul planifică ferestrele
+	// zilei din duratele estimate, deci un proiect mare împinge automat următoarele mai târziu.
+	const projects = await db
+		.select({ id: rankProject.id, devices: rankProject.devices })
 		.from(rankProject)
 		.where(and(eq(rankProject.tenantId, tenantId), eq(rankProject.active, true)));
+	const counts = await db
+		.select({ projectId: rankKeyword.projectId, id: rankKeyword.id })
+		.from(rankKeyword)
+		.where(eq(rankKeyword.active, true));
+	const byProject = new Map<string, number>();
+	for (const k of counts) byProject.set(k.projectId, (byProject.get(k.projectId) ?? 0) + 1);
+	return projects.map((p) => ({
+		id: p.id,
+		queries: (byProject.get(p.id) ?? 0) * ((p.devices as string[]).length || 1)
+	}));
 }
 
 async function defaultHasRunToday(projectId: string, dayKey: string): Promise<boolean> {
@@ -93,7 +107,7 @@ export async function processRankDailyCheck(
 		if (Number.isNaN(settingHour) || settingHour !== hour) continue;
 		checkedTenants++;
 
-		let projects: { id: string }[] = [];
+		let projects: { id: string; queries?: number }[] = [];
 		try {
 			projects = await loadActiveProjects(s.tenantId);
 		} catch (e) {
@@ -101,20 +115,22 @@ export async function processRankDailyCheck(
 			continue;
 		}
 
+		// FERESTRE ORARE planificate de MOTOR: fiecare proiect pornește după durata
+		// ESTIMATĂ a celui dinainte (funcție de numărul lui de cuvinte și de ritmul curent
+		// al motorului) + gaura de răcire RANK_STAGGER_MINUTES (implicit 120 min), + 0-10
+		// min aleator. Scalabil: 26 sau 200 de cuvinte — planul se întinde singur.
+		const engState = await loadEngineState(now);
+		const gapMs = (Number(process.env.RANK_STAGGER_MINUTES ?? 120) || 120) * 60_000;
+		const plan = planWindows(projects.map((p) => p.queries ?? 0), engState, gapMs);
 		let projectIndex = 0;
 		for (const p of projects) {
 			try {
-				if (await hasRunToday(p.id, dayKey)) continue;
-				// FERESTRE ORARE (anti-blocare): proiectele pornesc PE RÂND, nu lipite.
-				// Primul la ora setată (06:00), următoarele la câte RANK_STAGGER_MINUTES
-				// distanță (implicit 150 = 2h30), plus 0-10 min aleator. Trei salve de câte
-				// 26 de interogări cu ore de liniște între ele trec mult mai ușor decât o
-				// rafală de 78 — iar dacă Google taie o fereastră, IP-ul se răcește până la
-				// următoarea.
-				const staggerMin =
-					Number(process.env.RANK_STAGGER_MINUTES ?? 150) || 150;
+				if (await hasRunToday(p.id, dayKey)) {
+					projectIndex++;
+					continue;
+				}
 				const delayMs =
-					projectIndex * staggerMin * 60_000 + Math.floor(Math.random() * 10 * 60_000);
+					(plan.delaysMs[projectIndex] ?? 0) + Math.floor(Math.random() * 10 * 60_000);
 				await enqueue(
 					`rank-project-check-${p.id}-${dayKey}`,
 					{

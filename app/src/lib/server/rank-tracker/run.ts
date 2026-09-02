@@ -17,6 +17,15 @@ import { resolveSerpProvider, shouldFailover, type ResolvedProviders } from './p
 import { SerpProviderError, type SerpQuery } from './providers/types';
 import { computeAlert } from './alerts';
 import { RUN_STALE_MS, SERP_DEPTH } from './config';
+import {
+	canStartRun,
+	extraDelayMs,
+	onBlock as engineOnBlock,
+	onFailure as engineOnFailure,
+	onSuccess as engineOnSuccess,
+	type EngineState
+} from '$lib/logic/scrape-engine';
+import { engineConfig, loadEngineState, saveEngineState } from './engine-store';
 
 const PROGRESS_TTL_S = 30 * 60;
 const FINAL_TTL_S = 20;
@@ -42,11 +51,20 @@ export interface RankRunSummary {
 	alerts: number;
 	status: 'ok' | 'partial' | 'interrupted';
 	skipped: boolean;
+	/** Setat când motorul amână rularea (cooldown/buget): momentul reîncercării (epoch ms). */
+	deferredUntilMs?: number;
+	/** Cuvintele neîncercate la o rulare oprită de blocare — pentru re-programare. */
+	unattemptedKeywordIds?: string[];
 }
 
 export interface RankRunDeps {
 	/** Sursă de aleator pentru amestecarea cozii — injectabilă pentru determinism în teste. */
 	shuffle?: () => number;
+	/** Motorul adaptiv (stare persistată) — injectabil pentru teste fără Redis. */
+	engine?: {
+		load: () => Promise<EngineState>;
+		save: (state: EngineState) => Promise<void>;
+	};
 	/** Providerii deja rezolvați (altfel se rezolvă din setările tenantului). */
 	providers?: ResolvedProviders;
 	sleep?: (ms: number) => Promise<void>;
@@ -160,6 +178,35 @@ export async function runRankProjectCheck(
 		[jobs[i], jobs[j]] = [jobs[j], jobs[i]];
 	}
 
+	// ── MOTORUL ADAPTIV: aceleași reguli pentru cron ȘI manual ──
+	// (utilizatorul a cerut explicit: pornirea manuală nu ocolește protecțiile).
+	const engineIo = deps.engine ?? { load: () => loadEngineState(now()), save: saveEngineState };
+	const engCfg = engineConfig();
+	let engState = await engineIo.load();
+	{
+		const nowMs = now().getTime();
+		// miezul nopții următor (aprox. via rankDayKey ar cere tz; 24h de la 00:00 local e suficient
+		// pentru amânarea de buget — cronul zilnic oricum reia dimineața)
+		const nextDay = new Date(nowMs);
+		nextDay.setHours(24, 5, 0, 0);
+		const decision = canStartRun(engState, jobs.length, engCfg, nowMs, nextDay.getTime());
+		if (!decision.ok) {
+			logInfo(
+				'scheduler',
+				`[rank] motorul amână rularea proiectului ${project.id}: ${decision.reason} până la ${new Date(decision.retryAtMs).toISOString()}`
+			);
+			return { ...emptySummary(), deferredUntilMs: decision.retryAtMs };
+		}
+		// Buget parțial: rulăm cât încape azi; restul se amână, nu se refuză integral.
+		if (decision.allowedQueries < jobs.length) {
+			const dropped = jobs.splice(decision.allowedQueries);
+			logInfo(
+				'scheduler',
+				`[rank] buget zilnic parțial: rulez ${jobs.length}, amân ${dropped.length} (proiect ${project.id})`
+			);
+		}
+	}
+
 	// Baza de comparație: cel mai recent snapshot al fiecărui (keyword, device) DINAINTE
 	// de ziua curentă → pentru delte și alerte.
 	const todayKey = rankDayKey(now());
@@ -253,6 +300,11 @@ export async function runRankProjectCheck(
 			logInfo('scheduler', `[rank] failover pe DataForSEO (rată de eșec) — proiect ${project.id}`);
 		}
 
+		// Excedent adaptiv peste ritmul de bază (scraperul doarme deja baza+jitter):
+		// 0 când suntem sănătoși, crescut după blocări/eșecuri soft repetate.
+		const extra = extraDelayMs(engState, engCfg);
+		if (extra > 0 && activeProvider.name === 'scraper') await sleep(extra);
+
 		const measuredAt = now();
 		try {
 			let result;
@@ -314,6 +366,10 @@ export async function runRankProjectCheck(
 
 			checked++;
 			todayPositions.push(nextPos);
+			if (activeProvider.name === 'scraper') {
+				engState = engineOnSuccess(engState, engCfg);
+				await engineIo.save(engState).catch(() => {});
+			}
 
 			const { kind } = positionDelta(prevPos, nextPos);
 			if (kind === 'up') up++;
@@ -340,9 +396,17 @@ export async function runRankProjectCheck(
 			const { message } = serializeError(error);
 			if (error instanceof SerpProviderError && error.kind === 'blocked') {
 				blocked = true;
+				if (activeProvider.name === 'scraper') {
+					engState = engineOnBlock(engState, engCfg, now().getTime());
+					await engineIo.save(engState).catch(() => {});
+				}
 				failedNotes.push(`blocat de Google la „${job.keyword}" (${job.device})`);
 				logError('scheduler', `[rank] blocat — opresc rularea proiectului ${project.id}`);
 				break; // nu insista pe scraper după o blocare
+			}
+			if (activeProvider.name === 'scraper') {
+				engState = engineOnFailure(engState, engCfg);
+				await engineIo.save(engState).catch(() => {});
 			}
 			failedNotes.push(`„${job.keyword}" (${job.device}): ${message.slice(0, 120)}`);
 			logError('scheduler', `[rank] verificare eșuată ${job.keyword} (${job.device}): ${message}`);
@@ -389,7 +453,25 @@ export async function runRankProjectCheck(
 		`[rank] proiect ${project.domain}: ${checked} verificate, ${failed} eșuate, ${up}↑ ${down}↓ ${flat}→, ${alertRows.length} alerte`
 	);
 
-	return { runId, checked, failed, up, down, flat, alerts: alertRows.length, status, skipped: false };
+	// Cuvintele neatinse (blocare la mijloc sau buget parțial): re-programabile de apelant
+	// după cooldown-ul motorului, în loc să aștepte cronul de a doua zi.
+	const attempted = checked + failed;
+	const unattemptedKeywordIds =
+		attempted < jobs.length ? [...new Set(jobs.slice(attempted).map((j) => j.keywordId))] : undefined;
+
+	return {
+		runId,
+		checked,
+		failed,
+		up,
+		down,
+		flat,
+		alerts: alertRows.length,
+		status,
+		skipped: false,
+		unattemptedKeywordIds,
+		deferredUntilMs: unattemptedKeywordIds?.length ? (engState.cooldownUntil ?? undefined) : undefined
+	};
 	} finally {
 		// Închide browserul partajat al scraperului (dacă providerul îl deține).
 		await providers.primary.close?.().catch(() => {});

@@ -118,9 +118,26 @@ Ce NU s-a implementat (raport impact/efort slab pe un singur IP): mișcări de m
 tastare simulată, rotație de IP prin VPN/Tor (blocklist public — mai rău). Dacă blocarea
 persistă și după astea: `RANK_PACE_MS` mai mare, volum mai mic, sau DataForSEO pe `auto`.
 
+## Motorul adaptiv de rulare (`$lib/logic/scrape-engine.ts` + `engine-store.ts`)
+Stare per canal de ieșire (IP/proxy), persistată în Redis (`rank:engine:direct`), partajată
+de TOATE rulările — cron și manual deopotrivă (cerință explicită: pornirea manuală nu
+ocolește regulile). Reviewed de opencode; fix-urile lui aplicate (recuperare accelerată,
+reset de ritm la epocă nouă, buget parțial, semnal de pre-blocare).
+- **AIMD**: blocare → ritm ×1.6 (cap 60 s) + cooldown exponențial 30 min→8 h; succes →
+  −5% din bază, −15% după 20 de succese consecutive; 3 eșecuri soft consecutive → ×1.3
+  preventiv. Blocările mai vechi de 24 h se iartă (ritmul revine la bază).
+- **Poarta de start**: în cooldown nu se rulează deloc; buget zilnic `RANK_DAILY_QUERY_BUDGET`
+  (120) cu tăiere PARȚIALĂ a batch-ului (rulează cât încape, restul se amână).
+- **Re-programare automată**: rulare amânată sau blocată la mijloc → jobul se re-pune în
+  coadă singur după cooldown (+2 min), max 2 reluări/zi, cu DOAR cuvintele rămase.
+- **Planificarea zilei**: `planWindows` — fiecare proiect pornește după durata estimată a
+  celui dinainte (cuvinte × ritmul curent) + gaura `RANK_STAGGER_MINUTES` (120). Scalabil:
+  un proiect de 200 de cuvinte împinge automat următoarele.
+- Starea e vizibilă în `_debug-rank-health` (câmpul `engine`).
+
 ## Operațional
 - Env: `RANK_PACE_MS` (implicit 8000), `RANK_PROXY_URLS` (listă separată prin virgulă),
-  `RANK_MAX_KEYWORDS_PER_PROJECT` (500), `RANK_STAGGER_MINUTES` (150), `RANK_SERP_DEPTH` (implicit **30** = 3 pagini;
+  `RANK_MAX_KEYWORDS_PER_PROJECT` (500), `RANK_STAGGER_MINUTES` (120, gaura dintre ferestre), `RANK_DAILY_QUERY_BUDGET` (120), `RANK_SERP_DEPTH` (implicit **30** = 3 pagini;
   cu paginare, 100 ar însemna până la 10 cereri per cuvânt → peste 10 minute și blocare
   aproape sigură. Ridică-l doar cu proxy-uri sau pe DataForSEO).
 - Debug: `GET /[tenant]/api/_debug-rank-health` (admin) — Chromium, pacing/proxy,
