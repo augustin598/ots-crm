@@ -16,6 +16,7 @@
 	moduleHrefs={{
 		seoLinks: `${p}/backlinks`,
 		pagespeed: `${p}/pagespeed`,
+		rankTracker: `${p}/rank-tracker`,
 		content: `${p}/content`
 	}}
 />

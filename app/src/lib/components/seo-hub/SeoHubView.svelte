@@ -50,7 +50,7 @@
 	}: {
 		data: SeoHubData;
 		isClient?: boolean;
-		moduleHrefs?: { seoLinks: string; pagespeed: string; content: string };
+		moduleHrefs?: { seoLinks: string; pagespeed: string; rankTracker: string; content: string };
 	} = $props();
 
 	const base = $derived(`/${page.params.tenant}`);
@@ -58,6 +58,7 @@
 		moduleHrefs ?? {
 			seoLinks: `${base}/seo-links`,
 			pagespeed: `${base}/seo-links/pagespeed`,
+			rankTracker: `${base}/seo-links/rank-tracker`,
 			content: `${base}/content`
 		}
 	);
@@ -383,6 +384,16 @@
 				<div class="sh-module-stat"><b class="psi-{psiScoreLevel(avgPs)}">{avgPs ?? '—'}</b><span>Mediu mobil</span></div>
 				<div class="sh-module-stat"><b>{cwvPassCount}/{cwvKnownCount}</b><span>Trec CWV</span></div>
 				<div class="sh-module-stat"><b>{nf.format(data.lastScans.length)}</b><span>Site-uri</span></div>
+			</div>
+		</a>
+		<a class="sh-module" href={hrefs.rankTracker}>
+			<div class="sh-module-head">
+				<span class="sh-module-ic" style="background: rgba(37,99,235,.08); color: #2563eb"><TrendingUpIcon size={17} /></span>
+				<div>
+					<div class="sh-module-name">Rank Tracker</div>
+					<div class="sh-module-sub">poziții Google organic, zilnic</div>
+				</div>
+				<span class="sh-module-arrow"><ChevronRightIcon size={16} /></span>
 			</div>
 		</a>
 		<a class="sh-module" href={hrefs.content}>
