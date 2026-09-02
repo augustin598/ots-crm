@@ -300,6 +300,43 @@ describe('fetchSerpScraper — pacing, proxy, cleanup', () => {
 	});
 });
 
+describe('createScraperProvider — sesiune persistată', () => {
+	test('la blocare, sesiunea salvată se ARUNCĂ (profil ars)', async () => {
+		const rec = newRecorder();
+		let cleared = 0;
+		const provider = createScraperProvider({
+			launch: async () => fakeBrowser(captchaHtml, { recorder: rec }),
+			sleep: async () => {},
+			env: {},
+			jitter: () => 0,
+			loadSession: async () => null,
+			saveSession: async () => {},
+			clearSession: async () => {
+				cleared++;
+			}
+		});
+		await expect(provider.fetchSerp(baseQuery(), 'example.ro')).rejects.toThrow();
+		expect(cleared).toBe(1);
+		await provider.close?.();
+	});
+
+	test('warm-up-ul folosește cookie-urile sesiunii precedente, dacă există', async () => {
+		const rec = newRecorder();
+		const savedCookies = [{ name: 'NID', value: 'sesiune-veche', domain: '.google.ro', path: '/' }];
+		const provider = createScraperProvider({
+			launch: async () => fakeBrowser(desktopHtml, { recorder: rec }),
+			sleep: async () => {},
+			env: {},
+			jitter: () => 0,
+			loadSession: async () => savedCookies,
+			saveSession: async () => {}
+		});
+		await provider.fetchSerp(baseQuery(), 'example.ro');
+		expect(rec.cookies.some((c) => c.name === 'NID')).toBe(true);
+		await provider.close?.();
+	});
+});
+
 describe('createScraperProvider — browser partajat pe rulare', () => {
 	test('lansează UN singur browser pentru mai multe interogări, închis prin close()', async () => {
 		const rec = newRecorder();
@@ -320,7 +357,10 @@ describe('createScraperProvider — browser partajat pe rulare', () => {
 		await provider.fetchSerp(baseQuery({ keyword: 'c' }), 'example.ro');
 
 		expect(launches).toBe(1); // un singur browser pentru 3 interogări
-		expect(rec.pageClosed).toBe(3); // dar pagină nouă închisă la fiecare
+		// 3 pagini de căutare + 1 pagină de WARM-UP (homepage-ul Google la lansare, care
+		// primește cookie-urile de sesiune) — toate închise după folosire.
+		expect(rec.pageClosed).toBe(4);
+		expect(rec.gotoUrls[0]).toBe('https://www.google.ro/'); // warm-up ÎNAINTEA primei căutări
 		expect(rec.browserClosed).toBe(false); // nu se închide între interogări
 
 		await provider.close?.();

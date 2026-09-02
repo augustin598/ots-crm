@@ -23,7 +23,7 @@ export interface RankDailyDeps {
 	loadEnabledSettings?: () => Promise<{ tenantId: string; checkHour: string }[]>;
 	loadActiveProjects?: (tenantId: string) => Promise<{ id: string }[]>;
 	hasRunToday?: (projectId: string, dayKey: string) => Promise<boolean>;
-	enqueue?: (jobId: string, params: Record<string, unknown>) => Promise<void>;
+	enqueue?: (jobId: string, params: Record<string, unknown>, delayMs?: number) => Promise<void>;
 }
 
 export interface RankDailyResult {
@@ -63,11 +63,11 @@ async function defaultHasRunToday(projectId: string, dayKey: string): Promise<bo
 	return !!row;
 }
 
-async function defaultEnqueue(jobId: string, params: Record<string, unknown>) {
+async function defaultEnqueue(jobId: string, params: Record<string, unknown>, delayMs = 0) {
 	await getSchedulerQueue().add(
 		'rank-project-check',
 		{ type: 'rank_project_check', params },
-		{ jobId, attempts: 1, removeOnComplete: true, removeOnFail: true }
+		{ jobId, delay: delayMs, attempts: 1, removeOnComplete: true, removeOnFail: true }
 	);
 }
 
@@ -101,14 +101,30 @@ export async function processRankDailyCheck(
 			continue;
 		}
 
+		let projectIndex = 0;
 		for (const p of projects) {
 			try {
 				if (await hasRunToday(p.id, dayKey)) continue;
-				await enqueue(`rank-project-check-${p.id}-${dayKey}`, {
-					tenantId: s.tenantId,
-					projectId: p.id,
-					trigger: 'cron'
-				});
+				// FERESTRE ORARE (anti-blocare): proiectele pornesc PE RÂND, nu lipite.
+				// Primul la ora setată (06:00), următoarele la câte RANK_STAGGER_MINUTES
+				// distanță (implicit 150 = 2h30), plus 0-10 min aleator. Trei salve de câte
+				// 26 de interogări cu ore de liniște între ele trec mult mai ușor decât o
+				// rafală de 78 — iar dacă Google taie o fereastră, IP-ul se răcește până la
+				// următoarea.
+				const staggerMin =
+					Number(process.env.RANK_STAGGER_MINUTES ?? 150) || 150;
+				const delayMs =
+					projectIndex * staggerMin * 60_000 + Math.floor(Math.random() * 10 * 60_000);
+				await enqueue(
+					`rank-project-check-${p.id}-${dayKey}`,
+					{
+						tenantId: s.tenantId,
+						projectId: p.id,
+						trigger: 'cron'
+					},
+					delayMs
+				);
+				projectIndex++;
 				enqueued++;
 			} catch (e) {
 				logWarning('scheduler', `[rank] enqueue eșuat pentru proiectul ${p.id}: ${serializeError(e).message}`);

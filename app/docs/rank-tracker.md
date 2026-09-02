@@ -99,9 +99,28 @@ proaspăt) întorcea `ok:true`, iar rularea prin worker eșua „blocat de Googl
 Atenție și la **dev servere multiple**: două instanțe consumă din aceeași coadă Redis, iar cea
 veche răspunde „Unknown scheduler job type" la joburile adăugate de codul nou.
 
+## Strategia anti-blocare (gratuită, 2 sep. 2026)
+Brainstorming Claude + opencode; Gemini n-a răspuns la timp. DataForSEO nu are magie de
+cod — puterea lor sunt IP-urile rezidențiale multiple. Pe UN IP, pârghiile gratuite reale:
+1. **Sesiune persistentă cu warm-up**: la lansare, browserul vizitează homepage-ul Google
+   cu cookie-urile sesiunii precedente (Redis `rank:scraper:session`, TTL 7 zile) —
+   „utilizator recurent", nu browser proaspăt. La blocare, sesiunea se ARUNCĂ (profil ars).
+2. **Ferestre orare**: proiectele pornesc pe rând, la `RANK_STAGGER_MINUTES` distanță
+   (implicit 150 = 2h30) + 0-10 min aleator. Salve de 26, nu rafală de 78.
+3. **Pauze umane**: la fiecare 8-12 interogări, 45-90 s de liniște; jitter puternic
+   pace..2×pace (interval cvasi-constant = tipar de robot).
+4. **Amprentă consecventă pe rulare, variată între rulări**: pool de 4 combinații
+   UA+viewport, aleasă la lansarea browserului.
+5. **Stealth suplimentar**: `window.chrome` fals, patch pe `permissions.query`
+   (ambele semnale clasice de headless), Referer de pe homepage.
+6. **Ordine aleatorie a cuvintelor** la fiecare rulare.
+Ce NU s-a implementat (raport impact/efort slab pe un singur IP): mișcări de mouse/scroll,
+tastare simulată, rotație de IP prin VPN/Tor (blocklist public — mai rău). Dacă blocarea
+persistă și după astea: `RANK_PACE_MS` mai mare, volum mai mic, sau DataForSEO pe `auto`.
+
 ## Operațional
 - Env: `RANK_PACE_MS` (implicit 8000), `RANK_PROXY_URLS` (listă separată prin virgulă),
-  `RANK_MAX_KEYWORDS_PER_PROJECT` (500), `RANK_SERP_DEPTH` (implicit **30** = 3 pagini;
+  `RANK_MAX_KEYWORDS_PER_PROJECT` (500), `RANK_STAGGER_MINUTES` (150), `RANK_SERP_DEPTH` (implicit **30** = 3 pagini;
   cu paginare, 100 ar însemna până la 10 cereri per cuvânt → peste 10 minute și blocare
   aproape sigură. Ridică-l doar cu proxy-uri sau pe DataForSEO).
 - Debug: `GET /[tenant]/api/_debug-rank-health` (admin) — Chromium, pacing/proxy,

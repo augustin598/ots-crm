@@ -7,6 +7,7 @@ import { db } from '$lib/server/db';
 import { rankSettings, serpIntegration } from '$lib/server/db/schema';
 import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { logWarning } from '$lib/server/logger';
+import { getRedis } from '$lib/server/redis';
 import { createScraperProvider, type ScraperDeps } from './serp-scraper';
 import { createDataforseoProvider } from './dataforseo';
 import { SerpProviderError, type SerpProvider } from './types';
@@ -16,6 +17,9 @@ export type ProviderMode = 'scraper' | 'dataforseo' | 'auto';
 /** Prag de failover în modul 'auto': peste 20% eșecuri (cu minim de verificări). */
 const FAILOVER_RATIO = 0.2;
 const FAILOVER_MIN_CHECKS = 10;
+
+/** Cheia Redis a sesiunii Google persistate (cookie-urile de warm-up). */
+const SESSION_KEY = 'rank:scraper:session';
 
 /** Adevărat când rata de eșec a unei rulări cere trecerea pe providerul de rezervă. */
 export function shouldFailover(run: { keywordsChecked: number; failed: number }): boolean {
@@ -114,7 +118,22 @@ export async function resolveSerpProvider(
 	const dfsDeps = { loadIntegration, decryptFn, fetchImpl: deps.fetchImpl };
 
 	const mode = await loadMode(tenantId);
-	const scraper = createScraperProvider(deps.scraperDeps);
+	const scraper = createScraperProvider({
+		...(deps.scraperDeps ?? {}),
+		// Sesiunea Google (NID & co.) persistă între rulări în Redis: un „utilizator
+		// recurent" e mult mai greu de blocat decât un browser proaspăt în fiecare zi.
+		// TTL 7 zile; se șterge automat la blocare (profil ars).
+		loadSession: async () => {
+			const raw = await getRedis().get(SESSION_KEY);
+			return raw ? (JSON.parse(raw) as Array<Record<string, unknown>>) : null;
+		},
+		saveSession: async (cookies) => {
+			await getRedis().set(SESSION_KEY, JSON.stringify(cookies), 'EX', 7 * 24 * 3600);
+		},
+		clearSession: async () => {
+			await getRedis().del(SESSION_KEY);
+		}
+	});
 
 	if (mode === 'scraper') {
 		return { mode, primary: scraper, fallback: null };

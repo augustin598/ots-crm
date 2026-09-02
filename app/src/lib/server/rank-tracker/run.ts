@@ -45,6 +45,8 @@ export interface RankRunSummary {
 }
 
 export interface RankRunDeps {
+	/** Sursă de aleator pentru amestecarea cozii — injectabilă pentru determinism în teste. */
+	shuffle?: () => number;
 	/** Providerii deja rezolvați (altfel se rezolvă din setările tenantului). */
 	providers?: ResolvedProviders;
 	sleep?: (ms: number) => Promise<void>;
@@ -148,6 +150,14 @@ export async function runRankProjectCheck(
 				location: kw.location || defaultLocation
 			});
 		}
+	}
+	// Ordine ALEATORIE la fiecare rulare (anti-detecție): aceleași interogări, în aceeași
+	// ordine, la aceeași oră, zi de zi, sunt un tipar de robot pe care Google îl vede ușor.
+	// Amestecatul e gratuit și nu schimbă nimic funcțional — upsertul e per (keyword, zi).
+	const rng = deps.shuffle ?? Math.random;
+	for (let i = jobs.length - 1; i > 0; i--) {
+		const j = Math.floor(rng() * (i + 1));
+		[jobs[i], jobs[j]] = [jobs[j], jobs[i]];
 	}
 
 	// Baza de comparație: cel mai recent snapshot al fiecărui (keyword, device) DINAINTE

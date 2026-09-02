@@ -25,6 +25,8 @@ export interface PageLike {
 	setCookie(...cookies: Array<Record<string, unknown>>): Promise<void>;
 	evaluateOnNewDocument(fn: (...a: unknown[]) => unknown): Promise<void>;
 	goto(url: string, opts: { waitUntil?: string; timeout?: number }): Promise<unknown>;
+	/** Cookie-urile contextului — opțional, pentru persistarea sesiunii între rulări. */
+	cookies?(...urls: string[]): Promise<Array<Record<string, unknown>>>;
 	content(): Promise<string>;
 	/** URL-ul final după redirecturi; opțional ca să nu rupem dublurile din teste. */
 	url?(): string;
@@ -45,6 +47,16 @@ export interface ScraperDeps {
 	env?: Record<string, string | undefined>;
 	/** Jitter 0..1 (implicit aleator) — injectabil pentru determinism în teste. */
 	jitter?: () => number;
+	/**
+	 * Persistarea sesiunii Google între rulări (cookie-urile NID/AEC primite de la
+	 * Google la warm-up). O sesiune „încălzită" care revine zilnic arată ca un
+	 * utilizator recurent, nu ca un browser proaspăt — una dintre puținele pârghii
+	 * gratuite reale contra blocării. Implementarea reală e în resolve.ts (Redis).
+	 */
+	loadSession?: () => Promise<Array<Record<string, unknown>> | null>;
+	saveSession?: (cookies: Array<Record<string, unknown>>) => Promise<void>;
+	/** Aruncă sesiunea salvată — apelat la blocare, ca să nu cărăm un profil ars. */
+	clearSession?: () => Promise<void>;
 }
 
 // Contor round-robin pentru proxy-uri, la nivel de proces.
@@ -54,8 +66,21 @@ export function _resetScraperState(): void {
 	proxyCounter = 0;
 }
 
-const UA_DESKTOP =
-	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+/**
+ * Amprenta se alege O DATĂ per lansare de browser și rămâne consecventă pe toată
+ * rularea (UA + viewport care se contrazic între cereri sunt ele însele un semnal).
+ * Între rulări variază — un „utilizator" ușor diferit în fiecare zi.
+ */
+const DESKTOP_FINGERPRINTS = [
+	{ ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', width: 1366, height: 768 },
+	{ ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36', width: 1536, height: 864 },
+	{ ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', width: 1440, height: 900 },
+	{ ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36', width: 1680, height: 1050 }
+];
+let sessionFp = DESKTOP_FINGERPRINTS[0];
+function pickFingerprint(jitter: () => number): void {
+	sessionFp = DESKTOP_FINGERPRINTS[Math.floor(jitter() * DESKTOP_FINGERPRINTS.length) % DESKTOP_FINGERPRINTS.length];
+}
 const UA_MOBILE =
 	'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
 
@@ -147,8 +172,8 @@ async function preparePage(page: PageLike, q: SerpQuery): Promise<void> {
 		await page.setUserAgent(UA_MOBILE);
 		await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
 	} else {
-		await page.setUserAgent(UA_DESKTOP);
-		await page.setViewport({ width: 1366, height: 768 });
+		await page.setUserAgent(sessionFp.ua);
+		await page.setViewport({ width: sessionFp.width, height: sessionFp.height });
 	}
 	// `webdriver` trebuie să fie UNDEFINED, nu `false`: proprietatea prezentă cu valoarea
 	// `false` e ea însăși un semnal de automatizare. Plus limbi și plugin-uri, altfel
@@ -157,8 +182,27 @@ async function preparePage(page: PageLike, q: SerpQuery): Promise<void> {
 		Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 		Object.defineProperty(navigator, 'languages', { get: () => ['ro-RO', 'ro', 'en-US'] });
 		Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+		// Chrome real are window.chrome cu runtime/loadTimes; headless-ul nu — semnal clasic.
+		const w = window as unknown as Record<string, unknown>;
+		if (!w.chrome) w.chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+		// Chrome real răspunde la query({name:'notifications'}) cu starea permisiunii,
+		// headless-ul răspunde altfel — al doilea semnal clasic.
+		try {
+			const perms = navigator.permissions;
+			const orig = perms.query.bind(perms);
+			perms.query = ((params: { name: string }) =>
+				params.name === 'notifications'
+					? Promise.resolve({ state: Notification.permission } as PermissionStatus)
+					: orig(params as PermissionDescriptor)) as typeof perms.query;
+		} catch {
+			/* mediu fără Permissions API */
+		}
 	});
-	await page.setExtraHTTPHeaders({ 'Accept-Language': `${q.hl}-${q.gl.toUpperCase()},${q.hl};q=0.9,en;q=0.8` });
+	await page.setExtraHTTPHeaders({
+		'Accept-Language': `${q.hl}-${q.gl.toUpperCase()},${q.hl};q=0.9,en;q=0.8`,
+		// Un om ajunge la /search de pe homepage, nu din senin.
+		Referer: `https://www.${q.googleDomain}/`
+	});
 	// Cookie-uri de consimțământ ca să sărim peste peretele „Înainte de a continua".
 	// SOCS = token de accept al consimțământului; CONSENT=YES+ = varianta legacy.
 	const cookieDomain = `.${q.googleDomain}`;
@@ -223,8 +267,9 @@ export async function fetchSerpScraper(
 		.map((s) => s.trim())
 		.filter(Boolean);
 
-	// Pacing: distanțăm cererile ca să nu declanșăm blocarea Google.
-	await sleep(paceMs + Math.floor(jitter() * paceMs * 0.25));
+	// Pacing cu jitter PUTERNIC (pace..2×pace): intervalele cvasi-constante sunt ele
+	// însele un tipar de robot; variația mare imită un om care citește între căutări.
+	await sleep(paceMs + Math.floor(jitter() * paceMs));
 
 	const ownBrowser = !deps.browser;
 	let browser: BrowserLike;
@@ -302,7 +347,7 @@ export async function fetchSerpScraper(
 			}
 			if (merged.organic.some((o) => matchDomain(o.url, targetDomain))) break; // țintă găsită
 			lastPageWasShort = page.organic.length < RESULTS_PER_PAGE;
-			if (pageIndex < maxPages - 1) await sleep(paceMs + Math.floor(jitter() * paceMs * 0.25));
+			if (pageIndex < maxPages - 1) await sleep(paceMs + Math.floor(jitter() * paceMs));
 		}
 		// Adâncimea cerută e în REZULTATE, nu în pagini: o pagină generoasă nu trebuie să
 		// raporteze poziții peste `depth`.
@@ -322,14 +367,50 @@ export async function fetchSerpScraper(
 export function createScraperProvider(deps: ScraperDeps = {}): SerpProvider {
 	const env = deps.env ?? (process.env as Record<string, string | undefined>);
 	const launch = deps.launch ?? defaultLaunch;
+	const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+	const jitter = deps.jitter ?? Math.random;
 	let shared: BrowserLike | null = null;
+	let queriesInSession = 0;
+
+	/**
+	 * Warm-up: vizităm homepage-ul Google ÎNAINTE de prima căutare, cu cookie-urile
+	 * sesiunii precedente (dacă există). Google emite/reînnoiește NID & co. pe context,
+	 * iar căutările ulterioare vin dintr-o „sesiune de utilizator recurent", nu dintr-un
+	 * browser văzut acum prima oară — exact diferența care ne tăia după ~15-20 de cereri.
+	 */
+	async function warmUp(browser: BrowserLike): Promise<void> {
+		const page = await browser.newPage();
+		try {
+			await page.setUserAgent(sessionFp.ua);
+			await page.setViewport({ width: sessionFp.width, height: sessionFp.height });
+			const saved = await deps.loadSession?.().catch(() => null);
+			if (saved?.length) {
+				await page.setCookie(...saved);
+			} else {
+				await page.setCookie(
+					{ name: 'SOCS', value: 'CAISNQgQEitib3', domain: '.google.ro', path: '/' },
+					{ name: 'CONSENT', value: 'YES+', domain: '.google.ro', path: '/' }
+				);
+			}
+			await page.goto('https://www.google.ro/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+			await sleep(1200 + Math.floor(jitter() * 1800));
+			const cookies = await page.cookies?.('https://www.google.ro/');
+			if (cookies?.length) await deps.saveSession?.(cookies).catch(() => {});
+		} catch {
+			// Warm-up-ul e best-effort: dacă pică, căutările merg pe calea veche.
+		} finally {
+			await page.close().catch(() => {});
+		}
+	}
 
 	async function ensureBrowser(): Promise<BrowserLike> {
 		if (shared) return shared;
+		pickFingerprint(jitter);
 		const args = [...BASE_LAUNCH_ARGS];
 		const proxy = pickProxy(proxiesFromEnv(env));
 		if (proxy) args.push(`--proxy-server=${proxy}`);
 		shared = await launch({ args });
+		await warmUp(shared);
 		return shared;
 	}
 
@@ -337,13 +418,28 @@ export function createScraperProvider(deps: ScraperDeps = {}): SerpProvider {
 		name: 'scraper',
 		fetchSerp: async (q, targetDomain) => {
 			const browser = deps.browser ?? (await ensureBrowser());
-			// Trecem browserul partajat prin deps → fetchSerpScraper nu-l închide.
-			return fetchSerpScraper(q, targetDomain, { ...deps, browser });
+			// „Pauză de cafea": la fiecare 8-12 interogări, 45-90 s de liniște. Un om nu
+			// caută 26 de lucruri în cadență constantă — roboții da, și exact asta se vede.
+			queriesInSession++;
+			if (queriesInSession > 1 && queriesInSession % (8 + Math.floor(jitter() * 5)) === 0) {
+				await sleep(45_000 + Math.floor(jitter() * 45_000));
+			}
+			try {
+				// Trecem browserul partajat prin deps → fetchSerpScraper nu-l închide.
+				return await fetchSerpScraper(q, targetDomain, { ...deps, browser });
+			} catch (e) {
+				// Blocare = profilul sesiunii e ars; nu-l mai cărăm în rularea de mâine.
+				if (e instanceof SerpProviderError && e.kind === 'blocked') {
+					await deps.clearSession?.().catch(() => {});
+				}
+				throw e;
+			}
 		},
 		close: async () => {
 			if (shared) {
 				await shared.close().catch(() => {});
 				shared = null;
+				queriesInSession = 0;
 			}
 		}
 	};
