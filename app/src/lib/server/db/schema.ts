@@ -6597,6 +6597,12 @@ export const rankProject = sqliteTable(
 		locations: jsonb('locations').notNull().default(['România']),
 		/** Domeniile competitorilor urmăriți în top 10. */
 		competitors: jsonb('competitors').notNull().default([]),
+		/**
+		 * Proprietatea din Search Console, în formatul cerut de API:
+		 * „sc-domain:heylux.ro" (domain property) sau „https://www.heylux.ro/" (URL prefix).
+		 * null = proiectul nu e legat încă de GSC.
+		 */
+		gscProperty: text('gsc_property'),
 		/** ['desktop'] | ['mobile'] | ambele. */
 		devices: jsonb('devices').notNull().default(['desktop', 'mobile']),
 		alertThreshold: integer('alert_threshold').notNull().default(5),
