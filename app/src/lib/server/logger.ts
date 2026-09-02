@@ -52,6 +52,7 @@ export type LogSource =
 	| 'google-calendar'
 	| 'hosting-email'
 	| 'content'
+	| 'gsc'
 	| 'stripe';
 
 function generateId() {
