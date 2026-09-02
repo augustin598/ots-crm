@@ -81,6 +81,23 @@ Google a schimbat regulile; toate cele de mai jos sunt MĂSURATE pe google.ro, n
 - Feature-uri verificate ca funcționale: `#tads`/`#tadsb` (ads), `[jsname="Cpkphb"]` (PAA),
   `.rllt__details` (local pack). Pentru images/video/shopping/snippet/AI Overview nu am avut
   un SERP care să le conțină → selectoarele rămân NEVERIFICATE pe layoutul curent.
+- **DESCHIS — extragerea pe MOBIL nu merge.** Desktopul e validat cap-coadă (rulare reală
+  2 sep. 2026: „studio de videochat iasi" → poziția 14, pagina 2, `https://www.heylux.ro`),
+  dar pe mobil parserul întoarce 0 organice și rularea iese „parțial". Ce s-a măsurat:
+  `.MjjYud` = 26 containere, `#rso cite` = **0** (deci extragerea din `<cite>` nu are de unde
+  citi URL-ul), iar `#rso h3` prinde fișele din local pack (fără `href`, fără `cite`), nu
+  rezultate organice. Nu am putut măsura structura organică de pe mobil: IP-ul intrase în
+  CAPTCHA. Efect: NU se scrie niciun snapshot pe mobil (deci fără alerte false de „lost"),
+  doar rularea rămâne „parțial". De reluat cu IP odihnit / proxy.
+
+## Dezvoltare locală: worker-ul NU ia codul nou la HMR
+Worker-ul BullMQ e pornit o singură dată (`globalThis[Symbol.for('ots_crm_scheduler_initialized')]`)
+și ține în closure modulele de la momentul pornirii. După orice modificare în
+`rank-tracker/providers/*` sau `run.ts` trebuie **repornit `vite dev`**, altfel rulările
+folosesc scraperul vechi. Simptom exact întâlnit: `_debug-rank-health?probe=1` (rută, cod
+proaspăt) întorcea `ok:true`, iar rularea prin worker eșua „blocat de Google" în aceeași minută.
+Atenție și la **dev servere multiple**: două instanțe consumă din aceeași coadă Redis, iar cea
+veche răspunde „Unknown scheduler job type" la joburile adăugate de codul nou.
 
 ## Operațional
 - Env: `RANK_PACE_MS` (implicit 8000), `RANK_PROXY_URLS` (listă separată prin virgulă),
