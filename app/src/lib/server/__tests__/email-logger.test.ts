@@ -37,8 +37,13 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 34 types (33 + pagespeed-report, raport PageSpeed 2026-08-31)', () => {
-		expect(EMAIL_TYPES.length).toBe(34);
+	test('has exactly 36 types (34 + rank-report + rank-alert, Rank Tracker 2026-09-02)', () => {
+		expect(EMAIL_TYPES.length).toBe(36);
+	});
+
+	test('includes the Rank Tracker email types', () => {
+		expect(EMAIL_TYPES).toContain('rank-report');
+		expect(EMAIL_TYPES).toContain('rank-alert');
 	});
 
 	test('includes the PageSpeed report type', () => {
