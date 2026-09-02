@@ -3,7 +3,8 @@ import type { RequestHandler } from './$types';
 import { handleCallback } from '$lib/server/gsc/auth';
 import { logError, serializeError } from '$lib/server/logger';
 
-const DEST = 'seo-links/rank-tracker';
+// Casa integrării e în Setări, lângă Gmail/Google Calendar/Google Ads.
+const DEST = 'settings/search-console';
 
 export const GET: RequestHandler = async ({ url }) => {
 	const code = url.searchParams.get('code');

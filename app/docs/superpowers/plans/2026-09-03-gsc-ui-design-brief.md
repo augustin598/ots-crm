@@ -5,13 +5,30 @@
 
 ---
 
+## Faza 1 e DEJA implementată — nu o reproiecta
+
+Conectarea și administrarea de bază trăiesc deja în **Setări**, după tiparul
+Gmail / Google Calendar / Google Ads:
+
+- Card în grila de integrări din `/[tenant]/settings` (badge Conectat / Dezactivată /
+  Deconectat).
+- Pagină `/[tenant]/settings/search-console`: stare conexiune, buton de conectare
+  OAuth, „Sincronizează acum", „Testează conexiunea" (sonda), dezactivare, plus tabelul
+  de mapare proiect → proprietate cu dropdown per proiect.
+- Callback-ul OAuth aterizează pe pagina asta.
+
+Tot ce e mai jos e **faza 2**: vederea analitică, nu administrarea. Presupune că
+integrarea e deja conectată și proprietățile deja legate.
+
 ## Ce e de proiectat
 
 Două livrabile, în același limbaj vizual:
 
 1. **Pagină nouă** sub hub-ul „SEO & GEO & AEO": `/[tenant]/seo-links/search-console`
-   — administrarea integrării: conectare, ce proprietăți avem, care proiect e legat de
-   care proprietate, sincronizare, sănătatea integrării.
+   — vederea **analitică**, nu administrarea (aia e deja în Setări): cât de mult ne
+   putem baza pe pozițiile pe care le raportăm, la nivel de tenant și de proiect.
+   Aici trăiește răspunsul la „câte dintre cifrele pe care i le arătăm clientului sunt
+   de fapt nemăsurate?".
 2. **Adăugiri în Rank Tracker** — în pagina de detaliu a unui proiect
    (`/[tenant]/seo-links/rank-tracker/[projectId]`) și, opțional, un indicator pe
    cardurile de proiect din hub.
@@ -76,11 +93,16 @@ tehnic și urât — designul trebuie să-l facă lizibil (etichetă „domeniu 
 { tenants: number, properties: number, rowsSaved: number, failed: number }
 ```
 
-### Conectarea (OAuth)
-Link simplu către `/api/gsc/auth?tenant=<slug>`. Google redirectează înapoi la
-`/[tenant]/seo-links/rank-tracker?gsc=connected` sau `?gsc_error=<mesaj>`.
-**Designul trebuie să propună unde aterizează după conectare** — probabil pe pagina
-nouă, nu în Rank Tracker (destinația se poate schimba în cod).
+### Conectarea (OAuth) — deja rezolvată în faza 1
+Link către `/api/gsc/auth?tenant=<slug>`; Google redirectează la
+`/[tenant]/settings/search-console?gsc=connected` sau `?gsc_error=<mesaj>`.
+Pagina de faza 2 nu trebuie să conțină flux de conectare — doar, eventual, o trimitere
+către Setări când integrarea lipsește.
+
+### Proiectele și proprietățile legate — `getGscProjects()`
+```ts
+{ id: string, name: string, domain: string, gscProperty: string | null }[]
+```
 
 ### Sonda de sănătate — `GET /[tenant]/api/_debug-gsc-health?probe=1`
 ```ts

@@ -43,6 +43,37 @@ export const getGscProperties = query(async () => {
 	return listProperties(tenantId);
 });
 
+/** Proiectele de rank ale tenantului, cu proprietatea legată (pentru ecranul de mapare). */
+export const getGscProjects = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	return db
+		.select({
+			id: table.rankProject.id,
+			name: table.rankProject.name,
+			domain: table.rankProject.domain,
+			gscProperty: table.rankProject.gscProperty
+		})
+		.from(table.rankProject)
+		.where(and(eq(table.rankProject.tenantId, tenantId), eq(table.rankProject.active, true)))
+		.orderBy(table.rankProject.name);
+});
+
+/**
+ * Dezactivează integrarea fără să o șteargă — tokenii rămân, iar o reautorizare
+ * face upsert și pune `isActive` înapoi pe true. Tiparul e cel de la Google Calendar.
+ * Jobul zilnic filtrează pe `isActive`, deci tragerea se oprește imediat.
+ */
+export const disconnectGsc = command(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	await db
+		.update(table.gscIntegration)
+		.set({ isActive: false, updatedAt: new Date() })
+		.where(eq(table.gscIntegration.tenantId, tenantId));
+	return { disconnected: true };
+});
+
 const propertySchema = v.object({
 	projectId: v.pipe(v.string(), v.minLength(1)),
 	/** „sc-domain:exemplu.ro" sau „https://www.exemplu.ro/"; gol = deconectare. */

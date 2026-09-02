@@ -100,6 +100,38 @@ describe('getGscStatus', () => {
 	});
 });
 
+describe('getGscProjects', () => {
+	test('fără sesiune → 401', async () => {
+		currentEvent = null;
+		await expect(remote.getGscProjects()).rejects.toThrow();
+	});
+
+	test('întoarce proiectele cu proprietatea legată', async () => {
+		selectQueue.push([
+			{ id: 'p1', name: 'Lucky Studio', domain: 'heylux.ro', gscProperty: 'sc-domain:heylux.ro' },
+			{ id: 'p2', name: 'Preziosa', domain: 'preziosa.ro', gscProperty: null }
+		]);
+		const rows = await remote.getGscProjects();
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toMatchObject({ id: 'p1', gscProperty: 'sc-domain:heylux.ro' });
+		expect(rows[1].gscProperty).toBeNull();
+	});
+});
+
+describe('disconnectGsc', () => {
+	test('fără sesiune → 401', async () => {
+		currentEvent = null;
+		await expect(remote.disconnectGsc()).rejects.toThrow();
+	});
+
+	test('dezactivează integrarea, NU o șterge (reconectarea o reactivează)', async () => {
+		await remote.disconnectGsc();
+		expect(updated).toHaveLength(1);
+		expect(updated[0]).toMatchObject({ isActive: false });
+		expect(deleteCalls).toBe(0);
+	});
+});
+
 describe('setGscProperty', () => {
 	test('proiect din alt tenant → 404', async () => {
 		selectQueue.push([]); // proiectul nu se găsește sub tenantId-ul sesiunii

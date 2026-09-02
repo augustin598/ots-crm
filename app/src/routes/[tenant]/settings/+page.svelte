@@ -27,6 +27,7 @@
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import { getGmailConnectionStatus } from '$lib/remotes/supplier-invoices.remote';
 	import { getGoogleCalendarStatus } from '$lib/remotes/integrations.remote';
+	import { getGscStatus } from '$lib/remotes/gsc.remote';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import { getGoogleAdsConnectionStatus } from '$lib/remotes/google-ads-invoices.remote';
 	import { getMetaAdsConnectionStatus } from '$lib/remotes/meta-ads-invoices.remote';
@@ -128,6 +129,10 @@
 	// Google Calendar status (separate integration from Gmail — own table + OAuth)
 	const calendarStatusQuery = getGoogleCalendarStatus();
 	const calendarStatus = $derived(calendarStatusQuery.current);
+
+	// Search Console — integrare proprie (tabel + OAuth separate de Gmail/Calendar)
+	const gscStatusQuery = getGscStatus();
+	const gscStatus = $derived(gscStatusQuery.current);
 
 	// WHMCS integration status
 	const whmcsStatusQuery = getWhmcsStatus();
@@ -766,6 +771,38 @@
 					<div class="flex items-center gap-2">
 						{#if calendarStatus?.connected}
 							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else}
+							<Badge variant="outline">Deconectat</Badge>
+						{/if}
+						<ChevronRightIcon class="h-5 w-5 text-muted-foreground" />
+					</div>
+				</div>
+			</CardHeader>
+		</Card>
+
+		<Card class="cursor-pointer hover:bg-muted/30 transition-colors" onclick={() => goto(`/${tenantSlug}/settings/search-console`)}>
+			<CardHeader>
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<SearchIcon class="h-5 w-5" />
+						<div>
+							<CardTitle>Google Search Console</CardTitle>
+							<CardDescription>
+								{#if gscStatus?.connected && gscStatus.isActive}
+									Conectat ca {gscStatus.email} — afișări și poziții reale în Rank Tracker
+								{:else if gscStatus?.connected}
+									Configurată dar dezactivată
+								{:else}
+									Sursă oficială care nu poate fi blocată — prinde rulările de scraping care mint
+								{/if}
+							</CardDescription>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if gscStatus?.connected && gscStatus.isActive}
+							<Badge variant="secondary" class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Conectat</Badge>
+						{:else if gscStatus?.connected}
+							<Badge variant="outline">Dezactivată</Badge>
 						{:else}
 							<Badge variant="outline">Deconectat</Badge>
 						{/if}
