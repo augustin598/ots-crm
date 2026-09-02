@@ -50,6 +50,8 @@ import { processContentAutoPublish } from './tasks/content-auto-publish';
 import { processContentAutoGenerate } from './tasks/content-auto-generate';
 import { processPagespeedWeeklyReport } from './tasks/pagespeed-weekly-report';
 import { processPagespeedScan } from './tasks/pagespeed-scan';
+import { processRankDailyCheck } from './tasks/rank-daily-check';
+import { processRankProjectCheck } from './tasks/rank-project-check';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -209,7 +211,9 @@ const taskHandlers: Record<string, TaskHandler> = {
 	content_auto_publish: processContentAutoPublish,
 	content_auto_generate: processContentAutoGenerate,
 	pagespeed_weekly_report: () => processPagespeedWeeklyReport(),
-	pagespeed_scan: processPagespeedScan
+	pagespeed_scan: processPagespeedScan,
+	rank_daily_check: () => processRankDailyCheck(),
+	rank_project_check: processRankProjectCheck
 };
 
 /**
@@ -324,6 +328,27 @@ export const startScheduler = async () => {
 		logWarning('scheduler', `Failed to mark interrupted content jobs: ${message}`);
 	}
 
+	// Marchează rulările Rank Tracker rămase „running" ca întrerupte — pipeline-ul
+	// in-process nu supraviețuiește unui restart; verificarea se reia la următorul cron.
+	try {
+		const now = new Date();
+		const res = await db
+			.update(table.rankRun)
+			.set({
+				status: 'interrupted',
+				errorNote: 'Serverul a repornit în timpul rulării',
+				finishedAt: now
+			})
+			.where(sql`${table.rankRun.status} = 'running'`);
+		const count = (res as { rowsAffected?: number })?.rowsAffected ?? 0;
+		if (count > 0) {
+			logWarning('scheduler', `Marked ${count} rank run(s) as interrupted after restart`);
+		}
+	} catch (e) {
+		const { message } = serializeError(e);
+		logWarning('scheduler', `Failed to mark interrupted rank runs: ${message}`);
+	}
+
 	// Recover any email retries stuck in 'retrying' state from a crash
 	await recoverInterruptedRetries();
 
@@ -361,7 +386,8 @@ export const startScheduler = async () => {
 		'directadmin-sync-accounts', 'directadmin-sync-packages',
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
 		'content-auto-publish', 'content-auto-generate',
-		'pagespeed-weekly-report'
+		'pagespeed-weekly-report',
+		'rank-daily-check'
 	]);
 
 	try {
@@ -1143,6 +1169,20 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] pagespeed-weekly-report registered (0 * * * * Europe/Bucharest)');
 
+	// Rank Tracker — verificarea zilnică ORARĂ: fiecare tenant are ora proprie în
+	// rank_settings; jobul compară cu ora Bucureștiului și pune în coadă câte un
+	// job one-shot rank_project_check per proiect activ care n-a rulat azi.
+	await schedulerQueue.add(
+		'rank-daily-check',
+		{ type: 'rank_daily_check', params: {} },
+		{
+			repeat: { pattern: '0 * * * *', tz: 'Europe/Bucharest' },
+			jobId: 'rank-daily-check',
+			attempts: 1
+		}
+	);
+	logInfo('scheduler', '[scheduler] rank-daily-check registered (0 * * * * Europe/Bucharest)');
+
 	// Content auto-publish — orar. Publică articolele programate scadente pe WordPress.
 	await schedulerQueue.add(
 		'content-auto-publish',
@@ -1206,7 +1246,9 @@ export const JOB_LABELS: Record<string, string> = {
 	content_auto_publish: 'Auto-publicare Conținut Programat (WordPress)',
 	content_auto_generate: 'Auto-generare Conținut (mod auto)',
 	pagespeed_weekly_report: 'Raport Săptămânal PageSpeed (per tenant, zi/oră din setări)',
-	pagespeed_scan: 'Scanare PageSpeed (manuală, din UI)'
+	pagespeed_scan: 'Scanare PageSpeed (manuală, din UI)',
+	rank_daily_check: 'Verificare zilnică poziții Google (Rank Tracker, oră din setări)',
+	rank_project_check: 'Verificare poziții proiect (Rank Tracker, one-shot)'
 };
 
 /** Default params for jobs that need specific parameters */
