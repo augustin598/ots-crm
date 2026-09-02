@@ -196,19 +196,19 @@
 			<div class="psi-toast" role="status" aria-live="polite"><CheckIcon size={14} /> {toast}</div>
 		{/if}
 	{/if}
+
+	{#if selected}
+		<KeywordDrawer
+			keyword={selected}
+			domain={detail?.domain ?? ''}
+			days={detail?.trend.days ?? []}
+			shareOfVoice={detail?.shareOfVoice ?? {}}
+			onclose={() => (selected = null)}
+			ondelete={onDeleteKeyword}
+		/>
+	{/if}
+
+	{#if addOpen}
+		<KeywordsModal onclose={() => (addOpen = false)} onadd={onAdd} />
+	{/if}
 </div>
-
-{#if selected}
-	<KeywordDrawer
-		keyword={selected}
-		domain={detail?.domain ?? ''}
-		days={detail?.trend.days ?? []}
-		shareOfVoice={detail?.shareOfVoice ?? {}}
-		onclose={() => (selected = null)}
-		ondelete={onDeleteKeyword}
-	/>
-{/if}
-
-{#if addOpen}
-	<KeywordsModal onclose={() => (addOpen = false)} onadd={onAdd} />
-{/if}

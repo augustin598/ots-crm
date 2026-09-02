@@ -135,3 +135,31 @@
 	background: #1e293b;
 	color: #cbd5e1;
 }
+
+/* Clase utilitare folosite de UI-ul Rank Tracker, aliniate la tokenii --cl-* din .cl-wrap. */
+.cl-check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--cl-text); cursor: pointer; margin-top: 2px; }
+.cl-check input { accent-color: var(--cl-accent); width: 15px; height: 15px; }
+.cl-form-error { color: #dc2626; font-size: 12px; margin: 6px 0 0; }
+.cl-btn-danger { color: #dc2626; border-color: rgba(220,38,38,.35); }
+.cl-btn-danger:hover { background: rgba(220,38,38,.08); }
+.cl-input-sm { padding: 6px 10px; font-size: 12.5px; width: auto; }
+.cl-back { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--cl-text-3); text-decoration: none; margin-bottom: 10px; }
+.cl-back:hover { color: var(--cl-accent); }
+.cl-cell-link { display: inline-flex; align-items: center; gap: 9px; color: var(--cl-text); text-decoration: none; font-weight: 600; }
+.cl-cell-link:hover { color: var(--cl-accent); }
+.cl-seg { display: inline-flex; border: 1px solid var(--cl-border); border-radius: 8px; overflow: hidden; }
+.cl-seg-btn { border: 0; background: var(--cl-surface); color: var(--cl-text-3); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; }
+.cl-seg-btn.active { background: var(--cl-accent); color: #fff; }
+.cl-row-click { cursor: pointer; }
+.cl-row-click:hover { background: var(--cl-surface-2); }
+.cl-row-actions { display: inline-flex; gap: 5px; align-items: center; justify-content: flex-end; }
+.cl-row-muted { opacity: .6; }
+.cl-alert-cell { color: #dc2626; font-weight: 700; }
+.cl-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-callout { display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--cl-surface-2); font-size: 12.5px; color: var(--cl-text); }
+.cl-callout.danger { background: #fef2f2; color: #991b1b; }
+:global(.dark) .cl-callout.danger { background: #7f1d1d; color: #fecaca; }
+.cl-callout.danger a { color: inherit; }
+.psi-scan-banner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; background: var(--cl-accent-50); color: var(--cl-accent); font-size: 12.5px; font-weight: 600; margin-bottom: 14px; }
+.cl-spin { animation: rk-spin 1s linear infinite; }
+@keyframes rk-spin { to { transform: rotate(360deg); } }

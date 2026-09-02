@@ -264,18 +264,18 @@
 	{#if toast}
 		<div class="psi-toast" role="status" aria-live="polite"><CheckIcon size={14} /> {toast}</div>
 	{/if}
+
+	{#if projectModalOpen}
+		<ProjectModal
+			project={editing}
+			{clients}
+			onclose={() => (projectModalOpen = false)}
+			onsave={onSaveProject}
+			ondelete={onDeleteProject}
+		/>
+	{/if}
+
+	{#if settingsOpen}
+		<RankSettingsModal {settings} onclose={() => (settingsOpen = false)} onsave={onSaveSettings} />
+	{/if}
 </div>
-
-{#if projectModalOpen}
-	<ProjectModal
-		project={editing}
-		{clients}
-		onclose={() => (projectModalOpen = false)}
-		onsave={onSaveProject}
-		ondelete={onDeleteProject}
-	/>
-{/if}
-
-{#if settingsOpen}
-	<RankSettingsModal {settings} onclose={() => (settingsOpen = false)} onsave={onSaveSettings} />
-{/if}
