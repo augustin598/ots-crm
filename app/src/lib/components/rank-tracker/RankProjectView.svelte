@@ -75,7 +75,15 @@
 	$effect(() => {
 		if (running) {
 			sawRunning = true;
-			const timer = setInterval(() => runQuery.refresh(), 2500);
+			let tick = 0;
+			const timer = setInterval(() => {
+				runQuery.refresh();
+				// Runner-ul scrie în DB după FIECARE cuvânt verificat, nu la final. Dacă
+				// reîmprospătam doar la încheiere, o rulare de 26 de cuvinte lăsa tabelul
+				// înghețat câteva minute, deși pozițiile existau deja. La fiecare al treilea
+				// tick (~7,5 s) recitim și detaliul, ca rândurile să se completeze din mers.
+				if (++tick % 3 === 0) void detailQuery.refresh().catch(() => {});
+			}, 2500);
 			return () => clearInterval(timer);
 		}
 		if (sawRunning) {

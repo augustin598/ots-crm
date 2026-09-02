@@ -70,7 +70,13 @@
 	$effect(() => {
 		if (running) {
 			sawRunning = true;
-			const timer = setInterval(() => runQuery.refresh(), 2500);
+			let tick = 0;
+			const timer = setInterval(() => {
+				runQuery.refresh();
+				// Cardurile arată vizibilitatea și poziția medie: se completează pe măsură ce
+				// rularea avansează, nu doar la final.
+				if (++tick % 4 === 0) void projectsQuery.refresh().catch(() => {});
+			}, 2500);
 			return () => clearInterval(timer);
 		}
 		if (sawRunning) {
