@@ -29,6 +29,14 @@ function requireTenantEvent() {
 	return { event, tenantId: tenant.id, userId: event.locals.user.id as string };
 }
 
+/**
+ * Forma canonică a unui cuvânt cheie pentru comparații: fără spații în plus, litere mici.
+ * Google nu face diferență între „Studio Videochat" și „studio  videochat".
+ */
+function normalizeKeyword(input: string): string {
+	return input.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 function normalizeDomain(input: string): string {
 	return input
 		.trim()
@@ -252,26 +260,38 @@ export const addRankKeywords = command(addKeywordsSchema, async (input) => {
 	if (!project) throw error(404, 'Proiect inexistent');
 
 	const location = input.location ?? '';
-	// keyword-urile deja existente pentru (proiect, locație) — dedup.
+	// Dedup pe PROIECT, nu pe (proiect, locație): același cuvânt urmărit de două ori pentru
+	// același site înseamnă două interogări Google pe zi și două rânduri identice în tabel.
+	// Filtrul vechi era pe locație, așa că „angajare videochat" cu locația goală și același
+	// cuvânt cu locația „România" intrau amândouă.
 	const existing = await db
 		.select({ keyword: table.rankKeyword.keyword })
 		.from(table.rankKeyword)
-		.where(and(eq(table.rankKeyword.projectId, input.projectId), eq(table.rankKeyword.location, location)));
-	const existingSet = new Set(existing.map((e) => e.keyword.toLowerCase()));
-	const totalCount = (
-		await db
-			.select({ id: table.rankKeyword.id })
-			.from(table.rankKeyword)
-			.where(eq(table.rankKeyword.projectId, input.projectId))
-	).length;
+		.where(eq(table.rankKeyword.projectId, input.projectId));
+	const existingSet = new Set(existing.map((e) => normalizeKeyword(e.keyword)));
+	const totalCount = existing.length;
 
-	const clean = [...new Set(input.keywords.map((k) => k.trim()).filter(Boolean))].filter(
-		(k) => !existingSet.has(k.toLowerCase())
-	);
+	// Normalizăm și în interiorul listei primite: „Studio  Videochat" și „studio videochat"
+	// sunt aceeași interogare pentru Google.
+	const seen = new Set<string>();
+	const clean: string[] = [];
+	const duplicates: string[] = [];
+	for (const raw of input.keywords) {
+		const keyword = raw.trim().replace(/\s+/g, ' ');
+		if (!keyword) continue;
+		const key = normalizeKeyword(keyword);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		if (existingSet.has(key)) {
+			duplicates.push(keyword);
+			continue;
+		}
+		clean.push(keyword);
+	}
 	if (totalCount + clean.length > MAX_KEYWORDS) {
 		throw error(400, `Limita de ${MAX_KEYWORDS} cuvinte cheie pe proiect ar fi depășită (ai ${totalCount}, adaugi ${clean.length}).`);
 	}
-	if (clean.length === 0) return { added: 0 };
+	if (clean.length === 0) return { added: 0, duplicates };
 
 	const now = new Date();
 	await db.insert(table.rankKeyword).values(
@@ -286,7 +306,7 @@ export const addRankKeywords = command(addKeywordsSchema, async (input) => {
 			updatedAt: now
 		}))
 	);
-	return { added: clean.length };
+	return { added: clean.length, duplicates };
 });
 
 export const deleteRankKeyword = command(v.pipe(v.string(), v.minLength(1)), async (keywordId) => {

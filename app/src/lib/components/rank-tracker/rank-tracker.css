@@ -60,7 +60,13 @@
 /* carduri proiecte (hub) */
 .rt-projects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 @media (max-width: 1360px) { .rt-projects { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.rt-proj { border: 1px solid var(--cl-border); background: var(--cl-surface); border-radius: 14px; padding: 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; text-align: left; font: inherit; color: inherit; display: block; width: 100%; }
+.rt-proj { position: relative; border: 1px solid var(--cl-border); background: var(--cl-surface); border-radius: 14px; padding: 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; text-align: left; font: inherit; color: inherit; display: block; width: 100%; }
+/* Tot cardul e o țintă de click, nu doar domeniul: linkul din titlu se întinde peste
+   card cu ::after, iar butoanele reale (editare, săgeată) stau deasupra lui. */
+.rt-proj-l1 a::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 14px; }
+.rt-proj .cl-icon-btn, .rt-proj-foot a { position: relative; z-index: 2; }
+.rt-proj:focus-within { border-color: var(--cl-border-strong); }
+.rt-proj-l1 a:focus-visible::after { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
 .rt-proj:hover { border-color: var(--cl-border-strong); box-shadow: 0 8px 22px rgba(15,23,42,.07); transform: translateY(-1px); }
 .rt-proj:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
 .rt-proj.paused { opacity: .72; }
@@ -115,6 +121,12 @@
 .rt-count { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--cl-text-3); }
 .rt-count b { color: var(--cl-text); }
 
+/* Antet de coloană cu pictogramă: înlocuiește glifa „Δ", care arăta ca un caracter
+   rătăcit între etichete. Pictograma stă la 60% opacitate, ca textul să rămână eroul. */
+.rt-th { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.cl-list-table thead th.num .rt-th { justify-content: flex-end; }
+.rt-th svg { opacity: .6; flex: none; }
+
 .rt-table-scroll { overflow-x: auto; }
 /* Tabelul de rulări are 10 coloane: sub ~1230px trebuie să deruleze în containerul lui,
    altfel overflow-ul urcă la .cl-wrap și e tăiat de layout (coloanele Eșuate/Status
@@ -126,7 +138,37 @@
 .cl-wrap .psi-drawer:focus-visible,
 .cl-wrap .psi-modal:focus-visible { outline: none; }
 .rt-table-scroll .cl-list-table { min-width: 1240px; }
-.rt-check { width: 15px; height: 15px; accent-color: var(--cl-accent); cursor: pointer; }
+/* Reset-ul global al aplicației scoate aspectul nativ al input-urilor, așa că un
+   `accent-color` singur lăsa un pătrat negru plin. Desenăm bifa explicit, în stilul
+   celorlalte controale (`psi-seg-box`): chenar subțire, colț rotunjit, accent la bifare. */
+.rt-check {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 15px;
+	height: 15px;
+	flex: none;
+	margin: 0;
+	border: 1.5px solid var(--cl-border-strong);
+	border-radius: 4px;
+	background: var(--cl-surface);
+	cursor: pointer;
+	display: inline-grid;
+	place-content: center;
+	transition: background .12s, border-color .12s;
+}
+.rt-check::after {
+	content: '';
+	width: 8px;
+	height: 8px;
+	transform: scale(0);
+	transition: transform .12s ease-in-out;
+	background: #fff;
+	clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 16%, 84% 0, 39% 62%);
+}
+.rt-check:checked { background: var(--cl-accent); border-color: var(--cl-accent); }
+.rt-check:checked::after { transform: scale(1); }
+.rt-check:hover:not(:checked) { border-color: var(--cl-accent); }
+.rt-check:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
 .rt-bulk { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border: 1px solid var(--cl-accent); background: var(--cl-accent-50); border-radius: 11px; font-size: 12.5px; font-weight: 600; color: #0b3d8c; }
 .rt-bulk-actions { display: flex; gap: 8px; margin-left: auto; }
 

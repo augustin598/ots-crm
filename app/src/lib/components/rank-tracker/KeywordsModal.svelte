@@ -15,6 +15,7 @@
 		devices,
 		tags,
 		checkHour,
+		existing = [],
 		limit = 500,
 		onclose,
 		onadd
@@ -25,6 +26,8 @@
 		devices: ('desktop' | 'mobile')[];
 		tags: string[];
 		checkHour: string;
+		/** Cuvintele deja urmărite pentru acest site — se resping, indiferent de locație. */
+		existing?: string[];
 		limit?: number;
 		onclose: () => void;
 		onadd: (keywords: string[], tag: string | null, location: string) => void;
@@ -36,8 +39,14 @@
 	let locationSel = $state<string | null>(null);
 	const location = $derived(locationSel ?? locations[0] ?? '');
 
+	const norm = (v: string) => v.trim().replace(/\s+/g, ' ').toLowerCase();
+	const existingSet = $derived(new Set(existing.map(norm)));
+
 	const lines = $derived(text.split('\n').map((l) => l.trim()).filter(Boolean));
-	const uniq = $derived([...new Set(lines.map((l) => l.toLowerCase()))]);
+	const uniq = $derived([...new Set(lines.map(norm))].filter(Boolean));
+	/** Deja urmărite pentru acest site: le arătăm, dar nu le trimitem. */
+	const duplicates = $derived(uniq.filter((k) => existingSet.has(k)));
+	const toAdd = $derived(uniq.filter((k) => !existingSet.has(k)));
 </script>
 
 <div class="psi-modal-back" onclick={onclose} role="presentation">
@@ -100,11 +109,22 @@
 				<div class="rt-count">
 					<span><b>{lines.length}</b> linii</span>
 					<span><b>{uniq.length}</b> unice</span>
+					{#if duplicates.length}
+						<span><b>{duplicates.length}</b> deja urmărite</span>
+					{/if}
+					<span><b>{toAdd.length}</b> de adăugat</span>
 					<span>
 						<b>{devices.length}</b>
-						{devices.length === 1 ? 'dispozitiv' : 'dispozitive'} → <b>{uniq.length * devices.length}</b> verificări/zi
+						{devices.length === 1 ? 'dispozitiv' : 'dispozitive'} → <b>{toAdd.length * devices.length}</b> verificări/zi
 					</span>
 				</div>
+				{#if duplicates.length}
+					<p class="cl-hint" style="margin-top: 6px">
+						Deja urmărite pentru {domain}, se sar: {duplicates.slice(0, 8).join(', ')}{duplicates.length > 8
+							? ` și încă ${duplicates.length - 8}`
+							: ''}
+					</p>
+				{/if}
 			</div>
 			<div class="cl-field" style="margin-top: 14px">
 				<span class="cl-field-head">Dispozitive urmărite</span>
@@ -124,10 +144,11 @@
 			<button class="cl-btn-secondary" onclick={onclose}>Anulează</button>
 			<button
 				class="cl-btn-primary"
-				disabled={uniq.length === 0 || uniq.length > limit}
-				onclick={() => onadd(uniq, tag.trim() || null, location.trim())}
+				disabled={toAdd.length === 0 || toAdd.length > limit}
+				onclick={() => onadd(toAdd, tag.trim() || null, location.trim())}
 			>
-				<CheckIcon size={13} /> Adaugă {uniq.length || ''} cuvinte
+				<CheckIcon size={13} />
+				{toAdd.length === 0 && uniq.length > 0 ? 'Toate există deja' : `Adaugă ${toAdd.length || ''} cuvinte`}
 			</button>
 		</div>
 	</div>

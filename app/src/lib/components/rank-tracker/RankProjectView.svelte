@@ -23,6 +23,8 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import CheckSquareIcon from '@lucide/svelte/icons/square-check';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
+	import TrophyIcon from '@lucide/svelte/icons/trophy';
 
 	import PsiStratIcon from '../pagespeed/PsiStratIcon.svelte';
 	import RtPos from './RtPos.svelte';
@@ -181,6 +183,9 @@
 		...new Set([...(detail?.locations ?? []), ...pRows.map((r) => r.location)].filter(Boolean))
 	]);
 	const tags = $derived([...new Set(pRows.map((r) => r.tag).filter((t): t is string => !!t))]);
+	// Locația se repetă identic pe fiecare rând când proiectul urmărește una singură — atunci
+	// e doar zgomot: apare deja în subtitlul paginii și în filtrul din toolbar.
+	const showRowLocation = $derived(new Set(pRows.map((r) => r.location)).size > 1);
 
 	const detailRows = $derived.by(() => {
 		const out = scopedRows.filter((k) => {
@@ -291,10 +296,12 @@
 		try {
 			const r = await addRankKeywords({ projectId, keywords, tag, location }).updates(detailQuery);
 			adding = false;
+			const skipped = r.duplicates?.length ?? 0;
+			const skippedNote = skipped ? ` · ${skipped} deja urmărite, sărite` : '';
 			showToast(
 				r.added === 0
-					? 'Toate cuvintele existau deja în proiect.'
-					: `${r.added} ${r.added === 1 ? 'cuvânt cheie adăugat' : 'cuvinte cheie adăugate'} · prima verificare la ${settings?.checkHour ?? '06:00'}`
+					? 'Toate cuvintele erau deja urmărite pentru acest site.'
+					: `${r.added} ${r.added === 1 ? 'cuvânt cheie adăugat' : 'cuvinte cheie adăugate'}${skippedNote} · prima verificare la ${settings?.checkHour ?? '06:00'}`
 			);
 		} catch (error) {
 			showToast(remoteErrorMessage(error, 'Nu am putut adăuga cuvintele cheie'));
@@ -560,9 +567,9 @@
 							<th class="num">KD</th>
 							<th class="num">Poziție</th>
 							<th class="num">Pagina</th>
-							<th class="num">Δ 1 zi</th>
-							<th class="num">Δ 7 zile</th>
-							<th class="num">Best</th>
+							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 1 zi</span></th>
+							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 7 zile</span></th>
+							<th class="num"><span class="rt-th"><TrophyIcon size={11} /> Best</span></th>
 							<th class="num">Ultimele 7 zile</th>
 							<th class="num">30 zile</th>
 							<th>SERP</th>
@@ -600,7 +607,9 @@
 										</div>
 										<div class="rt-kw-l2">
 											{#if r.tag}<span class="rt-tag">{r.tag}</span>{/if}
-											{#if r.location}<span><MapPinIcon size={10} /> {r.location}</span>{/if}
+											{#if r.location && showRowLocation}
+												<span><MapPinIcon size={10} /> {r.location}</span>
+											{/if}
 											{#if r.rankingUrl ?? r.targetUrl}
 												<span class="rt-url">{r.rankingUrl ?? r.targetUrl}</span>
 											{/if}
@@ -785,6 +794,7 @@
 			devices={detail.devices}
 			{tags}
 			checkHour={settings?.checkHour ?? '06:00'}
+			existing={[...new Set((detail.keywords ?? []).map((k) => k.keyword))]}
 			onclose={() => (adding = false)}
 			onadd={onAdd}
 		/>

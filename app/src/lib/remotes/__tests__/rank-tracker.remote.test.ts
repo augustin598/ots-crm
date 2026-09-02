@@ -107,12 +107,39 @@ describe('deleteRankProject — scoping', () => {
 describe('addRankKeywords — limită și dedup', () => {
 	test('respinge peste limita de cuvinte cheie', async () => {
 		selectQueue.push([{ id: 'p1' }]); // proiect există
-		selectQueue.push([]); // keyword-uri existente pe (proiect, locație)
-		selectQueue.push([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]); // total 4 existente
+		// O singură interogare acum: cuvintele existente ale PROIECTULUI (orice locație),
+		// folosită și pentru dedup, și pentru numărătoare.
+		selectQueue.push([{ keyword: 'a' }, { keyword: 'b' }, { keyword: 'c' }, { keyword: 'd' }]);
 		await expect(
 			remote.addRankKeywords({ projectId: 'p1', keywords: ['x', 'y', 'z'] })
 		).rejects.toThrow(); // 4 + 3 = 7 > 5
 		expect(inserted.length).toBe(0);
+	});
+
+	test('respinge un cuvânt deja urmărit pe site, chiar dacă locația diferă', async () => {
+		selectQueue.push([{ id: 'p1' }]);
+		// „angajare videochat" există deja cu locația '' — adăugarea cu locația „România"
+		// trebuie sărită, nu inserată (înainte dedupul era pe (proiect, locație)).
+		selectQueue.push([{ keyword: 'angajare videochat' }]);
+		const r = await remote.addRankKeywords({
+			projectId: 'p1',
+			keywords: ['angajare videochat', 'Angajare  Videochat', 'studio videochat'],
+			location: 'România'
+		});
+		expect(r.added).toBe(1);
+		expect(r.duplicates).toEqual(['angajare videochat']);
+		expect(inserted.map((k) => k.keyword as string)).toEqual(['studio videochat']);
+	});
+
+	test('normalizează spațiile și majusculele în cadrul inputului', async () => {
+		selectQueue.push([{ id: 'p1' }]);
+		selectQueue.push([]);
+		const r = await remote.addRankKeywords({
+			projectId: 'p1',
+			keywords: ['studio  videochat', 'Studio Videochat', ' studio videochat ']
+		});
+		expect(r.added).toBe(1);
+		expect(inserted.map((k) => k.keyword as string)).toEqual(['studio videochat']);
 	});
 
 	test('dedup contra celor existente + în cadrul inputului', async () => {
