@@ -199,6 +199,13 @@ describe('detectBlocked', () => {
 		expect(detectBlocked('redirect to /sorry/index')).toBe(true);
 		expect(detectBlocked('pagină normală fără markeri')).toBe(false);
 	});
+
+	test('NU marchează fals un SERP legitim care conține „recaptcha"/„unusual traffic"/„/sorry/" în text', () => {
+		// keyword „recaptcha" → titluri/snippeturi menționează cuvântul, dar nu e o pagină de blocare
+		expect(detectBlocked('<h3>Ce este reCAPTCHA?</h3><span>ghid despre recaptcha</span>')).toBe(false);
+		expect(detectBlocked('<span>cum detectezi unusual traffic pe site</span>')).toBe(false);
+		expect(detectBlocked('<a href="https://example.ro/nu-sorry/pagina">link</a>')).toBe(false);
+	});
 });
 
 describe('parseSerpHtml — cazuri limită', () => {

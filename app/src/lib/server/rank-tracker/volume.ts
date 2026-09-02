@@ -121,8 +121,10 @@ export async function refreshKeywordVolumes(tenantId: string, deps: VolumeDeps =
 		if (volumes === null) return { skipped: true, reason: 'fără integrare Google Ads', updated };
 
 		for (const kw of batch) {
-			const v = volumes.get(kw.keyword.toLowerCase()) ?? null;
-			await saveVolume(kw.id, v, now());
+			const key = kw.keyword.toLowerCase();
+			// Nu suprascrie un volum cunoscut cu null când Google omite keyword-ul din răspuns.
+			if (!volumes.has(key)) continue;
+			await saveVolume(kw.id, volumes.get(key) ?? null, now());
 			updated++;
 		}
 	}

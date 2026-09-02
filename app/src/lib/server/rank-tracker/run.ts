@@ -218,7 +218,13 @@ export async function runRankProjectCheck(
 		};
 
 		// Failover pe rată de eșec (modul 'auto'), înainte de următoarea cerere.
-		if (!usingFallback && providers.fallback && shouldFailover({ keywordsChecked: checked, failed })) {
+		// Numitorul = ÎNCERCĂRI totale (succese + eșecuri), nu doar succesele — altfel
+		// un scraper care eșuează la fiecare cerere n-ar atinge niciodată pragul.
+		if (
+			!usingFallback &&
+			providers.fallback &&
+			shouldFailover({ keywordsChecked: checked + failed, failed })
+		) {
 			activeProvider = providers.fallback;
 			usingFallback = true;
 			logInfo('scheduler', `[rank] failover pe DataForSEO (rată de eșec) — proiect ${project.id}`);

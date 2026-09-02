@@ -66,6 +66,7 @@ export async function buildRankProjects(
 			id: table.rankProject.id,
 			name: table.rankProject.name,
 			domain: table.rankProject.domain,
+			devices: table.rankProject.devices,
 			active: table.rankProject.active,
 			pausedAt: table.rankProject.pausedAt,
 			clientName: table.client.name
@@ -92,12 +93,13 @@ export async function buildRankProjects(
 				.select({
 					keywordId: table.rankSnapshot.keywordId,
 					projectId: table.rankKeyword.projectId,
+					device: table.rankSnapshot.device,
 					dayKey: table.rankSnapshot.dayKey,
 					position: table.rankSnapshot.position
 				})
 				.from(table.rankSnapshot)
 				.innerJoin(table.rankKeyword, eq(table.rankSnapshot.keywordId, table.rankKeyword.id))
-				.where(and(inArray(table.rankSnapshot.keywordId, keywordIds), eq(table.rankSnapshot.device, 'desktop')))
+				.where(inArray(table.rankSnapshot.keywordId, keywordIds))
 				.orderBy(desc(table.rankSnapshot.dayKey))
 		: [];
 
@@ -132,23 +134,24 @@ export async function buildRankProjects(
 	const keywordCountByProject = new Map<string, number>();
 	for (const k of keywords) keywordCountByProject.set(k.projectId, (keywordCountByProject.get(k.projectId) ?? 0) + 1);
 
-	// Serie desktop per keyword.
+	// Serie per (keyword, device); agregatele folosesc dispozitivul principal al proiectului.
 	const seriesByKeyword = new Map<string, { dayKey: string; position: number | null }[]>();
-	const keywordProject = new Map<string, string>();
-	for (const k of keywords) keywordProject.set(k.id, k.projectId);
 	for (const s of snapshots) {
-		const arr = seriesByKeyword.get(s.keywordId) ?? [];
+		const key = `${s.keywordId}:${s.device}`;
+		const arr = seriesByKeyword.get(key) ?? [];
 		arr.push({ dayKey: s.dayKey, position: s.position });
-		seriesByKeyword.set(s.keywordId, arr);
+		seriesByKeyword.set(key, arr);
 	}
 
 	const rows: RankProjectListRow[] = projects.map((p) => {
 		const projKeywords = keywords.filter((k) => k.projectId === p.id);
+		const trackedDevices = p.devices as ('desktop' | 'mobile')[];
+		const primaryDevice = trackedDevices.includes('desktop') ? 'desktop' : (trackedDevices[0] ?? 'desktop');
 		const nowPositions: (number | null)[] = [];
 		const thenPositions: (number | null)[] = [];
 		const dist: Record<RankBucket, number> = { '1-3': 0, '4-10': 0, '11-20': 0, '21-50': 0, '51-100': 0, '100+': 0 };
 		for (const kw of projKeywords) {
-			const series = (seriesByKeyword.get(kw.id) ?? []).filter((s) => s.dayKey <= todayKey);
+			const series = (seriesByKeyword.get(`${kw.id}:${primaryDevice}`) ?? []).filter((s) => s.dayKey <= todayKey);
 			const nowPos = series[0]?.position ?? null;
 			const then = snapshotAtLookback(series, todayKey, 7, 3);
 			nowPositions.push(nowPos);
@@ -286,7 +289,8 @@ export async function buildRankProjectDetail(
 		.where(and(eq(table.rankKeyword.projectId, projectId), eq(table.rankKeyword.active, true)));
 
 	const keywordIds = keywords.map((k) => k.id);
-	const since30 = new Date(now.getTime() - 33 * DAY_MS);
+	// Fereastra de fetch trebuie să acopere lookback-ul delta30 (30 + toleranță 5) + slack DST.
+	const since30 = new Date(now.getTime() - 36 * DAY_MS);
 	const snapshots = keywordIds.length
 		? await db
 				.select({
@@ -320,17 +324,22 @@ export async function buildRankProjectDetail(
 
 	const detailKeywords: RankKeywordDetail[] = [];
 	const dist: Record<RankBucket, number> = { '1-3': 0, '4-10': 0, '11-20': 0, '21-50': 0, '51-100': 0, '100+': 0 };
-	const desktopNow: (number | null)[] = [];
+	// Dispozitivul principal pentru agregatele „headline" = desktop dacă e urmărit, altfel
+	// mobil (un proiect doar-mobil nu trebuie să raporteze vizibilitate 0).
+	const trackedDevices = project.devices as ('desktop' | 'mobile')[];
+	const primaryDevice: 'desktop' | 'mobile' = trackedDevices.includes('desktop') ? 'desktop' : 'mobile';
+	const primaryNow: (number | null)[] = [];
 	let aiPresent = 0;
 	let aiCited = 0;
-	// Serii pentru graficul de trend: vizibilitate + poziție medie desktop pe zi.
-	const perDayPositions = new Map<string, number[]>();
+	// Serii pentru graficul de trend: vizibilitate + poziție medie pe dispozitivul principal.
+	// Include nulurile (unranked) în numitor, ca vizibilitatea zilei să nu fie umflată.
+	const perDayPositions = new Map<string, (number | null)[]>();
 	const sov: Record<string, number[]> = {};
 
 	for (const kw of keywords) {
 		for (const device of ['desktop', 'mobile'] as const) {
 			const series = (byKwDevice.get(`${kw.id}:${device}`) ?? []).filter((s) => s.dayKey <= todayKey);
-			if (series.length === 0 && device === 'mobile' && !(project.devices as string[]).includes('mobile')) {
+			if (series.length === 0 && !trackedDevices.includes(device)) {
 				continue;
 			}
 			const nowSnap = series[0] ?? null;
@@ -342,14 +351,14 @@ export async function buildRankProjectDetail(
 			const posByDay = new Map(series.map((s) => [s.dayKey, s.position]));
 			const spark30 = days.map((d) => (posByDay.has(d) ? posByDay.get(d)! : null));
 
-			if (device === 'desktop') {
-				desktopNow.push(nowPos);
+			if (device === primaryDevice) {
+				primaryNow.push(nowPos);
 				dist[bucketFor(nowPos)]++;
 				if (nowSnap?.aiOverview === 'present' || nowSnap?.aiOverview === 'cited') aiPresent++;
 				if (nowSnap?.aiOverview === 'cited') aiCited++;
 				for (const s of series) {
 					const arr = perDayPositions.get(s.dayKey) ?? [];
-					if (s.position != null) arr.push(s.position);
+					arr.push(s.position); // include null (unranked) — numitor corect al vizibilității
 					perDayPositions.set(s.dayKey, arr);
 				}
 				const comp = (nowSnap?.competitors ?? {}) as Record<string, number>;
@@ -389,9 +398,9 @@ export async function buildRankProjectDetail(
 		return positions && positions.length ? visibility(positions) : null;
 	});
 	const trendAvg = days.map((d) => {
-		const positions = perDayPositions.get(d);
-		if (!positions || !positions.length) return null;
-		return Math.round((positions.reduce((a, b) => a + b, 0) / positions.length) * 10) / 10;
+		const nums = (perDayPositions.get(d) ?? []).filter((p): p is number => p != null);
+		if (!nums.length) return null;
+		return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10;
 	});
 
 	const runs = await db
@@ -412,7 +421,7 @@ export async function buildRankProjectDetail(
 		.orderBy(desc(table.rankRun.startedAt))
 		.limit(15);
 
-	const nums = desktopNow.filter((x): x is number => x != null);
+	const nums = primaryNow.filter((x): x is number => x != null);
 	const shareOfVoice: Record<string, number> = {};
 	const kwCount = keywords.length || 1;
 	for (const [dom, positions] of Object.entries(sov)) {
@@ -433,7 +442,7 @@ export async function buildRankProjectDetail(
 		clientName: project.clientName,
 		active: project.active,
 		paused: !!project.pausedAt,
-		visibility: visibility(desktopNow),
+		visibility: visibility(primaryNow),
 		avgPosition: nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10 : null,
 		distribution: dist,
 		aiPresent,

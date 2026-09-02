@@ -50,14 +50,20 @@ function unwrapUrl(href: string): string {
 	return h;
 }
 
-/** Markerii unei pagini de blocare (CAPTCHA / „unusual traffic" / /sorry/). */
+/**
+ * Markerii unei pagini de blocare Google, restrânși la semnale SPECIFICE paginii de
+ * interstițiu — NU substringuri generice care pot apărea în rezultate organice legitime
+ * (ex. un keyword „recaptcha", un snippet cu „unusual traffic", un URL cu „/sorry/").
+ * Google folosește: formularul `id="captcha-form"`, widgetul `g-recaptcha`, fraza exactă
+ * „unusual traffic from your …", și calea de redirect `/sorry/index`.
+ */
 export function detectBlocked(html: string): boolean {
 	const h = (html || '').toLowerCase();
 	return (
-		h.includes('unusual traffic') ||
 		h.includes('captcha-form') ||
-		h.includes('recaptcha') ||
-		h.includes('/sorry/')
+		h.includes('g-recaptcha') ||
+		h.includes('unusual traffic from your') ||
+		h.includes('/sorry/index')
 	);
 }
 

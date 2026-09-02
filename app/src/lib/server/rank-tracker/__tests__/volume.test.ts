@@ -47,16 +47,29 @@ describe('refreshKeywordVolumes', () => {
 		expect(r.skipped).toBe(true);
 	});
 
-	test('keyword lipsă din răspuns → volum null', async () => {
+	test('keyword omis din răspuns → NU se suprascrie (nu se salvează null peste un volum cunoscut)', async () => {
 		const saved: (number | null)[] = [];
-		await refreshKeywordVolumes('t1', {
+		const r = await refreshKeywordVolumes('t1', {
 			loadKeywords: async () => [{ id: 'k1', keyword: 'necunoscut' }],
 			fetchVolumes: async () => new Map(),
 			saveVolume: async (_id, vol) => {
 				saved.push(vol);
 			}
 		});
-		expect(saved).toEqual([null]);
+		expect(saved).toEqual([]); // omis → sărit, volumul anterior rămâne intact
+		expect(r.updated).toBe(0);
+	});
+
+	test('volum 0 explicit în răspuns → se salvează (0 ≠ omis)', async () => {
+		const saved: { id: string; vol: number | null }[] = [];
+		await refreshKeywordVolumes('t1', {
+			loadKeywords: async () => [{ id: 'k1', keyword: 'nișă rară' }],
+			fetchVolumes: async () => new Map([['nișă rară', 0]]),
+			saveVolume: async (id, vol) => {
+				saved.push({ id, vol });
+			}
+		});
+		expect(saved).toEqual([{ id: 'k1', vol: 0 }]);
 	});
 });
 

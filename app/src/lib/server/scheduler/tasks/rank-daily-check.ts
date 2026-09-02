@@ -1,7 +1,7 @@
 // Job orar: pentru fiecare tenant cu Rank Tracker activat a cărui oră de verificare
 // se potrivește cu ora curentă din Europe/Bucharest, pune în coadă câte un job
 // one-shot `rank_project_check` per proiect activ care NU a rulat deja azi.
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { rankSettings, rankProject, rankRun } from '$lib/server/db/schema';
 import { logInfo, serializeError, logWarning } from '$lib/server/logger';
@@ -46,13 +46,21 @@ async function defaultLoadActiveProjects(tenantId: string) {
 }
 
 async function defaultHasRunToday(projectId: string, dayKey: string): Promise<boolean> {
+	// „a rulat azi" = există un run FINALIZAT (ok/partial) pe ziua curentă. Filtrăm statusul
+	// în SQL ca să nu depindem de ordinea rândurilor (un run 'running'/'interrupted' anterior
+	// nu trebuie să blocheze o verificare nouă).
 	const [row] = await db
-		.select({ id: rankRun.id, status: rankRun.status })
+		.select({ id: rankRun.id })
 		.from(rankRun)
-		.where(and(eq(rankRun.projectId, projectId), eq(rankRun.dayKey, dayKey)))
-		.limit(20);
-	// „a rulat azi" = există un run cu status finalizat (ok/partial) pe ziua curentă.
-	return !!row && (row.status === 'ok' || row.status === 'partial');
+		.where(
+			and(
+				eq(rankRun.projectId, projectId),
+				eq(rankRun.dayKey, dayKey),
+				inArray(rankRun.status, ['ok', 'partial'])
+			)
+		)
+		.limit(1);
+	return !!row;
 }
 
 async function defaultEnqueue(jobId: string, params: Record<string, unknown>) {

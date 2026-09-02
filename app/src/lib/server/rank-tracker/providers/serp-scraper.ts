@@ -66,7 +66,10 @@ const UULE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234
  * Google acceptă numele canonic („Oraș,Județ,Țara") pentru geolocalizarea SERP.
  */
 export function buildUule(location: string): string {
-	const lengthChar = UULE_ALPHABET[location.length % 64];
+	// Caracterul de lungime folosește numărul de OCTEȚI UTF-8, nu lungimea în code-uniți
+	// UTF-16 — contează la diacritice (ș, â, î ocupă 2 octeți).
+	const byteLen = Buffer.byteLength(location, 'utf8');
+	const lengthChar = UULE_ALPHABET[byteLen % 64];
 	const b64 = Buffer.from(location, 'utf8').toString('base64');
 	return `w+CAIQICI${lengthChar}${b64}`;
 }

@@ -202,6 +202,24 @@ describe('runRankProjectCheck — erori și status', () => {
 });
 
 describe('runRankProjectCheck — failover auto', () => {
+	test('scraper care eșuează la toate cererile (non-blocked) → failover pe rată după prag', async () => {
+		// 12 keywords desktop; scraperul dă timeout la toate → după 10+ încercări (rată >20%)
+		// runner-ul trebuie să comute pe DataForSEO pentru restul (bug: numitorul era doar succesele).
+		const kws = Array.from({ length: 12 }, (_, i) => keyword(`k${i}`));
+		selectQueue.push([project({ devices: ['desktop'] })], kws, []);
+		const providers = {
+			mode: 'auto' as const,
+			primary: fakeProvider('scraper', () => {
+				throw new SerpProviderError('timeout', 'timeout', true);
+			}),
+			fallback: fakeProvider('dataforseo', () => serp(4))
+		};
+		const r = await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers, sleep: async () => {}, now: () => NOW });
+		expect(r.failed).toBeGreaterThanOrEqual(10);
+		// failover-ul s-a produs: cel puțin un snapshot scris cu providerul de rezervă
+		expect(snapshotUpserts.some((s) => s.values.provider === 'dataforseo')).toBe(true);
+	});
+
 	test('blocare pe scraper → comută pe DataForSEO și continuă', async () => {
 		selectQueue.push([project({ devices: ['desktop'] })], [keyword('k1')], []);
 		const providers = {
