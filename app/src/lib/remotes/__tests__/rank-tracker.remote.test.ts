@@ -153,25 +153,45 @@ describe('addRankKeywords — limită și dedup', () => {
 	});
 });
 
-describe('startRankCheck — guard și rate-limit', () => {
+describe('startRankCheck — guard și buget orar', () => {
 	test('verificare deja în curs → 409', async () => {
-		selectQueue.push([{ id: 'p1' }]); // proiect
+		selectQueue.push([{ id: 'p1', devices: ['desktop'] }]);
 		redisStore.set('t1:rank:run:p1', JSON.stringify({ runId: 'r', total: 1, done: 0 })); // fără finishedAt
-		await expect(remote.startRankCheck('p1')).rejects.toThrow();
+		await expect(remote.startRankCheck({ projectId: 'p1' })).rejects.toThrow();
 		expect(queueAdds.length).toBe(0);
 	});
 
-	test('rulare manuală recentă (sub 1h) → 429', async () => {
-		selectQueue.push([{ id: 'p1' }]); // proiect
-		selectQueue.push([{ id: 'r-recent' }]); // rulare manuală recentă
-		await expect(remote.startRankCheck('p1')).rejects.toThrow();
+	test('peste bugetul orar de cuvinte → 429', async () => {
+		selectQueue.push([{ id: 'p1', devices: ['desktop'] }]);
+		selectQueue.push([{ checked: 58 }]); // 58 verificate manual în ultima oră
+		selectQueue.push(Array.from({ length: 26 }, (_, i) => ({ id: 'k' + i }))); // 26 cuvinte active
+		await expect(remote.startRankCheck({ projectId: 'p1' })).rejects.toThrow(); // 58 + 26 > 60
+		expect(queueAdds.length).toBe(0);
+	});
+
+	test('un singur cuvânt trece chiar dacă tot proiectul nu ar încăpea în buget', async () => {
+		selectQueue.push([{ id: 'p1', devices: ['desktop'] }]);
+		selectQueue.push([{ id: 'k1' }]); // cuvântul aparține proiectului
+		selectQueue.push([{ checked: 58 }]); // buget aproape epuizat
+		const r = await remote.startRankCheck({ projectId: 'p1', keywordIds: ['k1'] });
+		expect((r as { started: boolean }).started).toBe(true);
+		expect((queueAdds[0].data as { params: { keywordIds: string[] } }).params.keywordIds).toEqual(['k1']);
+	});
+
+	test('cuvintele care nu aparțin proiectului → 404', async () => {
+		selectQueue.push([{ id: 'p1', devices: ['desktop'] }]);
+		selectQueue.push([]); // niciun cuvânt al proiectului nu se potrivește
+		await expect(
+			remote.startRankCheck({ projectId: 'p1', keywordIds: ['al-altui-proiect'] })
+		).rejects.toThrow();
 		expect(queueAdds.length).toBe(0);
 	});
 
 	test('altfel → pune în coadă job-ul manual', async () => {
-		selectQueue.push([{ id: 'p1' }]); // proiect
-		selectQueue.push([]); // fără rulare manuală recentă
-		const r = await remote.startRankCheck('p1');
+		selectQueue.push([{ id: 'p1', devices: ['desktop'] }]);
+		selectQueue.push([]); // fără rulări manuale în ultima oră
+		selectQueue.push([{ id: 'k1' }, { id: 'k2' }]); // 2 cuvinte active
+		const r = await remote.startRankCheck({ projectId: 'p1' });
 		expect((r as { started: boolean }).started).toBe(true);
 		expect(queueAdds[0].name).toBe('rank-project-check');
 		expect((queueAdds[0].data as { params: { trigger: string } }).params.trigger).toBe('manual');

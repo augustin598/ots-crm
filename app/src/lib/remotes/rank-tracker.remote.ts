@@ -4,7 +4,7 @@
 import { query, command, getRequestEvent } from '$app/server';
 import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { env } from '$env/dynamic/private';
 import { db } from '$lib/server/db';
@@ -351,16 +351,47 @@ export const deleteRankKeyword = command(v.pipe(v.string(), v.minLength(1)), asy
 });
 
 // ── Verifică acum ──────────────────────────────────────────────────────
-export const startRankCheck = command(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+/**
+ * Bugetul de cuvinte verificate MANUAL pe oră, per proiect. Înlocuiește vechea regulă
+ * „o rulare pe oră", care făcea imposibilă reverificarea unui singur cuvânt: costul real
+ * față de Google e numărul de cuvinte, nu numărul de apăsări pe buton.
+ */
+const MANUAL_KEYWORDS_PER_HOUR = Number(env.RANK_MANUAL_KEYWORDS_PER_HOUR ?? 60) || 60;
+
+const startCheckSchema = v.object({
+	projectId: v.pipe(v.string(), v.minLength(1)),
+	/** Lipsă sau gol = tot proiectul. */
+	keywordIds: v.optional(v.array(v.pipe(v.string(), v.minLength(1))))
+});
+
+export const startRankCheck = command(startCheckSchema, async (input) => {
 	const { event, tenantId, userId } = requireTenantEvent();
 	await requireStaff(event);
+	const { projectId } = input;
 
 	const [project] = await db
-		.select({ id: table.rankProject.id })
+		.select({ id: table.rankProject.id, devices: table.rankProject.devices })
 		.from(table.rankProject)
 		.where(and(eq(table.rankProject.id, projectId), eq(table.rankProject.tenantId, tenantId)))
 		.limit(1);
 	if (!project) throw error(404, 'Proiect inexistent');
+
+	// Cuvintele cerute trebuie să fie chiar ale acestui proiect (scoping, nu doar filtrare).
+	let keywordIds: string[] | undefined;
+	if (input.keywordIds?.length) {
+		const owned = await db
+			.select({ id: table.rankKeyword.id })
+			.from(table.rankKeyword)
+			.where(
+				and(
+					eq(table.rankKeyword.projectId, projectId),
+					eq(table.rankKeyword.active, true),
+					inArray(table.rankKeyword.id, input.keywordIds)
+				)
+			);
+		if (owned.length === 0) throw error(404, 'Cuvintele cheie nu aparțin acestui proiect.');
+		keywordIds = owned.map((k) => k.id);
+	}
 
 	// deja o rulare activă?
 	const raw = await getRedis().get(rankRunProgressKey(tenantId, projectId));
@@ -372,21 +403,42 @@ export const startRankCheck = command(v.pipe(v.string(), v.minLength(1)), async 
 		}
 	}
 
-	// rate-limit: max o rulare manuală pe oră.
+	// Buget orar în CUVINTE: o reverificare punctuală trece, o rulare completă repetată nu.
 	const hourAgo = new Date(Date.now() - 3_600_000);
-	const [recent] = await db
-		.select({ id: table.rankRun.id })
+	const recent = await db
+		.select({ checked: table.rankRun.keywordsChecked })
 		.from(table.rankRun)
-		.where(and(eq(table.rankRun.projectId, projectId), eq(table.rankRun.trigger, 'manual'), gte(table.rankRun.startedAt, hourAgo)))
-		.limit(1);
-	if (recent) throw error(429, 'Ai rulat deja o verificare manuală în ultima oră. Încearcă mai târziu.');
+		.where(
+			and(
+				eq(table.rankRun.projectId, projectId),
+				eq(table.rankRun.trigger, 'manual'),
+				gte(table.rankRun.startedAt, hourAgo)
+			)
+		);
+	const usedThisHour = recent.reduce((a, r) => a + (r.checked ?? 0), 0);
+	const activeKeywords = keywordIds
+		? keywordIds.length
+		: (
+				await db
+					.select({ id: table.rankKeyword.id })
+					.from(table.rankKeyword)
+					.where(and(eq(table.rankKeyword.projectId, projectId), eq(table.rankKeyword.active, true)))
+			).length;
+	const devices = (project.devices as string[]).length || 1;
+	const cost = activeKeywords * devices;
+	if (usedThisHour + cost > MANUAL_KEYWORDS_PER_HOUR) {
+		throw error(
+			429,
+			`Buget orar depășit: ${usedThisHour} din ${MANUAL_KEYWORDS_PER_HOUR} verificări manuale folosite în ultima oră, iar asta ar mai cere ${cost}. Încearcă mai târziu sau verifică mai puține cuvinte.`
+		);
+	}
 
 	await getSchedulerQueue().add(
 		'rank-project-check',
-		{ type: 'rank_project_check', params: { tenantId, projectId, trigger: 'manual', triggeredBy: userId } },
+		{ type: 'rank_project_check', params: { tenantId, projectId, trigger: 'manual', triggeredBy: userId, keywordIds } },
 		{ jobId: `rank-project-check-${projectId}-${Date.now()}`, attempts: 1, removeOnComplete: true, removeOnFail: true }
 	);
-	return { started: true };
+	return { started: true, keywords: activeKeywords };
 });
 
 export const sendRankReportNow = command(async () => {

@@ -260,7 +260,7 @@
 		if (starting || running) return;
 		starting = true;
 		try {
-			await startRankCheck(projectId);
+			await startRankCheck({ projectId });
 			showToast('Verificare pornită — pozițiile se actualizează în câteva minute.');
 			void watchRun(projectId);
 		} catch (error) {
@@ -290,6 +290,25 @@
 		}
 		if (projectId !== watchedId) return;
 		await detailQuery.refresh().catch(() => {});
+	}
+
+	/** Verifică doar cuvintele date (un rând sau selecția), nu tot proiectul. */
+	async function runCheckFor(ids: string[]) {
+		if (starting || running || ids.length === 0) return;
+		starting = true;
+		try {
+			await startRankCheck({ projectId, keywordIds: ids });
+			showToast(
+				ids.length === 1
+					? 'Verific cuvântul acum — poziția se actualizează în câteva momente.'
+					: `Verific ${ids.length} cuvinte acum.`
+			);
+			void watchRun(projectId);
+		} catch (error) {
+			showToast(remoteErrorMessage(error, 'Verificarea nu a putut porni'));
+		} finally {
+			starting = false;
+		}
 	}
 
 	async function onAdd(keywords: string[], tag: string | null, location: string) {
@@ -533,6 +552,17 @@
 				{sel.length}
 				{sel.length === 1 ? 'cuvânt selectat' : 'cuvinte selectate'}
 				<div class="rt-bulk-actions">
+					<button
+						class="cl-btn-mini"
+						disabled={running || starting}
+						onclick={() => {
+							const ids = [...sel];
+							sel = [];
+							runCheckFor(ids);
+						}}
+					>
+						<RefreshCwIcon size={11} /> Verifică
+					</button>
 					<button class="cl-btn-mini" onclick={() => (sel = [])}>Anulează</button>
 					<button class="cl-btn-mini" onclick={() => delKws(sel)}><Trash2Icon size={11} /> Șterge</button>
 				</div>
@@ -645,6 +675,15 @@
 								<td><RtAi state={r.aiOverview} /></td>
 								<td class="num" onclick={(e) => e.stopPropagation()}>
 									<div style="display: flex; gap: 6px; justify-content: flex-end">
+										<button
+											class="cl-icon-btn"
+											title="Verifică acum acest cuvânt"
+											aria-label="Verifică acum {r.keyword}"
+											disabled={running || starting}
+											onclick={() => runCheckFor([r.id])}
+										>
+											<RefreshCwIcon size={13} />
+										</button>
 										<a
 											class="cl-icon-btn"
 											title="Vezi SERP în Google"

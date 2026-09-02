@@ -73,6 +73,8 @@ export async function runRankProjectCheck(
 		projectId: string;
 		trigger?: 'cron' | 'manual';
 		triggeredBy?: string | null;
+		/** Verifică DOAR aceste cuvinte cheie; lipsă = toate cuvintele active ale proiectului. */
+		keywordIds?: string[];
 	},
 	deps: RankRunDeps = {}
 ): Promise<RankRunSummary> {
@@ -117,7 +119,13 @@ export async function runRankProjectCheck(
 	const keywords = await db
 		.select()
 		.from(rankKeyword)
-		.where(and(eq(rankKeyword.projectId, project.id), eq(rankKeyword.active, true)));
+		.where(
+			and(
+				eq(rankKeyword.projectId, project.id),
+				eq(rankKeyword.active, true),
+				...(opts.keywordIds?.length ? [inArray(rankKeyword.id, opts.keywordIds)] : [])
+			)
+		);
 	if (keywords.length === 0) return emptySummary();
 
 	const { googleDomain, hl, gl } = parseLocale(project.locale);

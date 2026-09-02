@@ -151,7 +151,7 @@
 		if (checking || activeProjects.length === 0) return;
 		checking = true;
 		try {
-			const results = await Promise.allSettled(activeProjects.map((p) => startRankCheck(p.id)));
+			const results = await Promise.allSettled(activeProjects.map((p) => startRankCheck({ projectId: p.id })));
 			const started = results.filter((r) => r.status === 'fulfilled').length;
 			showToast(
 				started > 0

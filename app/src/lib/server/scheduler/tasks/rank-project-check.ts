@@ -40,11 +40,17 @@ export async function processRankProjectCheck(
 	const alertsEnabled = deps.alertsEnabled ?? defaultAlertsEnabled;
 	const sendAlerts = deps.sendAlerts ?? defaultSendAlerts;
 
+	// Subset opțional de cuvinte cheie: „Verifică acum" pe un rând sau pe o selecție.
+	const keywordIds = Array.isArray(params.keywordIds)
+		? params.keywordIds.filter((k): k is string => typeof k === 'string')
+		: undefined;
+
 	const summary = await run({
 		tenantId,
 		projectId,
 		trigger: (params.trigger as 'cron' | 'manual') ?? 'cron',
-		triggeredBy: (params.triggeredBy as string) ?? null
+		triggeredBy: (params.triggeredBy as string) ?? null,
+		keywordIds
 	});
 
 	if (summary.runId && summary.alerts > 0) {
