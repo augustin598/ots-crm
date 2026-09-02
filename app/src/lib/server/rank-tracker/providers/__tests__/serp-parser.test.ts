@@ -196,7 +196,10 @@ describe('detectBlocked', () => {
 		expect(detectBlocked('... unusual traffic from your computer ...')).toBe(true);
 		expect(detectBlocked('<form id="captcha-form">')).toBe(true);
 		expect(detectBlocked('<div class="g-recaptcha"></div>')).toBe(true);
-		expect(detectBlocked('redirect to /sorry/index')).toBe(true);
+		// „/sorry/index" NU mai e marker: MĂSURAT pe google.ro (2 sep. 2026), stringul apare
+		// în JS-ul inline al paginilor VALIDE de căutare, iar paginile de CAPTCHA (servite
+		// cu status 200) NU îl conțin. Redirectul real se prinde pe URL-ul final, în scraper.
+		expect(detectBlocked('redirect to /sorry/index')).toBe(false);
 		expect(detectBlocked('pagină normală fără markeri')).toBe(false);
 	});
 

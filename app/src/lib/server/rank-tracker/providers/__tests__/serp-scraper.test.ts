@@ -90,14 +90,23 @@ function newRecorder(): Recorder {
 beforeEach(() => _resetScraperState());
 
 describe('buildSerpUrl — parametrii Google', () => {
-	test('desktop RO: num=100, hl, gl, pws, fără uule când locația e goală', () => {
+	test('desktop RO: hl, gl, pws, FĂRĂ num, fără uule când locația e goală', () => {
 		const url = buildSerpUrl(baseQuery());
 		expect(url.startsWith('https://www.google.ro/search?')).toBe(true);
-		expect(url).toContain('num=100');
+		// `num=100` a fost scos: MĂSURAT pe google.ro (2 sep. 2026) — cu `&num=100` Google
+		// întoarce 429 → /sorry/, fără el întoarce 200 cu rezultate. Adâncimea vine din
+		// paginarea `&start=`.
+		expect(url).not.toContain('num=');
 		expect(url).toContain('hl=ro');
 		expect(url).toContain('gl=ro');
 		expect(url).toContain('pws=0');
 		expect(url).not.toContain('uule=');
+		expect(url).not.toContain('start=');
+	});
+
+	test('paginare: start=0 nu apare în URL, start=20 apare', () => {
+		expect(buildSerpUrl(baseQuery(), 0)).not.toContain('start=');
+		expect(buildSerpUrl(baseQuery(), 20)).toContain('start=20');
 	});
 
 	test('cu locație → conține uule', () => {

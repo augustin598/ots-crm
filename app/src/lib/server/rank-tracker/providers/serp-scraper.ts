@@ -5,7 +5,7 @@
 // dependențele externe (launch, sleep, env) sunt injectabile → testabil fără browser.
 // Modelul de stealth/launch e preluat din scraper/cloudflare-bypass.ts.
 import { findChromePath } from '$lib/server/scraper/find-chrome';
-import { detectBlocked, parseSerpHtml } from './serp-parser';
+import { detectBlocked, matchDomain, parseSerpHtml } from './serp-parser';
 import { SerpProviderError, type SerpQuery, type SerpResult, type SerpProvider } from './types';
 
 const DEFAULT_PACE_MS = 8000;
@@ -26,6 +26,8 @@ export interface PageLike {
 	evaluateOnNewDocument(fn: (...a: unknown[]) => unknown): Promise<void>;
 	goto(url: string, opts: { waitUntil?: string; timeout?: number }): Promise<unknown>;
 	content(): Promise<string>;
+	/** URL-ul final după redirecturi; opțional ca să nu rupem dublurile din teste. */
+	url?(): string;
 	close(): Promise<void>;
 }
 export interface BrowserLike {
@@ -53,9 +55,9 @@ export function _resetScraperState(): void {
 }
 
 const UA_DESKTOP =
-	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const UA_MOBILE =
-	'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+	'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
 
 // Alfabetul base64url folosit de UULE pentru caracterul de lungime.
 const UULE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -74,15 +76,25 @@ export function buildUule(location: string): string {
 	return `w+CAIQICI${lengthChar}${b64}`;
 }
 
-/** URL-ul de căutare Google pentru interogare (num=depth, hl/gl, pws=0, uule opțional). */
-export function buildSerpUrl(q: SerpQuery): string {
+/** Câte rezultate întoarce Google pe o pagină de căutare (fără `num`). */
+export const RESULTS_PER_PAGE = 10;
+
+/**
+ * URL-ul de căutare Google pentru o PAGINĂ de rezultate (hl/gl, pws=0, uule opțional).
+ *
+ * `num=100` a fost SCOS intenționat: MĂSURAT pe google.ro (2 sep. 2026), cu exact
+ * același browser și aceeași amprentă, `&num=100` întoarce **HTTP 429 → /sorry/**
+ * (blocare imediată), iar aceeași interogare fără `num` întoarce **200 cu rezultate**.
+ * Adâncimea se obține prin paginare `&start=0,10,20…` (vezi `fetchSerpScraper`).
+ */
+export function buildSerpUrl(q: SerpQuery, start = 0): string {
 	const params = new URLSearchParams({
 		q: q.keyword,
-		num: String(q.depth),
 		hl: q.hl,
 		gl: q.gl,
 		pws: '0'
 	});
+	if (start > 0) params.set('start', String(start));
 	if (q.location) params.set('uule', buildUule(q.location));
 	return `https://www.${q.googleDomain}/search?${params.toString()}`;
 }
@@ -109,6 +121,11 @@ async function defaultLaunch(opts: { args: string[] }): Promise<BrowserLike> {
 	})) as unknown as BrowserLike;
 }
 
+/**
+ * Argumentele de lansare. `--disable-blink-features=AutomationControlled` e OBLIGATORIU:
+ * MĂSURAT pe google.ro (2 sep. 2026) — fără el, aceeași interogare simplă primește
+ * **HTTP 429 → /sorry/** din prima, cu el întoarce **200 cu rezultate**.
+ */
 const BASE_LAUNCH_ARGS = [
 	'--no-sandbox',
 	'--disable-setuid-sandbox',
@@ -117,7 +134,8 @@ const BASE_LAUNCH_ARGS = [
 	'--disable-extensions',
 	'--disable-background-networking',
 	'--disable-sync',
-	'--no-first-run'
+	'--no-first-run',
+	'--disable-blink-features=AutomationControlled'
 ];
 
 function proxiesFromEnv(env: Record<string, string | undefined>): string[] {
@@ -132,8 +150,13 @@ async function preparePage(page: PageLike, q: SerpQuery): Promise<void> {
 		await page.setUserAgent(UA_DESKTOP);
 		await page.setViewport({ width: 1366, height: 768 });
 	}
+	// `webdriver` trebuie să fie UNDEFINED, nu `false`: proprietatea prezentă cu valoarea
+	// `false` e ea însăși un semnal de automatizare. Plus limbi și plugin-uri, altfel
+	// amprenta rămâne una evident de headless.
 	await page.evaluateOnNewDocument(() => {
-		Object.defineProperty(navigator, 'webdriver', { get: () => false });
+		Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+		Object.defineProperty(navigator, 'languages', { get: () => ['ro-RO', 'ro', 'en-US'] });
+		Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
 	});
 	await page.setExtraHTTPHeaders({ 'Accept-Language': `${q.hl}-${q.gl.toUpperCase()},${q.hl};q=0.9,en;q=0.8` });
 	// Cookie-uri de consimțământ ca să sărim peste peretele „Înainte de a continua".
@@ -145,25 +168,36 @@ async function preparePage(page: PageLike, q: SerpQuery): Promise<void> {
 	);
 }
 
+/** O SINGURĂ pagină de rezultate (`start` = offsetul paginării). */
 async function attemptOnce(
 	browser: BrowserLike,
 	q: SerpQuery,
-	targetDomain: string
+	targetDomain: string,
+	start = 0
 ): Promise<SerpResult> {
 	const page = await browser.newPage();
 	try {
 		await preparePage(page, q);
 		try {
-			await page.goto(buildSerpUrl(q), { waitUntil: 'networkidle2', timeout: NAV_TIMEOUT_MS });
+			await page.goto(buildSerpUrl(q, start), {
+				waitUntil: 'domcontentloaded',
+				timeout: NAV_TIMEOUT_MS
+			});
 		} catch (e) {
 			if (isTimeoutError(e)) throw new SerpProviderError('timeout la navigare', 'timeout', true);
 			throw new SerpProviderError('eroare de rețea la navigare', 'network', true);
+		}
+		// Redirectul real către interstițiu se vede pe URL-ul final; în HTML NU (pagina
+		// de CAPTCHA e servită chiar cu status 200 și fără „/sorry/" în corp).
+		const finalUrl = page.url?.() ?? '';
+		if (finalUrl.includes('/sorry/')) {
+			throw new SerpProviderError('blocat de Google (redirect /sorry/)', 'blocked', false);
 		}
 		const html = await page.content();
 		if (detectBlocked(html)) {
 			throw new SerpProviderError('blocat de Google (CAPTCHA)', 'blocked', false);
 		}
-		const result = parseSerpHtml(html, { targetDomain, competitors: [] });
+		const result = parseSerpHtml(html, { targetDomain, competitors: [], startOffset: start });
 		// Anti-„lost fals": pagină nedetectată ca blocată, dar cu 0 organice = selector rupt.
 		if (result.organic.length === 0) {
 			throw new SerpProviderError('0 rezultate organice — selector posibil rupt', 'parse', false);
@@ -197,27 +231,22 @@ export async function fetchSerpScraper(
 	if (deps.browser) {
 		browser = deps.browser;
 	} else {
-		const args = [
-			'--no-sandbox',
-			'--disable-setuid-sandbox',
-			'--disable-dev-shm-usage',
-			'--disable-gpu',
-			'--disable-extensions',
-			'--disable-background-networking',
-			'--disable-sync',
-			'--no-first-run'
-		];
+		// O SINGURĂ sursă de adevăr pentru argumente: lista era duplicată aici și nu primea
+		// flagurile de stealth adăugate în `BASE_LAUNCH_ARGS`, așa că orice apel fără browser
+		// partajat (ex. proba din `_debug-rank-health`) pornea un Chromium detectabil.
+		const args = [...BASE_LAUNCH_ARGS];
 		const proxy = pickProxy(proxies);
 		if (proxy) args.push(`--proxy-server=${proxy}`);
 		const launch = deps.launch ?? defaultLaunch;
 		browser = await launch({ args });
 	}
 
-	try {
+	/** O pagină, cu reîncercări pe erorile tranzitorii. */
+	async function pageWithRetries(start: number): Promise<SerpResult> {
 		let lastErr: unknown;
 		for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 			try {
-				return await attemptOnce(browser, q, targetDomain);
+				return await attemptOnce(browser, q, targetDomain, start);
 			} catch (e) {
 				lastErr = e;
 				const retryable = e instanceof SerpProviderError ? e.retryable : true;
@@ -227,6 +256,40 @@ export async function fetchSerpScraper(
 			}
 		}
 		throw lastErr;
+	}
+
+	try {
+		// Paginare `&start=`: mergem din 10 în 10 până găsim domeniul țintă sau atingem
+		// adâncimea cerută. Ne oprim imediat ce ținta e găsită — fiecare pagină în plus e
+		// o cerere în plus către Google, adică risc de blocare.
+		const maxPages = Math.max(1, Math.ceil(q.depth / RESULTS_PER_PAGE));
+		const merged: SerpResult = {
+			organic: [],
+			features: [],
+			aiOverview: 'absent',
+			raw: { blocked: false }
+		};
+		for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+			const start = pageIndex * RESULTS_PER_PAGE;
+			let page: SerpResult;
+			try {
+				page = await pageWithRetries(start);
+			} catch (e) {
+				// Prima pagină trebuie să reușească; pe paginile următoare o eroare „parse"
+				// înseamnă doar că s-au terminat rezultatele (SERP-ul are mai puțin de `depth`).
+				if (pageIndex === 0) throw e;
+				if (e instanceof SerpProviderError && e.kind === 'parse') break;
+				throw e;
+			}
+			merged.organic.push(...page.organic);
+			for (const f of page.features) if (!merged.features.includes(f)) merged.features.push(f);
+			// Feature-urile și AI Overview se raportează de pe prima pagină (SERP-ul propriu-zis).
+			if (pageIndex === 0) merged.aiOverview = page.aiOverview;
+			if (page.organic.length < RESULTS_PER_PAGE) break; // nu mai sunt rezultate
+			if (page.organic.some((o) => matchDomain(o.url, targetDomain))) break; // țintă găsită
+			if (pageIndex < maxPages - 1) await sleep(paceMs + Math.floor(jitter() * paceMs * 0.25));
+		}
+		return merged;
 	} finally {
 		if (ownBrowser) await browser.close().catch(() => {});
 	}
