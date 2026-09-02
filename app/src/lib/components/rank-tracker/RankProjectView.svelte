@@ -208,13 +208,25 @@
 		starting = true;
 		try {
 			await startRankCheck(projectId);
-			runQuery.refresh();
 			showToast('Verificare pornită — pozițiile se actualizează în câteva minute.');
+			void watchRun();
 		} catch (error) {
 			showToast(remoteErrorMessage(error, 'Verificarea nu a putut porni'));
 		} finally {
 			starting = false;
 		}
+	}
+
+	// Jobul intră în coadă asincron, iar progresul apare în Redis abia când îl ia workerul:
+	// un singur refresh după pornire ratează rulările scurte (blocare Google) și bannerul
+	// n-ar apărea niciodată. Urmărim până se termină, apoi reîmprospătăm datele.
+	async function watchRun() {
+		for (let i = 0; i < 60; i++) {
+			await new Promise((r) => setTimeout(r, 1500));
+			await runQuery.refresh();
+			if (run?.finishedAt) break;
+		}
+		await detailQuery.refresh();
 	}
 
 	async function onAdd(keywords: string[], tag: string | null, location: string) {
