@@ -21,9 +21,21 @@ export const PSI_LVL_TEXT: Record<PsiLevel, string> = {
  * Attachment pentru dialoguri/drawere: focus la deschidere, trap de Tab în interior,
  * restaurarea focusului la închidere. Escape se tratează separat prin onkeydown.
  */
+/** Câte dialoguri sunt deschise simultan (drawer + modal peste el). */
+let openDialogs = 0;
+let savedOverflow = '';
+
 export function psiDialog(node: HTMLElement) {
 	const previous = document.activeElement as HTMLElement | null;
 	node.focus();
+	// Blochează derularea paginii din spate: fără asta, scroll-ul peste un modal deschis
+	// mișca fundalul (283 px sub modal, 476 px sub drawer — măsurat), iar panoul rămânea
+	// suspendat peste alt conținut decât cel de la deschidere.
+	if (openDialogs === 0) {
+		savedOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+	}
+	openDialogs++;
 	const onKey = (e: KeyboardEvent) => {
 		if (e.key !== 'Tab') return;
 		const focusables = [
@@ -45,6 +57,8 @@ export function psiDialog(node: HTMLElement) {
 	node.addEventListener('keydown', onKey);
 	return () => {
 		node.removeEventListener('keydown', onKey);
+		openDialogs = Math.max(0, openDialogs - 1);
+		if (openDialogs === 0) document.body.style.overflow = savedOverflow;
 		previous?.focus?.();
 	};
 }

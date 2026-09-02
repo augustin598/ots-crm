@@ -113,7 +113,7 @@
 					{/if}
 				</div>
 				<div class="psi-mail-foot">
-					Generat automat de OTS Rank Tracker · date SERP {lastDay || 'din ultima rulare'}, {hour}
+					Generat automat de OTS Rank Tracker · date SERP {lastDay || 'din ultima rulare'}
 				</div>
 			</div>
 		</div>

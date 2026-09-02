@@ -3,6 +3,7 @@
 // (vizibilitate, delte, distribuție, canibalizare) folosesc logica pură din $lib/logic.
 import { and, desc, eq, inArray, gte } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { SERP_DEPTH } from './config';
 import * as table from '$lib/server/db/schema';
 import {
 	visibility,
@@ -287,6 +288,11 @@ export interface RankProjectDetailData {
 	aiCited: number;
 	keywords: RankKeywordDetail[];
 	trend: { days: string[]; visibility: (number | null)[]; avgPosition: (number | null)[] };
+	/**
+	 * Câte poziții s-au căutat efectiv. UI-ul trebuie să spună „peste 30", nu „100+",
+	 * când un cuvânt nu a fost găsit — altfel afirmăm ceva ce nu am verificat.
+	 */
+	searchDepth: number;
 	runs: { id: string; startedAt: string; finishedAt: string | null; status: string; keywordsChecked: number; up: number; down: number; flat: number; failed: number; trigger: string }[];
 	shareOfVoice: Record<string, number>;
 }
@@ -494,6 +500,7 @@ export async function buildRankProjectDetail(
 		aiCited,
 		keywords: detailKeywords,
 		trend: { days, visibility: trendVis, avgPosition: trendAvg },
+		searchDepth: SERP_DEPTH,
 		runs: runs.map((r) => ({
 			id: r.id,
 			startedAt: r.startedAt.toISOString(),

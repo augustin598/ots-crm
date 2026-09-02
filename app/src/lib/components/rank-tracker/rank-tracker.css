@@ -116,6 +116,15 @@
 .rt-count b { color: var(--cl-text); }
 
 .rt-table-scroll { overflow-x: auto; }
+/* Tabelul de rulări are 10 coloane: sub ~1230px trebuie să deruleze în containerul lui,
+   altfel overflow-ul urcă la .cl-wrap și e tăiat de layout (coloanele Eșuate/Status
+   deveneau inaccesibile pe laptopuri mici). */
+.rt-runs-scroll { overflow-x: auto; }
+.rt-runs-scroll .cl-list-table { min-width: 900px; }
+/* `psiDialog` mută focusul pe containerul cu tabindex="-1"; fără asta, deschiderea de la
+   tastatură desena inelul albastru implicit în jurul întregului panou de 760px. */
+.cl-wrap .psi-drawer:focus-visible,
+.cl-wrap .psi-modal:focus-visible { outline: none; }
 .rt-table-scroll .cl-list-table { min-width: 1240px; }
 .rt-check { width: 15px; height: 15px; accent-color: var(--cl-accent); cursor: pointer; }
 .rt-bulk { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border: 1px solid var(--cl-accent); background: var(--cl-accent-50); border-radius: 11px; font-size: 12.5px; font-weight: 600; color: #0b3d8c; }

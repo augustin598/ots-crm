@@ -145,29 +145,45 @@
 		};
 	});
 
+	// Contoarele se calculează pe rândurile care trec deja de căutare/locație/etichete,
+	// altfel tabul zicea „Toate 3" în timp ce tabelul afișa 1 rând (pe hub filtrarea
+	// era deja corectă — era o inconsecvență în interiorul aceleiași funcționalități).
+	const scopedRows = $derived.by(() => {
+		const needle = q.trim().toLowerCase();
+		return pRows.filter((k) => {
+			if (locF !== 'all' && k.location !== locF) return false;
+			if (tagF.length && (!k.tag || !tagF.includes(k.tag))) return false;
+			if (needle && !`${k.keyword} ${k.rankingUrl ?? k.targetUrl ?? ''}`.toLowerCase().includes(needle))
+				return false;
+			return true;
+		});
+	});
+
 	const tabs = $derived([
-		['all', 'Toate', pRows.length],
-		['top10', 'Top 10', pRows.filter((r) => r.position != null && r.position <= 10).length],
-		['up', 'Au urcat', pRows.filter((r) => (r.delta7 ?? 0) > 0).length],
+		['all', 'Toate', scopedRows.length],
+		['top10', 'Top 10', scopedRows.filter((r) => r.position != null && r.position <= 10).length],
+		['up', 'Au urcat', scopedRows.filter((r) => (r.delta7 ?? 0) > 0).length],
 		[
 			'down',
 			'Au scăzut',
-			pRows.filter((r) => (r.delta7 ?? 0) < 0 || (r.position == null && r.spark30.some((v) => v != null)))
-				.length
+			scopedRows.filter(
+				(r) => (r.delta7 ?? 0) < 0 || (r.position == null && r.spark30.some((v) => v != null))
+			).length
 		],
-		['ai', 'AI Overview', pRows.filter((r) => r.aiOverview !== 'absent').length],
-		['canib', 'Canibalizare', pRows.filter((r) => r.cannibalization.flagged).length]
+		['ai', 'AI Overview', scopedRows.filter((r) => r.aiOverview !== 'absent').length],
+		['canib', 'Canibalizare', scopedRows.filter((r) => r.cannibalization.flagged).length]
 	] as const);
 
-	const locations = $derived([...new Set(pRows.map((r) => r.location).filter(Boolean))]);
+	// Locațiile proiectului sunt sursa de adevăr (aceleași cu subtitlul și cu modalul de
+	// editare). Derivarea din `pRows` dădea listă goală, fiindcă `location` e adesea '' pe
+	// keyword — deci selectul rămânea inert.
+	const locations = $derived([
+		...new Set([...(detail?.locations ?? []), ...pRows.map((r) => r.location)].filter(Boolean))
+	]);
 	const tags = $derived([...new Set(pRows.map((r) => r.tag).filter((t): t is string => !!t))]);
 
 	const detailRows = $derived.by(() => {
-		const needle = q.trim().toLowerCase();
-		const out = pRows.filter((k) => {
-			if (locF !== 'all' && k.location !== locF) return false;
-			if (tagF.length && (!k.tag || !tagF.includes(k.tag))) return false;
-			if (needle && !`${k.keyword} ${k.rankingUrl ?? k.targetUrl ?? ''}`.toLowerCase().includes(needle)) return false;
+		const out = scopedRows.filter((k) => {
 			if (tab === 'top10' && !(k.position != null && k.position <= 10)) return false;
 			if (tab === 'up' && !((k.delta7 ?? 0) > 0)) return false;
 			if (
@@ -390,7 +406,10 @@
 				<div>
 					<div class="cl-kpi-lbl">Poziție medie</div>
 					<div class="cl-kpi-val">{st.avg ?? '—'}</div>
-					<div class="cl-kpi-sub">{device === 'mobile' ? 'mobil' : 'desktop'} · {pRows.length} cuvinte</div>
+					<div class="cl-kpi-sub">
+						{device === 'mobile' ? 'mobil' : 'desktop'} · pe {pRows.filter((r) => r.position != null).length}
+						din {pRows.length} cuvinte clasate
+					</div>
 				</div>
 			</div>
 			<div class="cl-kpi">
@@ -590,7 +609,7 @@
 								</td>
 								<td class="num">{#if r.volume}{rtNum(r.volume)}{:else}<span class="iv-muted">—</span>{/if}</td>
 								<td class="num"><span class="iv-muted">—</span></td>
-								<td class="num"><RtPos pos={r.position} /></td>
+								<td class="num"><RtPos pos={r.position} depth={detail?.searchDepth ?? 100} /></td>
 								<td class="num">
 									{#if r.page == null}
 										<span class="iv-muted">—</span>
@@ -692,6 +711,7 @@
 				<h3><CalendarDaysIcon size={15} /> Istoric rulări zilnice</h3>
 				<p class="cl-section-sub" style="margin-left: auto">fiecare rulare salvează poziția fiecărui cuvânt cheie</p>
 			</div>
+			<div class="rt-runs-scroll">
 			<table class="cl-list-table">
 				<thead>
 					<tr>
@@ -737,6 +757,7 @@
 					{/each}
 				</tbody>
 			</table>
+			</div>
 		</div>
 	</div>
 
@@ -750,6 +771,7 @@
 			locale={detail.locale}
 			days={detail.trend.days}
 			checkHour={settings?.checkHour ?? '06:00'}
+			searchDepth={detail.searchDepth}
 			onclose={() => (openKw = null)}
 			ondelete={(id) => delKws([id])}
 		/>

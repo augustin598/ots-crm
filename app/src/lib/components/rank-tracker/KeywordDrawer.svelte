@@ -30,6 +30,7 @@
 		locale,
 		days,
 		checkHour,
+		searchDepth = 100,
 		onclose,
 		ondelete
 	}: {
@@ -41,6 +42,7 @@
 		locale: string;
 		days: string[];
 		checkHour: string;
+		searchDepth?: number;
 		onclose: () => void;
 		ondelete: (id: string) => void;
 	} = $props();
@@ -152,10 +154,10 @@
 			<div class="rt-kpi-mini">
 				<div class="rt-mini">
 					<span>Poziție azi</span>
-					<b>{keyword.position == null ? '100+' : '#' + keyword.position}</b>
+					<b>{keyword.position == null ? `${searchDepth}+` : '#' + keyword.position}</b>
 					<em>
 						{keyword.position == null
-							? 'peste pagina 10'
+							? `negăsit în primele ${searchDepth}`
 							: `pagina ${keyword.page} · ${rtd.length ? rtd[rtd.length - 1].short : ''}`}
 					</em>
 				</div>
@@ -311,11 +313,11 @@
 							<tr style="cursor: default">
 								<td>{r.full}</td>
 								<td class="num">
-									{#if !hasDesktop}<span class="iv-muted">neurmărit</span>{:else if !r.dRan}<span class="iv-muted">—</span>{:else}<RtPos pos={r.d} sm />{/if}
+									{#if !hasDesktop}<span class="iv-muted">neurmărit</span>{:else if !r.dRan}<span class="iv-muted">—</span>{:else}<RtPos pos={r.d} sm depth={searchDepth} />{/if}
 								</td>
 								<td class="num">{#if hasDesktop}<RtGain value={r.dDelta} />{:else}<span class="iv-muted">—</span>{/if}</td>
 								<td class="num">
-									{#if !hasMobile}<span class="iv-muted">neurmărit</span>{:else if !r.mRan}<span class="iv-muted">—</span>{:else}<RtPos pos={r.m} sm />{/if}
+									{#if !hasMobile}<span class="iv-muted">neurmărit</span>{:else if !r.mRan}<span class="iv-muted">—</span>{:else}<RtPos pos={r.m} sm depth={searchDepth} />{/if}
 								</td>
 								<td class="num">{#if hasMobile}<RtGain value={r.mDelta} />{:else}<span class="iv-muted">—</span>{/if}</td>
 							</tr>

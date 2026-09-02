@@ -16,6 +16,7 @@ import { pickTargetPosition, competitorPositions } from './providers/serp-parser
 import { resolveSerpProvider, shouldFailover, type ResolvedProviders } from './providers/resolve';
 import { SerpProviderError, type SerpQuery } from './providers/types';
 import { computeAlert } from './alerts';
+import { SERP_DEPTH } from './config';
 
 const PROGRESS_TTL_S = 30 * 60;
 const FINAL_TTL_S = 20;
@@ -55,18 +56,6 @@ export function rankRunProgressKey(tenantId: string, projectId: string): string 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 }
-
-/**
- * Câte poziții căutăm per cuvânt. Contează mult de când Google nu mai acceptă `num=100`:
- * scraperul paginează din 10 în 10, deci `depth` = numărul MAXIM de cereri către Google
- * per (cuvânt × dispozitiv). Cu 100 ar însemna până la 10 cereri fiecare — la 8 s pacing
- * o rulare mică depășește 10 minute și se termină aproape sigur cu blocare.
- * 30 = 3 cereri, acoperă primele 3 pagini (unde se decid clicurile). Peste `depth`
- * poziția e raportată ca „100+". Se poate ridica din `RANK_SERP_DEPTH` dacă ai proxy-uri
- * sau DataForSEO (care nu paginează).
- * Căutarea se oprește oricum imediat ce domeniul țintă e găsit.
- */
-const SERP_DEPTH = Number(env.RANK_SERP_DEPTH ?? 30) || 30;
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
