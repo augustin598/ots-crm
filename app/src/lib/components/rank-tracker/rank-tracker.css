@@ -190,11 +190,18 @@
 .dark .rt-bulk { color: #9ec5fb; }
 .dark .rt-comp-dom.self { color: var(--cl-accent); }
 .dark .rt-proj:hover { box-shadow: 0 8px 22px rgba(0,0,0,.4); }
+.dark .rt-trust.divergent { background: rgba(245,158,11,.18); color: #fcd34d; }
+.dark .rt-trust.missing { background: rgba(239,68,68,.18); color: #fca5a5; }
 
 /* ===== utilitare care NU există în pagespeed.css ===== */
 /* două coloane (din pagespeed-styles.css al designului, neportat în pagespeed.css) */
 /* secțiuni una sub alta, pe toată lățimea (SERP + competitori în drawerul de cuvânt) */
 .rt-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+
+/* semnal că poziția scrapată nu se potrivește cu ce raportează Search Console */
+.rt-trust { font-size: 10.5px; font-weight: 800; padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
+.rt-trust.divergent { background: rgba(245,158,11,.12); color: #b45309; }
+.rt-trust.missing { background: rgba(239,68,68,.12); color: #b91c1c; }
 .psi-two { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 1240px) { .psi-two { grid-template-columns: minmax(0, 1fr); } }
 .psi-two > * { min-width: 0; }

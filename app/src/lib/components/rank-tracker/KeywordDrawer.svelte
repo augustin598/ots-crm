@@ -370,6 +370,30 @@
 						<p class="cl-hint">Niciun alt domeniu în SERP-ul de azi.</p>
 					{/if}
 				</div>
+
+				<div class="cl-section">
+					<div class="cl-section-head">
+						<h3><TrendingUpIcon size={15} /> Search Console</h3>
+						<p class="cl-section-sub">date raportate de Google, nu scrapate</p>
+					</div>
+					{#if keyword.gsc}
+						<p class="cl-hint">
+							{keyword.gsc.date}: {keyword.gsc.impressions} afișări · {keyword.gsc.clicks} clicuri ·
+							CTR {keyword.gsc.ctr}% · poziție medie {keyword.gsc.position}
+						</p>
+						{#if keyword.gsc.trust === 'scrape-missing'}
+							<p class="cl-hint">
+								Google raportează afișări pentru acest cuvânt, dar rularea noastră nu a găsit
+								site-ul. Verifică istoricul rulărilor — probabil au fost blocate.
+							</p>
+						{/if}
+					{:else}
+						<p class="cl-hint">
+							Fără date — proiectul nu are proprietate Search Console legată, sau cuvântul nu a
+							avut afișări în ultimele zile.
+						</p>
+					{/if}
+				</div>
 			</div>
 
 			<div class="cl-section" style="padding: 0">

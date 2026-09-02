@@ -615,6 +615,8 @@
 							<th class="num">Volum</th>
 							<th class="num">KD</th>
 							<th class="num">Poziție</th>
+							<th class="num" title="Afișări în Google Search Console, ultima zi cu date">AFIȘĂRI</th>
+							<th class="num" title="Poziția medie din Search Console — mediată peste locații și pagini, nu comparabilă direct cu poziția scrapată">POZ. GSC</th>
 							<th class="num">Pagina</th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 1 zi</span></th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 7 zile</span></th>
@@ -668,6 +670,19 @@
 								<td class="num">{#if r.volume}{rtNum(r.volume)}{:else}<span class="iv-muted">—</span>{/if}</td>
 								<td class="num"><span class="iv-muted">—</span></td>
 								<td class="num"><RtPos pos={r.position} depth={detail?.searchDepth ?? 100} /></td>
+								<td class="num">{r.gsc ? r.gsc.impressions : '—'}</td>
+								<td class="num">
+									{#if r.gsc}
+										{r.gsc.position}
+										{#if r.gsc.trust === 'scrape-missing'}
+											<span class="rt-trust missing" title="Google raportează afișări, dar noi n-am găsit site-ul — măsurătoarea noastră e nesigură (rulare blocată?)">nemăsurat</span>
+										{:else if r.gsc.trust === 'divergent'}
+											<span class="rt-trust divergent" title="Poziția scrapată diferă cu peste 10 locuri față de media din Search Console">divergent</span>
+										{/if}
+									{:else}
+										—
+									{/if}
+								</td>
 								<td class="num">
 									{#if r.page == null}
 										<span class="iv-muted">—</span>
@@ -719,7 +734,7 @@
 							</tr>
 						{:else}
 							<tr style="cursor: default">
-								<td colspan="14">
+								<td colspan="16">
 									<div class="cl-empty" style="padding: 40px 0">
 										<SearchIcon size={20} />
 										<h3>Niciun cuvânt cheie</h3>
