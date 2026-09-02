@@ -6691,6 +6691,45 @@ export const rankSnapshot = sqliteTable(
 	})
 );
 
+/**
+ * Datele zilnice din Google Search Console, per cuvânt urmărit.
+ *
+ * `gsc_date` NU e `rank_snapshot.day_key`: GSC lucrează în ora Pacificului, noi în
+ * Europe/Bucharest. Numele diferit e intenționat, ca nimeni să nu facă un JOIN pe
+ * egalitate între ele crezând că e aceeași zi.
+ */
+export const rankGscDaily = sqliteTable(
+	'rank_gsc_daily',
+	{
+		id: text('id').primaryKey(),
+		keywordId: text('keyword_id')
+			.notNull()
+			.references(() => rankKeyword.id, { onDelete: 'cascade' }),
+		/** Ziua raportată de GSC, „YYYY-MM-DD" (ora Pacificului). */
+		gscDate: text('gsc_date').notNull(),
+		device: text('device', { enum: ['desktop', 'mobile'] }).notNull(),
+		clicks: integer('clicks').notNull().default(0),
+		impressions: integer('impressions').notNull().default(0),
+		/** CTR 0–100 cu o zecimală (GSC întoarce 0–1). */
+		ctr: real('ctr'),
+		/** Poziția medie GSC, cu o zecimală. Mediată peste locații și pagini. */
+		position: real('position'),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		kwDeviceDateUnique: uniqueIndex('rank_gsc_daily_kw_device_date_uidx').on(
+			t.keywordId,
+			t.device,
+			t.gscDate
+		)
+	})
+);
+
 export const rankRun = sqliteTable(
 	'rank_run',
 	{

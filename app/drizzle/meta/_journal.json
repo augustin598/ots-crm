@@ -3674,6 +3674,20 @@
       "when": 1788383466237002,
       "tag": "0527_rank_project_gsc_property",
       "breakpoints": true
+    },
+    {
+      "idx": 528,
+      "version": "6",
+      "when": 1788383466237003,
+      "tag": "0528_rank_gsc_daily",
+      "breakpoints": true
+    },
+    {
+      "idx": 529,
+      "version": "6",
+      "when": 1788383466237004,
+      "tag": "0529_rank_gsc_daily_uidx",
+      "breakpoints": true
     }
   ]
 }
