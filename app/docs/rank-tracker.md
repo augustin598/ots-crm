@@ -63,9 +63,30 @@ săptămânal.
 - **Hub**: fără segmented desktop/mobil (agregatele din lista de proiecte sunt pe dispozitivul
   principal); tabelul de jos e „Rapoarte trimise" (rulările sunt per proiect, în detaliu).
 
+## Scraper: ce a măsurat auditul din 2 sep. 2026
+Google a schimbat regulile; toate cele de mai jos sunt MĂSURATE pe google.ro, nu presupuse.
+- **`num=100` = blocare instantanee.** Aceeași interogare, același browser: cu `&num=100`
+  → HTTP 429 → `/sorry/`; fără `num` → 200 cu rezultate. Adâncimea vine acum din paginare
+  `&start=0,10,20…`, deci `depth` = numărul MAXIM de cereri per (cuvânt × dispozitiv).
+- **`--disable-blink-features=AutomationControlled` e obligatoriu**; fără el, chiar și o
+  interogare simplă ia 429 din prima. `navigator.webdriver` trebuie să fie `undefined`,
+  nu `false` (proprietatea prezentă e ea însăși un semnal).
+- **Pagina de CAPTCHA e servită cu status 200** și NU conține „/sorry/index"; în schimb
+  pagina VALIDĂ îl conține (în JS-ul inline). Deci: blocarea se detectează prin
+  `captcha-form`/`g-recaptcha` în HTML + `/sorry/` în URL-ul FINAL — niciodată prin
+  căutarea lui „/sorry/index" în corp.
+- **Selectoare organice**: `.g` = 0, `.mnr-c` = 0; funcționează `.tF2Cxc` (desktop, 10)
+  și `.MjjYud` (mobil, 26). `href`-ul nu mai conține destinația (`/goto?url=CAES…`,
+  protobuf opac) — URL-ul real se ia din `<cite>`.
+- Feature-uri verificate ca funcționale: `#tads`/`#tadsb` (ads), `[jsname="Cpkphb"]` (PAA),
+  `.rllt__details` (local pack). Pentru images/video/shopping/snippet/AI Overview nu am avut
+  un SERP care să le conțină → selectoarele rămân NEVERIFICATE pe layoutul curent.
+
 ## Operațional
 - Env: `RANK_PACE_MS` (implicit 8000), `RANK_PROXY_URLS` (listă separată prin virgulă),
-  `RANK_MAX_KEYWORDS_PER_PROJECT` (500).
+  `RANK_MAX_KEYWORDS_PER_PROJECT` (500), `RANK_SERP_DEPTH` (implicit **30** = 3 pagini;
+  cu paginare, 100 ar însemna până la 10 cereri per cuvânt → peste 10 minute și blocare
+  aproape sigură. Ridică-l doar cu proxy-uri sau pe DataForSEO).
 - Debug: `GET /[tenant]/api/_debug-rank-health` (admin) — Chromium, pacing/proxy,
   integrare SERP (fără credențiale); `?probe=1` face un SERP real de test.
 - Când apare `blocked` frecvent: crește `RANK_PACE_MS`, adaugă proxy-uri, sau trece

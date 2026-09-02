@@ -4,6 +4,7 @@
 // Redis, calculează agregatele rulării și persistă alertele. O eroare pe un keyword
 // NU oprește restul cozii; blocarea Google oprește scraperul și, în modul 'auto',
 // comută restul cozii pe providerul de rezervă.
+import { env } from '$env/dynamic/private';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -54,6 +55,18 @@ export function rankRunProgressKey(tenantId: string, projectId: string): string 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 }
+
+/**
+ * Câte poziții căutăm per cuvânt. Contează mult de când Google nu mai acceptă `num=100`:
+ * scraperul paginează din 10 în 10, deci `depth` = numărul MAXIM de cereri către Google
+ * per (cuvânt × dispozitiv). Cu 100 ar însemna până la 10 cereri fiecare — la 8 s pacing
+ * o rulare mică depășește 10 minute și se termină aproape sigur cu blocare.
+ * 30 = 3 cereri, acoperă primele 3 pagini (unde se decid clicurile). Peste `depth`
+ * poziția e raportată ca „100+". Se poate ridica din `RANK_SERP_DEPTH` dacă ai proxy-uri
+ * sau DataForSEO (care nu paginează).
+ * Căutarea se oprește oricum imediat ce domeniul țintă e găsit.
+ */
+const SERP_DEPTH = Number(env.RANK_SERP_DEPTH ?? 30) || 30;
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -214,7 +227,7 @@ export async function runRankProjectCheck(
 			hl,
 			gl,
 			location: job.location,
-			depth: 100
+			depth: SERP_DEPTH
 		};
 
 		// Failover pe rată de eșec (modul 'auto'), înainte de următoarea cerere.
