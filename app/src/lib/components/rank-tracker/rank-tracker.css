@@ -89,6 +89,11 @@
 .rt-comp-bar { height: 7px; border-radius: 999px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); overflow: hidden; }
 .rt-comp-bar i { display: block; height: 100%; border-radius: 999px; }
 
+/* drawer keyword — mai lat decât cel din PageSpeed: aici sunt două coloane (SERP azi +
+   competitori) plus un tabel de rulări cu 5 coloane. La 760px numele de domeniu se rupea
+   pe două rânduri („luckystudio.r" / „o"). */
+.psi-drawer.rt-drawer { width: 1080px; }
+
 /* drawer keyword */
 .rt-kpi-mini { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .rt-mini { border: 1px solid var(--cl-border); border-radius: 11px; padding: 12px 13px; background: var(--cl-surface); }

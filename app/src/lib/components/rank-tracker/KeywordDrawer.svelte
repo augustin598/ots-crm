@@ -122,7 +122,7 @@
 
 <div class="psi-drawer-back" onclick={onclose} role="presentation">
 	<div
-		class="psi-drawer"
+		class="psi-drawer rt-drawer"
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => {
 			e.stopPropagation();

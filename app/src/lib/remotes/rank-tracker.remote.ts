@@ -69,6 +69,32 @@ export const getRankRunStatus = query(v.pipe(v.string(), v.minLength(1)), async 
 	return getRankRunProgress(tenantId, projectId);
 });
 
+/**
+ * Progresul agregat al rulărilor din TOATE proiectele active ale tenantului — pentru
+ * bara de progres din hub, unde „Verifică acum" pornește câte o rulare per proiect.
+ * Citește doar din Redis (cheile de progres), fără atingerea bazei pentru fiecare rulare.
+ */
+export const getRankRunStatusAll = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const projects = await db
+		.select({ id: table.rankProject.id, domain: table.rankProject.domain })
+		.from(table.rankProject)
+		.where(and(eq(table.rankProject.tenantId, tenantId), eq(table.rankProject.active, true)));
+
+	const progress = await Promise.all(
+		projects.map(async (p) => ({ domain: p.domain, run: await getRankRunProgress(tenantId, p.id) }))
+	);
+	const active = progress.filter((p) => p.run && !p.run.finishedAt);
+	return {
+		running: active.length,
+		projects: active.map((p) => p.domain),
+		done: active.reduce((a, p) => a + (p.run?.done ?? 0), 0),
+		total: active.reduce((a, p) => a + (p.run?.total ?? 0), 0),
+		currentKeyword: active.find((p) => p.run?.currentKeyword)?.run?.currentKeyword ?? null
+	};
+});
+
 export const getRankReports = query(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);

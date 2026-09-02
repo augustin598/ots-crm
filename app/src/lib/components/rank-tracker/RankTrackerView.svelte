@@ -36,6 +36,7 @@
 	import { psiFmtDateTime } from '../pagespeed/lib';
 	import {
 		getRankProjects,
+		getRankRunStatusAll,
 		getRankReports,
 		getRankAlerts,
 		getRankSettings,
@@ -50,6 +51,7 @@
 	import type { RankProjectListRow } from '$lib/server/rank-tracker/projects-data';
 
 	const projectsQuery = $derived(getRankProjects());
+	const runQuery = $derived(getRankRunStatusAll());
 	const reportsQuery = $derived(getRankReports());
 	const alertsQuery = $derived(getRankAlerts());
 	const settingsQuery = $derived(getRankSettings());
@@ -60,6 +62,23 @@
 		projectsQuery.current?.totals ?? { projectCount: 0, keywordCount: 0, avgVisibility: 0, alertsLast7d: 0 }
 	);
 	const trend = $derived(projectsQuery.current?.trend ?? null);
+	const run = $derived(runQuery.current ?? null);
+	const running = $derived((run?.running ?? 0) > 0);
+
+	// Poll doar cât e ceva în curs; la final reîmprospătăm cardurile o singură dată.
+	let sawRunning = $state(false);
+	$effect(() => {
+		if (running) {
+			sawRunning = true;
+			const timer = setInterval(() => runQuery.refresh(), 2500);
+			return () => clearInterval(timer);
+		}
+		if (sawRunning) {
+			sawRunning = false;
+			projectsQuery.refresh();
+			showToast('Verificarea s-a încheiat.');
+		}
+	});
 	const reports = $derived(reportsQuery.current ?? []);
 	const alerts = $derived(alertsQuery.current ?? []);
 	const clients = $derived(clientsQuery.current ?? []);
@@ -139,8 +158,17 @@
 					? `Verificare pornită pentru ${started} ${started === 1 ? 'proiect' : 'proiecte'}.`
 					: 'Nicio verificare pornită — s-a rulat deja manual în ultima oră.'
 			);
+			if (started > 0) void watchRuns();
 		} finally {
 			checking = false;
+		}
+	}
+
+	/** Jobul intră în coadă asincron: așteptăm să apară progresul, altfel bara n-ar apărea. */
+	async function watchRuns() {
+		for (let i = 0; i < 20 && !running; i++) {
+			await new Promise((r) => setTimeout(r, 1500));
+			await runQuery.refresh().catch(() => {});
 		}
 	}
 
@@ -290,6 +318,20 @@
 			</div>
 		</div>
 	</div>
+
+	{#if run && running}
+		<div class="rt-pad" style="padding-top: 16px">
+			<div class="psi-banner" role="status" aria-live="polite">
+				<span class="psi-spin"></span>
+				<span class="psi-banner-txt">
+					Se interoghează SERP-urile Google · {run.done}/{run.total} cuvinte · {run.projects.join(', ')}{run.currentKeyword
+						? ` · ${run.currentKeyword}`
+						: ''}
+				</span>
+				<span class="psi-banner-track"><i style:width="{run.total ? (run.done / run.total) * 100 : 0}%"></i></span>
+			</div>
+		</div>
+	{/if}
 
 	<div class="cl-toolbar" style="padding-top: 14px">
 		<div class="cl-tabs">
