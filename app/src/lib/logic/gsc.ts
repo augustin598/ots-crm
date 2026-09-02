@@ -89,14 +89,25 @@ export type GscTrust = 'ok' | 'divergent' | 'scrape-missing';
  * fiindcă toate rulările fuseseră blocate de Google — dar site-ul era pe poziția 8.
  * `scrape-missing` există exact pentru cazul ăsta: noi n-am găsit nimic, Google
  * raportează afișări, deci datele NOASTRE sunt greșite, nu pozițiile clientului.
+ *
+ * `depth` = câte poziții căutăm efectiv (`SERP_DEPTH`, implicit 30). Dacă Google
+ * raportează o poziție DINCOLO de ea, „negăsit în primele 30" e răspunsul corect,
+ * nu o măsurătoare ratată — MĂSURAT 3 sep. 2026, când badge-ul se aprindea degeaba
+ * la cuvinte aflate pe pozițiile 40 și 58. Un semnal care dă alarme false e mai rău
+ * decât niciun semnal: se învață ignorarea lui, inclusiv când e real.
  */
 export function gscTrust(
 	scraped: number | null,
 	gscPosition: number | null,
-	impressions: number
+	impressions: number,
+	depth?: number
 ): GscTrust {
 	if (impressions <= 0) return 'ok'; // fără date GSC nu avem cu ce compara
-	if (scraped == null) return 'scrape-missing';
+	if (scraped == null) {
+		// dincolo de adâncimea căutată, „negăsit" e adevărul, nu un eșec de măsurare
+		if (depth != null && gscPosition != null && gscPosition > depth) return 'ok';
+		return 'scrape-missing';
+	}
 	if (gscPosition == null) return 'ok';
 	return Math.abs(scraped - gscPosition) >= GSC_DIVERGENCE_THRESHOLD ? 'divergent' : 'ok';
 }

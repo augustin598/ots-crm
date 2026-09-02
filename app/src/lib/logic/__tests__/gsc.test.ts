@@ -106,4 +106,36 @@ describe('gscTrust — semnalul care ar fi prins cazul heylux', () => {
 		expect(gscTrust(3, 90, 0)).toBe('ok');
 		expect(gscTrust(3, null, 120)).toBe('ok');
 	});
+
+	// MĂSURAT 3 sep. 2026, rulând testul de acceptanță: pe luckystudio.ro (unde
+	// scrapingul CHIAR a funcționat) apăreau badge-uri „nemăsurat" la cuvinte cu
+	// poziția GSC 40 și 58. Adâncimea noastră e 30, deci „30+" era răspunsul CORECT,
+	// nu o măsurătoare ratată. Un badge care se aprinde degeaba e mai rău decât
+	// niciun badge: userul învață să-l ignore, inclusiv când e real.
+	describe('poziția GSC dincolo de adâncimea noastră', () => {
+		test('GSC raportează mai adânc decât căutăm noi → „30+" e corect, nu nemăsurat', () => {
+			expect(gscTrust(null, 58, 2, 30)).toBe('ok');
+			expect(gscTrust(null, 40.5, 2, 30)).toBe('ok');
+			expect(gscTrust(null, 33, 1, 30)).toBe('ok');
+		});
+
+		test('GSC raportează ÎN interiorul adâncimii → chiar am ratat-o', () => {
+			expect(gscTrust(null, 8.7, 3, 30)).toBe('scrape-missing');
+			expect(gscTrust(null, 29.9, 3, 30)).toBe('scrape-missing');
+		});
+
+		test('exact pe prag: adâncimea e inclusivă', () => {
+			expect(gscTrust(null, 30, 3, 30)).toBe('scrape-missing');
+			expect(gscTrust(null, 30.1, 3, 30)).toBe('ok');
+		});
+
+		test('fără adâncime dată, comportamentul rămâne cel vechi', () => {
+			expect(gscTrust(null, 58, 2)).toBe('scrape-missing');
+		});
+
+		test('adâncimea nu schimbă cazurile în care avem poziție scrapată', () => {
+			expect(gscTrust(12, 22, 1, 30)).toBe('divergent');
+			expect(gscTrust(7, 6.3, 3, 30)).toBe('ok');
+		});
+	});
 });

@@ -31,6 +31,7 @@
 		days,
 		checkHour,
 		searchDepth = 100,
+		gscProperty = null,
 		onclose,
 		ondelete
 	}: {
@@ -43,6 +44,8 @@
 		days: string[];
 		checkHour: string;
 		searchDepth?: number;
+		/** Proprietatea GSC a proiectului; null = integrarea nu e legată de proiect. */
+		gscProperty?: string | null;
 		onclose: () => void;
 		ondelete: (id: string) => void;
 	} = $props();
@@ -387,10 +390,17 @@
 								site-ul. Verifică istoricul rulărilor — probabil au fost blocate.
 							</p>
 						{/if}
+					{:else if gscProperty}
+						<p class="cl-hint">
+							Zero afișări în ultimele 7 zile pentru „{keyword.keyword}" pe {device === 'mobile'
+								? 'mobil'
+								: 'desktop'}. Proprietatea <strong>{gscProperty}</strong> e legată și
+							raportează normal — cuvântul pur și simplu n-a fost căutat destul cât să apară.
+						</p>
 					{:else}
 						<p class="cl-hint">
-							Fără date — proiectul nu are proprietate Search Console legată, sau cuvântul nu a
-							avut afișări în ultimele zile.
+							Proiectul nu are o proprietate Search Console legată. Leag-o din
+							<strong>Setări → Google Search Console</strong>, ca să vezi aici afișările reale.
 						</p>
 					{/if}
 				</div>

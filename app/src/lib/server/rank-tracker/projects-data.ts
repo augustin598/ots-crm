@@ -321,6 +321,12 @@ export interface RankProjectDetailData {
 	 * când un cuvânt nu a fost găsit — altfel afirmăm ceva ce nu am verificat.
 	 */
 	searchDepth: number;
+	/**
+	 * Proprietatea Search Console legată de proiect, sau null. UI-ul o folosește ca să
+	 * distingă „nu e configurat nimic" de „e configurat, dar cuvântul n-a avut afișări"
+	 * — altfel mesajul de stare goală pune userul să se îndoiască de o integrare bună.
+	 */
+	gscProperty: string | null;
 	runs: { id: string; startedAt: string; finishedAt: string | null; status: string; keywordsChecked: number; up: number; down: number; flat: number; failed: number; trigger: string; errorNote: string | null }[];
 	shareOfVoice: Record<string, number>;
 }
@@ -347,6 +353,7 @@ export async function buildRankProjectDetail(
 			alertThreshold: table.rankProject.alertThreshold,
 			active: table.rankProject.active,
 			pausedAt: table.rankProject.pausedAt,
+			gscProperty: table.rankProject.gscProperty,
 			clientId: table.rankProject.clientId,
 			clientName: table.client.name
 		})
@@ -491,7 +498,8 @@ export async function buildRankProjectDetail(
 						impressions: row.impressions,
 						ctr: row.ctr ?? 0,
 						position: row.position ?? 0,
-						trust: gscTrust(nowPos, row.position, row.impressions)
+						// SERP_DEPTH: dincolo de el, „negăsit" e corect, nu o măsurătoare ratată
+						trust: gscTrust(nowPos, row.position, row.impressions, SERP_DEPTH)
 					};
 				})(),
 				cannibalization: detectCannibalization(
@@ -560,6 +568,7 @@ export async function buildRankProjectDetail(
 		keywords: detailKeywords,
 		trend: { days, visibility: trendVis, avgPosition: trendAvg },
 		searchDepth: SERP_DEPTH,
+		gscProperty: project.gscProperty,
 		runs: runs.map((r) => ({
 			id: r.id,
 			startedAt: r.startedAt.toISOString(),

@@ -855,6 +855,7 @@
 			days={detail.trend.days}
 			checkHour={settings?.checkHour ?? '06:00'}
 			searchDepth={detail.searchDepth}
+			gscProperty={detail.gscProperty}
 			onclose={() => (openKw = null)}
 			ondelete={(id) => delKws([id])}
 		/>
