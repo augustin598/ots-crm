@@ -5,6 +5,7 @@ import {
 	buildSerpUrl,
 	buildUule,
 	fetchSerpScraper,
+	createScraperProvider,
 	_resetScraperState,
 	type BrowserLike,
 	type PageLike
@@ -287,5 +288,33 @@ describe('fetchSerpScraper — pacing, proxy, cleanup', () => {
 			jitter: () => 0
 		});
 		expect(rec.browserClosed).toBe(false);
+	});
+});
+
+describe('createScraperProvider — browser partajat pe rulare', () => {
+	test('lansează UN singur browser pentru mai multe interogări, închis prin close()', async () => {
+		const rec = newRecorder();
+		let launches = 0;
+		const provider = createScraperProvider({
+			launch: async ({ args }) => {
+				launches++;
+				rec.launchArgs = args;
+				return fakeBrowser(desktopHtml, { recorder: rec });
+			},
+			sleep: async () => {},
+			env: {},
+			jitter: () => 0
+		});
+
+		await provider.fetchSerp(baseQuery({ keyword: 'a' }), 'example.ro');
+		await provider.fetchSerp(baseQuery({ keyword: 'b', device: 'mobile' }), 'example.ro');
+		await provider.fetchSerp(baseQuery({ keyword: 'c' }), 'example.ro');
+
+		expect(launches).toBe(1); // un singur browser pentru 3 interogări
+		expect(rec.pageClosed).toBe(3); // dar pagină nouă închisă la fiecare
+		expect(rec.browserClosed).toBe(false); // nu se închide între interogări
+
+		await provider.close?.();
+		expect(rec.browserClosed).toBe(true); // închis explicit la final
 	});
 });

@@ -106,6 +106,21 @@ async function defaultLaunch(opts: { args: string[] }): Promise<BrowserLike> {
 	})) as unknown as BrowserLike;
 }
 
+const BASE_LAUNCH_ARGS = [
+	'--no-sandbox',
+	'--disable-setuid-sandbox',
+	'--disable-dev-shm-usage',
+	'--disable-gpu',
+	'--disable-extensions',
+	'--disable-background-networking',
+	'--disable-sync',
+	'--no-first-run'
+];
+
+function proxiesFromEnv(env: Record<string, string | undefined>): string[] {
+	return (env.RANK_PROXY_URLS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 async function preparePage(page: PageLike, q: SerpQuery): Promise<void> {
 	if (q.device === 'mobile') {
 		await page.setUserAgent(UA_MOBILE);
@@ -214,10 +229,38 @@ export async function fetchSerpScraper(
 	}
 }
 
-/** Providerul scraper ca `SerpProvider` (dependențe legate prin closure). */
+/**
+ * Providerul scraper ca `SerpProvider`, cu UN SINGUR browser partajat pe toată
+ * durata folosirii (o rulare de proiect): lansat leneș la prima interogare, refolosit
+ * la fiecare (keyword × device), închis prin `close()`. Evită overhead-ul și zombie-urile
+ * unui browser-per-request. Dacă `deps.browser` e dat explicit, acela e folosit.
+ */
 export function createScraperProvider(deps: ScraperDeps = {}): SerpProvider {
+	const env = deps.env ?? (process.env as Record<string, string | undefined>);
+	const launch = deps.launch ?? defaultLaunch;
+	let shared: BrowserLike | null = null;
+
+	async function ensureBrowser(): Promise<BrowserLike> {
+		if (shared) return shared;
+		const args = [...BASE_LAUNCH_ARGS];
+		const proxy = pickProxy(proxiesFromEnv(env));
+		if (proxy) args.push(`--proxy-server=${proxy}`);
+		shared = await launch({ args });
+		return shared;
+	}
+
 	return {
 		name: 'scraper',
-		fetchSerp: (q, targetDomain) => fetchSerpScraper(q, targetDomain, deps)
+		fetchSerp: async (q, targetDomain) => {
+			const browser = deps.browser ?? (await ensureBrowser());
+			// Trecem browserul partajat prin deps → fetchSerpScraper nu-l închide.
+			return fetchSerpScraper(q, targetDomain, { ...deps, browser });
+		},
+		close: async () => {
+			if (shared) {
+				await shared.close().catch(() => {});
+				shared = null;
+			}
+		}
 	};
 }

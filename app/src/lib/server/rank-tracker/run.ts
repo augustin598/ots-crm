@@ -192,6 +192,7 @@ export async function runRankProjectCheck(
 	};
 	await writeProgress();
 
+	try {
 	let checked = 0;
 	let failed = 0;
 	let up = 0;
@@ -360,6 +361,11 @@ export async function runRankProjectCheck(
 	);
 
 	return { runId, checked, failed, up, down, flat, alerts: alertRows.length, status, skipped: false };
+	} finally {
+		// Închide browserul partajat al scraperului (dacă providerul îl deține).
+		await providers.primary.close?.().catch(() => {});
+		await providers.fallback?.close?.().catch(() => {});
+	}
 }
 
 /** Starea curentă a rulării unui proiect (sau null). */

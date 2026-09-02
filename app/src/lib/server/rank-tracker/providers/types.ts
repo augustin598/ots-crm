@@ -61,4 +61,6 @@ export class SerpProviderError extends Error {
 export interface SerpProvider {
 	name: 'scraper' | 'dataforseo';
 	fetchSerp(q: SerpQuery, targetDomain: string): Promise<SerpResult>;
+	/** Eliberează resursele (ex. browserul partajat al scraperului) la finalul rulării. */
+	close?(): Promise<void>;
 }
