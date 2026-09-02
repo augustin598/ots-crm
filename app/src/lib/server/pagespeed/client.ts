@@ -251,6 +251,19 @@ export async function fetchPagespeed(
 	strategy: PsiStrategy,
 	deps: FetchDeps = {}
 ): Promise<PsiResult> {
+	return parsePsiResponse(await fetchPagespeedRaw(url, strategy, deps));
+}
+
+/**
+ * Ca `fetchPagespeed`, dar întoarce răspunsul brut. Folosit de sonda de sănătate,
+ * care are nevoie de metadatele pe care `PsiResult` nu le păstrează (versiunea
+ * Lighthouse, lista de categorii) — vezi _debug-pagespeed-health.
+ */
+export async function fetchPagespeedRaw(
+	url: string,
+	strategy: PsiStrategy,
+	deps: FetchDeps = {}
+): Promise<unknown> {
 	// Fără cheie, PSI acceptă un volum mic de cereri (util în dev); în producție
 	// cheia din PSI_API_KEY ridică limita la cota configurată în Google Cloud.
 	const apiKey = env.PSI_API_KEY || null;
@@ -286,7 +299,7 @@ export async function fetchPagespeed(
 					retryable
 				);
 			}
-			return parsePsiResponse(await response.json());
+			return (await response.json()) as unknown;
 		} catch (error) {
 			lastError = error;
 			if (error instanceof PsiApiError && !error.retryable) throw error;
