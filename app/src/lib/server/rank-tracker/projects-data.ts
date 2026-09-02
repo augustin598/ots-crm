@@ -17,6 +17,7 @@ import {
 	type RankBucket,
 	type RankSerpResult
 } from '$lib/logic/rank-tracker';
+import { gscTrust, GSC_WINDOW_DAYS, type GscTrust } from '$lib/logic/gsc';
 
 export interface RankProjectsOptions {
 	clientId?: string | null;
@@ -242,6 +243,18 @@ function bucketFor(pos: number | null): RankBucket {
 	return '51-100';
 }
 
+export interface RankGscSummary {
+	/** Ziua GSC (ora Pacificului) din care vin cifrele. */
+	date: string;
+	clicks: number;
+	impressions: number;
+	/** 0–100. */
+	ctr: number;
+	/** Poziția medie GSC — mediată peste locații și pagini. */
+	position: number;
+	trust: GscTrust;
+}
+
 export interface RankKeywordDetail {
 	id: string;
 	keyword: string;
@@ -274,6 +287,12 @@ export interface RankKeywordDetail {
 	 * Gol pentru snapshoturile scrise înainte să existe coloana `top_results`.
 	 */
 	topResults: RankSerpResult[];
+	/**
+	 * Ultima zi cu date din Search Console pentru acest cuvânt+dispozitiv, plus
+	 * verdictul de încredere în poziția scrapată. `null` = fie nu e conectat GSC,
+	 * fie proprietatea nu raportează nimic pentru cuvântul ăsta.
+	 */
+	gsc: RankGscSummary | null;
 	cannibalization: { flagged: boolean; urls: string[] };
 }
 
@@ -366,6 +385,22 @@ export async function buildRankProjectDetail(
 				.orderBy(desc(table.rankSnapshot.dayKey))
 		: [];
 
+	// O singură interogare pentru tot proiectul, nu una per cuvânt. Luăm ultimele
+	// GSC_WINDOW_DAYS zile și păstrăm în JS cea mai recentă per (cuvânt, dispozitiv).
+	const gscRows = keywordIds.length
+		? await db
+				.select()
+				.from(table.rankGscDaily)
+				.where(inArray(table.rankGscDaily.keywordId, keywordIds))
+				.orderBy(desc(table.rankGscDaily.gscDate))
+				.limit(keywordIds.length * GSC_WINDOW_DAYS * 2)
+		: [];
+	const latestGsc = new Map<string, (typeof gscRows)[number]>();
+	for (const row of gscRows) {
+		const key = `${row.keywordId}:${row.device}`;
+		if (!latestGsc.has(key)) latestGsc.set(key, row); // sortat desc → prima e cea mai nouă
+	}
+
 	const todayKey = rankDayKey(now);
 	// Ultimele 30 de zile calendaristice (chei) pentru grafic + spark.
 	const days: string[] = [];
@@ -447,6 +482,18 @@ export async function buildRankProjectDetail(
 				checked30,
 				competitors: (nowSnap?.competitors ?? {}) as Record<string, number>,
 				topResults: normalizeTopResults(nowSnap?.topResults),
+				gsc: (() => {
+					const row = latestGsc.get(`${kw.id}:${device}`);
+					if (!row) return null;
+					return {
+						date: row.gscDate,
+						clicks: row.clicks,
+						impressions: row.impressions,
+						ctr: row.ctr ?? 0,
+						position: row.position ?? 0,
+						trust: gscTrust(nowPos, row.position, row.impressions)
+					};
+				})(),
 				cannibalization: detectCannibalization(
 					series.map((s) => ({ dayKey: s.dayKey, rankingUrl: s.rankingUrl }))
 				)
