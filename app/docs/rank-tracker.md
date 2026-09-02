@@ -28,12 +28,51 @@ săptămânal.
 (unique `keyword+device+day`), `rank_run`, `rank_alert`, `rank_settings`
 (unique `tenant`), `rank_report` (unique `tenant+week`), `serp_integration`.
 
+## Google Search Console (sursa care nu poate fi blocată)
+
+Pe 2 sep. 2026 heylux.ro arăta „30+" la toate cele 26 de cuvinte — dar toate cele 4
+rulări fuseseră blocate de Google, deci nu exista nicio măsurătoare, iar snapshotul
+altui proiect îl arăta pe poziția 8. GSC e API oficial, gratuit, care nu poate fi
+blocat; îl folosim ca martor pentru cât de mult ne putem baza pe poziția scrapată.
+
+- **Pozițiile NU se contopesc niciodată.** Poziția GSC e mediată peste dispozitive,
+  locații și pagini; cea scrapată e „poziția 8, desktop, România". Stau în coloane
+  separate, iar între ele calculăm doar `gscTrust` (`$lib/logic/gsc.ts`):
+  `scrape-missing` (noi n-am găsit nimic, Google raportează afișări → badge roșu
+  **„nemăsurat"**), `divergent` (≥10 poziții diferență), `ok`.
+- **Model de date** (migrări 0525–0529): `gsc_integration` (OAuth per tenant, tokeni
+  DOAR criptați, unique pe tenant), `rank_gsc_daily` (unique `keyword+device+gsc_date`),
+  coloana `gsc_property` pe `rank_project`.
+- **`gsc_date` NU e `rank_snapshot.day_key`** — GSC lucrează în ora Pacificului, noi în
+  Europe/Bucharest. Numele diferit e intenționat: nu face JOIN pe egalitate între ele.
+- **Job**: `gsc-daily-pull`, zilnic la 05:00, ÎNAINTEA verificării de poziții. Retrage
+  o fereastră de 7 zile cu upsert, fiindcă `dataState: 'all'` aduce zile parțiale pe
+  care Google le rescrie. `TABLET` se ignoră. O proprietate care crapă (403) nu oprește
+  coada. Se scriu doar interogările care se potrivesc cu un `rank_keyword` urmărit
+  (potrivire pe `normalizeKeyword`).
+- **Proprietatea se ține pe proiect, nu pe tenant** — un tenant are proiecte pentru
+  clienți diferiți. „domain" (`sc-domain:heylux.ro`) și „URL prefix"
+  (`https://www.heylux.ro/`) sunt proprietăți DIFERITE, cu date diferite: se alege din
+  `sites.list`, niciodată construită din domeniu.
+- **Debug**: `GET /[tenant]/api/_debug-gsc-health` (admin). `?probe=1` face apel REAL —
+  e singurul lucru care dovedește că **Search Console API e activat în Google Cloud**;
+  OAuth „connected" nu spune nimic despre asta (lecția de la Google Calendar). Sonda
+  detectează `SERVICE_DISABLED` și întoarce un `hint` explicit.
+- **Config extern**: `https://<domeniu>/api/gsc/callback` pe același OAuth client ca
+  Gmail/Google Ads, plus Search Console API activat. Scope-ul e readonly.
+- **Ce NU rezolvă GSC**: niciun competitor (tot panoul „Competitori" e invizibil acolo),
+  iar datele au ~2 zile întârziere. De asta păstrăm scrapingul.
+- **Faze ulterioare**: (2) descoperirea interogărilor pe care clientul le are în GSC dar
+  nu sunt urmărite; (3) CTR real în formula de vizibilitate, în locul lui `ctrForPosition`.
+
 ## Joburi (BullMQ, Europe/Bucharest)
 - `rank-daily-check` (orar): pune în coadă `rank_project_check` per proiect activ al
   tenanților a căror oră (`check_hour`) se potrivește.
 - `rank_project_check` (one-shot): rulează verificarea + trimite alerte dacă e cazul.
 - `rank-weekly-report` (orar, potrivire zi/oră): raport săptămânal idempotent.
 - `rank-volume-refresh` (lunar): volume din Google Ads (`generateKeywordHistoricalMetrics`).
+- `gsc-daily-pull` (zilnic 05:00): trage Search Console pe fereastră de 7 zile, upsert
+  pe `(keyword, device, gsc_date)`; rulează ÎNAINTEA verificării de poziții.
 - Recovery: rulările `running` rămase după restart devin `interrupted`.
 
 ## UI
