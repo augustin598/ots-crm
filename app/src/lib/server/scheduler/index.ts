@@ -54,6 +54,7 @@ import { processRankDailyCheck } from './tasks/rank-daily-check';
 import { processRankProjectCheck } from './tasks/rank-project-check';
 import { processRankWeeklyReport } from './tasks/rank-weekly-report';
 import { processRankVolumeRefresh } from './tasks/rank-volume-refresh';
+import { processGscDailyPull } from './tasks/gsc-daily-pull';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -217,7 +218,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	rank_daily_check: () => processRankDailyCheck(),
 	rank_project_check: processRankProjectCheck,
 	rank_weekly_report: () => processRankWeeklyReport(),
-	rank_volume_refresh: () => processRankVolumeRefresh()
+	rank_volume_refresh: () => processRankVolumeRefresh(),
+	gsc_daily_pull: () => processGscDailyPull()
 };
 
 /**
@@ -391,7 +393,8 @@ export const startScheduler = async () => {
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
 		'content-auto-publish', 'content-auto-generate',
 		'pagespeed-weekly-report',
-		'rank-daily-check', 'rank-weekly-report', 'rank-volume-refresh'
+		'rank-daily-check', 'rank-weekly-report', 'rank-volume-refresh',
+		'gsc-daily-pull'
 	]);
 
 	try {
@@ -1187,6 +1190,19 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] rank-daily-check registered (0 * * * * Europe/Bucharest)');
 
+	// Search Console — tragere zilnică la 05:00, înaintea verificării de poziții,
+	// ca semnalul de divergență să aibă cu ce compara snapshotul din aceeași zi.
+	await schedulerQueue.add(
+		'gsc-daily-pull',
+		{ type: 'gsc_daily_pull', params: {} },
+		{
+			repeat: { pattern: '0 5 * * *', tz: 'Europe/Bucharest' },
+			jobId: 'gsc-daily-pull',
+			attempts: 1
+		}
+	);
+	logInfo('scheduler', '[scheduler] gsc-daily-pull registered (0 5 * * * Europe/Bucharest)');
+
 	// Rank Tracker — raport săptămânal ORAR: fiecare tenant are zi+oră proprii în
 	// rank_settings; idempotent prin unique (tenant_id, week_key) pe rank_report.
 	await schedulerQueue.add(
@@ -1275,7 +1291,8 @@ export const JOB_LABELS: Record<string, string> = {
 	rank_daily_check: 'Verificare zilnică poziții Google (Rank Tracker, oră din setări)',
 	rank_project_check: 'Verificare poziții proiect (Rank Tracker, one-shot)',
 	rank_weekly_report: 'Raport săptămânal poziții Google (Rank Tracker, zi/oră din setări)',
-	rank_volume_refresh: 'Volume de căutare lunare (Rank Tracker, din Google Ads)'
+	rank_volume_refresh: 'Volume de căutare lunare (Rank Tracker, din Google Ads)',
+	gsc_daily_pull: 'Tragere zilnică date Google Search Console (Rank Tracker)'
 };
 
 /** Default params for jobs that need specific parameters */
