@@ -1,0 +1,396 @@
+// Remote functions pentru modulul Rank Tracker (poziții Google organic).
+// Standard proiect: query()/command() din $app/server, requireStaff + scoping pe
+// tenantul din sesiune. Credențialele SERP nu sunt NICIODATĂ returnate clientului.
+import { query, command, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
+import * as v from 'valibot';
+import { and, desc, eq, gte } from 'drizzle-orm';
+import { encodeBase32LowerCase } from '@oslojs/encoding';
+import { env } from '$env/dynamic/private';
+import { db } from '$lib/server/db';
+import * as table from '$lib/server/db/schema';
+import { requireStaff } from '$lib/server/get-actor';
+import { getSchedulerQueue } from '$lib/server/scheduler';
+import { RANK_HOURS } from '$lib/logic/rank-tracker';
+import { buildRankProjects, buildRankProjectDetail } from '$lib/server/rank-tracker/projects-data';
+import { getRankRunProgress, rankRunProgressKey } from '$lib/server/rank-tracker/run';
+import { getRedis } from '$lib/server/redis';
+
+const MAX_KEYWORDS = Number(env.RANK_MAX_KEYWORDS_PER_PROJECT ?? 500) || 500;
+
+function generateId() {
+	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+}
+
+function requireTenantEvent() {
+	const event = getRequestEvent();
+	const tenant = event?.locals.tenant;
+	if (!event?.locals.user || !tenant) throw error(401, 'Unauthorized');
+	return { event, tenantId: tenant.id, userId: event.locals.user.id as string };
+}
+
+function normalizeDomain(input: string): string {
+	return input
+		.trim()
+		.replace(/^https?:\/\//i, '')
+		.replace(/^www\./i, '')
+		.replace(/\/.*$/, '')
+		.toLowerCase();
+}
+
+// ── Citiri ─────────────────────────────────────────────────────────────
+export type { RankProjectListRow, RankProjectDetailData, RankKeywordDetail } from '$lib/server/rank-tracker/projects-data';
+
+export const getRankProjects = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	return buildRankProjects(tenantId);
+});
+
+export const getRankProjectDetail = query(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const detail = await buildRankProjectDetail(tenantId, projectId);
+	if (!detail) throw error(404, 'Proiect inexistent');
+	return detail;
+});
+
+export const getRankRunStatus = query(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	return getRankRunProgress(tenantId, projectId);
+});
+
+export const getRankReports = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	return db
+		.select()
+		.from(table.rankReport)
+		.where(eq(table.rankReport.tenantId, tenantId))
+		.orderBy(desc(table.rankReport.weekKey))
+		.limit(12);
+});
+
+export const getRankAlerts = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	return db
+		.select({
+			id: table.rankAlert.id,
+			keyword: table.rankKeyword.keyword,
+			device: table.rankAlert.device,
+			type: table.rankAlert.type,
+			fromPosition: table.rankAlert.fromPosition,
+			toPosition: table.rankAlert.toPosition,
+			delta: table.rankAlert.delta,
+			createdAt: table.rankAlert.createdAt
+		})
+		.from(table.rankAlert)
+		.innerJoin(table.rankKeyword, eq(table.rankAlert.keywordId, table.rankKeyword.id))
+		.where(eq(table.rankAlert.tenantId, tenantId))
+		.orderBy(desc(table.rankAlert.createdAt))
+		.limit(50);
+});
+
+export const getRankClients = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	return db
+		.select({ id: table.client.id, name: table.client.name })
+		.from(table.client)
+		.where(eq(table.client.tenantId, tenantId))
+		.orderBy(table.client.name);
+});
+
+// ── Setări ─────────────────────────────────────────────────────────────
+const RANK_DEFAULTS = {
+	checkHour: '06:00',
+	reportDay: 1,
+	reportHour: '07:00',
+	recipients: [] as string[],
+	sendToClient: false,
+	attachPdf: true,
+	archiveToClient: true,
+	alertsEnabled: true,
+	providerMode: 'scraper' as const,
+	isEnabled: true
+};
+
+export const getRankSettings = query(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const [row] = await db
+		.select()
+		.from(table.rankSettings)
+		.where(eq(table.rankSettings.tenantId, tenantId))
+		.limit(1);
+	const hasIntegration = !!(
+		await db
+			.select({ id: table.serpIntegration.id, isActive: table.serpIntegration.isActive })
+			.from(table.serpIntegration)
+			.where(eq(table.serpIntegration.tenantId, tenantId))
+			.limit(1)
+	)[0];
+	if (!row) return { ...RANK_DEFAULTS, hasIntegration };
+	return {
+		checkHour: row.checkHour,
+		reportDay: row.reportDay,
+		reportHour: row.reportHour,
+		recipients: row.recipients as string[],
+		sendToClient: row.sendToClient,
+		attachPdf: row.attachPdf,
+		archiveToClient: row.archiveToClient,
+		alertsEnabled: row.alertsEnabled,
+		providerMode: row.providerMode,
+		isEnabled: row.isEnabled,
+		hasIntegration
+	};
+});
+
+const settingsSchema = v.object({
+	checkHour: v.picklist(RANK_HOURS),
+	reportDay: v.pipe(v.number(), v.minValue(1), v.maxValue(7)),
+	reportHour: v.picklist(RANK_HOURS),
+	recipients: v.array(v.pipe(v.string(), v.email())),
+	sendToClient: v.boolean(),
+	attachPdf: v.boolean(),
+	archiveToClient: v.boolean(),
+	alertsEnabled: v.boolean(),
+	providerMode: v.picklist(['scraper', 'dataforseo', 'auto']),
+	isEnabled: v.boolean()
+});
+
+export const saveRankSettings = command(settingsSchema, async (input) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const now = new Date();
+	const [existing] = await db
+		.select({ id: table.rankSettings.id })
+		.from(table.rankSettings)
+		.where(eq(table.rankSettings.tenantId, tenantId))
+		.limit(1);
+	if (existing) {
+		await db.update(table.rankSettings).set({ ...input, updatedAt: now }).where(eq(table.rankSettings.id, existing.id));
+	} else {
+		await db.insert(table.rankSettings).values({ id: generateId(), tenantId, ...input, createdAt: now, updatedAt: now });
+	}
+	return { ok: true };
+});
+
+// ── Proiecte ───────────────────────────────────────────────────────────
+const projectSchema = v.object({
+	id: v.optional(v.string()),
+	name: v.pipe(v.string(), v.minLength(1), v.maxLength(120)),
+	clientId: v.nullable(v.string()),
+	domain: v.pipe(v.string(), v.minLength(3)),
+	locale: v.pipe(v.string(), v.minLength(3)),
+	locations: v.pipe(v.array(v.string()), v.maxLength(5)),
+	competitors: v.pipe(v.array(v.string()), v.maxLength(10)),
+	devices: v.pipe(v.array(v.picklist(['desktop', 'mobile'])), v.minLength(1)),
+	alertThreshold: v.pipe(v.number(), v.minValue(1), v.maxValue(50)),
+	active: v.boolean()
+});
+
+export const saveRankProject = command(projectSchema, async (input) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const now = new Date();
+	const domain = normalizeDomain(input.domain);
+	const competitors = input.competitors.map(normalizeDomain).filter(Boolean);
+	const payload = {
+		name: input.name,
+		clientId: input.clientId,
+		domain,
+		locale: input.locale,
+		locations: input.locations,
+		competitors,
+		devices: input.devices,
+		alertThreshold: input.alertThreshold,
+		active: input.active
+	};
+
+	if (input.id) {
+		const [existing] = await db
+			.select({ id: table.rankProject.id })
+			.from(table.rankProject)
+			.where(and(eq(table.rankProject.id, input.id), eq(table.rankProject.tenantId, tenantId)))
+			.limit(1);
+		if (!existing) throw error(404, 'Proiect inexistent');
+		await db.update(table.rankProject).set({ ...payload, updatedAt: now }).where(eq(table.rankProject.id, input.id));
+		return { id: input.id };
+	}
+	const id = generateId();
+	await db.insert(table.rankProject).values({ id, tenantId, ...payload, createdAt: now, updatedAt: now });
+	return { id };
+});
+
+export const deleteRankProject = command(v.pipe(v.string(), v.minLength(1)), async (id) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	await db.delete(table.rankProject).where(and(eq(table.rankProject.id, id), eq(table.rankProject.tenantId, tenantId)));
+	return { ok: true };
+});
+
+// ── Cuvinte cheie ──────────────────────────────────────────────────────
+const addKeywordsSchema = v.object({
+	projectId: v.pipe(v.string(), v.minLength(1)),
+	keywords: v.pipe(v.array(v.string()), v.minLength(1)),
+	tag: v.optional(v.nullable(v.string())),
+	location: v.optional(v.string())
+});
+
+export const addRankKeywords = command(addKeywordsSchema, async (input) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+
+	const [project] = await db
+		.select({ id: table.rankProject.id })
+		.from(table.rankProject)
+		.where(and(eq(table.rankProject.id, input.projectId), eq(table.rankProject.tenantId, tenantId)))
+		.limit(1);
+	if (!project) throw error(404, 'Proiect inexistent');
+
+	const location = input.location ?? '';
+	// keyword-urile deja existente pentru (proiect, locație) — dedup.
+	const existing = await db
+		.select({ keyword: table.rankKeyword.keyword })
+		.from(table.rankKeyword)
+		.where(and(eq(table.rankKeyword.projectId, input.projectId), eq(table.rankKeyword.location, location)));
+	const existingSet = new Set(existing.map((e) => e.keyword.toLowerCase()));
+	const totalCount = (
+		await db
+			.select({ id: table.rankKeyword.id })
+			.from(table.rankKeyword)
+			.where(eq(table.rankKeyword.projectId, input.projectId))
+	).length;
+
+	const clean = [...new Set(input.keywords.map((k) => k.trim()).filter(Boolean))].filter(
+		(k) => !existingSet.has(k.toLowerCase())
+	);
+	if (totalCount + clean.length > MAX_KEYWORDS) {
+		throw error(400, `Limita de ${MAX_KEYWORDS} cuvinte cheie pe proiect ar fi depășită (ai ${totalCount}, adaugi ${clean.length}).`);
+	}
+	if (clean.length === 0) return { added: 0 };
+
+	const now = new Date();
+	await db.insert(table.rankKeyword).values(
+		clean.map((keyword) => ({
+			id: generateId(),
+			projectId: input.projectId,
+			keyword,
+			tag: input.tag ?? null,
+			location,
+			active: true,
+			createdAt: now,
+			updatedAt: now
+		}))
+	);
+	return { added: clean.length };
+});
+
+export const deleteRankKeyword = command(v.pipe(v.string(), v.minLength(1)), async (keywordId) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	// verifică apartenența la tenant prin proiect
+	const [row] = await db
+		.select({ id: table.rankKeyword.id })
+		.from(table.rankKeyword)
+		.innerJoin(table.rankProject, eq(table.rankKeyword.projectId, table.rankProject.id))
+		.where(and(eq(table.rankKeyword.id, keywordId), eq(table.rankProject.tenantId, tenantId)))
+		.limit(1);
+	if (!row) throw error(404, 'Cuvânt cheie inexistent');
+	await db.delete(table.rankKeyword).where(eq(table.rankKeyword.id, keywordId));
+	return { ok: true };
+});
+
+// ── Verifică acum ──────────────────────────────────────────────────────
+export const startRankCheck = command(v.pipe(v.string(), v.minLength(1)), async (projectId) => {
+	const { event, tenantId, userId } = requireTenantEvent();
+	await requireStaff(event);
+
+	const [project] = await db
+		.select({ id: table.rankProject.id })
+		.from(table.rankProject)
+		.where(and(eq(table.rankProject.id, projectId), eq(table.rankProject.tenantId, tenantId)))
+		.limit(1);
+	if (!project) throw error(404, 'Proiect inexistent');
+
+	// deja o rulare activă?
+	const raw = await getRedis().get(rankRunProgressKey(tenantId, projectId));
+	if (raw) {
+		try {
+			if (!JSON.parse(raw).finishedAt) throw error(409, 'O verificare este deja în curs pentru acest proiect.');
+		} catch (e) {
+			if ((e as { status?: number })?.status === 409) throw e;
+		}
+	}
+
+	// rate-limit: max o rulare manuală pe oră.
+	const hourAgo = new Date(Date.now() - 3_600_000);
+	const [recent] = await db
+		.select({ id: table.rankRun.id })
+		.from(table.rankRun)
+		.where(and(eq(table.rankRun.projectId, projectId), eq(table.rankRun.trigger, 'manual'), gte(table.rankRun.startedAt, hourAgo)))
+		.limit(1);
+	if (recent) throw error(429, 'Ai rulat deja o verificare manuală în ultima oră. Încearcă mai târziu.');
+
+	await getSchedulerQueue().add(
+		'rank-project-check',
+		{ type: 'rank_project_check', params: { tenantId, projectId, trigger: 'manual', triggeredBy: userId } },
+		{ jobId: `rank-project-check-${projectId}-${Date.now()}`, attempts: 1, removeOnComplete: true, removeOnFail: true }
+	);
+	return { started: true };
+});
+
+export const sendRankReportNow = command(async () => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const { buildRankReportData } = await import('$lib/server/rank-tracker/report');
+	const { isoWeekKey } = await import('$lib/logic/rank-tracker');
+	const weekKey = isoWeekKey(new Date());
+	const data = await buildRankReportData(tenantId, weekKey);
+	const [settings] = await db
+		.select({ recipients: table.rankSettings.recipients })
+		.from(table.rankSettings)
+		.where(eq(table.rankSettings.tenantId, tenantId))
+		.limit(1);
+	const recipients = (settings?.recipients as string[]) ?? [];
+	if (recipients.length === 0) return { sent: 0, note: 'fără destinatari' };
+	const { sendRankReportEmail } = await import('$lib/server/email');
+	for (const recipient of recipients) await sendRankReportEmail(tenantId, recipient, data);
+	return { sent: recipients.length };
+});
+
+// ── Integrare SERP (DataForSEO) ────────────────────────────────────────
+const serpSchema = v.object({
+	login: v.pipe(v.string(), v.minLength(1)),
+	password: v.pipe(v.string(), v.minLength(1))
+});
+
+export const saveSerpIntegration = command(serpSchema, async (input) => {
+	const { event, tenantId } = requireTenantEvent();
+	await requireStaff(event);
+	const { encryptVerified } = await import('$lib/server/plugins/smartbill/crypto');
+	const now = new Date();
+	const [existing] = await db
+		.select({ id: table.serpIntegration.id })
+		.from(table.serpIntegration)
+		.where(eq(table.serpIntegration.tenantId, tenantId))
+		.limit(1);
+	const values = {
+		provider: 'dataforseo' as const,
+		loginEncrypted: encryptVerified(tenantId, input.login),
+		passwordEncrypted: encryptVerified(tenantId, input.password),
+		isActive: true,
+		lastError: null,
+		updatedAt: now
+	};
+	if (existing) {
+		await db.update(table.serpIntegration).set(values).where(eq(table.serpIntegration.id, existing.id));
+	} else {
+		await db.insert(table.serpIntegration).values({ id: generateId(), tenantId, ...values, createdAt: now });
+	}
+	// NU returnăm niciodată credențialele.
+	return { ok: true };
+});
