@@ -6,13 +6,21 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { pagespeedMeasurement, pagespeedSite } from '$lib/server/db/schema';
 import { getRedis } from '$lib/server/redis';
-import { logError, logInfo, serializeError } from '$lib/server/logger';
+import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { isoWeekKey, type PsiStrategy } from '$lib/logic/pagespeed';
 import { fetchPagespeed, type PsiResult } from './client';
 
 const PACE_MS = 1100; // puțin peste 1 s, ca să nu atingem niciodată 1 rps exact
 const PROGRESS_TTL_S = 15 * 60;
-const FINAL_TTL_S = 20; // starea finală rămâne scurt, pentru ultimul poll al UI-ului
+// starea finală rămâne 2 minute: destul cât UI-ul s-o prindă și dintr-un tab în
+// fundal, unde browserul încetinește timerele de poll
+const FINAL_TTL_S = 120;
+/**
+ * Fără semn de viață mai nou de atât, scanarea e considerată moartă (proces căzut
+ * la mijloc). Pragul acoperă cazul cel mai lent al unei singure măsurători —
+ * 3 încercări × 60 s timeout + backoff ≈ 3 min — plus marjă.
+ */
+const STALE_MS = 5 * 60 * 1000;
 
 export interface ScanProgress {
 	scanId: string;
@@ -21,7 +29,20 @@ export interface ScanProgress {
 	current: string | null;
 	perSite: Record<string, 'running' | 'done' | 'failed'>;
 	startedAt: string;
+	/** Ultimul semn de viață al procesului care scanează (vezi isScanActive). */
+	heartbeatAt?: string;
 	finishedAt?: string;
+}
+
+/**
+ * Scanarea chiar rulează acum? Cheia Redis fără `finishedAt` nu e suficientă:
+ * dacă procesul moare la mijloc, ea rămâne până la expirarea TTL-ului și ar
+ * bloca orice relansare. Heartbeat-ul vechi = scanare moartă, nu activă.
+ */
+export function isScanActive(progress: ScanProgress | null | undefined): boolean {
+	if (!progress || progress.finishedAt) return false;
+	const beat = Date.parse(progress.heartbeatAt ?? progress.startedAt);
+	return Number.isFinite(beat) && Date.now() - beat < STALE_MS;
 }
 
 export interface ScanSummary {
@@ -64,9 +85,15 @@ export async function runPagespeedScan(
 	if (existingRaw) {
 		try {
 			const existing = JSON.parse(existingRaw) as ScanProgress;
-			if (!existing.finishedAt) {
+			if (isScanActive(existing)) {
 				logInfo('scheduler', `[pagespeed] scan deja activ pentru tenant ${opts.tenantId} — sărit`);
 				return { scanned: 0, failed: 0, skipped: true };
+			}
+			if (!existing.finishedAt) {
+				logWarning(
+					'scheduler',
+					`[pagespeed] scan abandonat pentru tenant ${opts.tenantId} (fără semn de viață) — se repornește`
+				);
 			}
 		} catch {
 			// stare coruptă — o suprascriem cu scanul nou
@@ -100,6 +127,7 @@ export async function runPagespeedScan(
 		startedAt: new Date().toISOString()
 	};
 	const writeProgress = async (ttl = PROGRESS_TTL_S) => {
+		progress.heartbeatAt = new Date().toISOString();
 		await redis.set(key, JSON.stringify(progress), 'EX', ttl);
 	};
 	await writeProgress();
@@ -183,6 +211,9 @@ export async function runPagespeedScan(
 					createdAt: measuredAt
 				});
 			}
+			// heartbeat după FIECARE măsurătoare: pe un site cu ambele strategii,
+			// pauza dintre două scrieri rămâne sub pragul de „scanare moartă"
+			await writeProgress();
 		}
 
 		progress.done++;

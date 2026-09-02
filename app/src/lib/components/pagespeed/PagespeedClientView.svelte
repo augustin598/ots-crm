@@ -124,7 +124,9 @@
 				<div>
 					<div class="cl-kpi-lbl">Site-uri monitorizate</div>
 					<div class="cl-kpi-val">{sites.length}</div>
-					<div class="cl-kpi-sub">{sites.reduce((n, s) => n + s.pages.length, 0)} URL-uri măsurate</div>
+					<div class="cl-kpi-sub" title="Se măsoară pagina principală a fiecărui site">
+						se măsoară pagina principală
+					</div>
 				</div>
 			</div>
 		</div>
@@ -142,13 +144,17 @@
 						<tr>
 							<th>Site</th>
 							<th class="num">Scor</th>
-							<th class="num">Δ 7 zile</th>
+							<th class="num" title="Diferența față de măsurătoarea anterioară a site-ului">
+								Δ față de anterior
+							</th>
 							<th class="num">10 săptămâni</th>
 							<th class="num">LCP</th>
 							<th class="num">INP</th>
 							<th class="num">CLS</th>
 							<th class="num">TBT</th>
-							<th>Core Web Vitals</th>
+							<th title="Date reale de la vizitatorii tăi (Chrome UX Report, p75 pe mobil) — nu se schimbă cu selectorul mobil/desktop">
+								Core Web Vitals · mobil
+							</th>
 							<th class="num">Raport</th>
 						</tr>
 					</thead>
@@ -161,7 +167,7 @@
 										<PsiFav id={r.site.id} domain={r.site.domain} url={r.site.pages[0]?.url} />
 										<div style="min-width: 0">
 											<div class="psi-site-l1">{r.site.domain}</div>
-											<div class="psi-site-l2">{r.site.name} · {r.site.pages.length} URL</div>
+											<div class="psi-site-l2">{r.site.name}</div>
 										</div>
 									</div>
 								</td>
@@ -196,7 +202,7 @@
 									<div class="cl-empty" style="padding: 40px 0; border: 0; background: transparent">
 										<SearchIcon size={20} />
 										<h3>Niciun site monitorizat</h3>
-										<p>Site-urile companiei tale vor apărea aici după prima scanare.</p>
+										<p>Nu avem încă site-uri în monitorizare pentru contul tău. Scrie-ne și le adăugăm.</p>
 									</div>
 								</td>
 							</tr>

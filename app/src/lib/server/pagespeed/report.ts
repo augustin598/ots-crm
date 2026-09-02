@@ -1,7 +1,7 @@
 // Raportul săptămânal PageSpeed: agregarea datelor (aceleași formule ca UI-ul),
 // corpul HTML al emailului și PDF-ul opțional. Datele sunt serializabile (JSON),
 // ca emailul să poată fi re-trimis din admin prin registry-ul de retry.
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, lte } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import {
@@ -57,22 +57,26 @@ export async function buildPagespeedReportData(
 		.orderBy(table.pagespeedSite.domain);
 
 	const siteIds = sites.map((s) => s.id);
+	// Fereastra se taie ÎN SQL la săptămâna cerută: altfel, pentru un raport istoric,
+	// cele mai noi `siteIds × 24` rânduri ar fi toate din săptămânile de după el, iar
+	// raportul ar ieși gol pe măsură ce se adună scanări. („YYYY-Www" se compară
+	// lexicografic corect cronologic.)
 	const measurements = siteIds.length
 		? await db
 				.select()
 				.from(table.pagespeedMeasurement)
-				.where(inArray(table.pagespeedMeasurement.siteId, siteIds))
+				.where(
+					and(
+						inArray(table.pagespeedMeasurement.siteId, siteIds),
+						lte(table.pagespeedMeasurement.weekKey, weekKey)
+					)
+				)
 				.orderBy(desc(table.pagespeedMeasurement.measuredAt))
 				.limit(siteIds.length * 24)
 		: [];
 
 	const latest = (siteId: string, strategy: PsiStrategy) => {
-		// doar măsurătorile de până la sfârșitul săptămânii cerute — un raport istoric
-		// arată datele acelei săptămâni, nu cele mai noi (comparația lexicografică pe
-		// „YYYY-Www" este corectă cronologic)
-		const rows = measurements.filter(
-			(m) => m.siteId === siteId && m.strategy === strategy && m.weekKey <= weekKey
-		);
+		const rows = measurements.filter((m) => m.siteId === siteId && m.strategy === strategy);
 		const ok = rows.filter((m) => m.status === 'ok');
 		return { any: rows[0] ?? null, last: ok[0] ?? null, prev: ok[1] ?? null };
 	};

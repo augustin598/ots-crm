@@ -44,7 +44,10 @@ const dbMock = {
 const redisStore = new Map<string, string>();
 const redisMock = {
 	get: async (key: string) => redisStore.get(key) ?? null,
-	set: async (key: string, value: string) => {
+	// `NX` (lock-ul de trimitere manuală) trebuie respectat, altfel testul de dublă
+	// trimitere ar trece degeaba
+	set: async (key: string, value: string, ...args: unknown[]) => {
+		if (args.includes('NX') && redisStore.has(key)) return null;
 		redisStore.set(key, value);
 		return 'OK';
 	},
@@ -281,9 +284,88 @@ describe('startPagespeedScan', () => {
 	test('scan activ → refuză (fără dublare)', async () => {
 		redisStore.set(
 			't1:pagespeed:scan',
-			JSON.stringify({ scanId: 'x', total: 3, done: 0, perSite: {}, startedAt: 'now' })
+			JSON.stringify({
+				scanId: 'x',
+				total: 3,
+				done: 0,
+				perSite: {},
+				startedAt: new Date().toISOString(),
+				heartbeatAt: new Date().toISOString()
+			})
 		);
 		await expect(remote.startPagespeedScan(undefined)).rejects.toThrow();
 		expect(queueAdds.length).toBe(0);
+	});
+
+	test('scan mort (heartbeat vechi) → permite relansarea', async () => {
+		const old = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+		redisStore.set(
+			't1:pagespeed:scan',
+			JSON.stringify({ scanId: 'x', total: 3, done: 1, perSite: {}, startedAt: old, heartbeatAt: old })
+		);
+		const result = await remote.startPagespeedScan(undefined);
+		expect(result.started).toBe(true);
+		expect(queueAdds.length).toBe(1);
+	});
+});
+
+describe('getPagespeedScanStatus', () => {
+	test('scan viu → state running', async () => {
+		const now = new Date().toISOString();
+		redisStore.set(
+			't1:pagespeed:scan',
+			JSON.stringify({ scanId: 'x', total: 3, done: 1, perSite: {}, startedAt: now, heartbeatAt: now })
+		);
+		expect((await remote.getPagespeedScanStatus())?.state).toBe('running');
+	});
+
+	test('scan terminat → state done', async () => {
+		const now = new Date().toISOString();
+		redisStore.set(
+			't1:pagespeed:scan',
+			JSON.stringify({
+				scanId: 'x',
+				total: 3,
+				done: 3,
+				perSite: {},
+				startedAt: now,
+				heartbeatAt: now,
+				finishedAt: now
+			})
+		);
+		expect((await remote.getPagespeedScanStatus())?.state).toBe('done');
+	});
+
+	test('proces căzut la mijloc → state dead (nu rămâne agățat pe „în curs")', async () => {
+		const old = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+		redisStore.set(
+			't1:pagespeed:scan',
+			JSON.stringify({ scanId: 'x', total: 3, done: 1, perSite: {}, startedAt: old, heartbeatAt: old })
+		);
+		expect((await remote.getPagespeedScanStatus())?.state).toBe('dead');
+	});
+
+	test('nimic în Redis → null', async () => {
+		expect(await remote.getPagespeedScanStatus()).toBeNull();
+	});
+});
+
+describe('sendPagespeedReportNow', () => {
+	test('trimitere deja în curs (lock activ) → refuză, fără email dublat', async () => {
+		redisStore.set('t1:pagespeed:report-send', '1');
+		await expect(remote.sendPagespeedReportNow(undefined)).rejects.toThrow();
+	});
+
+	test('fără destinatari → refuză și eliberează lock-ul pentru o nouă încercare', async () => {
+		selectQueue.push([{ recipients: [] }]);
+		await expect(remote.sendPagespeedReportNow(undefined)).rejects.toThrow();
+		expect(redisStore.has('t1:pagespeed:report-send')).toBe(false);
+	});
+});
+
+describe('getPagespeedReportPreview', () => {
+	test('săptămână viitoare → refuză (raportul gol arăta ca o eroare de date)', async () => {
+		const nextYear = `${new Date().getUTCFullYear() + 1}-W05`;
+		await expect(remote.getPagespeedReportPreview(nextYear)).rejects.toThrow();
 	});
 });

@@ -133,7 +133,10 @@
 .cl-kpi-val { font-size: 19px; font-weight: 800; color: var(--cl-text); letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
 /* max 2 rânduri, apoi „…": păstrează informația fără să lățească/înalțe cardul necontrolat */
 .cl-kpi-sub { font-size: 11px; color: var(--cl-text-3); margin-top: 1px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+/* !important: componentele setează numărul de coloane inline (6 în admin, 3 în portal) */
 @media (max-width: 1200px) { .cl-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
+@media (max-width: 900px) { .cl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width: 560px) { .cl-kpis { grid-template-columns: 1fr !important; } }
 
 /* ============ Sections ============ */
 .cl-section { background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: 12px; padding: 18px 20px; }

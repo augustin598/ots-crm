@@ -50,7 +50,7 @@ mock.module('$lib/server/logger', () => ({
 	serializeError: (e: unknown) => ({ message: String(e) })
 }));
 
-const { runPagespeedScan, scanProgressKey } = await import('../scan');
+const { runPagespeedScan, scanProgressKey, isScanActive } = await import('../scan');
 
 const psiOk = {
 	performance: 77,
@@ -178,6 +178,73 @@ describe('runPagespeedScan', () => {
 		);
 		expect(result.skipped).toBe(true);
 		expect(inserted.length).toBe(0);
+	});
+
+	test('scan abandonat (proces căzut, heartbeat vechi) → repornește, nu blochează tenantul', async () => {
+		const old = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+		redisStore.set(
+			scanProgressKey('t1'),
+			JSON.stringify({
+				scanId: 'mort',
+				total: 5,
+				done: 1,
+				perSite: {},
+				startedAt: old,
+				heartbeatAt: old
+			})
+		);
+		selectQueue.push([site('alpha', { strategies: ['mobile'] })]);
+		const result = await runPagespeedScan(
+			{ tenantId: 't1' },
+			{ fetchPsi: async () => psiOk, sleep: async () => {} }
+		);
+		expect(result.skipped).toBe(false);
+		expect(result.scanned).toBe(1);
+	});
+
+	test('heartbeat-ul se împrospătează după fiecare măsurătoare', async () => {
+		selectQueue.push([site('alpha')]);
+		const beats: string[] = [];
+		await runPagespeedScan(
+			{ tenantId: 't1' },
+			{
+				fetchPsi: async () => {
+					const raw = redisStore.get(scanProgressKey('t1'));
+					if (raw) beats.push(JSON.parse(raw).heartbeatAt);
+					return psiOk;
+				},
+				sleep: async () => {}
+			}
+		);
+		// câte un heartbeat înainte de fiecare dintre cele două strategii
+		expect(beats.length).toBe(2);
+		expect(beats.every((b) => typeof b === 'string' && b.length > 0)).toBe(true);
+	});
+});
+
+describe('isScanActive', () => {
+	test('scan proaspăt fără finishedAt = activ', () => {
+		expect(isScanActive({ startedAt: new Date().toISOString() } as never)).toBe(true);
+	});
+
+	test('scan terminat = inactiv', () => {
+		expect(
+			isScanActive({
+				startedAt: new Date().toISOString(),
+				heartbeatAt: new Date().toISOString(),
+				finishedAt: new Date().toISOString()
+			} as never)
+		).toBe(false);
+	});
+
+	test('heartbeat mai vechi de 5 minute = inactiv (proces mort)', () => {
+		const old = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+		expect(isScanActive({ startedAt: old, heartbeatAt: old } as never)).toBe(false);
+	});
+
+	test('null / heartbeat corupt = inactiv', () => {
+		expect(isScanActive(null)).toBe(false);
+		expect(isScanActive({ startedAt: 'nu-e-o-dată' } as never)).toBe(false);
 	});
 
 	test('siteIds explicit → scanează doar acele site-uri', async () => {

@@ -1,12 +1,16 @@
 // Site-urile PageSpeed + ultimele măsurători — logică partajată între remote-ul
 // de admin (getPagespeedSites, toate site-urile tenantului) și pagina din
 // portalul clientului (doar site-urile cu clientId-ul sesiunii).
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { cwvPass, isoWeekKey, isoWeekShortDate, type PsiStrategy } from '$lib/logic/pagespeed';
 
 const SPARK_POINTS = 10;
+/** Câte rânduri păstrăm per (site, strategie): 10 puncte de spark + last + prev. */
+const ROWS_PER_SERIES = SPARK_POINTS + 2;
+/** Săptămânile afișate în graficul de evoluție. */
+const TREND_WEEKS = 10;
 
 type MeasurementRow = typeof table.pagespeedMeasurement.$inferSelect;
 
@@ -71,7 +75,7 @@ export async function buildPagespeedSites(tenantId: string, opts: PagespeedSites
 	for (const m of measurements) {
 		const key = `${m.siteId}:${m.strategy}`;
 		const list = bySiteStrategy.get(key) ?? [];
-		if (list.length < SPARK_POINTS + 2) list.push(m);
+		if (list.length < ROWS_PER_SERIES) list.push(m);
 		bySiteStrategy.set(key, list);
 	}
 
@@ -86,22 +90,45 @@ export async function buildPagespeedSites(tenantId: string, opts: PagespeedSites
 	const trendWeeks: { id: string; label: string }[] = [];
 	{
 		const now = new Date();
-		for (let back = 9; back >= 0; back--) {
+		for (let back = TREND_WEEKS - 1; back >= 0; back--) {
 			const d = new Date(now.getTime() - back * 7 * 86400000);
 			const id = isoWeekKey(d);
 			// eticheta = data de luni („31 aug."), nu codul ISO „S36" — lizibil pentru oricine
 			trendWeeks.push({ id, label: isoWeekShortDate(id) });
 		}
 	}
+
+	// Interogare separată pentru grafic: rândurile de mai sus sunt cele mai RECENTE
+	// (pentru tabel și spark) și, după destule scanări, nu mai ajung înapoi 10
+	// săptămâni — graficul ar pierde capătul stâng. Aici filtrăm direct fereastra.
+	const trendRows = siteIds.length
+		? await db
+				.select({
+					siteId: table.pagespeedMeasurement.siteId,
+					strategy: table.pagespeedMeasurement.strategy,
+					weekKey: table.pagespeedMeasurement.weekKey,
+					performance: table.pagespeedMeasurement.performance
+				})
+				.from(table.pagespeedMeasurement)
+				.where(
+					and(
+						inArray(table.pagespeedMeasurement.siteId, siteIds),
+						gte(table.pagespeedMeasurement.weekKey, trendWeeks[0].id),
+						eq(table.pagespeedMeasurement.status, 'ok')
+					)
+				)
+				.orderBy(desc(table.pagespeedMeasurement.measuredAt))
+				.limit(siteIds.length * TREND_WEEKS * 2 * 3)
+		: [];
+
 	const trendSeries = (strategy: PsiStrategy): (number | null)[] =>
 		trendWeeks.map((week) => {
 			const perSite = new Map<string, number>();
-			// measurements e sortat desc — prima potrivire per site e cea mai recentă din săptămână
-			for (const m of measurements) {
+			// trendRows e sortat desc — prima potrivire per site e cea mai recentă din săptămână
+			for (const m of trendRows) {
 				if (
 					m.weekKey === week.id &&
 					m.strategy === strategy &&
-					m.status === 'ok' &&
 					m.performance != null &&
 					activeSiteIds.has(m.siteId) &&
 					!perSite.has(m.siteId)

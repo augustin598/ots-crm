@@ -10,9 +10,9 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { requireStaff } from '$lib/server/get-actor';
-import { getScanProgress } from '$lib/server/pagespeed/scan';
+import { getScanProgress, isScanActive } from '$lib/server/pagespeed/scan';
 import { getSchedulerQueue } from '$lib/server/scheduler';
-import { PSI_HOURS, type PsiStrategy } from '$lib/logic/pagespeed';
+import { PSI_HOURS, isoWeekKey, type PsiStrategy } from '$lib/logic/pagespeed';
 
 function generateId() {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -292,8 +292,9 @@ export const startPagespeedScan = command(
 		const { event, tenantId } = requireTenantEvent();
 		await requireStaff(event);
 	
-		const active = await getScanProgress(tenantId);
-		if (active && !active.finishedAt) {
+		// o scanare al cărei proces a murit NU mai blochează relansarea (isScanActive
+		// verifică heartbeat-ul, nu doar absența lui finishedAt)
+		if (isScanActive(await getScanProgress(tenantId))) {
 			throw error(409, 'O scanare este deja în curs pentru acest cont');
 		}
 
@@ -306,11 +307,22 @@ export const startPagespeedScan = command(
 	}
 );
 
-/** Starea scanării curente (null când nu rulează nimic). */
+/**
+ * Starea scanării curente (null când nu s-a rulat nimic recent). `state` spune
+ * UI-ului adevărul: `running` = în curs, `done` = terminată, `dead` = procesul a
+ * murit la mijloc (altfel bannerul ar rămâne agățat până expiră cheia Redis).
+ */
 export const getPagespeedScanStatus = query(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	return getScanProgress(tenantId);
+	const progress = await getScanProgress(tenantId);
+	if (!progress) return null;
+	const state: 'running' | 'done' | 'dead' = progress.finishedAt
+		? 'done'
+		: isScanActive(progress)
+			? 'running'
+			: 'dead';
+	return { ...progress, state };
 });
 
 /**
@@ -322,6 +334,23 @@ export const sendPagespeedReportNow = command(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
 
+	// două taburi (sau două click-uri) NU trebuie să trimită raportul de două ori
+	const { getRedis } = await import('$lib/server/redis');
+	const redis = getRedis();
+	const lockKey = `${tenantId}:pagespeed:report-send`;
+	// SET … NX EX e atomic: fără TOCTOU între o citire și o scriere separate
+	const acquired = await redis.set(lockKey, '1', 'EX', 180, 'NX');
+	if (!acquired) {
+		throw error(409, 'Raportul este deja în curs de trimitere');
+	}
+	try {
+		return await sendReportNow(tenantId);
+	} finally {
+		await redis.del(lockKey).catch(() => {});
+	}
+});
+
+async function sendReportNow(tenantId: string) {
 	const [settings] = await db
 		.select()
 		.from(table.pagespeedSettings)
@@ -334,7 +363,6 @@ export const sendPagespeedReportNow = command(async () => {
 
 	const { buildPagespeedReportData } = await import('$lib/server/pagespeed/report');
 	const { sendPagespeedReportEmail } = await import('$lib/server/email');
-	const { isoWeekKey } = await import('$lib/logic/pagespeed');
 
 	const now = new Date();
 	const weekKey = isoWeekKey(now);
@@ -394,7 +422,7 @@ export const sendPagespeedReportNow = command(async () => {
 		});
 	}
 	return { sent: recipients.length - failed, failed };
-});
+}
 
 /** Datele raportului curent, pentru modalul de previzualizare din UI. */
 export const getPagespeedReportPreview = query(
@@ -404,14 +432,20 @@ export const getPagespeedReportPreview = query(
 		const { event, tenantId } = requireTenantEvent();
 		await requireStaff(event);
 
+		// „YYYY-Www" se compară lexicografic corect cronologic; o săptămână viitoare
+		// ar întoarce un raport gol, care arată ca o eroare de date
+		const currentWeek = isoWeekKey(new Date());
+		if (weekKey && weekKey > currentWeek) {
+			throw error(400, 'Nu există încă date pentru o săptămână viitoare');
+		}
+
 		const [settings] = await db
 			.select()
 			.from(table.pagespeedSettings)
 			.where(eq(table.pagespeedSettings.tenantId, tenantId))
 			.limit(1);
 		const { buildPagespeedReportData } = await import('$lib/server/pagespeed/report');
-		const { isoWeekKey } = await import('$lib/logic/pagespeed');
-		return buildPagespeedReportData(tenantId, weekKey ?? isoWeekKey(new Date()), {
+		return buildPagespeedReportData(tenantId, weekKey ?? currentWeek, {
 			includeOpportunities: settings?.includeOpportunities ?? true,
 			attachPdf: settings?.attachPdf ?? false
 		});

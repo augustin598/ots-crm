@@ -144,7 +144,7 @@
 			<div class="cl-field" style="margin-top: 12px">
 				<div class="cl-field-head">
 					<label for="psi-page-url-0">Pagini testate <span class="cl-req">*</span></label>
-					<span class="cl-hint">prima pagină este cea raportată în tabel</span>
+					<span class="cl-hint">se măsoară doar prima pagină; restul rămân salvate pentru referință</span>
 				</div>
 				{#each pages as p, i (p._k)}
 					<div style="display: grid; grid-template-columns: 150px 1fr 32px; gap: 8px; margin-top: 8px">

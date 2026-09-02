@@ -74,20 +74,30 @@
 
 	// ---- scanare: polling DOAR cât timp e activă (fără auto-polling permanent) ----
 	const scan = $derived(scanQuery.current ?? null);
-	const scanRunning = $derived(!!scan && !scan.finishedAt);
-	let sawRunning = $state(false);
+	/** Intervalul dintre comandă și primul progres scris de worker în Redis. */
+	let starting = $state(false);
+	const scanRunning = $derived(starting || scan?.state === 'running');
+	// păstrate între rulările efectului (nu se afișează direct): totalul de anunțat
+	// în toast, după ce starea scanării a dispărut deja din Redis
+	let sawRunning = false;
+	let lastTotal = 0;
 	$effect(() => {
-		if (scanRunning) {
+		if (scan?.state === 'running') {
 			sawRunning = true;
+			lastTotal = scan.total;
 			const timer = setInterval(() => scanQuery.refresh(), 2500);
 			return () => clearInterval(timer);
 		}
 		if (sawRunning) {
-			// scanarea tocmai s-a terminat: reîmprospătăm datele fără reload de pagină
+			// scanarea tocmai s-a încheiat: reîmprospătăm datele fără reload de pagină
 			sawRunning = false;
 			sitesQuery.refresh();
 			reportsQuery.refresh();
-			showToast(`Scanare finalizată · ${scan?.total ?? 0} ${scan?.total === 1 ? 'site măsurat' : 'site-uri măsurate'}`);
+			if (scan?.state === 'dead') {
+				showToast('Scanarea s-a oprit înainte de final — pornește-o din nou');
+			} else {
+				showToast(`Scanare finalizată · ${lastTotal} ${lastTotal === 1 ? 'site măsurat' : 'site-uri măsurate'}`);
+			}
 		}
 	});
 
@@ -238,11 +248,24 @@
 
 	// ---- acțiuni ----
 	async function runScan(siteIds?: string[]) {
+		if (scanRunning) return;
+		starting = true;
 		try {
 			await startPagespeedScan(siteIds);
-			await scanQuery.refresh();
+			// Workerul are nevoie de câteva sute de ms ca să scrie primul progres în
+			// Redis. Cu un singur refresh, starea venea încă goală, polling-ul nu mai
+			// pornea niciodată și pagina părea moartă până la un reload manual.
+			let confirmed = false;
+			for (let attempt = 0; attempt < 8 && !confirmed; attempt++) {
+				await scanQuery.refresh();
+				confirmed = scanQuery.current?.state === 'running';
+				if (!confirmed) await new Promise((resolve) => setTimeout(resolve, 600));
+			}
+			if (!confirmed) showToast('Scanarea a intrat în coadă — pornește în scurt timp');
 		} catch (error) {
 			showToast(remoteErrorMessage(error, 'Scanarea nu a putut porni'));
+		} finally {
+			starting = false;
 		}
 	}
 
@@ -388,16 +411,18 @@
 					<div class="cl-kpi-val">
 						{cwvPassCount}<span style="font-size: 15px; color: var(--cl-text-3); font-weight: 700"> / {cwvKnownCount}</span>
 					</div>
-					<div class="cl-kpi-sub">date reale CrUX, p75 mobil</div>
+					<div class="cl-kpi-sub" title="Date reale de la vizitatori (Chrome UX Report), percentila 75 pe mobil">
+						CrUX, p75 mobil
+					</div>
 				</div>
 			</div>
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background: rgba(239,68,68,.08); color: #ef4444"><TriangleAlertIcon size={16} /></div>
 				<div>
-					<div class="cl-kpi-lbl">Scăderi peste prag</div>
+					<div class="cl-kpi-lbl">Scăderi peste prag (mobil)</div>
 					<div class="cl-kpi-val {alerts.length ? 'cl-text-danger' : ''}">{alerts.length}</div>
 					<div class="cl-kpi-sub">
-						{alerts.length ? alerts.map((a) => a.site.domain).join(', ') : 'nicio scădere săptămâna aceasta'}
+						{alerts.length ? alerts.map((a) => a.site.domain).join(', ') : 'nicio scădere față de măsurătoarea anterioară'}
 					</div>
 				</div>
 			</div>
@@ -406,8 +431,9 @@
 				<div>
 					<div class="cl-kpi-lbl">Site-uri în monitorizare</div>
 					<div class="cl-kpi-val">{sites.filter((s) => s.active).length}</div>
-					<div class="cl-kpi-sub">
-						{sites.reduce((n, s) => n + s.pages.length, 0)} URL-uri · {sites.filter((s) => !s.active).length} în pauză
+					<!-- cardul e îngust (6 KPI-uri pe rând): explicația stă în tooltip, nu în text -->
+					<div class="cl-kpi-sub" title="Se măsoară doar pagina principală a fiecărui site (prima din listă)">
+						{sites.filter((s) => !s.active).length} în pauză
 					</div>
 				</div>
 			</div>
@@ -424,14 +450,18 @@
 		</div>
 	</div>
 
-	{#if scan && scanRunning}
+	{#if scanRunning}
 		<div class="psi-pad" style="padding-top: 16px">
 			<div class="psi-banner" role="status" aria-live="polite">
 				<span class="psi-spin"></span>
-				<span class="psi-banner-txt">
-					Se interoghează PageSpeed Insights API · {scan.done}/{scan.total}{scan.current ? ` · ${scan.current}` : ''}
-				</span>
-				<span class="psi-banner-track"><i style:width="{scan.total ? (scan.done / scan.total) * 100 : 0}%"></i></span>
+				{#if scan?.state === 'running'}
+					<span class="psi-banner-txt">
+						Se interoghează PageSpeed Insights API · {scan.done}/{scan.total}{scan.current ? ` · ${scan.current}` : ''}
+					</span>
+					<span class="psi-banner-track"><i style:width="{scan.total ? (scan.done / scan.total) * 100 : 0}%"></i></span>
+				{:else}
+					<span class="psi-banner-txt">Se pornește scanarea…</span>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -492,13 +522,17 @@
 						<tr>
 							<th>Site</th>
 							<th class="num">Scor</th>
-							<th class="num">Δ 7 zile</th>
+							<th class="num" title="Diferența față de măsurătoarea anterioară a aceluiași site, nu față de acum 7 zile">
+								Δ față de anterior
+							</th>
 							<th class="num">10 săptămâni</th>
 							<th class="num">LCP</th>
 							<th class="num">INP</th>
 							<th class="num">CLS</th>
 							<th class="num">TBT</th>
-							<th>Core Web Vitals</th>
+							<th title="Date reale CrUX pe mobil (p75) — nu se schimbă cu selectorul mobil/desktop">
+								Core Web Vitals · mobil
+							</th>
 							<th class="num">Acțiuni</th>
 						</tr>
 					</thead>

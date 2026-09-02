@@ -141,6 +141,15 @@
 			{/if}
 		</div>
 		<div class="psi-modal-foot">
+			{#if allowSend}
+				<span class="cl-hint" style="margin-right: auto">
+					Trimis acum, raportul automat de {dayName.toLowerCase()} nu va mai pleca pentru această săptămână.
+				</span>
+			{:else}
+				<span class="cl-hint" style="margin-right: auto">
+					Raport istoric, doar pentru consultare — nu poate fi retrimis.
+				</span>
+			{/if}
 			<button class="cl-btn-secondary" onclick={onclose}>Închide</button>
 			{#if allowSend}
 				<button class="cl-btn-primary" disabled={sending || !settings.recipients.length} onclick={onsend}>
