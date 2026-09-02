@@ -3653,6 +3653,20 @@
       "when": 1785398836928498,
       "tag": "0524_serp_integration_tenant_uidx",
       "breakpoints": true
+    },
+    {
+      "idx": 525,
+      "version": "6",
+      "when": 1788383466237000,
+      "tag": "0525_gsc_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 526,
+      "version": "6",
+      "when": 1788383466237001,
+      "tag": "0526_gsc_integration_tenant_uidx",
+      "breakpoints": true
     }
   ]
 }

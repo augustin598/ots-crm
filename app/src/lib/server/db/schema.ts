@@ -2673,6 +2673,31 @@ export const googleAdsIntegration = sqliteTable('google_ads_integration', {
 		.default(sql`current_timestamp`)
 });
 
+/**
+ * Integrare Google Search Console per tenant. Oglindă după `googleAdsIntegration`,
+ * cu o diferență: aici tokenii sunt DOAR criptați (fără coloane în clar), fiindcă
+ * tabelul e nou și nu avem date vechi de migrat.
+ */
+export const gscIntegration = sqliteTable('gsc_integration', {
+	id: text('id').primaryKey(),
+	tenantId: text('tenant_id')
+		.notNull()
+		.references(() => tenant.id),
+	email: text('email').notNull(),
+	accessTokenEncrypted: text('access_token_encrypted').notNull(),
+	refreshTokenEncrypted: text('refresh_token_encrypted').notNull(),
+	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+	isActive: boolean('is_active').notNull().default(true),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true, mode: 'date' }),
+	lastError: text('last_error'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+		.notNull()
+		.default(sql`current_timestamp`)
+});
+
 // Google Ads sub-accounts cached from MCC — each can be assigned to a CRM client
 export const googleAdsAccount = sqliteTable('google_ads_account', {
 	id: text('id').primaryKey(),
