@@ -293,7 +293,7 @@ export interface RankProjectDetailData {
 	 * când un cuvânt nu a fost găsit — altfel afirmăm ceva ce nu am verificat.
 	 */
 	searchDepth: number;
-	runs: { id: string; startedAt: string; finishedAt: string | null; status: string; keywordsChecked: number; up: number; down: number; flat: number; failed: number; trigger: string }[];
+	runs: { id: string; startedAt: string; finishedAt: string | null; status: string; keywordsChecked: number; up: number; down: number; flat: number; failed: number; trigger: string; errorNote: string | null }[];
 	shareOfVoice: Record<string, number>;
 }
 
@@ -464,7 +464,8 @@ export async function buildRankProjectDetail(
 			down: table.rankRun.down,
 			flat: table.rankRun.flat,
 			failed: table.rankRun.failed,
-			trigger: table.rankRun.trigger
+			trigger: table.rankRun.trigger,
+			errorNote: table.rankRun.errorNote
 		})
 		.from(table.rankRun)
 		.where(eq(table.rankRun.projectId, projectId))
@@ -511,7 +512,8 @@ export async function buildRankProjectDetail(
 			down: r.down,
 			flat: r.flat,
 			failed: r.failed,
-			trigger: r.trigger
+			trigger: r.trigger,
+			errorNote: r.errorNote
 		})),
 		shareOfVoice
 	};

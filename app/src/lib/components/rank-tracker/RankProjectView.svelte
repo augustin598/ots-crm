@@ -88,15 +88,21 @@
 		}
 		if (sawRunning) {
 			sawRunning = false;
-			detailQuery.refresh();
-			// `run` poate fi deja null (cheia de progres din Redis expiră la 20 s, iar taburile
-			// din fundal sunt încetinite de browser) — atunci nu inventăm „0 cuvinte verificate".
-			const total = run?.total;
-			showToast(
-				total == null
-					? 'Rulare finalizată.'
-					: `Rulare finalizată · ${total} ${total === 1 ? 'cuvânt verificat' : 'cuvinte verificate'}`
-			);
+			// Toastul spunea „Rulare finalizată" chiar și când Google ne blocase la jumătate:
+			// citea doar progresul din Redis (câte s-au ÎNCERCAT), nu rezultatul. Citim rularea
+			// din DB și spunem adevărul — inclusiv motivul, dacă a fost parțială.
+			void detailQuery.refresh().then(() => {
+				const last = detail?.runs?.[0];
+				if (!last) return showToast('Rulare finalizată.');
+				if (last.status === 'ok') {
+					showToast(`Rulare finalizată · ${last.keywordsChecked} ${last.keywordsChecked === 1 ? 'cuvânt verificat' : 'cuvinte verificate'}`);
+				} else {
+					const reason = last.errorNote?.includes('blocat') ? ' — Google a blocat restul' : '';
+					showToast(
+						`Rulare PARȚIALĂ: ${last.keywordsChecked} verificate, ${last.failed} ${last.failed === 1 ? 'eșuat' : 'eșuate'}${reason}. Restul rămân neverificate.`
+					);
+				}
+			});
 		}
 	});
 
@@ -790,6 +796,7 @@
 							<td>
 								{fmtTime(r.startedAt)}
 								{#if r.trigger === 'manual'}<div class="psi-site-l2">rulare manuală</div>{/if}
+								{#if r.errorNote}<div class="psi-site-l2" title={r.errorNote}>{r.errorNote}</div>{/if}
 							</td>
 							<td class="num">{r.keywordsChecked}</td>
 							<td class="num"><span class="psi-delta up">▲ {r.up}</span></td>
