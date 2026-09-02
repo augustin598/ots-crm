@@ -1,165 +1,156 @@
-/* Clase specifice Rank Tracker (rk-*), peste vocabularul cl-*/psi-* din pagespeed.css.
-   Culorile hard-codate au variante .dark unde e cazul. */
+/* ===== OTS — Rank Tracker (poziții Google organic) =====
+   Port 1:1 din designul Claude Design (rank-styles.css). Clasele cl- si psi-
+   vin din pagespeed.css; aici sunt doar rt- plus utilitarele care lipsesc.
+   Culorile de text hard-codate din design folosesc tokenii --psi-…-text
+   (identici în light, corecți pe dark). Regulile de dark sunt grupate la final. */
 
-.rk-dist {
-	display: flex;
-	height: 8px;
-	border-radius: 999px;
-	overflow: hidden;
-	background: #e2e8f0;
-	min-width: 90px;
-}
-:global(.dark) .rk-dist {
-	background: #334155;
-}
-.rk-dist-seg {
-	height: 100%;
-}
-.rk-dist-1 { background: #16a34a; }
-.rk-dist-2 { background: #4ade80; }
-.rk-dist-3 { background: #facc15; }
-.rk-dist-4 { background: #fb923c; }
-.rk-dist-5 { background: #f87171; }
-.rk-dist-6 { background: #cbd5e1; }
-:global(.dark) .rk-dist-6 { background: #475569; }
+.rt-pad { padding: 0 28px; }
 
-.rk-features {
-	display: inline-flex;
-	gap: 4px;
-	flex-wrap: wrap;
-	align-items: center;
-}
-.rk-feat {
-	font-size: 10px;
-	line-height: 1;
-	padding: 3px 5px;
-	border-radius: 5px;
-	background: #eef2ff;
-	color: #4338ca;
-	text-transform: uppercase;
-	letter-spacing: 0.03em;
-	font-weight: 600;
-}
-:global(.dark) .rk-feat {
-	background: #312e81;
-	color: #c7d2fe;
-}
-.rk-feat-ai { background: #ede9fe; color: #6d28d9; }
-:global(.dark) .rk-feat-ai { background: #4c1d95; color: #ddd6fe; }
-.rk-feat-cited { background: #dcfce7; color: #15803d; }
-:global(.dark) .rk-feat-cited { background: #14532d; color: #bbf7d0; }
+/* pastilă poziție */
+.rt-pos { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 27px; padding: 0 8px; border-radius: 8px; font-size: 13.5px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; border: 1px solid transparent; }
+.rt-pos.top3 { background: var(--cl-success-50); color: var(--psi-good-text); border-color: #a7f3d0; }
+.rt-pos.top10 { background: var(--cl-accent-50); color: var(--cl-accent-600); border-color: #cfe2fd; }
+.rt-pos.top20 { background: var(--cl-warn-50); color: var(--psi-ni-text); border-color: #fde68a; }
+.rt-pos.low { background: var(--cl-surface-2); color: var(--cl-text-2); border-color: var(--cl-border); }
+.rt-pos.out { background: var(--cl-surface-2); color: var(--cl-text-3); border-color: var(--cl-border); font-weight: 700; font-size: 12px; }
+.rt-pos.sm { min-width: 28px; height: 22px; font-size: 12px; padding: 0 6px; }
 
-.rk-canib {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	font-size: 11px;
-	font-weight: 600;
-	color: #b91c1c;
-	background: #fee2e2;
-	padding: 2px 7px;
-	border-radius: 6px;
-}
-:global(.dark) .rk-canib {
-	background: #7f1d1d;
-	color: #fecaca;
-}
+/* cuvânt cheie în tabel */
+.rt-kw { min-width: 0; }
+.rt-kw-l1 { font-size: 13px; font-weight: 700; color: var(--cl-text); display: flex; align-items: center; gap: 7px; }
+.rt-kw-l2 { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 11.5px; color: var(--cl-text-3); }
+.rt-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--cl-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; display: inline-block; vertical-align: bottom; }
+.rt-tag { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); color: var(--cl-text-2); white-space: nowrap; }
+.rt-tag.on { background: var(--cl-accent-50); border-color: #cfe2fd; color: var(--cl-accent-600); }
+.rt-tagbar { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.rt-tagbar button { font: inherit; cursor: pointer; }
 
-.rk-pos {
-	font-weight: 700;
-	font-size: 15px;
-	color: #0f172a;
-}
-:global(.dark) .rk-pos {
-	color: #f1f5f9;
-}
-.rk-pos-page {
-	font-size: 11px;
-	color: #64748b;
-	font-weight: 500;
-}
+/* chips SERP features */
+.rt-feats { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.rt-feat { width: 22px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 9.5px; font-weight: 800; letter-spacing: -.02em; color: #fff; }
+.rt-feat.ghost { background: var(--cl-surface-2) !important; color: var(--cl-text-3); border: 1px solid var(--cl-border); }
 
-.rk-chart {
-	width: 100%;
-	height: 220px;
-}
-.rk-chart-band-good { fill: rgba(22, 163, 74, 0.06); }
-.rk-chart-band-mid { fill: rgba(250, 204, 21, 0.06); }
-.rk-chart-line { fill: none; stroke: var(--cl-accent, #2563eb); stroke-width: 2; }
-.rk-chart-dot { fill: var(--cl-accent, #2563eb); }
-.rk-chart-axis { stroke: #e2e8f0; stroke-width: 1; }
-:global(.dark) .rk-chart-axis { stroke: #334155; }
-.rk-chart-label { fill: #94a3b8; font-size: 10px; }
+/* AI overview */
+.rt-ai { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+.rt-ai.cited { background: rgba(139,92,246,.1); color: #6d28d9; }
+.rt-ai.present { background: var(--cl-surface-2); color: var(--cl-text-2); }
+.rt-ai.none { color: var(--cl-text-3); font-weight: 600; }
 
-.rk-drawer-kw {
-	font-size: 18px;
-	font-weight: 700;
-	color: #0f172a;
-}
-:global(.dark) .rk-drawer-kw {
-	color: #f8fafc;
-}
+/* ultimele 7 zile */
+.rt-7 { display: inline-grid; grid-auto-flow: column; gap: 3px; }
+.rt-7 i { width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; font-style: normal; font-variant-numeric: tabular-nums; background: var(--cl-surface-2); color: var(--cl-text-2); border: 1px solid var(--cl-border); }
+.rt-7 i.up { background: var(--cl-success-50); color: var(--psi-good-text); border-color: #a7f3d0; }
+.rt-7 i.down { background: var(--cl-danger-50); color: var(--psi-poor-text); border-color: #fecaca; }
+.rt-7 i.empty { color: var(--cl-text-3); }
 
-.rk-sov-row {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 6px 0;
-	border-bottom: 1px solid #f1f5f9;
-}
-:global(.dark) .rk-sov-row {
-	border-color: #1e293b;
-}
-.rk-sov-bar {
-	flex: 1;
-	height: 8px;
-	border-radius: 999px;
-	background: #e2e8f0;
-	overflow: hidden;
-}
-:global(.dark) .rk-sov-bar { background: #334155; }
-.rk-sov-fill {
-	height: 100%;
-	background: var(--cl-accent, #2563eb);
-}
-.rk-sov-fill-me { background: #16a34a; }
+/* bară vizibilitate */
+.rt-vis { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.rt-vis-track { width: 62px; height: 6px; border-radius: 999px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); overflow: hidden; }
+.rt-vis-track i { display: block; height: 100%; background: var(--cl-accent); border-radius: 999px; }
+.rt-vis-val { font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--cl-text); }
 
-.rk-tag {
-	font-size: 11px;
-	padding: 2px 7px;
-	border-radius: 6px;
-	background: #f1f5f9;
-	color: #475569;
-}
-:global(.dark) .rk-tag {
-	background: #1e293b;
-	color: #cbd5e1;
-}
+/* distribuție poziții */
+.rt-dist { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--cl-surface-2); border: 1px solid var(--cl-border); }
+.rt-dist i { display: block; height: 100%; }
+.rt-dist-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 11.5px; color: var(--cl-text-2); }
+.rt-dist-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.rt-dist-legend b { color: var(--cl-text); font-variant-numeric: tabular-nums; }
+.rt-dist-legend em { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
 
-/* Clase utilitare folosite de UI-ul Rank Tracker, aliniate la tokenii --cl-* din .cl-wrap. */
-.cl-check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--cl-text); cursor: pointer; margin-top: 2px; }
-.cl-check input { accent-color: var(--cl-accent); width: 15px; height: 15px; }
-.cl-form-error { color: #dc2626; font-size: 12px; margin: 6px 0 0; }
-.cl-btn-danger { color: #dc2626; border-color: rgba(220,38,38,.35); }
-.cl-btn-danger:hover { background: rgba(220,38,38,.08); }
-.cl-input-sm { padding: 6px 10px; font-size: 12.5px; width: auto; }
-.cl-back { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--cl-text-3); text-decoration: none; margin-bottom: 10px; }
+/* carduri proiecte (hub) */
+.rt-projects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1360px) { .rt-projects { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rt-proj { border: 1px solid var(--cl-border); background: var(--cl-surface); border-radius: 14px; padding: 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; text-align: left; font: inherit; color: inherit; display: block; width: 100%; }
+.rt-proj:hover { border-color: var(--cl-border-strong); box-shadow: 0 8px 22px rgba(15,23,42,.07); transform: translateY(-1px); }
+.rt-proj:focus-visible { outline: 2px solid var(--cl-accent); outline-offset: 2px; }
+.rt-proj.paused { opacity: .72; }
+.rt-proj-head { display: flex; align-items: center; gap: 11px; }
+.rt-proj-head .psi-fav { width: 34px; height: 34px; border-radius: 9px; font-size: 13px; }
+.rt-proj-l1 { font-size: 14px; font-weight: 800; color: var(--cl-text); letter-spacing: -.01em; display: flex; align-items: center; gap: 7px; }
+.rt-proj-l2 { font-size: 11.5px; color: var(--cl-text-3); margin-top: 2px; }
+.rt-proj-nums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.rt-proj-num b { display: block; font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: var(--cl-text); font-variant-numeric: tabular-nums; }
+.rt-proj-num span { font-size: 10.5px; color: var(--cl-text-3); font-weight: 600; }
+.rt-proj-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--cl-border); font-size: 11.5px; color: var(--cl-text-3); }
+
+/* rânduri competitori */
+.rt-comp-row { display: grid; grid-template-columns: 1fr 68px 90px; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--cl-border); }
+.rt-comp-row:last-child { border-bottom: 0; }
+.rt-comp-dom { font-size: 12.5px; font-weight: 700; color: var(--cl-text); display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+/* pe coloana îngustă din drawer numele se rupe pe două rânduri, nu se trunchiază la 2 litere */
+.rt-comp-name { min-width: 0; overflow-wrap: anywhere; }
+.rt-comp-dom.self { color: var(--cl-accent-600); }
+.rt-comp-bar { height: 7px; border-radius: 999px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); overflow: hidden; }
+.rt-comp-bar i { display: block; height: 100%; border-radius: 999px; }
+
+/* drawer keyword */
+.rt-kpi-mini { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.rt-mini { border: 1px solid var(--cl-border); border-radius: 11px; padding: 12px 13px; background: var(--cl-surface); }
+.rt-mini span { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--cl-text-3); }
+.rt-mini b { display: block; font-size: 21px; font-weight: 800; letter-spacing: -.02em; margin-top: 5px; color: var(--cl-text); font-variant-numeric: tabular-nums; }
+.rt-mini em { font-style: normal; font-size: 11px; color: var(--cl-text-3); display: block; margin-top: 3px; }
+
+/* SERP mock */
+.rt-serp { border: 1px solid var(--cl-border); border-radius: 12px; overflow: hidden; }
+.rt-serp-row { display: flex; align-items: flex-start; gap: 11px; padding: 11px 14px; border-bottom: 1px solid var(--cl-border); }
+.rt-serp-row:last-child { border-bottom: 0; }
+.rt-serp-row.self { background: var(--cl-accent-50); }
+.rt-serp-row.feature { background: var(--cl-surface-2); }
+.rt-serp-n { font-size: 11px; font-weight: 800; color: var(--cl-text-3); width: 18px; flex: none; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.rt-serp-t { font-size: 12.5px; font-weight: 700; color: var(--cl-text); }
+.rt-serp-u { font-size: 11px; color: var(--cl-text-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 2px; word-break: break-all; }
+
+/* alerta canibalizare */
+.rt-note { display: flex; gap: 11px; align-items: flex-start; border: 1px solid #fde68a; background: var(--cl-warn-50); border-radius: 11px; padding: 12px 14px; }
+.rt-note.danger { border-color: #fecaca; background: var(--cl-danger-50); }
+.rt-note svg { color: var(--psi-ni-text); flex: none; }
+.rt-note.danger svg { color: var(--psi-poor-text); }
+.rt-note-t { font-size: 12.5px; font-weight: 800; color: var(--cl-text); }
+.rt-note-s { font-size: 11.5px; color: var(--cl-text-2); margin-top: 3px; line-height: 1.5; }
+
+/* adăugare cuvinte cheie */
+.rt-add-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.rt-ta { width: 100%; min-height: 150px; resize: vertical; border: 1px solid var(--cl-border); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 12.5px; line-height: 1.7; color: var(--cl-text); background: var(--cl-surface); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rt-ta:focus { outline: 0; border-color: var(--cl-accent); box-shadow: 0 0 0 3px var(--cl-accent-50); }
+.rt-count { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--cl-text-3); }
+.rt-count b { color: var(--cl-text); }
+
+.rt-table-scroll { overflow-x: auto; }
+.rt-table-scroll .cl-list-table { min-width: 1240px; }
+.rt-check { width: 15px; height: 15px; accent-color: var(--cl-accent); cursor: pointer; }
+.rt-bulk { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border: 1px solid var(--cl-accent); background: var(--cl-accent-50); border-radius: 11px; font-size: 12.5px; font-weight: 600; color: #0b3d8c; }
+.rt-bulk-actions { display: flex; gap: 8px; margin-left: auto; }
+
+/* ===== dark mode: doar culorile hard-codate din design ===== */
+.dark .rt-pos.top3 { border-color: rgba(16,185,129,.35); }
+.dark .rt-pos.top10 { border-color: rgba(59,139,245,.35); color: var(--cl-accent); }
+.dark .rt-pos.top20 { border-color: rgba(245,158,11,.35); }
+.dark .rt-tag.on { border-color: rgba(59,139,245,.35); color: var(--cl-accent); }
+.dark .rt-ai.cited { background: rgba(139,92,246,.18); color: #c4b5fd; }
+.dark .rt-7 i.up { border-color: rgba(16,185,129,.35); }
+.dark .rt-7 i.down { border-color: rgba(242,83,79,.35); }
+.dark .rt-note { border-color: rgba(245,158,11,.35); }
+.dark .rt-note.danger { border-color: rgba(242,83,79,.35); }
+.dark .rt-bulk { color: #9ec5fb; }
+.dark .rt-comp-dom.self { color: var(--cl-accent); }
+.dark .rt-proj:hover { box-shadow: 0 8px 22px rgba(0,0,0,.4); }
+
+/* ===== utilitare care NU există în pagespeed.css ===== */
+/* două coloane (din pagespeed-styles.css al designului, neportat în pagespeed.css) */
+.psi-two { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 1240px) { .psi-two { grid-template-columns: minmax(0, 1fr); } }
+.psi-two > * { min-width: 0; }
+.iv-muted { color: var(--cl-text-3); }
+/* link „înapoi la proiecte" — breadcrumb-ul paginii vine din layout-ul [tenant] */
+.cl-back { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--cl-text-3); text-decoration: none; padding: 14px 28px 0; }
 .cl-back:hover { color: var(--cl-accent); }
-.cl-cell-link { display: inline-flex; align-items: center; gap: 9px; color: var(--cl-text); text-decoration: none; font-weight: 600; }
-.cl-cell-link:hover { color: var(--cl-accent); }
-.cl-seg { display: inline-flex; border: 1px solid var(--cl-border); border-radius: 8px; overflow: hidden; }
-.cl-seg-btn { border: 0; background: var(--cl-surface); color: var(--cl-text-3); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; }
-.cl-seg-btn.active { background: var(--cl-accent); color: #fff; }
-.cl-row-click { cursor: pointer; }
-.cl-row-click:hover { background: var(--cl-surface-2); }
-.cl-row-actions { display: inline-flex; gap: 5px; align-items: center; justify-content: flex-end; }
-.cl-row-muted { opacity: .6; }
-.cl-alert-cell { color: #dc2626; font-weight: 700; }
+.cl-form-error { color: var(--cl-danger); font-size: 12px; margin: 8px 0 0; }
+.cl-btn-danger { color: var(--cl-danger); border-color: rgba(239,68,68,.35); }
+.cl-btn-danger:hover { background: var(--cl-danger-50); color: var(--cl-danger); border-color: var(--cl-danger); }
 .cl-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cl-callout { display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--cl-surface-2); font-size: 12.5px; color: var(--cl-text); }
-.cl-callout.danger { background: #fef2f2; color: #991b1b; }
-:global(.dark) .cl-callout.danger { background: #7f1d1d; color: #fecaca; }
-.cl-callout.danger a { color: inherit; }
-.psi-scan-banner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; background: var(--cl-accent-50); color: var(--cl-accent); font-size: 12.5px; font-weight: 600; margin-bottom: 14px; }
-.cl-spin { animation: rk-spin 1s linear infinite; }
-@keyframes rk-spin { to { transform: rotate(360deg); } }
+.cl-spin { animation: rt-spin 1s linear infinite; }
+@keyframes rt-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+	.cl-spin { animation: none; }
+	.rt-proj { transition: none; }
+}

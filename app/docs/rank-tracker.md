@@ -39,6 +39,29 @@ săptămânal.
 ## UI
 - Admin: `/[tenant]/seo-links/rank-tracker` (hub) + `/[projectId]` (detaliu + drawer).
 - Portal client (read-only): `/client/[tenant]/rank-tracker` (categoria de acces `seo`).
+- **Port 1:1 din Claude Design** (`docs/superpowers/plans/2026-09-01-rank-tracker-design/`):
+  aceleași clase `rt-*` peste vocabularul `cl-*`/`psi-*` din `pagespeed.css`.
+  `rank-tracker.css` = `rank-styles.css` + `.psi-two`/`.iv-muted`/`.cl-back` (lipsesc din
+  `pagespeed.css`) + variantele `.dark` pentru culorile hard-codate din design.
+- Componente (`$lib/components/rank-tracker/`): `RankTrackerView` (hub),
+  `RankProjectView` (detaliu), bits `Rt{Pos,Gain,Spark,7,Feats,Ai,Vis,Dist,RankChart,CompRow}`,
+  modale `ProjectModal`, `RankSettingsModal`, `KeywordsModal`, `ReportPreviewModal`,
+  `KeywordDrawer`. Helper-ele de etichete/culori sunt în `rank-tracker/lib.ts`.
+- **STRICT**: modalele/drawerul se randează ÎN interiorul `.cl-wrap` — tokenii `--cl-*`
+  sunt definiți pe `.cl-wrap` și nu cascadează la frați.
+- Breadcrumbul vine din layout-ul `[tenant]`; designul are `cl-crumbs`, noi NU (ar fi dublat).
+
+### Diferențe acceptate față de design
+- **KD (dificultate)** rămâne „—": nu există sursă gratuită în v1.
+- **Verificare per cuvânt**: backendul rulează per proiect (`startRankCheck(projectId)`),
+  deci rândurile n-au buton de re-verificare; acțiunile pe rând sunt „SERP în Google" și
+  „Șterge", iar bara de selecție multiplă are „Anulează" + „Șterge".
+- **Istoric rulări**: coloanele „Poziție medie"/„Vizibilitate" se citesc din `trend` pe ziua
+  rulării; „Alerte" din design e înlocuit cu „Eșuate" (nu ținem alerte per rulare în read model).
+- **Drawer**: designul are o coloană „URL în SERP" per zi; noi nu păstrăm URL-ul istoric per zi
+  (doar cel curent + lista din canibalizare), deci coloana lipsește.
+- **Hub**: fără segmented desktop/mobil (agregatele din lista de proiecte sunt pe dispozitivul
+  principal); tabelul de jos e „Rapoarte trimise" (rulările sunt per proiect, în detaliu).
 
 ## Operațional
 - Env: `RANK_PACE_MS` (implicit 8000), `RANK_PROXY_URLS` (listă separată prin virgulă),

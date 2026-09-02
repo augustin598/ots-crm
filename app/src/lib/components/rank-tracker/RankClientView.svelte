@@ -5,7 +5,7 @@
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import PsiFav from '../pagespeed/PsiFav.svelte';
 	import PsiDelta from '../pagespeed/PsiDelta.svelte';
-	import RkDistBar from './RkDistBar.svelte';
+	import RtDist from './RtDist.svelte';
 	import type { RankProjectsData } from '$lib/server/rank-tracker/projects-data';
 
 	let { data }: { data: RankProjectsData } = $props();
@@ -49,7 +49,7 @@
 									{#if p.deltaVisibility != null && p.deltaVisibility !== 0}<PsiDelta value={p.deltaVisibility} suffix=" pct" />{/if}
 								</td>
 								<td>{p.avgPosition != null ? nf.format(p.avgPosition) : '—'}</td>
-								<td><RkDistBar distribution={p.distribution} /></td>
+								<td><RtDist buckets={p.distribution} total={p.keywordCount} compact /></td>
 							</tr>
 						{/each}
 					</tbody>

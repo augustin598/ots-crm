@@ -31,6 +31,8 @@ export interface RankProjectListRow {
 	distribution: Record<RankBucket, number>;
 	lastRunAt: string | null;
 	lastRunStatus: string | null;
+	lastRunUp: number | null;
+	lastRunDown: number | null;
 	alertsLast7d: number;
 	active: boolean;
 	paused: boolean;
@@ -44,6 +46,8 @@ export interface RankProjectsData {
 		avgVisibility: number;
 		alertsLast7d: number;
 	};
+	/** Ultimele 30 de zile pentru graficul de portofoliu din hub (dispozitivul principal). */
+	trend: { days: string[]; visibility: (number | null)[]; avgPosition: (number | null)[] };
 }
 
 const DAY_MS = 86_400_000;
@@ -109,13 +113,15 @@ export async function buildRankProjects(
 				.select({
 					projectId: table.rankRun.projectId,
 					startedAt: table.rankRun.startedAt,
-					status: table.rankRun.status
+					status: table.rankRun.status,
+					up: table.rankRun.up,
+					down: table.rankRun.down
 				})
 				.from(table.rankRun)
 				.where(inArray(table.rankRun.projectId, projectIds))
 				.orderBy(desc(table.rankRun.startedAt))
 		: [];
-	const lastRunByProject = new Map<string, { startedAt: Date; status: string }>();
+	const lastRunByProject = new Map<string, { startedAt: Date; status: string; up: number; down: number }>();
 	for (const r of runs) if (!lastRunByProject.has(r.projectId)) lastRunByProject.set(r.projectId, r);
 
 	// Alerte din ultimele 7 zile per proiect (alert → run → project).
@@ -143,6 +149,12 @@ export async function buildRankProjects(
 		seriesByKeyword.set(key, arr);
 	}
 
+	// Ultimele 30 de zile calendaristice pentru graficul de portofoliu.
+	const trendDays: string[] = [];
+	for (let i = 29; i >= 0; i--) trendDays.push(daysAgoKey(now, i));
+	const trendDaySet = new Set(trendDays);
+	const perDayPositions = new Map<string, (number | null)[]>();
+
 	const rows: RankProjectListRow[] = projects.map((p) => {
 		const projKeywords = keywords.filter((k) => k.projectId === p.id);
 		const trackedDevices = p.devices as ('desktop' | 'mobile')[];
@@ -157,6 +169,14 @@ export async function buildRankProjects(
 			nowPositions.push(nowPos);
 			thenPositions.push(then?.position ?? null);
 			dist[bucketFor(nowPos)]++;
+			if (p.active && !p.pausedAt) {
+				for (const s of series) {
+					if (!trendDaySet.has(s.dayKey)) continue;
+					const arr = perDayPositions.get(s.dayKey) ?? [];
+					arr.push(s.position); // include null (neclasat) — numitor corect al vizibilității
+					perDayPositions.set(s.dayKey, arr);
+				}
+			}
 		}
 		const nums = nowPositions.filter((x): x is number => x != null);
 		const vis = visibility(nowPositions);
@@ -174,6 +194,8 @@ export async function buildRankProjects(
 			distribution: dist,
 			lastRunAt: lastRun?.startedAt?.toISOString() ?? null,
 			lastRunStatus: lastRun?.status ?? null,
+			lastRunUp: lastRun?.up ?? null,
+			lastRunDown: lastRun?.down ?? null,
 			alertsLast7d: alertsByProject.get(p.id) ?? 0,
 			active: p.active,
 			paused: !!p.pausedAt
@@ -192,6 +214,18 @@ export async function buildRankProjects(
 			keywordCount: keywords.length,
 			avgVisibility: avgVis,
 			alertsLast7d: rows.reduce((a, r) => a + r.alertsLast7d, 0)
+		},
+		trend: {
+			days: trendDays,
+			visibility: trendDays.map((d) => {
+				const positions = perDayPositions.get(d);
+				return positions && positions.length ? visibility(positions) : null;
+			}),
+			avgPosition: trendDays.map((d) => {
+				const nums = (perDayPositions.get(d) ?? []).filter((x): x is number => x != null);
+				if (!nums.length) return null;
+				return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10;
+			})
 		}
 	};
 }
@@ -236,6 +270,7 @@ export interface RankProjectDetailData {
 	competitors: string[];
 	devices: ('desktop' | 'mobile')[];
 	alertThreshold: number;
+	clientId: string | null;
 	clientName: string | null;
 	active: boolean;
 	paused: boolean;
@@ -272,6 +307,7 @@ export async function buildRankProjectDetail(
 			alertThreshold: table.rankProject.alertThreshold,
 			active: table.rankProject.active,
 			pausedAt: table.rankProject.pausedAt,
+			clientId: table.rankProject.clientId,
 			clientName: table.client.name
 		})
 		.from(table.rankProject)
@@ -439,6 +475,7 @@ export async function buildRankProjectDetail(
 		competitors: project.competitors as string[],
 		devices: project.devices as ('desktop' | 'mobile')[],
 		alertThreshold: project.alertThreshold,
+		clientId: project.clientId,
 		clientName: project.clientName,
 		active: project.active,
 		paused: !!project.pausedAt,
