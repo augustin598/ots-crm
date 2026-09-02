@@ -187,6 +187,61 @@ export const RANK_HOURS: string[] = Array.from(
 	(_, i) => `${String(i).padStart(2, '0')}:00`
 );
 
+/** Un rezultat organic din prima pagină, așa cum e stocat în `rank_snapshot.top_results`. */
+export interface RankSerpResult {
+	position: number;
+	domain: string;
+	url: string;
+	title: string;
+	snippet: string;
+}
+
+/** Câte rezultate organice are o pagină de căutare Google. */
+export const RANK_PAGE_SIZE = 10;
+
+/**
+ * Hostul arată a domeniu real? `new URL()` e prea permisiv pentru ce scoatem din
+ * `<cite>`: „https://6" NU aruncă, ci întoarce hostname „0.0.0.6" (Node citește „6"
+ * ca întreg IPv4), iar „https://ro" dă hostul „ro". Ambele ajungeau în SERP ca
+ * rezultate false — MĂSURAT 2 sep. 2026 pe „videochat iasi", unde un rezultat local
+ * avea cite-ul „6 Strada Sărăriei, Iași".
+ */
+export function isPlausibleHost(host: string): boolean {
+	if (!host.includes('.')) return false;
+	const tld = host.slice(host.lastIndexOf('.') + 1);
+	return /^[a-z]{2,}$/.test(tld) || /^xn--[a-z0-9-]+$/.test(tld);
+}
+
+/**
+ * Curăță `rank_snapshot.top_results`: coloana e jsonb, deci la citire nu avem nicio
+ * garanție de formă (snapshoturi vechi fără coloană, rânduri parțiale de la un provider
+ * care schimbă contractul). Păstrează doar intrările cu poziție și domeniu utilizabile,
+ * normalizează „www.", sortează după poziție și taie la prima pagină.
+ */
+export function normalizeTopResults(raw: unknown): RankSerpResult[] {
+	if (!Array.isArray(raw)) return [];
+	return raw
+		.map((item) => {
+			const r = (item ?? {}) as Record<string, unknown>;
+			const position = Number(r.position);
+			const domain =
+				typeof r.domain === 'string' ? r.domain.replace(/^www\./i, '').toLowerCase() : '';
+			// filtrul se aplică ȘI la citire, nu doar la scriere: snapshoturile luate
+			// înainte de fixul din parser au deja rânduri cu host-uri de tip „0.0.0.6"
+			if (!Number.isInteger(position) || position < 1 || !isPlausibleHost(domain)) return null;
+			return {
+				position,
+				domain,
+				url: typeof r.url === 'string' ? r.url : '',
+				title: typeof r.title === 'string' ? r.title : '',
+				snippet: typeof r.snippet === 'string' ? r.snippet : ''
+			};
+		})
+		.filter((r): r is RankSerpResult => r !== null)
+		.sort((a, b) => a.position - b.position)
+		.slice(0, RANK_PAGE_SIZE);
+}
+
 /**
  * Parsează localizarea „google.ro|ro" → { googleDomain, hl, gl }.
  * gl = TLD-ul de după „google." dacă are exact 2 litere (ro, de), altfel „us" (com).

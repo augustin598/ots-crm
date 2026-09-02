@@ -16,6 +16,8 @@ import {
 	detectCannibalization,
 	rankDayKey,
 	parseLocale,
+	isPlausibleHost,
+	normalizeTopResults,
 	RANK_HOURS,
 	// re-exporturi din ../pagespeed (nu reimplementate)
 	isoWeekKey,
@@ -294,5 +296,87 @@ describe('snapshotAtLookback — nu se compară ziua cu ea însăși', () => {
 		];
 		expect(snapshotAtLookback(series, '2026-09-02', 7, 3)?.dayKey).toBe('2026-08-26');
 		expect(snapshotAtLookback(series, '2026-09-02', 30, 5)?.dayKey).toBe('2026-08-03');
+	});
+});
+
+describe('normalizeTopResults', () => {
+	const r = (position: number, domain: string) => ({
+		position,
+		domain,
+		url: `https://${domain}/`,
+		title: `T${position}`,
+		snippet: ''
+	});
+
+	test('sortează după poziție, indiferent de ordinea din jsonb', () => {
+		const out = normalizeTopResults([r(3, 'c.ro'), r(1, 'a.ro'), r(2, 'b.ro')]);
+		expect(out.map((x) => x.position)).toEqual([1, 2, 3]);
+		expect(out.map((x) => x.domain)).toEqual(['a.ro', 'b.ro', 'c.ro']);
+	});
+
+	test('normalizează „www." și majusculele, ca potrivirea cu domeniul nostru să meargă', () => {
+		expect(normalizeTopResults([r(1, 'WWW.Heylux.RO')])[0].domain).toBe('heylux.ro');
+	});
+
+	test('taie la prima pagină (10 rezultate)', () => {
+		const many = Array.from({ length: 20 }, (_, i) => r(i + 1, `d${i}.ro`));
+		expect(normalizeTopResults(many).length).toBe(10);
+		expect(normalizeTopResults(many).at(-1)?.position).toBe(10);
+	});
+
+	test('coloană lipsă sau formă neașteptată → listă goală, fără excepție', () => {
+		expect(normalizeTopResults(undefined)).toEqual([]);
+		expect(normalizeTopResults(null)).toEqual([]);
+		expect(normalizeTopResults({})).toEqual([]);
+		expect(normalizeTopResults('[]')).toEqual([]);
+		expect(normalizeTopResults([])).toEqual([]);
+	});
+
+	test('aruncă rândurile fără poziție sau domeniu utilizabil', () => {
+		const out = normalizeTopResults([
+			null,
+			{ position: 0, domain: 'zero.ro' },
+			{ position: 1.5, domain: 'frac.ro' },
+			{ position: 2, domain: '' },
+			{ position: 'x', domain: 'nan.ro' },
+			r(4, 'bun.ro')
+		]);
+		expect(out.map((x) => x.domain)).toEqual(['bun.ro']);
+	});
+
+	test('câmpurile de text lipsă devin șiruri goale, nu undefined', () => {
+		const [only] = normalizeTopResults([{ position: 1, domain: 'a.ro' }]);
+		expect(only).toEqual({ position: 1, domain: 'a.ro', url: '', title: '', snippet: '' });
+	});
+});
+
+describe('isPlausibleHost — filtrul care oprește „0.0.0.6" din cite-uri numerice', () => {
+	test('domenii reale trec', () => {
+		expect(isPlausibleHost('sugarstudio.ro')).toBe(true);
+		expect(isPlausibleHost('bestjobs.eu')).toBe(true);
+		expect(isPlausibleHost('sub.dom.co.uk')).toBe(true);
+		expect(isPlausibleHost('xn--p1ai.xn--p1ai')).toBe(true);
+	});
+
+	test('rezultatul lui new URL("https://6") NU trece', () => {
+		expect(new URL('https://6').hostname).toBe('0.0.0.6'); // cauza bugului
+		expect(isPlausibleHost('0.0.0.6')).toBe(false);
+		expect(isPlausibleHost('1.0.0.2')).toBe(false);
+	});
+
+	test('host fără punct (TLD singur, localhost) NU trece', () => {
+		expect(isPlausibleHost('ro')).toBe(false);
+		expect(isPlausibleHost('localhost')).toBe(false);
+		expect(isPlausibleHost('')).toBe(false);
+	});
+});
+
+describe('normalizeTopResults — curăță și datele deja salvate', () => {
+	test('rândul corupt „0.0.0.6" dispare fără rescanare', () => {
+		const out = normalizeTopResults([
+			{ position: 9, domain: 'waze.com', url: 'https://www.waze.com/x', title: 'T', snippet: '' },
+			{ position: 10, domain: '0.0.0.6', url: 'https://6', title: 'Studio', snippet: '' }
+		]);
+		expect(out.map((x) => x.domain)).toEqual(['waze.com']);
 	});
 });

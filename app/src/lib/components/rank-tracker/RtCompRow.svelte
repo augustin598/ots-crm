@@ -6,12 +6,15 @@
 	let {
 		domain,
 		self = false,
+		tracked = false,
 		pos,
 		vis,
 		max
 	}: {
 		domain: string;
 		self?: boolean;
+		/** Domeniu configurat explicit ca fiind competitor (restul vin din SERP). */
+		tracked?: boolean;
 		pos?: number | null;
 		vis: number;
 		max: number;
@@ -31,7 +34,7 @@
 			style:background={self ? 'var(--cl-accent)' : psiTileColor(domain)}>{psiInitials(domain)}</span
 		>
 		<span class="rt-comp-name">{domain}</span>
-		{#if self}<span class="psi-tag info">noi</span>{/if}
+		{#if self}<span class="psi-tag info">noi</span>{:else if tracked}<span class="psi-tag">urmărit</span>{/if}
 	</div>
 	<div style="text-align: right">
 		{#if showPos}<RtPos pos={pos ?? null} sm />{:else}<span class="iv-muted">—</span>{/if}

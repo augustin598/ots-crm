@@ -252,4 +252,28 @@ describe('parseSerpHtml — cazuri limită', () => {
 		const r = parseSerpHtml(desktopHtml, { targetDomain: TARGET });
 		expect(pickTargetPosition(r.organic, 'domeniu-care-nu-exista.ro')).toBeNull();
 	});
+
+	// MĂSURAT 2 sep. 2026 pe „videochat iasi": un rezultat local avea `<cite>` care începe
+	// cu un număr („6 Strada …"). `new URL('https://6')` NU aruncă — Node citește „6" ca
+	// întreg IPv4 și întoarce hostname „0.0.0.6", așa că rezultatul intra în SERP cu
+	// domeniul „0.0.0.6" și URL-ul „https://6".
+	test('cite care începe cu un număr → rezultatul e ignorat, nu devine IP „0.0.0.6"', () => {
+		const html = `<div id="rso">
+			<div class="g"><div class="yuRUbf"><a href="/goto?url=CAES1"><h3>Studio videochat Iași | Iasi</h3></a>
+			<cite>6 Strada Sărăriei, Iași</cite></div></div>
+			<div class="g"><div class="yuRUbf"><a href="/goto?url=CAES2"><h3>Rezultat valid</h3></a>
+			<cite>https://sugarstudio.ro › servicii</cite></div></div>
+		</div>`;
+		const r = parseSerpHtml(html, { targetDomain: TARGET });
+		expect(r.organic.map((o) => o.domain)).toEqual(['sugarstudio.ro']);
+		expect(r.organic[0].position).toBe(1);
+	});
+
+	test('cite fără punct („localhost", un TLD singur) → ignorat', () => {
+		const html = `<div id="rso">
+			<div class="g"><div class="yuRUbf"><a href="/goto?url=CAES1"><h3>Fără domeniu</h3></a>
+			<cite>ro</cite></div></div>
+		</div>`;
+		expect(parseSerpHtml(html, { targetDomain: TARGET }).organic).toEqual([]);
+	});
 });

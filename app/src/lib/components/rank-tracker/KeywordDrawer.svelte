@@ -62,9 +62,6 @@
 			.sort((a, b) => a[1] - b[1])
 	);
 	const compsAbsent = $derived(compsAll.filter((e) => typeof e[1] !== 'number').map((e) => e[0]));
-	const maxVis = $derived(
-		Math.max(ctrForPosition(keyword.position), ...comps.map(([, p]) => ctrForPosition(p)), 0.1)
-	);
 	/** Dispozitivul are date doar dacă proiectul îl urmărește; altfel coloana rămâne goală. */
 	const hasDesktop = $derived(!!desktopRow);
 	const hasMobile = $derived(!!mobileRow);
@@ -76,14 +73,73 @@
 		].filter((s): s is { label: string; color: string; values: (number | null)[]; thin?: boolean } => !!s)
 	);
 
-	// SERP-ul de azi: competitorii din snapshot + noi, doar primele 10 poziții.
-	const serp = $derived(
-		[
-			...comps.map(([dom, pos]) => ({ dom, pos, self: false })),
-			...(keyword.position != null ? [{ dom: domain, pos: keyword.position, self: true }] : [])
-		]
-			.filter((r) => r.pos <= 10)
-			.sort((a, b) => a.pos - b.pos)
+	const selfDomain = $derived(domain.replace(/^www\./i, '').toLowerCase());
+	/** Domeniile urmărite explicit ca fiind competitori, ca să le putem marca în listă. */
+	const trackedDomains = $derived(
+		new Set(compsAll.map(([d]) => d.replace(/^www\./i, '').toLowerCase()))
+	);
+
+	interface SerpRow {
+		pos: number;
+		dom: string;
+		title: string;
+		url: string;
+		self: boolean;
+		tracked: boolean;
+	}
+
+	/**
+	 * SERP-ul de azi = prima pagină reală din snapshot (`topResults`), cu tot cu
+	 * domeniile pe care nu le urmărim. Snapshoturile scrise înainte de coloana
+	 * `top_results` nu o au, așa că pentru ele rămânem pe vechea reconstrucție din
+	 * competitorii configurați — altfel drawerul ar arăta gol pentru istoricul deja
+	 * colectat.
+	 */
+	const hasTopResults = $derived((keyword.topResults?.length ?? 0) > 0);
+	const serp = $derived<SerpRow[]>(
+		hasTopResults
+			? keyword.topResults.map((r) => {
+					const dom = r.domain.replace(/^www\./i, '').toLowerCase();
+					const self = dom === selfDomain;
+					return {
+						pos: r.position,
+						dom,
+						title: r.title || (self ? name : dom),
+						url: r.url || dom,
+						self,
+						tracked: !self && trackedDomains.has(dom)
+					};
+				})
+			: [
+					...comps.map(([dom, pos]) => ({
+						pos,
+						dom,
+						title: dom,
+						url: dom,
+						self: false,
+						tracked: true
+					})),
+					...(keyword.position != null
+						? [
+								{
+									pos: keyword.position,
+									dom: selfDomain,
+									title: name,
+									url: url ?? selfDomain,
+									self: true,
+									tracked: false
+								}
+							]
+						: [])
+				]
+					.filter((r) => r.pos <= 10)
+					.sort((a, b) => a.pos - b.pos)
+	);
+
+	/** Toată prima pagină în afară de noi — nu doar competitorii configurați. */
+	const compRows = $derived(serp.filter((r) => !r.self));
+	const maxVis = $derived(
+		Math.max(ctrForPosition(keyword.position), ...compRows.map((r) => ctrForPosition(r.pos)), 0.1)
 	);
 
 	// ultimele 12 zile, cea mai recentă prima
@@ -200,10 +256,15 @@
 				</div>
 			{/if}
 
-			<div class="psi-two">
+			<!-- SERP-ul și competitorii stau unul sub altul: ambele liste au 10 rânduri,
+			     iar pe două coloane se înghesuiau și se tăiau titlurile -->
+			<div class="rt-stack">
 				<div class="cl-section">
 					<div class="cl-section-head">
 						<h3><LayersIcon size={15} /> SERP azi</h3>
+						{#if hasTopResults}
+							<p class="cl-section-sub">prima pagină, așa cum a returnat-o Google</p>
+						{/if}
 						<a
 							class="cl-btn-mini"
 							style="margin-left: auto"
@@ -236,14 +297,18 @@
 								<div><div class="rt-serp-t">Local pack</div><div class="rt-serp-u">{keyword.location || '—'}</div></div>
 							</div>
 						{/if}
-						{#each serp as r (r.dom)}
+						{#each serp as r (`${r.pos}:${r.dom}`)}
 							<div class="rt-serp-row" class:self={r.self}>
 								<span class="rt-serp-n">{r.pos}</span>
 								<div style="min-width: 0">
-									<div class="rt-serp-t">{r.self ? name : r.dom}</div>
-									<div class="rt-serp-u">{r.self && url ? url : r.dom}</div>
+									<div class="rt-serp-t">{r.title}</div>
+									<div class="rt-serp-u">{r.url}</div>
 								</div>
-								{#if r.self}<span class="psi-tag info" style="margin-left: auto">noi</span>{/if}
+								{#if r.self}
+									<span class="psi-tag info" style="margin-left: auto">noi</span>
+								{:else if r.tracked}
+									<span class="psi-tag" style="margin-left: auto">urmărit</span>
+								{/if}
 							</div>
 						{/each}
 						{#if keyword.features.includes('paa')}
@@ -272,7 +337,14 @@
 				</div>
 
 				<div class="cl-section">
-					<div class="cl-section-head"><h3><UsersIcon size={15} /> Competitori pe acest cuvânt</h3></div>
+					<div class="cl-section-head">
+						<h3><UsersIcon size={15} /> Competitori pe acest cuvânt</h3>
+						<p class="cl-section-sub">
+							{hasTopResults
+								? 'toate domeniile din prima pagină, nu doar cele urmărite'
+								: 'doar domeniile urmărite — SERP-ul complet apare după următoarea rulare'}
+						</p>
+					</div>
 					<RtCompRow
 						{domain}
 						self
@@ -280,16 +352,22 @@
 						vis={Math.round(ctrForPosition(keyword.position) * 10) / 10}
 						max={maxVis}
 					/>
-					{#each comps as [dom, pos] (dom)}
-						<RtCompRow domain={dom} {pos} vis={Math.round(ctrForPosition(pos) * 10) / 10} max={maxVis} />
+					{#each compRows as r (`${r.pos}:${r.dom}`)}
+						<RtCompRow
+							domain={r.dom}
+							pos={r.pos}
+							tracked={r.tracked}
+							vis={Math.round(ctrForPosition(r.pos) * 10) / 10}
+							max={maxVis}
+						/>
 					{/each}
 					{#if compsAbsent.length}
 						<p class="cl-hint">
-							În afara top 10 azi: {compsAbsent.join(', ')}
+							Urmăriți, dar în afara primei pagini azi: {compsAbsent.join(', ')}
 						</p>
 					{/if}
-					{#if comps.length === 0 && compsAbsent.length === 0}
-						<p class="cl-hint">Niciun competitor înregistrat în SERP-ul de azi.</p>
+					{#if compRows.length === 0 && compsAbsent.length === 0}
+						<p class="cl-hint">Niciun alt domeniu în SERP-ul de azi.</p>
 					{/if}
 				</div>
 			</div>

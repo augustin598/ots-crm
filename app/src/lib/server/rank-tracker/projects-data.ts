@@ -13,7 +13,9 @@ import {
 	detectCannibalization,
 	pageForPosition,
 	rankDayKey,
-	type RankBucket
+	normalizeTopResults,
+	type RankBucket,
+	type RankSerpResult
 } from '$lib/logic/rank-tracker';
 
 export interface RankProjectsOptions {
@@ -265,6 +267,13 @@ export interface RankKeywordDetail {
 	 */
 	checked30: boolean[];
 	competitors: Record<string, number>;
+	/**
+	 * Prima pagină reală de rezultate din snapshotul de azi, în ordinea din Google.
+	 * `competitors` conține doar domeniile configurate ca fiind competitori; asta e
+	 * SERP-ul întreg, deci UI-ul poate arăta pe cine mai avem lângă noi în top 10.
+	 * Gol pentru snapshoturile scrise înainte să existe coloana `top_results`.
+	 */
+	topResults: RankSerpResult[];
 	cannibalization: { flagged: boolean; urls: string[] };
 }
 
@@ -349,7 +358,8 @@ export async function buildRankProjectDetail(
 					rankingUrl: table.rankSnapshot.rankingUrl,
 					serpFeatures: table.rankSnapshot.serpFeatures,
 					aiOverview: table.rankSnapshot.aiOverview,
-					competitors: table.rankSnapshot.competitors
+					competitors: table.rankSnapshot.competitors,
+					topResults: table.rankSnapshot.topResults
 				})
 				.from(table.rankSnapshot)
 				.where(and(inArray(table.rankSnapshot.keywordId, keywordIds), gte(table.rankSnapshot.checkedAt, since30)))
@@ -436,6 +446,7 @@ export async function buildRankProjectDetail(
 				spark30,
 				checked30,
 				competitors: (nowSnap?.competitors ?? {}) as Record<string, number>,
+				topResults: normalizeTopResults(nowSnap?.topResults),
 				cannibalization: detectCannibalization(
 					series.map((s) => ({ dayKey: s.dayKey, rankingUrl: s.rankingUrl }))
 				)

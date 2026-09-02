@@ -4,6 +4,7 @@
 // strategii, tolerante la piese lipsă, nu aruncă niciodată pe o pagină normală.
 // Aruncatul pe pagină goală/blocată e treaba stratului provider (Task 4/6).
 import { parse, type HTMLElement } from 'node-html-parser';
+import { isPlausibleHost } from '$lib/logic/rank-tracker';
 import type { SerpResult, SerpOrganicResult } from './types';
 
 /** Hostul unui URL, lowercase și fără „www."; null dacă URL-ul e malformat. */
@@ -99,7 +100,9 @@ const ORGANIC_SELECTORS = ['.tF2Cxc', '.MjjYud', '.g', '.mnr-c'];
 function resolveResultUrl(container: HTMLElement, href: string | undefined): string | null {
 	const direct = unwrapUrl(href || '');
 	const directHost = hostOf(direct);
-	if (directHost && !/(^|\.)google\.[a-z.]+$/.test(directHost)) return direct;
+	if (directHost && !/(^|\.)google\.[a-z.]+$/.test(directHost) && isPlausibleHost(directHost)) {
+		return direct;
+	}
 
 	const citeText = (container.querySelector('cite')?.text || '').trim();
 	if (citeText) {
@@ -107,7 +110,8 @@ function resolveResultUrl(container: HTMLElement, href: string | undefined): str
 		const first = citeText.split(/[\s›]/)[0].trim();
 		if (first) {
 			const candidate = /^https?:\/\//i.test(first) ? first : `https://${first}`;
-			if (hostOf(candidate)) return candidate;
+			const host = hostOf(candidate);
+			if (host && isPlausibleHost(host)) return candidate;
 		}
 	}
 	return null;
