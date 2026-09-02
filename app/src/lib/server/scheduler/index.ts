@@ -53,6 +53,7 @@ import { processPagespeedScan } from './tasks/pagespeed-scan';
 import { processRankDailyCheck } from './tasks/rank-daily-check';
 import { processRankProjectCheck } from './tasks/rank-project-check';
 import { processRankWeeklyReport } from './tasks/rank-weekly-report';
+import { processRankVolumeRefresh } from './tasks/rank-volume-refresh';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -215,7 +216,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	pagespeed_scan: processPagespeedScan,
 	rank_daily_check: () => processRankDailyCheck(),
 	rank_project_check: processRankProjectCheck,
-	rank_weekly_report: () => processRankWeeklyReport()
+	rank_weekly_report: () => processRankWeeklyReport(),
+	rank_volume_refresh: () => processRankVolumeRefresh()
 };
 
 /**
@@ -389,7 +391,7 @@ export const startScheduler = async () => {
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
 		'content-auto-publish', 'content-auto-generate',
 		'pagespeed-weekly-report',
-		'rank-daily-check', 'rank-weekly-report'
+		'rank-daily-check', 'rank-weekly-report', 'rank-volume-refresh'
 	]);
 
 	try {
@@ -1198,6 +1200,14 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] rank-weekly-report registered (0 * * * * Europe/Bucharest)');
 
+	// Rank Tracker — volume de căutare lunare din Google Ads (ziua 1, ora 05:00).
+	await schedulerQueue.add(
+		'rank-volume-refresh',
+		{ type: 'rank_volume_refresh', params: {} },
+		{ repeat: { pattern: '0 5 1 * *', tz: 'Europe/Bucharest' }, jobId: 'rank-volume-refresh', attempts: 1 }
+	);
+	logInfo('scheduler', '[scheduler] rank-volume-refresh registered (0 5 1 * * Europe/Bucharest)');
+
 	// Content auto-publish — orar. Publică articolele programate scadente pe WordPress.
 	await schedulerQueue.add(
 		'content-auto-publish',
@@ -1264,7 +1274,8 @@ export const JOB_LABELS: Record<string, string> = {
 	pagespeed_scan: 'Scanare PageSpeed (manuală, din UI)',
 	rank_daily_check: 'Verificare zilnică poziții Google (Rank Tracker, oră din setări)',
 	rank_project_check: 'Verificare poziții proiect (Rank Tracker, one-shot)',
-	rank_weekly_report: 'Raport săptămânal poziții Google (Rank Tracker, zi/oră din setări)'
+	rank_weekly_report: 'Raport săptămânal poziții Google (Rank Tracker, zi/oră din setări)',
+	rank_volume_refresh: 'Volume de căutare lunare (Rank Tracker, din Google Ads)'
 };
 
 /** Default params for jobs that need specific parameters */
