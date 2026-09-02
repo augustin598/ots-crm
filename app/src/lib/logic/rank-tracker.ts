@@ -31,7 +31,7 @@ export function ctrForPosition(pos: number | null): number {
 export function visibility(positions: (number | null)[]): number {
 	const n = positions.length;
 	if (n === 0) return 0;
-	const sum = positions.reduce((acc, p) => acc + ctrForPosition(p), 0);
+	const sum = positions.reduce((acc: number, p) => acc + ctrForPosition(p), 0);
 	const max = n * ctrForPosition(1);
 	return Math.round((sum / max) * 100 * 10) / 10;
 }

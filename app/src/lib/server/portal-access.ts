@@ -180,5 +180,6 @@ export function routeRequiresAccess(pathname: string, tenantSlug: string): Acces
 	// hub-ul SEO & GEO & AEO + PageSpeed (portal) — o singură categorie
 	if (rest.startsWith('/seo')) return 'seo';
 	if (rest.startsWith('/pagespeed')) return 'seo';
+	if (rest.startsWith('/rank-tracker')) return 'seo';
 	return null;
 }

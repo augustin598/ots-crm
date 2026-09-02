@@ -21,6 +21,7 @@ export type IconKey =
 	| 'seo'
 	| 'seo-links'
 	| 'pagespeed'
+	| 'rank-tracker'
 	| 'content'
 	| 'wordpress'
 	| 'marketing'
@@ -270,6 +271,12 @@ export const SIDEBAR_NAV: NavGroup[] = [
 						label: 'PageSpeed Insights',
 						icon: 'pagespeed',
 						href: '/seo-links/pagespeed'
+					},
+					{
+						id: 'seo-rank',
+						label: 'Rank Tracker',
+						icon: 'rank-tracker',
+						href: '/seo-links/rank-tracker'
 					},
 					{ id: 'content', label: 'Content', icon: 'content', href: '/content' }
 				]

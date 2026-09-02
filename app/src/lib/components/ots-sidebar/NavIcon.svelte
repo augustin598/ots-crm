@@ -12,6 +12,7 @@
 	import SearchCheckIcon from '@lucide/svelte/icons/search-check';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import GaugeIcon from '@lucide/svelte/icons/gauge';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import RocketIcon from '@lucide/svelte/icons/rocket';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
@@ -77,6 +78,8 @@
 	<LinkIcon class={className} />
 {:else if icon === 'pagespeed'}
 	<GaugeIcon class={className} />
+{:else if icon === 'rank-tracker'}
+	<TrendingUpIcon class={className} />
 {:else if icon === 'content'}
 	<FileTextIcon class={className} />
 {:else if icon === 'wordpress'}

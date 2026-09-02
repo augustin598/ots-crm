@@ -324,7 +324,7 @@ export async function buildRankProjectDetail(
 	let aiPresent = 0;
 	let aiCited = 0;
 	// Serii pentru graficul de trend: vizibilitate + poziție medie desktop pe zi.
-	const perDayPositions = new Map<string, (number | null)[]>();
+	const perDayPositions = new Map<string, number[]>();
 	const sov: Record<string, number[]> = {};
 
 	for (const kw of keywords) {

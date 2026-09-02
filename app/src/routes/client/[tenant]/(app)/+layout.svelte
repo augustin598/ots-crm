@@ -206,6 +206,12 @@
 											label: 'PageSpeed Insights',
 											icon: 'pagespeed' as const,
 											href: '/pagespeed'
+										},
+										{
+											id: 'seo-rank',
+											label: 'Rank Tracker',
+											icon: 'rank-tracker' as const,
+											href: '/rank-tracker'
 										}
 									]
 								}

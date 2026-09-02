@@ -669,6 +669,7 @@ export function routeRequiresCapability(
 	if (rest.startsWith('/interviuri')) return 'portal.interviuri.view';
 	if (rest.startsWith('/seo')) return 'portal.seo.view';
 	if (rest.startsWith('/pagespeed')) return 'portal.seo.view';
+	if (rest.startsWith('/rank-tracker')) return 'portal.seo.view';
 	if (rest.startsWith('/team')) return 'portal.team.manage';
 	return null;
 }

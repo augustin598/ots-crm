@@ -17,6 +17,7 @@ describe('grupul SEO & GEO & AEO în sidebar', () => {
 		expect(seoItem.children?.map((c) => c.href)).toEqual([
 			'/seo-links',
 			'/seo-links/pagespeed',
+			'/seo-links/rank-tracker',
 			'/content'
 		]);
 	});
@@ -27,7 +28,7 @@ describe('grupul SEO & GEO & AEO în sidebar', () => {
 	});
 
 	it('itemul seo (și grupul) e activ pe oricare din cele patru rute', () => {
-		for (const path of ['/ots/seo', '/ots/seo-links', '/ots/seo-links/pagespeed', '/ots/content', '/ots/content/abc123']) {
+		for (const path of ['/ots/seo', '/ots/seo-links', '/ots/seo-links/pagespeed', '/ots/seo-links/rank-tracker', '/ots/content', '/ots/content/abc123']) {
 			expect(isItemActive(seoItem, path, PREFIX)).toBe(true);
 			expect(isGroupActive(marketing, path, PREFIX)).toBe(true);
 		}
@@ -50,6 +51,14 @@ describe('breadcrumbs pentru rutele SEO', () => {
 			'Marketing & Ads',
 			'SEO & GEO & AEO',
 			'PageSpeed Insights'
+		]);
+	});
+
+	it('/seo-links/rank-tracker → Marketing & Ads / SEO & GEO & AEO / Rank Tracker', () => {
+		expect(crumbs('/ots/seo-links/rank-tracker')).toEqual([
+			'Marketing & Ads',
+			'SEO & GEO & AEO',
+			'Rank Tracker'
 		]);
 	});
 
