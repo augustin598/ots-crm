@@ -16,7 +16,7 @@ import { pickTargetPosition, competitorPositions } from './providers/serp-parser
 import { resolveSerpProvider, shouldFailover, type ResolvedProviders } from './providers/resolve';
 import { SerpProviderError, type SerpQuery } from './providers/types';
 import { computeAlert } from './alerts';
-import { SERP_DEPTH } from './config';
+import { RUN_STALE_MS, SERP_DEPTH } from './config';
 
 const PROGRESS_TTL_S = 30 * 60;
 const FINAL_TTL_S = 20;
@@ -27,6 +27,8 @@ export interface RankRunProgress {
 	done: number;
 	currentKeyword: string | null;
 	startedAt: string;
+	/** Rescris la fiecare cuvânt — semnalul după care știm dacă rularea mai trăiește. */
+	updatedAt?: string;
 	finishedAt?: string;
 }
 
@@ -198,6 +200,7 @@ export async function runRankProjectCheck(
 		startedAt: startedAt.toISOString()
 	};
 	const writeProgress = async (ttl = PROGRESS_TTL_S) => {
+		progress.updatedAt = now().toISOString();
 		await redis.set(key, JSON.stringify(progress), 'EX', ttl);
 	};
 	await writeProgress();
@@ -392,7 +395,15 @@ export async function getRankRunProgress(
 	const raw = await getRedis().get(rankRunProgressKey(tenantId, projectId));
 	if (!raw) return null;
 	try {
-		return JSON.parse(raw) as RankRunProgress;
+		const progress = JSON.parse(raw) as RankRunProgress;
+		// O rulare fără semn de viață e moartă, nu „în curs": procesul a fost ucis înainte să
+		// apuce să scrie `finishedAt`. Altfel bannerul rămânea blocat cu datele vechi până la
+		// expirarea cheii (30 min), iar orice verificare nouă primea 409.
+		if (!progress.finishedAt) {
+			const last = Date.parse(progress.updatedAt ?? progress.startedAt);
+			if (Number.isFinite(last) && Date.now() - last > RUN_STALE_MS) return null;
+		}
+		return progress;
 	} catch {
 		return null;
 	}

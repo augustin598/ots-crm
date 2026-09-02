@@ -65,7 +65,7 @@ mock.module('$lib/server/logger', () => ({
 	serializeError: (e: unknown) => ({ message: (e as Error)?.message ?? String(e) })
 }));
 
-const { runRankProjectCheck, rankRunProgressKey } = await import('../run');
+const { runRankProjectCheck, rankRunProgressKey, getRankRunProgress } = await import('../run');
 const { SerpProviderError } = await import('../providers/types');
 
 const NOW = new Date('2026-09-02T08:00:00Z'); // ziua curentă: 2026-09-02 (Bucharest)
@@ -265,11 +265,79 @@ describe('runRankProjectCheck — delte și alerte', () => {
 	});
 });
 
+describe('getRankRunProgress — rulări moarte', () => {
+	test('rulare fără semn de viață de peste 5 minute → null (nu „în curs")', async () => {
+		redisStore.set(
+			rankRunProgressKey('t1', 'p1'),
+			JSON.stringify({
+				runId: 'x',
+				total: 26,
+				done: 0,
+				currentKeyword: 'a',
+				startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+				updatedAt: new Date(Date.now() - 10 * 60_000).toISOString()
+			})
+		);
+		expect(await getRankRunProgress('t1', 'p1')).toBeNull();
+	});
+
+	test('rulare actualizată recent → rămâne activă', async () => {
+		redisStore.set(
+			rankRunProgressKey('t1', 'p1'),
+			JSON.stringify({
+				runId: 'x',
+				total: 2,
+				done: 1,
+				currentKeyword: 'a',
+				startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+				updatedAt: new Date(Date.now() - 5_000).toISOString()
+			})
+		);
+		expect((await getRankRunProgress('t1', 'p1'))?.total).toBe(2);
+	});
+
+	test('rulare terminată se întoarce indiferent de vechime', async () => {
+		redisStore.set(
+			rankRunProgressKey('t1', 'p1'),
+			JSON.stringify({
+				runId: 'x',
+				total: 5,
+				done: 5,
+				currentKeyword: null,
+				startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+				finishedAt: new Date(Date.now() - 59 * 60_000).toISOString()
+			})
+		);
+		expect((await getRankRunProgress('t1', 'p1'))?.finishedAt).toBeTruthy();
+	});
+
+	test('fără `updatedAt` (cheie veche) cade pe `startedAt`', async () => {
+		redisStore.set(
+			rankRunProgressKey('t1', 'p1'),
+			JSON.stringify({
+				runId: 'x',
+				total: 26,
+				done: 0,
+				currentKeyword: 'a',
+				startedAt: new Date(Date.now() - 30 * 60_000).toISOString()
+			})
+		);
+		expect(await getRankRunProgress('t1', 'p1')).toBeNull();
+	});
+});
+
 describe('runRankProjectCheck — guard și skip', () => {
 	test('rulare deja activă (cheie Redis fără finishedAt) → skip', async () => {
 		redisStore.set(
 			rankRunProgressKey('t1', 'p1'),
-			JSON.stringify({ runId: 'x', total: 1, done: 0, currentKeyword: 'a', startedAt: 'now' })
+			JSON.stringify({
+				runId: 'x',
+				total: 1,
+				done: 0,
+				currentKeyword: 'a',
+				startedAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString()
+			})
 		);
 		const r = await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers: { mode: 'scraper', primary: fakeProvider('scraper', () => serp(1)), fallback: null }, now: () => NOW });
 		expect(r.skipped).toBe(true);

@@ -294,7 +294,12 @@
 
 	/** Verifică doar cuvintele date (un rând sau selecția), nu tot proiectul. */
 	async function runCheckFor(ids: string[]) {
-		if (starting || running || ids.length === 0) return;
+		if (ids.length === 0) return;
+		// Fără mesajul ăsta, butonul pur și simplu nu făcea nimic cât timp o rulare era în curs.
+		if (running || starting) {
+			showToast('O verificare e deja în curs pentru acest proiect — așteapt-o să se termine.');
+			return;
+		}
 		starting = true;
 		try {
 			await startRankCheck({ projectId, keywordIds: ids });
