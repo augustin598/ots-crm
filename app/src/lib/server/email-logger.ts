@@ -38,7 +38,9 @@ export const EMAIL_TYPES = [
 	'payment-succeeded',
 	'admin-payment-received',
 	'stripe-statements',
-	'pagespeed-report'
+	'pagespeed-report',
+	'rank-report',
+	'rank-alert'
 ] as const;
 
 export type EmailType = typeof EMAIL_TYPES[number];

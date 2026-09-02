@@ -52,6 +52,7 @@ import { processPagespeedWeeklyReport } from './tasks/pagespeed-weekly-report';
 import { processPagespeedScan } from './tasks/pagespeed-scan';
 import { processRankDailyCheck } from './tasks/rank-daily-check';
 import { processRankProjectCheck } from './tasks/rank-project-check';
+import { processRankWeeklyReport } from './tasks/rank-weekly-report';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -213,7 +214,8 @@ const taskHandlers: Record<string, TaskHandler> = {
 	pagespeed_weekly_report: () => processPagespeedWeeklyReport(),
 	pagespeed_scan: processPagespeedScan,
 	rank_daily_check: () => processRankDailyCheck(),
-	rank_project_check: processRankProjectCheck
+	rank_project_check: processRankProjectCheck,
+	rank_weekly_report: () => processRankWeeklyReport()
 };
 
 /**
@@ -387,7 +389,7 @@ export const startScheduler = async () => {
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
 		'content-auto-publish', 'content-auto-generate',
 		'pagespeed-weekly-report',
-		'rank-daily-check'
+		'rank-daily-check', 'rank-weekly-report'
 	]);
 
 	try {
@@ -1183,6 +1185,19 @@ export const startScheduler = async () => {
 	);
 	logInfo('scheduler', '[scheduler] rank-daily-check registered (0 * * * * Europe/Bucharest)');
 
+	// Rank Tracker — raport săptămânal ORAR: fiecare tenant are zi+oră proprii în
+	// rank_settings; idempotent prin unique (tenant_id, week_key) pe rank_report.
+	await schedulerQueue.add(
+		'rank-weekly-report',
+		{ type: 'rank_weekly_report', params: {} },
+		{
+			repeat: { pattern: '0 * * * *', tz: 'Europe/Bucharest' },
+			jobId: 'rank-weekly-report',
+			attempts: 1
+		}
+	);
+	logInfo('scheduler', '[scheduler] rank-weekly-report registered (0 * * * * Europe/Bucharest)');
+
 	// Content auto-publish — orar. Publică articolele programate scadente pe WordPress.
 	await schedulerQueue.add(
 		'content-auto-publish',
@@ -1248,7 +1263,8 @@ export const JOB_LABELS: Record<string, string> = {
 	pagespeed_weekly_report: 'Raport Săptămânal PageSpeed (per tenant, zi/oră din setări)',
 	pagespeed_scan: 'Scanare PageSpeed (manuală, din UI)',
 	rank_daily_check: 'Verificare zilnică poziții Google (Rank Tracker, oră din setări)',
-	rank_project_check: 'Verificare poziții proiect (Rank Tracker, one-shot)'
+	rank_project_check: 'Verificare poziții proiect (Rank Tracker, one-shot)',
+	rank_weekly_report: 'Raport săptămânal poziții Google (Rank Tracker, zi/oră din setări)'
 };
 
 /** Default params for jobs that need specific parameters */

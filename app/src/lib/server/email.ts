@@ -3752,6 +3752,106 @@ export async function sendPagespeedReportEmail(
 	);
 }
 
+export async function sendRankReportEmail(
+	tenantId: string,
+	recipientEmail: string,
+	data: import('$lib/server/rank-tracker/report').RankReportData
+): Promise<void> {
+	const subject = `Raport poziții Google — ${data.interval}`;
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: recipientEmail,
+			subject,
+			emailType: 'rank-report',
+			metadata: { weekKey: data.weekKey, projectCount: data.projectCount, alertCount: data.alertCount },
+			htmlBody: '',
+			payload: { sendFn: 'sendRankReportEmail', args: [tenantId, recipientEmail, data] }
+		},
+		async () => {
+			const [{ renderRankReportBodyHtml, renderRankReportText }, brand] = await Promise.all([
+				import('$lib/server/rank-tracker/report'),
+				fetchTenantBrand(tenantId)
+			]);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: 'Raport poziții Google',
+				subtitle: `Săptămâna ${data.interval} · ${data.projectCount} proiecte`,
+				bodyHtml: renderRankReportBodyHtml(data),
+				previewTitle: subject
+			});
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: recipientEmail,
+				subject,
+				html,
+				text: renderRankReportText(data),
+				attachments: brand.logoAttachment ? [brand.logoAttachment] : []
+			};
+		}
+	);
+}
+
+export async function sendRankAlertEmail(
+	tenantId: string,
+	recipientEmail: string,
+	data: import('$lib/server/rank-tracker/report').RankAlertEmailData
+): Promise<void> {
+	const subject = `Alerte poziții Google — ${data.projectDomain} (${data.count})`;
+
+	await sendWithPersistence(
+		{
+			tenantId,
+			toEmail: recipientEmail,
+			subject,
+			emailType: 'rank-alert',
+			metadata: { projectDomain: data.projectDomain, count: data.count },
+			htmlBody: '',
+			payload: { sendFn: 'sendRankAlertEmail', args: [tenantId, recipientEmail, data] }
+		},
+		async () => {
+			const [{ renderRankAlertBodyHtml, renderRankAlertText }, brand] = await Promise.all([
+				import('$lib/server/rank-tracker/report'),
+				fetchTenantBrand(tenantId)
+			]);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, tenantId))
+				.limit(1);
+			const fromEmail = resolveFromEmail(emailSettings);
+
+			const html = renderBrandedEmail({
+				themeColor: brand.themeColor,
+				headerLogoHtml: brand.headerLogoHtml,
+				title: 'Alerte poziții Google',
+				subtitle: data.projectDomain,
+				bodyHtml: renderRankAlertBodyHtml(data),
+				previewTitle: subject
+			});
+
+			return {
+				from: `"${brand.tenantName}" <${fromEmail}>`,
+				to: recipientEmail,
+				subject,
+				html,
+				text: renderRankAlertText(data),
+				attachments: brand.logoAttachment ? [brand.logoAttachment] : []
+			};
+		}
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Outbox replay registry — used by `retryEmailLog`, `retryAllFailedEmails`,
 // and the `email_retry` scheduler task to replay a failed email by `sendFn` name.
@@ -3789,7 +3889,9 @@ export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<voi
 	sendPackageRequestEmail,
 	sendAdPaymentAlertEmail,
 	sendAdPaymentDigestEmail,
-	sendPagespeedReportEmail
+	sendPagespeedReportEmail,
+	sendRankReportEmail,
+	sendRankAlertEmail
 	// NOTE: Intentionally omitted (payload: null, not replay-able):
 	// - sendMagicLinkEmail, sendAdminMagicLinkEmail, sendPasswordResetEmail
 	//   (contain single-use auth tokens that must not be persisted)
