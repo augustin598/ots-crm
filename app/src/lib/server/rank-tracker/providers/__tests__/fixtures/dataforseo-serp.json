@@ -1,0 +1,91 @@
+{
+	"version": "0.1.20260901",
+	"status_code": 20000,
+	"status_message": "Ok.",
+	"tasks": [
+		{
+			"id": "09010000-0000-0000-0000-000000000001",
+			"status_code": 20000,
+			"result": [
+				{
+					"keyword": "ce este optimizarea seo",
+					"type": "organic",
+					"se_domain": "google.ro",
+					"location_code": 2642,
+					"language_code": "ro",
+					"check_url": "https://www.google.ro/search?q=ce%20este%20optimizarea%20seo&num=100&hl=ro&gl=ro",
+					"item_types": ["organic", "ai_overview", "people_also_ask", "local_pack", "paid"],
+					"se_results_count": 4120000,
+					"items_count": 8,
+					"items": [
+						{
+							"type": "paid",
+							"rank_group": 1,
+							"rank_absolute": 1,
+							"domain": "reclama-seo-a.ro",
+							"title": "Agenție SEO #1",
+							"url": "https://reclama-seo-a.ro/oferta"
+						},
+						{
+							"type": "ai_overview",
+							"rank_group": 1,
+							"rank_absolute": 2,
+							"references": [
+								{ "type": "ai_overview_reference", "domain": "www.example.ro", "url": "https://www.example.ro/ghid-seo", "title": "Ghid SEO - Example" },
+								{ "type": "ai_overview_reference", "domain": "moz.com", "url": "https://moz.com/beginners-guide-to-seo", "title": "Moz" }
+							]
+						},
+						{
+							"type": "organic",
+							"rank_group": 1,
+							"rank_absolute": 3,
+							"domain": "moz.com",
+							"title": "The Beginner's Guide to SEO - Moz",
+							"description": "Learn everything you need to know to get started with SEO.",
+							"url": "https://moz.com/beginners-guide-to-seo"
+						},
+						{
+							"type": "organic",
+							"rank_group": 2,
+							"rank_absolute": 4,
+							"domain": "www.competitor-a.ro",
+							"title": "Servicii SEO profesionale - Competitor A",
+							"description": "Audit, optimizare on-page și link building.",
+							"url": "https://www.competitor-a.ro/servicii-seo"
+						},
+						{
+							"type": "people_also_ask",
+							"rank_group": 1,
+							"rank_absolute": 5,
+							"items": [{ "type": "people_also_ask_element", "title": "Ce este SEO pe scurt?" }]
+						},
+						{
+							"type": "organic",
+							"rank_group": 3,
+							"rank_absolute": 6,
+							"domain": "ahrefs.com",
+							"title": "SEO: The Complete Guide - Ahrefs",
+							"description": "Search engine optimization explained.",
+							"url": "https://ahrefs.com/seo"
+						},
+						{
+							"type": "organic",
+							"rank_group": 4,
+							"rank_absolute": 7,
+							"domain": "www.example.ro",
+							"title": "Servicii SEO în București - Agenția Example",
+							"description": "Servicii complete de optimizare SEO pentru companii din România.",
+							"url": "https://www.example.ro/servicii-seo"
+						},
+						{
+							"type": "local_pack",
+							"rank_group": 1,
+							"rank_absolute": 8,
+							"title": "Agenția SEO Bucuresti SRL"
+						}
+					]
+				}
+			]
+		}
+	]
+}
