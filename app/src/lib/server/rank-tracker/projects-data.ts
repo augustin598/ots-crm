@@ -257,6 +257,12 @@ export interface RankKeywordDetail {
 	features: string[];
 	aiOverview: 'absent' | 'present' | 'cited';
 	spark30: (number | null)[];
+	/**
+	 * Paralel cu `spark30`: `true` = în ziua aia CHIAR s-a rulat. Fără el, `null` din
+	 * `spark30` însemna deopotrivă „n-am rulat" și „am rulat și nu era clasat", iar UI-ul
+	 * desena zilele dinaintea primei rulări ca „în afara top 100".
+	 */
+	checked30: boolean[];
 	competitors: Record<string, number>;
 	cannibalization: { flagged: boolean; urls: string[] };
 }
@@ -386,6 +392,7 @@ export async function buildRankProjectDetail(
 			const d30 = snapshotAtLookback(seriesLite, todayKey, 30, 5)?.position ?? null;
 			const posByDay = new Map(series.map((s) => [s.dayKey, s.position]));
 			const spark30 = days.map((d) => (posByDay.has(d) ? posByDay.get(d)! : null));
+			const checked30 = days.map((d) => posByDay.has(d));
 
 			if (device === primaryDevice) {
 				primaryNow.push(nowPos);
@@ -421,6 +428,7 @@ export async function buildRankProjectDetail(
 				features: (nowSnap?.serpFeatures ?? []) as string[],
 				aiOverview: (nowSnap?.aiOverview ?? 'absent') as 'absent' | 'present' | 'cited',
 				spark30,
+				checked30,
 				competitors: (nowSnap?.competitors ?? {}) as Record<string, number>,
 				cannibalization: detectCannibalization(
 					series.map((s) => ({ dayKey: s.dayKey, rankingUrl: s.rankingUrl }))

@@ -79,7 +79,14 @@
 		if (sawRunning) {
 			sawRunning = false;
 			detailQuery.refresh();
-			showToast(`Rulare finalizată · ${run?.total ?? 0} ${run?.total === 1 ? 'cuvânt verificat' : 'cuvinte verificate'}`);
+			// `run` poate fi deja null (cheia de progres din Redis expiră la 20 s, iar taburile
+			// din fundal sunt încetinite de browser) — atunci nu inventăm „0 cuvinte verificate".
+			const total = run?.total;
+			showToast(
+				total == null
+					? 'Rulare finalizată.'
+					: `Rulare finalizată · ${total} ${total === 1 ? 'cuvânt verificat' : 'cuvinte verificate'}`
+			);
 		}
 	});
 
@@ -126,7 +133,15 @@
 			dist,
 			up: lastRun?.up ?? 0,
 			down: lastRun?.down ?? 0,
-			alerts: pRows.filter((r) => r.delta1 != null && r.delta1 <= -(detail?.alertThreshold ?? 5)).length
+			// `positionDelta` întoarce `delta: null` când un cuvânt IESE din adâncimea căutată
+			// („lost"). E cel mai rău rezultat posibil, iar serverul chiar ridică alertă pentru
+			// el — dar filtrul pe `delta1 != null` îl excludea, deci KPI-ul putea arăta 0 într-o
+			// zi în care mai multe cuvinte dispăruseră complet.
+			alerts: pRows.filter(
+				(r) =>
+					(r.delta1 != null && r.delta1 <= -(detail?.alertThreshold ?? 5)) ||
+					(r.position == null && r.spark30.some((v) => v != null))
+			).length
 		};
 	});
 
@@ -134,7 +149,12 @@
 		['all', 'Toate', pRows.length],
 		['top10', 'Top 10', pRows.filter((r) => r.position != null && r.position <= 10).length],
 		['up', 'Au urcat', pRows.filter((r) => (r.delta7 ?? 0) > 0).length],
-		['down', 'Au scăzut', pRows.filter((r) => (r.delta7 ?? 0) < 0).length],
+		[
+			'down',
+			'Au scăzut',
+			pRows.filter((r) => (r.delta7 ?? 0) < 0 || (r.position == null && r.spark30.some((v) => v != null)))
+				.length
+		],
 		['ai', 'AI Overview', pRows.filter((r) => r.aiOverview !== 'absent').length],
 		['canib', 'Canibalizare', pRows.filter((r) => r.cannibalization.flagged).length]
 	] as const);
@@ -150,7 +170,11 @@
 			if (needle && !`${k.keyword} ${k.rankingUrl ?? k.targetUrl ?? ''}`.toLowerCase().includes(needle)) return false;
 			if (tab === 'top10' && !(k.position != null && k.position <= 10)) return false;
 			if (tab === 'up' && !((k.delta7 ?? 0) > 0)) return false;
-			if (tab === 'down' && !((k.delta7 ?? 0) < 0)) return false;
+			if (
+				tab === 'down' &&
+				!((k.delta7 ?? 0) < 0 || (k.position == null && k.spark30.some((v) => v != null)))
+			)
+				return false;
 			if (tab === 'ai' && k.aiOverview === 'absent') return false;
 			if (tab === 'canib' && !k.cannibalization.flagged) return false;
 			return true;
@@ -173,12 +197,20 @@
 
 	// „cele mai importante cuvinte" — după volumul de căutare
 	const SERIES_COLORS = ['#1877F2', '#8b5cf6', '#10b981', '#f59e0b'];
-	const topSeries = $derived(
-		[...pRows]
-			.sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
-			.slice(0, 4)
-			.map((r, i) => ({ label: r.keyword, color: SERIES_COLORS[i], values: r.spark30 }))
-	);
+	// Eticheta include locația când același cuvânt e urmărit în mai multe locații: altfel
+	// `{#each series as s (s.label)}` primea două chei identice (eroare în dev, randare
+	// greșită în build-ul de producție).
+	const topSeries = $derived.by(() => {
+		const top = [...pRows].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0)).slice(0, 4);
+		const dupes = new Set(
+			top.map((r) => r.keyword).filter((k, i, arr) => arr.indexOf(k) !== i)
+		);
+		return top.map((r, i) => ({
+			label: dupes.has(r.keyword) && r.location ? `${r.keyword} · ${r.location}` : r.keyword,
+			color: SERIES_COLORS[i],
+			values: r.spark30
+		}));
+	});
 
 	const compVis = $derived(
 		Object.entries(detail?.shareOfVoice ?? {})
@@ -209,7 +241,7 @@
 		try {
 			await startRankCheck(projectId);
 			showToast('Verificare pornită — pozițiile se actualizează în câteva minute.');
-			void watchRun();
+			void watchRun(projectId);
 		} catch (error) {
 			showToast(remoteErrorMessage(error, 'Verificarea nu a putut porni'));
 		} finally {
@@ -220,13 +252,23 @@
 	// Jobul intră în coadă asincron, iar progresul apare în Redis abia când îl ia workerul:
 	// un singur refresh după pornire ratează rulările scurte (blocare Google) și bannerul
 	// n-ar apărea niciodată. Urmărim până se termină, apoi reîmprospătăm datele.
-	async function watchRun() {
+	async function watchRun(watchedId: string) {
 		for (let i = 0; i < 60; i++) {
 			await new Promise((r) => setTimeout(r, 1500));
-			await runQuery.refresh();
+			// Ruta e [projectId]: navigarea între proiecte NU remontează componenta, doar
+			// schimbă `projectId`. Fără garda asta, bucla continua să interogheze proiectul
+			// NOU timp de 90 s și îi reîmprospăta datele; la ieșirea din modul, `projectId`
+			// devine '' și `refresh()` respingea cu o rejecție neprinsă.
+			if (projectId !== watchedId) return;
+			try {
+				await runQuery.refresh();
+			} catch {
+				return;
+			}
 			if (run?.finishedAt) break;
 		}
-		await detailQuery.refresh();
+		if (projectId !== watchedId) return;
+		await detailQuery.refresh().catch(() => {});
 	}
 
 	async function onAdd(keywords: string[], tag: string | null, location: string) {
@@ -368,7 +410,9 @@
 					<div class="cl-kpi-val">
 						{st.up}<span style="font-size: 15px; color: var(--cl-text-3); font-weight: 700"> ↑ / {st.down} ↓</span>
 					</div>
-					<div class="cl-kpi-sub">față de rularea de ieri</div>
+					<div class="cl-kpi-sub">
+						față de rularea de ieri{trackedDevices.length > 1 ? ' · ambele dispozitive' : ''}
+					</div>
 				</div>
 			</div>
 			<div class="cl-kpi">
@@ -561,12 +605,12 @@
 								</td>
 								<td class="num">
 									<div style="display: flex; justify-content: flex-end">
-										<Rt7 values={r.spark30.slice(-7)} days={detail?.trend.days.slice(-7) ?? []} />
+										<Rt7 values={r.spark30.slice(-7)} checked={r.checked30.slice(-7)} days={detail?.trend.days.slice(-7) ?? []} />
 									</div>
 								</td>
 								<td class="num">
 									<div style="display: flex; justify-content: flex-end">
-										<RtSpark values={r.spark30} />
+										<RtSpark values={r.spark30} checked={r.checked30} />
 									</div>
 								</td>
 								<td><RtFeats list={r.features} /></td>

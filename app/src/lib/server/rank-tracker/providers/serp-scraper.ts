@@ -269,26 +269,44 @@ export async function fetchSerpScraper(
 			aiOverview: 'absent',
 			raw: { blocked: false }
 		};
+		let lastPageWasShort = false;
 		for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+			// `&start=` e offsetul CERUT lui Google (multiplu de 10), dar poziția atribuită
+			// rezultatelor e rangul lor real în lista deja adunată. Nu presupunem că o pagină
+			// întoarce exact 10 organice — MĂSURAT: între 7 și 17 (Google amestecă module
+			// non-organice în aceleași containere). Cu `pageIndex * 10` ca offset, o pagină
+			// de 17 producea poziții DUPLICATE, iar una de 9 lăsa o gaură.
 			const start = pageIndex * RESULTS_PER_PAGE;
 			let page: SerpResult;
 			try {
 				page = await pageWithRetries(start);
 			} catch (e) {
-				// Prima pagină trebuie să reușească; pe paginile următoare o eroare „parse"
-				// înseamnă doar că s-au terminat rezultatele (SERP-ul are mai puțin de `depth`).
 				if (pageIndex === 0) throw e;
-				if (e instanceof SerpProviderError && e.kind === 'parse') break;
+				// „parse" = 0 organice. Înseamnă „s-au terminat rezultatele" DOAR dacă pagina
+				// precedentă era deja scurtă. O pagină plină urmată de una goală e suspectă
+				// (soft-block sau layout schimbat) — atunci aruncăm, ca să nu raportăm „100+"
+				// pentru un site pe care de fapt nu l-am căutat până la capăt.
+				if (e instanceof SerpProviderError && e.kind === 'parse' && lastPageWasShort) break;
 				throw e;
 			}
-			merged.organic.push(...page.organic);
-			for (const f of page.features) if (!merged.features.includes(f)) merged.features.push(f);
-			// Feature-urile și AI Overview se raportează de pe prima pagină (SERP-ul propriu-zis).
-			if (pageIndex === 0) merged.aiOverview = page.aiOverview;
-			if (page.organic.length < RESULTS_PER_PAGE) break; // nu mai sunt rezultate
-			if (page.organic.some((o) => matchDomain(o.url, targetDomain))) break; // țintă găsită
+			// Renumerotăm în funcție de câte rezultate avem deja, nu de offsetul cerut.
+			for (const o of page.organic) {
+				merged.organic.push({ ...o, position: merged.organic.length + 1 });
+			}
+			// Feature-urile și AI Overview descriu SERP-ul pe care îl vede utilizatorul: pagina 1.
+			// (Nu le acumulăm de pe paginile următoare — altfel un cuvânt ar arăta chips-uri
+			// de pe pagina 3, pe care nimeni nu o vede.)
+			if (pageIndex === 0) {
+				merged.aiOverview = page.aiOverview;
+				merged.features = [...page.features];
+			}
+			if (merged.organic.some((o) => matchDomain(o.url, targetDomain))) break; // țintă găsită
+			lastPageWasShort = page.organic.length < RESULTS_PER_PAGE;
 			if (pageIndex < maxPages - 1) await sleep(paceMs + Math.floor(jitter() * paceMs * 0.25));
 		}
+		// Adâncimea cerută e în REZULTATE, nu în pagini: o pagină generoasă nu trebuie să
+		// raporteze poziții peste `depth`.
+		merged.organic = merged.organic.slice(0, q.depth);
 		return merged;
 	} finally {
 		if (ownBrowser) await browser.close().catch(() => {});

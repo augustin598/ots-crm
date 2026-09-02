@@ -262,3 +262,37 @@ describe('re-exporturi din ../pagespeed (byte-for-byte)', () => {
 		expect(PSI_HOURS).toContain('07:00');
 	});
 });
+
+/* Audit 2 sep. 2026: fereastra `daysAgo=1, tolerance=2` ajungea la [-1, 3] și includea
+ * instantaneul de AZI. La egalitate de scor câștiga `diff` mai mic, deci ziua curentă
+ * devenea propria referință și `delta1` ieșea 0. */
+describe('snapshotAtLookback — nu se compară ziua cu ea însăși', () => {
+	test('cu ziua de ieri lipsă, delta1 NU alege ziua curentă ca referință', () => {
+		const series = [
+			{ dayKey: '2026-09-02', position: 30 }, // azi
+			{ dayKey: '2026-08-31', position: 5 } // acum 2 zile
+		];
+		const base = snapshotAtLookback(series, '2026-09-02', 1, 2);
+		expect(base?.dayKey).toBe('2026-08-31');
+		expect(positionDelta(base?.position ?? null, 30).delta).toBe(-25);
+	});
+
+	test('cu ziua de ieri prezentă, o alege pe ea', () => {
+		const series = [
+			{ dayKey: '2026-09-02', position: 12 },
+			{ dayKey: '2026-09-01', position: 10 },
+			{ dayKey: '2026-08-31', position: 5 }
+		];
+		expect(snapshotAtLookback(series, '2026-09-02', 1, 2)?.dayKey).toBe('2026-09-01');
+	});
+
+	test('ferestrele de 7 și 30 de zile rămân neschimbate', () => {
+		const series = [
+			{ dayKey: '2026-09-02', position: 9 },
+			{ dayKey: '2026-08-26', position: 4 },
+			{ dayKey: '2026-08-03', position: 20 }
+		];
+		expect(snapshotAtLookback(series, '2026-09-02', 7, 3)?.dayKey).toBe('2026-08-26');
+		expect(snapshotAtLookback(series, '2026-09-02', 30, 5)?.dayKey).toBe('2026-08-03');
+	});
+});

@@ -84,7 +84,11 @@ export function snapshotAtLookback(
 	tolerance: number
 ): { dayKey: string; position: number | null } | null {
 	const todayMs = dayKeyToUtc(todayKey);
-	const lo = daysAgo - tolerance;
+	// `lo` nu are voie să coboare sub 1: cu `daysAgo=1, tolerance=2` fereastra ajungea la
+	// [-1, 3] și includea instantaneul de AZI. La egalitate de scor câștigă `diff` mai mic,
+	// deci ziua curentă se alegea drept referință și `delta1` ieșea 0 — o prăbușire de 25 de
+	// poziții apărea ca „fără schimbare" ori de câte ori lipsea ziua de ieri.
+	const lo = Math.max(1, daysAgo - tolerance);
 	const hi = daysAgo + tolerance;
 	let best: { dayKey: string; position: number | null } | null = null;
 	let bestScore = Infinity; // |diff − daysAgo|

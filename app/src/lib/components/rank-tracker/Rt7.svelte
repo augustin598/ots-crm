@@ -2,19 +2,26 @@
 	// Ultimele 7 zile, cea mai recentă la dreapta. Celula e colorată față de ziua precedentă.
 	import { rtDay } from './lib';
 
-	let { values, days }: { values: (number | null)[]; days: string[] } = $props();
+	let {
+		values,
+		days,
+		checked
+	}: { values: (number | null)[]; days: string[]; checked?: boolean[] } = $props();
 
 	const cells = $derived(
 		values.map((pos, i) => {
 			const prev = i > 0 ? values[i - 1] : null;
+			// `checked` lipsă = presupunem că s-a rulat (compatibil cu apelurile vechi).
+			const ran = checked ? checked[i] !== false : true;
 			const cls =
-				pos == null ? 'empty' : prev == null ? '' : pos < prev ? 'up' : pos > prev ? 'down' : '';
+				!ran ? 'empty' : pos == null ? 'empty' : prev == null ? '' : pos < prev ? 'up' : pos > prev ? 'down' : '';
 			const day = days[i] ? rtDay(days[i]) : null;
+			const state = !ran ? 'fără rulare' : pos == null ? 'peste 100' : 'poziția ' + pos;
 			return {
 				key: days[i] ?? String(i),
 				cls,
-				text: pos == null ? '–' : String(pos),
-				title: `${day ? day.full + ' · ' : ''}${pos == null ? 'peste 100' : 'poziția ' + pos}`
+				text: !ran ? '·' : pos == null ? '–' : String(pos),
+				title: `${day ? day.full + ' · ' : ''}${state}`
 			};
 		})
 	);

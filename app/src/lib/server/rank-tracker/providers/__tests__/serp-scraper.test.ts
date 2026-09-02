@@ -327,3 +327,108 @@ describe('createScraperProvider — browser partajat pe rulare', () => {
 		expect(rec.browserClosed).toBe(true); // închis explicit la final
 	});
 });
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Paginare — regresii găsite la auditul din 2 sep. 2026. Google NU întoarce fix
+ * 10 organice pe pagină (măsurat: între 7 și 17), iar codul presupunea că da.
+ * ────────────────────────────────────────────────────────────────────────────*/
+
+/** Construiește o pagină SERP cu `n` rezultate organice, opțional cu ținta la un index. */
+function serpPage(n: number, opts: { target?: number; feature?: string } = {}): string {
+	const rows = Array.from({ length: n }, (_, i) => {
+		const isTarget = opts.target === i;
+		const host = isTarget ? 'tinta.ro' : `site-${i}.ro`;
+		return `<div class="g"><a href="https://${host}/p${i}"><h3>Rezultat ${i} de pe ${host}</h3></a><cite>https://${host}/p${i}</cite></div>`;
+	}).join('');
+	const feature = opts.feature === 'ads' ? '<div id="tads">reclame</div>' : '';
+	return `<html><body>${feature}<div id="rso">${rows}</div></body></html>`;
+}
+
+/** Browser fals care servește alt HTML per pagină, după parametrul `start` din URL. */
+function pagedBrowser(pages: (string | (() => never))[], rec: Recorder): BrowserLike {
+	let current: string | (() => never) = pages[0];
+	const page: PageLike = {
+		async setUserAgent(ua) { rec.ua = ua; },
+		async setViewport(v) { rec.viewport = v; },
+		async setExtraHTTPHeaders() {},
+		async setCookie(...c) { rec.cookies.push(...c); },
+		async evaluateOnNewDocument() {},
+		async goto(url) {
+			rec.gotoUrls.push(url);
+			const start = Number(new URL(url).searchParams.get('start') ?? '0');
+			current = pages[start / 10] ?? serpPage(0);
+			return null;
+		},
+		url() { return 'https://www.google.ro/search'; },
+		async content() {
+			if (typeof current === 'function') current();
+			return current as string;
+		},
+		async close() { rec.pageClosed++; }
+	};
+	return { async newPage() { return page; }, async close() { rec.browserClosed = true; } };
+}
+
+const runPaged = (pages: (string | (() => never))[], over: Partial<SerpQuery> = {}) => {
+	const rec = newRecorder();
+	return {
+		rec,
+		promise: fetchSerpScraper(baseQuery({ depth: 30, ...over }), 'tinta.ro', {
+			browser: pagedBrowser(pages, rec),
+			sleep: async () => {},
+			env: {},
+			jitter: () => 0
+		})
+	};
+};
+
+describe('fetchSerpScraper — paginare', () => {
+	test('o pagină scurtă NU oprește căutarea (ținta e pe pagina 3)', async () => {
+		// 9 rezultate pe pagina 1: cu vechiul `length < 10` căutarea se oprea aici și
+		// ținta era raportată drept „în afara top 100" → alertă falsă de „lost".
+		const { rec, promise } = runPaged([serpPage(9), serpPage(10), serpPage(10, { target: 4 })]);
+		const r = await promise;
+		expect(rec.gotoUrls.length).toBe(3);
+		const target = r.organic.find((o) => o.domain === 'tinta.ro');
+		expect(target).toBeDefined();
+		expect(target!.position).toBe(24); // 9 + 10 + al 5-lea de pe pagina 3
+	});
+
+	test('pozițiile rămân unice și contigue când paginile au dimensiuni diferite', async () => {
+		// Cu offset fix `pageIndex * 10`, o pagină de 17 producea poziții duplicate.
+		const r = await runPaged([serpPage(17), serpPage(9), serpPage(10)]).promise;
+		const positions = r.organic.map((o) => o.position);
+		expect(new Set(positions).size).toBe(positions.length);
+		expect(positions).toEqual(Array.from({ length: positions.length }, (_, i) => i + 1));
+	});
+
+	test('se oprește imediat ce găsește ținta', async () => {
+		const { rec, promise } = runPaged([serpPage(10), serpPage(10, { target: 2 }), serpPage(10)]);
+		const r = await promise;
+		expect(rec.gotoUrls.length).toBe(2);
+		expect(r.organic.find((o) => o.domain === 'tinta.ro')!.position).toBe(13);
+	});
+
+	test('respectă `depth` în REZULTATE, nu în pagini', async () => {
+		const r = await runPaged([serpPage(17), serpPage(17)], { depth: 20 }).promise;
+		expect(r.organic.length).toBe(20);
+		expect(r.organic.at(-1)!.position).toBe(20);
+	});
+
+	test('feature-urile vin DOAR de pe pagina 1', async () => {
+		const r = await runPaged([serpPage(10), serpPage(10), serpPage(10, { feature: 'ads' })]).promise;
+		expect(r.features).not.toContain('ads');
+	});
+
+	test('pagină plină urmată de una goală = eroare, NU „s-au terminat rezultatele"', async () => {
+		// Altfel un soft-block pe pagina 2 s-ar raporta ca „ținta nu e în top 30" și ar
+		// scrie un snapshot null → alertă falsă de „lost".
+		const { promise } = runPaged([serpPage(10), serpPage(0)]);
+		await expect(promise).rejects.toThrow();
+	});
+
+	test('pagină scurtă urmată de una goală = final normal de rezultate', async () => {
+		const r = await runPaged([serpPage(7), serpPage(0)]).promise;
+		expect(r.organic.length).toBe(7);
+	});
+});

@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import {
 	parseDataforseoResponse,
 	fetchSerpDataforseo,
-	type DataforseoCreds
+	type DataforseoCreds,
+	assertDataforseoTaskOk
 } from '../dataforseo';
 import { SerpProviderError, type SerpQuery } from '../types';
 
@@ -130,5 +131,38 @@ describe('fetchSerpDataforseo — rețea', () => {
 			}) as unknown as typeof fetch
 		});
 		expect(JSON.parse(sentBody!)[0].location_name).toBe('București,România');
+	});
+});
+
+/* Erori la nivel de TASK, servite cu HTTP 200 — audit 2 sep. 2026. Fără verificare,
+ * fiecare cuvânt primea `position: null` și o alertă falsă „dispărut din top 100". */
+describe('assertDataforseoTaskOk', () => {
+	const ok = { status_code: 20000, tasks: [{ status_code: 20000, result: [{}] }] };
+
+	test('trece pe plic valid', () => {
+		expect(() => assertDataforseoTaskOk(ok)).not.toThrow();
+	});
+
+	test('aruncă pe eroare de task (40501) cu result null', () => {
+		expect(() =>
+			assertDataforseoTaskOk({ status_code: 20000, tasks: [{ status_code: 40501, status_message: 'Invalid Field', result: null }] })
+		).toThrow(/40501/);
+	});
+
+	test('aruncă pe credit epuizat (40200) și o marchează drept problemă de config', () => {
+		try {
+			assertDataforseoTaskOk({ status_code: 20000, tasks: [{ status_code: 40200, status_message: 'Payment Required', result: null }] });
+			throw new Error('trebuia să arunce');
+		} catch (e) {
+			expect((e as SerpProviderError).kind).toBe('config');
+		}
+	});
+
+	test('aruncă pe eroare la nivel de plic', () => {
+		expect(() => assertDataforseoTaskOk({ status_code: 40401, status_message: 'Not Found', tasks: [] })).toThrow(/40401/);
+	});
+
+	test('aruncă pe task fără rezultat', () => {
+		expect(() => assertDataforseoTaskOk({ status_code: 20000, tasks: [{ status_code: 20000, result: null }] })).toThrow(/fără rezultat/);
 	});
 });

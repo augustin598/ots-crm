@@ -52,9 +52,13 @@
 		return segs;
 	}
 
+	/**
+	 * Valoarea din ULTIMA zi, nu ultima valoare nenulă: altfel un cuvânt care azi a ieșit
+	 * din top afișa în legendă „#7" (de ieri), în timp ce pastila de poziție de alături
+	 * spunea corect „100+".
+	 */
 	function lastValue(values: (number | null)[]): number | null {
-		for (let i = values.length - 1; i >= 0; i--) if (values[i] != null) return values[i];
-		return null;
+		return values.length ? values[values.length - 1] : null;
 	}
 
 	function lastIndex(values: (number | null)[]): number {

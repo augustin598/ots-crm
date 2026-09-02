@@ -147,7 +147,43 @@ export async function fetchSerpDataforseo(
 	}
 
 	const json = await res.json();
+	// DataForSEO raportează eșecurile PER TASK, cu HTTP 200: credit epuizat, `location_name`
+	// invalid, task expirat. Fără verificarea asta, `parseDataforseoResponse` întorcea liniștit
+	// `organic: []` → runnerul scria `position: null` → alertă „dispărut din top 100" pentru
+	// FIECARE cuvânt rămas. Cel mai periculos exact la failover (modul `auto`), când o blocare
+	// Google mută toată coada pe DataForSEO.
+	assertDataforseoTaskOk(json);
 	return parseDataforseoResponse(json, { targetDomain });
+}
+
+/** Aruncă dacă plicul DataForSEO semnalează un eșec la nivel de task (deși HTTP e 200). */
+export function assertDataforseoTaskOk(json: unknown): void {
+	const envelope = json as {
+		status_code?: number;
+		status_message?: string;
+		tasks?: { status_code?: number; status_message?: string; result?: unknown }[];
+	};
+	// 20000 = „Ok" la nivel de plic; 20100 = „Task Created" la nivel de task.
+	const OK = new Set([20000, 20100]);
+	if (typeof envelope?.status_code === 'number' && !OK.has(envelope.status_code)) {
+		throw new SerpProviderError(
+			`DataForSEO ${envelope.status_code}: ${envelope.status_message ?? 'eroare'}`,
+			envelope.status_code >= 40100 && envelope.status_code < 40300 ? 'config' : 'network',
+			false
+		);
+	}
+	const task = envelope?.tasks?.[0];
+	if (!task) throw new SerpProviderError('DataForSEO: răspuns fără task', 'network', false);
+	if (typeof task.status_code === 'number' && !OK.has(task.status_code)) {
+		throw new SerpProviderError(
+			`DataForSEO task ${task.status_code}: ${task.status_message ?? 'eroare'}`,
+			task.status_code >= 40100 && task.status_code < 40300 ? 'config' : 'network',
+			false
+		);
+	}
+	if (task.result == null) {
+		throw new SerpProviderError('DataForSEO: task fără rezultat', 'network', false);
+	}
 }
 
 /** Providerul DataForSEO ca `SerpProvider` (credențiale + fetch prin closure). */

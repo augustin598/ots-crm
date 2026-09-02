@@ -50,10 +50,22 @@
 	const rtd = $derived(rtDays(days));
 
 	const url = $derived(keyword.rankingUrl ?? keyword.targetUrl);
-	const comps = $derived(Object.entries(keyword.competitors ?? {}).sort((a, b) => a[1] - b[1]));
+	// `competitorPositions` scrie o intrare pentru FIECARE competitor configurat, cu `null`
+	// când nu e în top 10 — cazul obișnuit, nu excepția. Fără filtrare, `null - 5` sorta
+	// competitorii absenți ÎNAINTEA poziției 1 și îi injecta în lista „SERP azi" cu numărul gol.
+	const compsAll = $derived(Object.entries(keyword.competitors ?? {}) as [string, number | null][]);
+	const comps = $derived(
+		compsAll
+			.filter((e): e is [string, number] => typeof e[1] === 'number')
+			.sort((a, b) => a[1] - b[1])
+	);
+	const compsAbsent = $derived(compsAll.filter((e) => typeof e[1] !== 'number').map((e) => e[0]));
 	const maxVis = $derived(
 		Math.max(ctrForPosition(keyword.position), ...comps.map(([, p]) => ctrForPosition(p)), 0.1)
 	);
+	/** Dispozitivul are date doar dacă proiectul îl urmărește; altfel coloana rămâne goală. */
+	const hasDesktop = $derived(!!desktopRow);
+	const hasMobile = $derived(!!mobileRow);
 
 	const series = $derived(
 		[
@@ -78,21 +90,27 @@
 			key: string;
 			full: string;
 			d: number | null;
+			dRan: boolean;
 			dDelta: number | null;
 			m: number | null;
+			mRan: boolean;
 			mDelta: number | null;
 		}[] = [];
 		for (let i = days.length - 1; i >= Math.max(0, days.length - 12); i--) {
 			const d = desktopRow?.spark30[i] ?? null;
 			const m = mobileRow?.spark30[i] ?? null;
+			const dRan = desktopRow ? desktopRow.checked30[i] !== false : false;
+			const mRan = mobileRow ? mobileRow.checked30[i] !== false : false;
 			const dPrev = i > 0 ? (desktopRow?.spark30[i - 1] ?? null) : null;
 			const mPrev = i > 0 ? (mobileRow?.spark30[i - 1] ?? null) : null;
 			out.push({
 				key: days[i],
 				full: rtd[i]?.full ?? days[i],
 				d,
+				dRan,
 				dDelta: d != null && dPrev != null ? dPrev - d : null,
 				m,
+				mRan,
 				mDelta: m != null && mPrev != null ? mPrev - m : null
 			});
 		}
@@ -149,7 +167,7 @@
 				<div class="rt-mini">
 					<span>30 zile</span>
 					<b><RtGain value={keyword.delta30} /></b>
-					<em>vs {rtd.length ? rtd[0].short : '—'}</em>
+					<em>față de acum ~30 de zile</em>
 				</div>
 				<div class="rt-mini">
 					<span>Cea mai bună</span>
@@ -221,7 +239,7 @@
 								<span class="rt-serp-n">{r.pos}</span>
 								<div style="min-width: 0">
 									<div class="rt-serp-t">{r.self ? name : r.dom}</div>
-									<div class="rt-serp-u">{r.dom}{r.self && url ? url : ''}</div>
+									<div class="rt-serp-u">{r.self && url ? url : r.dom}</div>
 								</div>
 								{#if r.self}<span class="psi-tag info" style="margin-left: auto">noi</span>{/if}
 							</div>
@@ -263,7 +281,12 @@
 					{#each comps as [dom, pos] (dom)}
 						<RtCompRow domain={dom} {pos} vis={Math.round(ctrForPosition(pos) * 10) / 10} max={maxVis} />
 					{/each}
-					{#if comps.length === 0}
+					{#if compsAbsent.length}
+						<p class="cl-hint">
+							În afara top 10 azi: {compsAbsent.join(', ')}
+						</p>
+					{/if}
+					{#if comps.length === 0 && compsAbsent.length === 0}
 						<p class="cl-hint">Niciun competitor înregistrat în SERP-ul de azi.</p>
 					{/if}
 				</div>
@@ -287,10 +310,14 @@
 						{#each rows as r (r.key)}
 							<tr style="cursor: default">
 								<td>{r.full}</td>
-								<td class="num"><RtPos pos={r.d} sm /></td>
-								<td class="num"><RtGain value={r.dDelta} /></td>
-								<td class="num"><RtPos pos={r.m} sm /></td>
-								<td class="num"><RtGain value={r.mDelta} /></td>
+								<td class="num">
+									{#if !hasDesktop}<span class="iv-muted">neurmărit</span>{:else if !r.dRan}<span class="iv-muted">—</span>{:else}<RtPos pos={r.d} sm />{/if}
+								</td>
+								<td class="num">{#if hasDesktop}<RtGain value={r.dDelta} />{:else}<span class="iv-muted">—</span>{/if}</td>
+								<td class="num">
+									{#if !hasMobile}<span class="iv-muted">neurmărit</span>{:else if !r.mRan}<span class="iv-muted">—</span>{:else}<RtPos pos={r.m} sm />{/if}
+								</td>
+								<td class="num">{#if hasMobile}<RtGain value={r.mDelta} />{:else}<span class="iv-muted">—</span>{/if}</td>
 							</tr>
 						{/each}
 					</tbody>

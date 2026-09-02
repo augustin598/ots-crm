@@ -40,6 +40,8 @@ interface ProjectLite {
 	domain: string;
 	clientName: string | null;
 	clientEmail: string | null;
+	/** Dispozitivele urmărite; raportul folosește dispozitivul PRINCIPAL al proiectului. */
+	devices?: ('desktop' | 'mobile')[];
 }
 interface KeywordLite {
 	id: string;
@@ -61,7 +63,8 @@ async function defaultLoadProjects(tenantId: string): Promise<ProjectLite[]> {
 			id: table.rankProject.id,
 			domain: table.rankProject.domain,
 			clientName: table.client.name,
-			clientEmail: table.client.email
+			clientEmail: table.client.email,
+			devices: table.rankProject.devices
 		})
 		.from(table.rankProject)
 		.leftJoin(
@@ -69,7 +72,7 @@ async function defaultLoadProjects(tenantId: string): Promise<ProjectLite[]> {
 			and(eq(table.rankProject.clientId, table.client.id), eq(table.client.tenantId, tenantId))
 		)
 		.where(and(eq(table.rankProject.tenantId, tenantId), eq(table.rankProject.active, true)))
-		.orderBy(table.rankProject.domain);
+		.orderBy(table.rankProject.domain) as Promise<ProjectLite[]>;
 }
 
 async function defaultLoadKeywords(projectIds: string[]): Promise<KeywordLite[]> {
@@ -124,10 +127,23 @@ export async function buildRankReportData(
 	const keywords = await loadKeywords(projects.map((p) => p.id));
 	const snapshots = await loadSnapshots(keywords.map((k) => k.id));
 
-	// Serii desktop per keyword, sortate desc pe zi.
+	// Serii per keyword pe DISPOZITIVUL PRINCIPAL al proiectului (desktop dacă e urmărit,
+	// altfel mobil). Înainte era hard-codat „desktop": un proiect doar-mobil primea serii
+	// goale, deci raportul trimis clientului arăta vizibilitate 0 și totul „100+", deși
+	// UI-ul afișa corect pozițiile (`projects-data.ts` avea deja acest fix).
+	const primaryDeviceByProject = new Map<string, 'desktop' | 'mobile'>();
+	for (const p of projects) {
+		const tracked = (p.devices ?? ['desktop']) as ('desktop' | 'mobile')[];
+		primaryDeviceByProject.set(p.id, tracked.includes('desktop') ? 'desktop' : 'mobile');
+	}
+	const projectByKeyword = new Map<string, string>();
+	for (const k of keywords) projectByKeyword.set(k.id, k.projectId);
+
 	const seriesByKeyword = new Map<string, SnapshotLite[]>();
 	for (const s of snapshots) {
-		if (s.device !== 'desktop') continue;
+		const projectId = projectByKeyword.get(s.keywordId);
+		const primary = projectId ? (primaryDeviceByProject.get(projectId) ?? 'desktop') : 'desktop';
+		if (s.device !== primary) continue;
 		const arr = seriesByKeyword.get(s.keywordId) ?? [];
 		arr.push(s);
 		seriesByKeyword.set(s.keywordId, arr);
