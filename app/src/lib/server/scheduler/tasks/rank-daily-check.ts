@@ -60,9 +60,9 @@ async function defaultLoadActiveProjects(tenantId: string) {
 }
 
 async function defaultHasRunToday(projectId: string, dayKey: string): Promise<boolean> {
-	// „a rulat azi" = există un run FINALIZAT (ok/partial) pe ziua curentă. Filtrăm statusul
-	// în SQL ca să nu depindem de ordinea rândurilor (un run 'running'/'interrupted' anterior
-	// nu trebuie să blocheze o verificare nouă).
+	// „a rulat azi" = există un run CRON finalizat (ok/partial) pe ziua curentă. DOAR cron:
+	// o verificare manuală pe un singur cuvânt la miezul nopții nu e scanarea zilei și nu
+	// trebuie s-o anuleze. Filtrăm statusul în SQL ca să nu depindem de ordinea rândurilor.
 	const [row] = await db
 		.select({ id: rankRun.id })
 		.from(rankRun)
@@ -70,8 +70,8 @@ async function defaultHasRunToday(projectId: string, dayKey: string): Promise<bo
 			and(
 				eq(rankRun.projectId, projectId),
 				eq(rankRun.dayKey, dayKey),
-				inArray(rankRun.status, ['ok', 'partial'])
-			)
+				inArray(rankRun.status, ['ok', 'partial']),
+				eq(rankRun.trigger, 'cron'))
 		)
 		.limit(1);
 	return !!row;
@@ -104,7 +104,12 @@ export async function processRankDailyCheck(
 
 	for (const s of settings) {
 		const settingHour = Number(String(s.checkHour).split(':')[0]);
-		if (Number.isNaN(settingHour) || settingHour !== hour) continue;
+		// CATCH-UP, nu egalitate strictă: pe un laptop care doarme (sau după un restart de
+		// prod), tick-ul de la ora exactă se pierde, iar cu `!==` scanarea zilei era sărită
+		// COMPLET — măsurat pe 3 sep.: Mac adormit la 06:00 România, primul tick la 09:00,
+		// „9 ≠ 6" → enqueued: 0. Acum: rulăm la prima ocazie DE LA ora setată încolo;
+		// dublurile sunt oprite de jobId-ul pe zi + hasRunToday.
+		if (Number.isNaN(settingHour) || hour < settingHour) continue;
 		checkedTenants++;
 
 		let projects: { id: string; queries?: number }[] = [];

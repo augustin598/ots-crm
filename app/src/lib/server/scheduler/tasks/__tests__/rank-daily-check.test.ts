@@ -127,3 +127,31 @@ describe('processRankProjectCheck — delegare + alerte', () => {
 		expect((r as typeof summaryWithAlerts).status).toBe('ok');
 	});
 });
+
+/* Catch-up (3 sep. 2026): pe un laptop adormit la ora setată, primul tick după trezire
+ * pica pe „oră diferită" și scanarea zilei era sărită complet. */
+describe('processRankDailyCheck — catch-up după ora setată', () => {
+	test('tick la 09:00 pentru checkHour 06:00 → tot enqueue (dacă n-a rulat azi)', async () => {
+		const enqueued: string[] = [];
+		const r = await processRankDailyCheck(new Date('2026-09-02T06:00:00Z'), { // 09:00 EEST
+			loadEnabledSettings: async () => [{ tenantId: 't1', checkHour: '06:00' }],
+			loadActiveProjects: async () => [{ id: 'p1', queries: 26 }],
+			hasRunToday: async () => false,
+			enqueue: async (jobId) => {
+				enqueued.push(jobId);
+			}
+		});
+		expect(r.enqueued).toBe(1);
+		expect(enqueued.length).toBe(1);
+	});
+
+	test('tick ÎNAINTE de ora setată (05:00 pentru 06:00) → nimic', async () => {
+		const r = await processRankDailyCheck(new Date('2026-09-02T02:00:00Z'), { // 05:00 EEST
+			loadEnabledSettings: async () => [{ tenantId: 't1', checkHour: '06:00' }],
+			loadActiveProjects: async () => [{ id: 'p1', queries: 26 }],
+			hasRunToday: async () => false,
+			enqueue: async () => {}
+		});
+		expect(r.enqueued).toBe(0);
+	});
+});
