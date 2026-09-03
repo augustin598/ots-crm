@@ -34,10 +34,29 @@ export interface RankDailyResult {
 }
 
 async function defaultLoadEnabledSettings() {
-	return db
-		.select({ tenantId: rankSettings.tenantId, checkHour: rankSettings.checkHour })
-		.from(rankSettings)
-		.where(eq(rankSettings.isEnabled, true));
+	const saved = await db
+		.select({ tenantId: rankSettings.tenantId, checkHour: rankSettings.checkHour, isEnabled: rankSettings.isEnabled })
+		.from(rankSettings);
+	// Tenanții cu proiecte active dar FĂRĂ rând de setări intră cu implicitul 06:00.
+	// Fără asta, modulul nu scana NICIODATĂ pentru un tenant care n-a deschis modalul
+	// „Rulare și alerte" — UI-ul afișa „06:00" din fallback, dar cronul itera doar
+	// rândurile salvate (măsurat 3 sep.: rank_settings gol → checkedTenants: 0 zilnic).
+	const withProjects = await db
+		.selectDistinct({ tenantId: rankProject.tenantId })
+		.from(rankProject)
+		.where(eq(rankProject.active, true));
+	const savedByTenant = new Map(saved.map((s) => [s.tenantId, s]));
+	const out: { tenantId: string; checkHour: string }[] = [];
+	for (const t of withProjects) {
+		const row = savedByTenant.get(t.tenantId);
+		if (row) {
+			if (row.isEnabled) out.push({ tenantId: row.tenantId, checkHour: row.checkHour });
+			// isEnabled=false = oprit EXPLICIT — respectat
+		} else {
+			out.push({ tenantId: t.tenantId, checkHour: '06:00' });
+		}
+	}
+	return out;
 }
 
 async function defaultLoadActiveProjects(tenantId: string) {
