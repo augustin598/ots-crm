@@ -1,7 +1,7 @@
 // Job orar: pentru fiecare tenant cu Rank Tracker activat a cărui oră de verificare
 // se potrivește cu ora curentă din Europe/Bucharest, pune în coadă câte un job
 // one-shot `rank_project_check` per proiect activ care NU a rulat deja azi.
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, gte } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { rankSettings, rankProject, rankRun, rankKeyword } from '$lib/server/db/schema';
 import { logInfo, serializeError, logWarning } from '$lib/server/logger';
@@ -79,9 +79,12 @@ async function defaultLoadActiveProjects(tenantId: string) {
 }
 
 async function defaultHasRunToday(projectId: string, dayKey: string): Promise<boolean> {
-	// „a rulat azi" = există un run CRON finalizat (ok/partial) pe ziua curentă. DOAR cron:
-	// o verificare manuală pe un singur cuvânt la miezul nopții nu e scanarea zilei și nu
-	// trebuie s-o anuleze. Filtrăm statusul în SQL ca să nu depindem de ordinea rândurilor.
+	// „a rulat azi" = există un run CRON finalizat (ok/partial) CU MĂCAR UN CUVÂNT VERIFICAT.
+	// DOAR cron: o verificare manuală pe un cuvânt nu e scanarea zilei. Și DOAR cu progres
+	// real: workerul din cluster (IP de datacenter) e blocat de Google la primul cuvânt și
+	// scria zilnic un „partial" cu 0 verificate — care, fără condiția pe keywords_checked,
+	// consuma ziua și făcea workerul local (IP rezidențial, care chiar poate scana) să sară
+	// peste proiect. Ambele instanțe împart aceeași bază, deci marcajul zilei e comun.
 	const [row] = await db
 		.select({ id: rankRun.id })
 		.from(rankRun)
@@ -90,7 +93,8 @@ async function defaultHasRunToday(projectId: string, dayKey: string): Promise<bo
 				eq(rankRun.projectId, projectId),
 				eq(rankRun.dayKey, dayKey),
 				inArray(rankRun.status, ['ok', 'partial']),
-				eq(rankRun.trigger, 'cron'))
+				eq(rankRun.trigger, 'cron'),
+				gte(rankRun.keywordsChecked, 1))
 		)
 		.limit(1);
 	return !!row;
