@@ -130,17 +130,3 @@ export function rtCpcMidMicros(lowMicros: number | null, highMicros: number | nu
 	if (lowMicros != null && highMicros != null) return (lowMicros + highMicros) / 2;
 	return highMicros ?? lowMicros;
 }
-
-/**
- * Cât ar fi costat clicurile organice dacă erau cumpărate din Google Ads:
- * clicuri × CPC mediu, rotunjit la leu. Null când lipsește oricare din cele două.
- */
-export function rtSavings(
-	clicks: number,
-	lowMicros: number | null,
-	highMicros: number | null
-): number | null {
-	const mid = rtCpcMidMicros(lowMicros, highMicros);
-	if (!clicks || mid == null) return null;
-	return Math.round((clicks * mid) / 1_000_000);
-}

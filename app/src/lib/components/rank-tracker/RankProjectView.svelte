@@ -45,7 +45,7 @@
 
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { distribution, rankDayKey, visibility } from '$lib/logic/rank-tracker';
-	import { rtCpc, rtCpcMidMicros, rtCpcRange, rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSavings, rtSerpLink } from './lib';
+	import { rtCpc, rtCpcMidMicros, rtCpcRange, rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSerpLink } from './lib';
 	import {
 		getRankProjectDetail,
 		getRankRunStatus,
@@ -162,23 +162,42 @@
 		};
 	});
 
+	// CPC-ul mediu al proiectului, peste cuvintele care CHIAR au bid. Serveşte drept
+	// preţ de rezervă pentru cuvintele cu clicuri dar fără bid (Google nu dă bid unde
+	// nu licitează nimeni) — altfel trafic real ar apărea evaluat cu zero.
+	const avgCpcMidMicros = $derived.by(() => {
+		const mids = pRows
+			.map((r) => rtCpcMidMicros(r.cpcLowMicros, r.cpcHighMicros))
+			.filter((m): m is number => m != null);
+		return mids.length ? mids.reduce((a, b) => a + b, 0) / mids.length : null;
+	});
+
+	/** Cât valorează clicurile organice ale unui cuvânt. `estimated` = preţ de rezervă. */
+	function savingsFor(r: RankKeywordDetail): { ron: number; estimated: boolean } | null {
+		const clicks = r.gsc?.clicksWindow ?? 0;
+		if (!clicks) return null;
+		const own = rtCpcMidMicros(r.cpcLowMicros, r.cpcHighMicros);
+		const micros = own ?? avgCpcMidMicros;
+		if (micros == null) return null;
+		return { ron: Math.round((clicks * micros) / 1_000_000), estimated: own == null };
+	}
+
 	// Cât ne-ar fi costat traficul organic dacă l-am fi cumpărat din Google Ads:
-	// clicuri organice (fereastra GSC) × CPC-ul mediu al cuvântului, adică mijlocul
-	// intervalului de bid top-of-page. Intră doar cuvintele care au ȘI clicuri, ȘI bid —
-	// restul n-ar avea cu ce fi evaluate, iar un zero acolo ar trage media în jos degeaba.
+	// clicuri organice (fereastra GSC) × CPC-ul cuvântului (mijlocul intervalului de bid).
 	const savedVsAds = $derived.by(() => {
 		let ron = 0;
 		let clicks = 0;
 		let keywords = 0;
+		let estimated = 0;
 		for (const r of pRows) {
-			const c = r.gsc?.clicksWindow ?? 0;
-			const mid = rtCpcMidMicros(r.cpcLowMicros, r.cpcHighMicros);
-			if (!c || mid == null) continue;
-			ron += (c * mid) / 1_000_000;
-			clicks += c;
+			const s = savingsFor(r);
+			if (!s) continue;
+			ron += s.ron;
+			clicks += r.gsc?.clicksWindow ?? 0;
 			keywords++;
+			if (s.estimated) estimated++;
 		}
-		return { ron: Math.round(ron), clicks, keywords };
+		return { ron, clicks, keywords, estimated };
 	});
 
 	// Contoarele se calculează pe rândurile care trec deja de căutare/locație/etichete,
@@ -518,7 +537,9 @@
 					<div class="cl-kpi-sub">
 						{#if savedVsAds.keywords}
 							{rtNum(savedVsAds.clicks)}
-							{savedVsAds.clicks === 1 ? 'clic organic' : 'clicuri organice'} × CPC mediu · 7 zile
+							{savedVsAds.clicks === 1 ? 'clic organic' : 'clicuri organice'} × CPC · 7 zile{savedVsAds.estimated
+								? ' · parțial estimat'
+								: ''}
 						{:else}
 							fără clicuri sau fără bid în Google Ads
 						{/if}
@@ -730,8 +751,15 @@
 								</td>
 								<td class="num">{r.gsc ? rtNum(r.gsc.clicksWindow) : '—'}</td>
 								<td class="num rt-cpc">
-									{#if rtSavings(r.gsc?.clicksWindow ?? 0, r.cpcLowMicros, r.cpcHighMicros) != null}
-										{rtNum(rtSavings(r.gsc?.clicksWindow ?? 0, r.cpcLowMicros, r.cpcHighMicros)!)}
+									{#if savingsFor(r)}
+										{@const s = savingsFor(r)!}
+										{#if s.estimated}
+											<span
+												class="rt-est"
+												title="Estimare: Google nu dă bid pentru acest cuvânt, aşa că s-a folosit CPC-ul mediu al proiectului"
+												>~{rtNum(s.ron)}</span
+											>
+										{:else}{rtNum(s.ron)}{/if}
 									{:else}<span class="iv-muted">—</span>{/if}
 								</td>
 								<td class="num"><RtGain value={r.delta1} /></td>

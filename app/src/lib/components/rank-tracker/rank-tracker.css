@@ -199,6 +199,8 @@
 .rt-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 
 /* semnal că poziția scrapată nu se potrivește cu ce raportează Search Console */
+/* valoare estimată (CPC mediu în locul unui bid propriu) — vizibil mai discretă */
+.rt-est { color: var(--cl-text-3); }
 /* intervalul de bid: cifre înguste, ca să nu împingă coloanele următoare */
 .rt-cpc { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12.5px; }
 /* poziția scrapată + eventualul semnal de încredere, aliniate la dreapta coloanei */
