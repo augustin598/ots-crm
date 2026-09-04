@@ -612,12 +612,11 @@
 								/>
 							</th>
 							<th>Cuvânt cheie</th>
+							<th class="num">Poziție</th>
+							<th class="num">Pagina</th>
 							<th class="num">Volum</th>
 							<th class="num">KD</th>
-							<th class="num">Poziție</th>
 							<th class="num" title="Afișări în Google Search Console, ultima zi cu date">AFIȘĂRI</th>
-							<th class="num" title="Poziția medie din Search Console — mediată peste locații și pagini, nu comparabilă direct cu poziția scrapată">POZ. GSC</th>
-							<th class="num">Pagina</th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 1 zi</span></th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 7 zile</span></th>
 							<th class="num"><span class="rt-th"><TrophyIcon size={11} /> Best</span></th>
@@ -667,21 +666,17 @@
 										</div>
 									</div>
 								</td>
-								<td class="num">{#if r.volume}{rtNum(r.volume)}{:else}<span class="iv-muted">—</span>{/if}</td>
-								<td class="num"><span class="iv-muted">—</span></td>
-								<td class="num"><RtPos pos={r.position} depth={detail?.searchDepth ?? 100} /></td>
-								<td class="num">{r.gsc ? r.gsc.impressions : '—'}</td>
+								<!-- poziția medie din GSC stă doar în drawer; aici rămâne doar semnalul
+								     despre cât de sigură e poziția noastră scrapată -->
 								<td class="num">
-									{#if r.gsc}
-										{r.gsc.position}
-										{#if r.gsc.trust === 'scrape-missing'}
+									<span class="rt-pos-cell">
+										<RtPos pos={r.position} depth={detail?.searchDepth ?? 100} />
+										{#if r.gsc?.trust === 'scrape-missing'}
 											<span class="rt-trust missing" title="Google raportează afișări, dar noi n-am găsit site-ul — măsurătoarea noastră e nesigură (rulare blocată?)">nemăsurat</span>
-										{:else if r.gsc.trust === 'divergent'}
+										{:else if r.gsc?.trust === 'divergent'}
 											<span class="rt-trust divergent" title="Poziția scrapată diferă cu peste 10 locuri față de media din Search Console">divergent</span>
 										{/if}
-									{:else}
-										—
-									{/if}
+									</span>
 								</td>
 								<td class="num">
 									{#if r.page == null}
@@ -690,6 +685,9 @@
 										<span style="font-weight: 700" style:color={r.position != null && r.position <= 10 ? 'var(--cl-text)' : 'var(--cl-text-3)'}>{r.page}</span>
 									{/if}
 								</td>
+								<td class="num">{#if r.volume}{rtNum(r.volume)}{:else}<span class="iv-muted">—</span>{/if}</td>
+								<td class="num"><span class="iv-muted">—</span></td>
+								<td class="num">{r.gsc ? r.gsc.impressions : '—'}</td>
 								<td class="num"><RtGain value={r.delta1} /></td>
 								<td class="num"><RtGain value={r.delta7} /></td>
 								<td class="num" style="font-weight: 700">
@@ -734,7 +732,7 @@
 							</tr>
 						{:else}
 							<tr style="cursor: default">
-								<td colspan="16">
+								<td colspan="15">
 									<div class="cl-empty" style="padding: 40px 0">
 										<SearchIcon size={20} />
 										<h3>Niciun cuvânt cheie</h3>
