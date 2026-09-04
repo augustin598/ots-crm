@@ -8,6 +8,9 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { requireStaff } from '$lib/server/get-actor';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { processGscDailyPull } from '$lib/server/scheduler/tasks/gsc-daily-pull';
 
 function requireTenantEvent() {
 	const event = getRequestEvent();
@@ -102,7 +105,6 @@ export const setGscProperty = command(propertySchema, async ({ projectId, proper
 export const runGscPullNow = command(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const { processGscDailyPull } = await import('$lib/server/scheduler/tasks/gsc-daily-pull');
 	const { gscIntegration } = table;
 	return processGscDailyPull({
 		loadIntegrations: async () =>

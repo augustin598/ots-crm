@@ -17,6 +17,9 @@ import { isOnWhatsapp } from '$lib/server/whatsapp/groups';
 import { checkFixedWindowLimit } from '$lib/server/rate-limiter';
 import { logError } from '$lib/server/logger';
 import { serializeError } from '$lib/server/error-serializer';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { enqueueFetch } from '$lib/server/whatsapp/avatar-fetcher';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -152,7 +155,6 @@ export const setMyWhatsappPhone = command(
 
 		// Cerem avatarul acum, ca poza să apară fără să aștepte un mesaj nou.
 		try {
-			const { enqueueFetch } = await import('$lib/server/whatsapp/avatar-fetcher');
 			enqueueFetch(actor.tenantId, e164);
 		} catch (err) {
 			logError('whatsapp', 'enqueueFetch avatar eșuat (portal)', {

@@ -29,7 +29,7 @@ import { loadBnrFxRates } from '$lib/server/bnr/client';
 import XLSX from 'xlsx';
 import { unlink } from 'fs/promises';
 import { join } from 'path';
-import { uploadBuffer } from '$lib/server/storage';
+import { uploadBuffer, deleteFile } from '$lib/server/storage';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -231,7 +231,6 @@ export const deleteSupplierInvoice = command(
 		// Delete PDF file (try MinIO first, then filesystem fallback)
 		if (existing.pdfPath) {
 			try {
-				const { deleteFile } = await import('$lib/server/storage');
 				await deleteFile(existing.pdfPath);
 			} catch {
 				try {
@@ -278,7 +277,6 @@ export const deleteSupplierInvoices = command(
 
 			if (existing.pdfPath) {
 				try {
-					const { deleteFile } = await import('$lib/server/storage');
 					await deleteFile(existing.pdfPath);
 				} catch {
 					try {

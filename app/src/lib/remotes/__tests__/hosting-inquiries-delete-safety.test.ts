@@ -144,6 +144,13 @@ mock.module('$lib/server/stripe/post-payment/provision-da', () => ({
 	})
 }));
 
+// Remote-ul importă static emitentul Keez (importul dinamic era compilat greșit
+// de rolldown → `await void 0` pe build-ul de producție). Fără mock, lanțul real
+// ajunge la clientul Stripe și cere `$app/environment`, care nu există în teste.
+mock.module('$lib/server/stripe/post-payment/emit-keez-invoice', () => ({
+	emitKeezFiscalInvoice: async () => ({ skipped: true, reason: 'noop' })
+}));
+
 mock.module('$lib/server/hosting/create-account', () => ({
 	createHostingAccountInternal: async () => ({
 		id: 'noop',

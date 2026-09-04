@@ -5,10 +5,14 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-ads/auth';
 import { listMonthlySpend, formatCustomerId, listMccSubAccounts } from '$lib/server/google-ads/client';
-import { saveGoogleSessionCookies, clearGoogleSession } from '$lib/server/google-ads/google-cookies';
+import { saveGoogleSessionCookies, clearGoogleSession, getDecryptedGoogleCookies } from '$lib/server/google-ads/google-cookies';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
 import { refreshGoogleSessionHeadless } from '$lib/server/scraper/headless-session-refresh';
 import { requireStaff } from '$lib/server/get-actor';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { deleteFile, uploadBuffer } from '$lib/server/storage';
+import { downloadInvoicePdfViaCookies, downloadGoogleInvoicesFromLinks } from '$lib/server/google-ads/invoice-downloader';
 
 // ---- Queries ----
 
@@ -575,7 +579,6 @@ export const deleteGoogleAdsInvoice = command(
 		// Delete PDF file if exists (try MinIO first, then filesystem)
 		if (invoice.pdfPath) {
 			try {
-				const { deleteFile } = await import('$lib/server/storage');
 				await deleteFile(invoice.pdfPath);
 			} catch {
 				// Fallback: try filesystem
@@ -625,12 +628,8 @@ export const downloadGoogleInvoiceFromUrl = command(
 
 		if (!integration) throw new Error('Integrarea Google Ads nu este configurată');
 
-		const { getDecryptedGoogleCookies } = await import('$lib/server/google-ads/google-cookies');
 		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
 		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
-
-		const { downloadInvoicePdfViaCookies } = await import('$lib/server/google-ads/invoice-downloader');
-		const { uploadBuffer } = await import('$lib/server/storage');
 
 		const result = await downloadInvoicePdfViaCookies(data.pdfUrl, cookies);
 
@@ -733,7 +732,6 @@ export const bulkDownloadGoogleInvoices = command(
 
 		if (!integration) throw new Error('Integrarea Google Ads nu este configurată');
 
-		const { getDecryptedGoogleCookies } = await import('$lib/server/google-ads/google-cookies');
 		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
 		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
 
@@ -747,7 +745,6 @@ export const bulkDownloadGoogleInvoices = command(
 			}
 		} catch { /* proceed without Bearer token */ }
 
-		const { downloadGoogleInvoicesFromLinks } = await import('$lib/server/google-ads/invoice-downloader');
 		return await downloadGoogleInvoicesFromLinks(tenantId, data.customerId, data.links, cookies, accessToken);
 	}
 );
@@ -793,7 +790,6 @@ export const importScrapedGoogleInvoices = command(
 
 		if (!integration) throw new Error('Integrarea Google Ads nu este configurată');
 
-		const { getDecryptedGoogleCookies } = await import('$lib/server/google-ads/google-cookies');
 		const cookies = await getDecryptedGoogleCookies(integration.id, tenantId);
 		if (!cookies) throw new Error('Cookies Google nu sunt configurate');
 
@@ -814,8 +810,6 @@ export const importScrapedGoogleInvoices = command(
 			if (!groups.has(key)) groups.set(key, []);
 			groups.get(key)!.push(inv);
 		}
-
-		const { downloadGoogleInvoicesFromLinks } = await import('$lib/server/google-ads/invoice-downloader');
 
 		let totalDownloaded = 0;
 		let totalSkipped = 0;

@@ -19,6 +19,9 @@ import {
 	parseAccessFlags,
 	type AccessFlags
 } from '$lib/server/portal-access';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { enqueueFetch } from '$lib/server/whatsapp/avatar-fetcher';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -179,7 +182,6 @@ export const setClientContactWhatsappPhone = command(
 			});
 			// Cerem avatarul imediat, ca poza să apară fără să aștepți un mesaj nou.
 			try {
-				const { enqueueFetch } = await import('$lib/server/whatsapp/avatar-fetcher');
 				enqueueFetch(tenantId, e164);
 			} catch (err) {
 				logError('whatsapp', 'enqueueFetch avatar eșuat', {
@@ -411,7 +413,6 @@ export const applyWhatsappGroupLinks = command(
 			applied.push({ secondaryEmailId: l.secondaryEmailId, phoneE164: e164 });
 
 			try {
-				const { enqueueFetch } = await import('$lib/server/whatsapp/avatar-fetcher');
 				enqueueFetch(tenantId, e164);
 			} catch (err) {
 				logError('whatsapp', 'enqueueFetch avatar eșuat (import grup)', {

@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "bunx --bun vite dev",
-		"build": "bunx --bun vite build",
+		"build": "bunx --bun vite build && bun --bun scripts/check-build-dynamic-imports.ts",
 		"preview": "vite preview",
 		"prepare": "bunx --bun svelte-kit sync || echo ''",
 		"check": "bunx --bun svelte-kit sync && bunx --bun svelte-check --tsconfig ./tsconfig.json",

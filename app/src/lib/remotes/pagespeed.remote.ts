@@ -10,6 +10,10 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { requireStaff } from '$lib/server/get-actor';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { buildPagespeedSites } from '$lib/server/pagespeed/sites-data';
+import { getRedis } from '$lib/server/redis';
 import { getScanProgress, isScanActive } from '$lib/server/pagespeed/scan';
 import { getSchedulerQueue } from '$lib/server/scheduler';
 import { PSI_HOURS, isoWeekKey, type PsiStrategy } from '$lib/logic/pagespeed';
@@ -34,7 +38,6 @@ export const getPagespeedSites = query(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
 	// logica partajată cu pagina PageSpeed din portalul clientului
-	const { buildPagespeedSites } = await import('$lib/server/pagespeed/sites-data');
 	return buildPagespeedSites(tenantId);
 });
 
@@ -335,7 +338,6 @@ export const sendPagespeedReportNow = command(async () => {
 	await requireStaff(event);
 
 	// două taburi (sau două click-uri) NU trebuie să trimită raportul de două ori
-	const { getRedis } = await import('$lib/server/redis');
 	const redis = getRedis();
 	const lockKey = `${tenantId}:pagespeed:report-send`;
 	// SET … NX EX e atomic: fără TOCTOU între o citire și o scriere separate

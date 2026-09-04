@@ -21,6 +21,9 @@ import {
 import { toNaiveDateTime } from '$lib/server/google-calendar/time';
 import { requireStaff } from '$lib/server/get-actor';
 import { getEligibleClientAssigneeIds, getTaskParticipantEmails } from '$lib/server/client-users';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { deleteMeetEvent } from '$lib/server/google-calendar/meet';
 
 type ClientNotificationType = 'created' | 'status-change' | 'comment' | 'modified';
 
@@ -2631,7 +2634,6 @@ export const deleteTask = command(v.pipe(v.string(), v.minLength(1)), async (tas
 		const calStatus = await getCalendarStatus(event.locals.tenant.id);
 		if (calStatus.connected) {
 			try {
-				const { deleteMeetEvent } = await import('$lib/server/google-calendar/meet');
 				await deleteMeetEvent({ tenantId: event.locals.tenant.id, eventId: task.googleCalendarEventId });
 			} catch (err) {
 				logWarning('google-calendar', 'Calendar event delete failed during task delete', {

@@ -14,6 +14,9 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { insertHostingOrder } from '$lib/server/hosting/insert-order';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 import { computeVatBreakdown } from '$lib/utils/vat';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { emitKeezFiscalInvoice } from '$lib/server/stripe/post-payment/emit-keez-invoice';
 
 /**
  * Admin-side management of hosting inquiries / orders submitted via the public
@@ -451,9 +454,6 @@ export const acceptHostingOrderPayment = command(AcceptPaymentSchema, async (par
 				{ tenantId, metadata: { inquiryId: params.id } }
 			);
 		} else try {
-			const { emitKeezFiscalInvoice } = await import(
-				'$lib/server/stripe/post-payment/emit-keez-invoice'
-			);
 			const result = await emitKeezFiscalInvoice({
 				tenantId,
 				clientId: order.clientId!,

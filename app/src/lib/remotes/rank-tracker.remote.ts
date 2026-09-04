@@ -11,10 +11,13 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { requireStaff } from '$lib/server/get-actor';
 import { getSchedulerQueue } from '$lib/server/scheduler';
-import { RANK_HOURS, normalizeKeyword } from '$lib/logic/rank-tracker';
+import { RANK_HOURS, normalizeKeyword, isoWeekKey } from '$lib/logic/rank-tracker';
 import { buildRankProjects, buildRankProjectDetail } from '$lib/server/rank-tracker/projects-data';
 import { getRankRunProgress, rankRunProgressKey } from '$lib/server/rank-tracker/run';
 import { getRedis } from '$lib/server/redis';
+// import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
+// fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
+import { encryptVerified } from '$lib/server/plugins/smartbill/crypto';
 
 const MAX_KEYWORDS = Number(env.RANK_MAX_KEYWORDS_PER_PROJECT ?? 500) || 500;
 
@@ -437,7 +440,6 @@ export const sendRankReportNow = command(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
 	const { buildRankReportData } = await import('$lib/server/rank-tracker/report');
-	const { isoWeekKey } = await import('$lib/logic/rank-tracker');
 	const weekKey = isoWeekKey(new Date());
 	const data = await buildRankReportData(tenantId, weekKey);
 	const [settings] = await db
@@ -461,7 +463,6 @@ const serpSchema = v.object({
 export const saveSerpIntegration = command(serpSchema, async (input) => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const { encryptVerified } = await import('$lib/server/plugins/smartbill/crypto');
 	const now = new Date();
 	const [existing] = await db
 		.select({ id: table.serpIntegration.id })

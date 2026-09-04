@@ -23,7 +23,7 @@ import {
 	normalizeWHMCSDate,
 	nullIfEmpty
 } from '$lib/server/plugins/directadmin/mapper';
-import { matchOrCreateClient } from '$lib/server/whmcs/client-matching';
+import { matchOrCreateClient, normalizeCui } from '$lib/server/whmcs/client-matching';
 import type { WhmcsClientPayload } from '$lib/server/whmcs/types';
 import { encrypt, decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
@@ -338,7 +338,6 @@ export const importFromWHMCS = command(ImportSchema, async (params) => {
 	 * in `matchOrCreateClient` but returns null instead of creating.
 	 */
 	async function tryMatchOnly(payload: WhmcsClientPayload): Promise<'WHMCS_ID' | 'CUI' | 'EMAIL' | null> {
-		const { normalizeCui } = await import('$lib/server/whmcs/client-matching');
 		const cui = normalizeCui(payload.taxId);
 		const email = (payload.email ?? '').trim().toLowerCase();
 
