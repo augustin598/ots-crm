@@ -247,6 +247,8 @@ export interface RankGscSummary {
 	/** Ziua GSC (ora Pacificului) din care vin cifrele. */
 	date: string;
 	clicks: number;
+	/** Clicuri însumate pe toată fereastra GSC (GSC_WINDOW_DAYS), nu doar ultima zi. */
+	clicksWindow: number;
 	impressions: number;
 	/** 0–100. */
 	ctr: number;
@@ -406,9 +408,12 @@ export async function buildRankProjectDetail(
 				.limit(keywordIds.length * GSC_WINDOW_DAYS * 2)
 		: [];
 	const latestGsc = new Map<string, (typeof gscRows)[number]>();
+	// Clicurile pe toată fereastra: o singură zi e prea puțin ca să evaluezi traficul.
+	const clicksWindow = new Map<string, number>();
 	for (const row of gscRows) {
 		const key = `${row.keywordId}:${row.device}`;
 		if (!latestGsc.has(key)) latestGsc.set(key, row); // sortat desc → prima e cea mai nouă
+		clicksWindow.set(key, (clicksWindow.get(key) ?? 0) + row.clicks);
 	}
 
 	const todayKey = rankDayKey(now);
@@ -500,6 +505,7 @@ export async function buildRankProjectDetail(
 					return {
 						date: row.gscDate,
 						clicks: row.clicks,
+						clicksWindow: clicksWindow.get(`${kw.id}:${device}`) ?? row.clicks,
 						impressions: row.impressions,
 						ctr: row.ctr ?? 0,
 						position: row.position ?? 0,

@@ -102,17 +102,45 @@ export function rtNextRunLabel(hour: string, now: Date = new Date()): string {
 
 /**
  * Bidul top-of-page din Keyword Planner, în moneda contului Google Ads.
- * Google NU dă un CPC mediu — doar intervalul low–high, deci îl arătăm ca interval.
+ * Google NU dă un CPC mediu — doar intervalul low–high; în tabel arătăm capătul de
+ * sus (cât costă efectiv să prinzi topul), iar intervalul complet stă în tooltip.
  * Micro-unități → unități: 1.000.000 micro = 1 RON.
  */
+function fmtMicros(micros: number): string {
+	return (micros / 1_000_000).toLocaleString('ro-RO', {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	});
+}
+
+/** Maximul bidului top-of-page, rotunjit la leu (fallback pe low, dacă high lipsește). */
 export function rtCpc(lowMicros: number | null, highMicros: number | null): string | null {
-	const fmt = (micros: number) =>
-		(micros / 1_000_000).toLocaleString('ro-RO', {
-			minimumFractionDigits: 2,
-			maximumFractionDigits: 2
-		});
-	if (lowMicros == null && highMicros == null) return null;
-	if (lowMicros == null) return fmt(highMicros!);
-	if (highMicros == null) return fmt(lowMicros);
-	return `${fmt(lowMicros)}–${fmt(highMicros)}`;
+	const max = highMicros ?? lowMicros;
+	return max == null ? null : rtNum(Math.round(max / 1_000_000));
+}
+
+/** Intervalul complet, pentru tooltip. Null când n-avem ambele capete. */
+export function rtCpcRange(lowMicros: number | null, highMicros: number | null): string | null {
+	if (lowMicros == null || highMicros == null) return null;
+	return `Interval bid top-of-page: ${fmtMicros(lowMicros)}–${fmtMicros(highMicros)} RON`;
+}
+
+/** Mijlocul intervalului de bid, în micro-unități. Null dacă lipsesc ambele capete. */
+export function rtCpcMidMicros(lowMicros: number | null, highMicros: number | null): number | null {
+	if (lowMicros != null && highMicros != null) return (lowMicros + highMicros) / 2;
+	return highMicros ?? lowMicros;
+}
+
+/**
+ * Cât ar fi costat clicurile organice dacă erau cumpărate din Google Ads:
+ * clicuri × CPC mediu, rotunjit la leu. Null când lipsește oricare din cele două.
+ */
+export function rtSavings(
+	clicks: number,
+	lowMicros: number | null,
+	highMicros: number | null
+): number | null {
+	const mid = rtCpcMidMicros(lowMicros, highMicros);
+	if (!clicks || mid == null) return null;
+	return Math.round((clicks * mid) / 1_000_000);
 }

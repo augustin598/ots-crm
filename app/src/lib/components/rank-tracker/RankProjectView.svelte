@@ -25,6 +25,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
 	import TrophyIcon from '@lucide/svelte/icons/trophy';
+	import BanknoteIcon from '@lucide/svelte/icons/banknote';
 
 	import PsiStratIcon from '../pagespeed/PsiStratIcon.svelte';
 	import RtPos from './RtPos.svelte';
@@ -44,7 +45,7 @@
 
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { distribution, rankDayKey, visibility } from '$lib/logic/rank-tracker';
-	import { rtCpc, rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSerpLink } from './lib';
+	import { rtCpc, rtCpcMidMicros, rtCpcRange, rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSavings, rtSerpLink } from './lib';
 	import {
 		getRankProjectDetail,
 		getRankRunStatus,
@@ -159,6 +160,25 @@
 					(r.position == null && r.spark30.some((v) => v != null))
 			).length
 		};
+	});
+
+	// Cât ne-ar fi costat traficul organic dacă l-am fi cumpărat din Google Ads:
+	// clicuri organice (fereastra GSC) × CPC-ul mediu al cuvântului, adică mijlocul
+	// intervalului de bid top-of-page. Intră doar cuvintele care au ȘI clicuri, ȘI bid —
+	// restul n-ar avea cu ce fi evaluate, iar un zero acolo ar trage media în jos degeaba.
+	const savedVsAds = $derived.by(() => {
+		let ron = 0;
+		let clicks = 0;
+		let keywords = 0;
+		for (const r of pRows) {
+			const c = r.gsc?.clicksWindow ?? 0;
+			const mid = rtCpcMidMicros(r.cpcLowMicros, r.cpcHighMicros);
+			if (!c || mid == null) continue;
+			ron += (c * mid) / 1_000_000;
+			clicks += c;
+			keywords++;
+		}
+		return { ron: Math.round(ron), clicks, keywords };
 	});
 
 	// Contoarele se calculează pe rândurile care trec deja de căutare/locație/etichete,
@@ -437,7 +457,7 @@
 	{/if}
 
 	<div class="cl-hero" style="padding-top: 0; padding-bottom: 0">
-		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(6, minmax(0, 1fr))">
+		<div class="cl-kpis" style="width: 100%; grid-template-columns: repeat(7, minmax(0, 1fr))">
 			<div class="cl-kpi">
 				<div class="cl-kpi-ic" style="background: var(--cl-accent-50); color: var(--cl-accent)"><EyeIcon size={16} /></div>
 				<div>
@@ -485,6 +505,24 @@
 					<div class="cl-kpi-lbl">Scăderi peste prag</div>
 					<div class="cl-kpi-val {st.alerts ? 'cl-text-danger' : ''}">{st.alerts}</div>
 					<div class="cl-kpi-sub">prag {detail?.alertThreshold ?? 5} poziții</div>
+				</div>
+			</div>
+			<div class="cl-kpi">
+				<div class="cl-kpi-ic" style="background: var(--cl-success-50); color: #10b981"><BanknoteIcon size={16} /></div>
+				<div>
+					<div class="cl-kpi-lbl">Economie vs Ads</div>
+					<div class="cl-kpi-val">
+						<!-- &nbsp;: Svelte taie spațiul de la începutul conținutului unui element -->
+						{rtNum(savedVsAds.ron)}<span style="font-size: 15px; color: var(--cl-text-3); font-weight: 700">&nbsp;RON</span>
+					</div>
+					<div class="cl-kpi-sub">
+						{#if savedVsAds.keywords}
+							{rtNum(savedVsAds.clicks)}
+							{savedVsAds.clicks === 1 ? 'clic organic' : 'clicuri organice'} × CPC mediu · 7 zile
+						{:else}
+							fără clicuri sau fără bid în Google Ads
+						{/if}
+					</div>
 				</div>
 			</div>
 			<div class="cl-kpi">
@@ -615,8 +653,9 @@
 							<th class="num">Poziție</th>
 							<th class="num">Pagina</th>
 							<th class="num">Volum</th>
-							<th class="num" title="Bid top-of-page din Google Ads Keyword Planner (interval low–high, RON). Google nu publică un CPC mediu.">CPC RON</th>
-							<th class="num" title="Afișări în Google Search Console, ultima zi cu date">AFIȘĂRI</th>
+							<th class="num" title="Cât costă maxim un click în topul paginii — bidul high din Google Ads Keyword Planner. Google nu publică un CPC mediu.">CPC MAX RON</th>
+							<th class="num" title="Clicuri organice din Google Search Console, însumate pe ultimele 7 zile">CLICURI</th>
+							<th class="num" title="Cât ar fi costat clicurile organice cumpărate din Google Ads: clicuri × CPC mediu (mijlocul intervalului de bid)">ECONOMIE RON</th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 1 zi</span></th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 7 zile</span></th>
 							<th class="num"><span class="rt-th"><TrophyIcon size={11} /> Best</span></th>
@@ -686,10 +725,15 @@
 									{/if}
 								</td>
 								<td class="num">{#if r.volume}{rtNum(r.volume)}{:else}<span class="iv-muted">—</span>{/if}</td>
-								<td class="num rt-cpc">
+								<td class="num rt-cpc" title={rtCpcRange(r.cpcLowMicros, r.cpcHighMicros) ?? undefined}>
 									{#if rtCpc(r.cpcLowMicros, r.cpcHighMicros)}{rtCpc(r.cpcLowMicros, r.cpcHighMicros)}{:else}<span class="iv-muted">—</span>{/if}
 								</td>
-								<td class="num">{r.gsc ? r.gsc.impressions : '—'}</td>
+								<td class="num">{r.gsc ? rtNum(r.gsc.clicksWindow) : '—'}</td>
+								<td class="num rt-cpc">
+									{#if rtSavings(r.gsc?.clicksWindow ?? 0, r.cpcLowMicros, r.cpcHighMicros) != null}
+										{rtNum(rtSavings(r.gsc?.clicksWindow ?? 0, r.cpcLowMicros, r.cpcHighMicros)!)}
+									{:else}<span class="iv-muted">—</span>{/if}
+								</td>
 								<td class="num"><RtGain value={r.delta1} /></td>
 								<td class="num"><RtGain value={r.delta7} /></td>
 								<td class="num" style="font-weight: 700">
@@ -734,7 +778,7 @@
 							</tr>
 						{:else}
 							<tr style="cursor: default">
-								<td colspan="15">
+								<td colspan="16">
 									<div class="cl-empty" style="padding: 40px 0">
 										<SearchIcon size={20} />
 										<h3>Niciun cuvânt cheie</h3>
