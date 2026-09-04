@@ -3688,6 +3688,20 @@
       "when": 1788383466237004,
       "tag": "0529_rank_gsc_daily_uidx",
       "breakpoints": true
+    },
+    {
+      "idx": 530,
+      "version": "6",
+      "when": 1788550079238001,
+      "tag": "0530_rank_keyword_cpc_low_micros",
+      "breakpoints": true
+    },
+    {
+      "idx": 531,
+      "version": "6",
+      "when": 1788550079238002,
+      "tag": "0531_rank_keyword_cpc_high_micros",
+      "breakpoints": true
     }
   ]
 }

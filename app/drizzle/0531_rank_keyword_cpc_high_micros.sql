@@ -1,0 +1,1 @@
+ALTER TABLE `rank_keyword` ADD `cpc_high_micros` integer;

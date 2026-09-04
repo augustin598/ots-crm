@@ -261,6 +261,9 @@ export interface RankKeywordDetail {
 	tag: string | null;
 	location: string;
 	volume: number | null;
+	/** Bid top-of-page din Keyword Planner, micro-unități în moneda contului Google Ads. */
+	cpcLowMicros: number | null;
+	cpcHighMicros: number | null;
 	targetUrl: string | null;
 	device: 'desktop' | 'mobile';
 	position: number | null;
@@ -474,6 +477,8 @@ export async function buildRankProjectDetail(
 				tag: kw.tag,
 				location: kw.location,
 				volume: kw.volume,
+				cpcLowMicros: kw.cpcLowMicros,
+				cpcHighMicros: kw.cpcHighMicros,
 				targetUrl: kw.targetUrl,
 				device,
 				position: nowPos,

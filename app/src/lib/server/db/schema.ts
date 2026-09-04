@@ -6633,6 +6633,10 @@ export const rankKeyword = sqliteTable(
 		location: text('location').notNull().default(''),
 		volume: integer('volume'),
 		volumeUpdatedAt: timestamp('volume_updated_at', { withTimezone: true, mode: 'date' }),
+		/** Bid top-of-page din Keyword Planner, în micro-unități ale monedei contului
+		 *  Google Ads (RON la noi). Google NU întoarce un CPC mediu — doar intervalul. */
+		cpcLowMicros: integer('cpc_low_micros'),
+		cpcHighMicros: integer('cpc_high_micros'),
 		difficulty: integer('difficulty'),
 		targetUrl: text('target_url'),
 		active: boolean('active').notNull().default(true),

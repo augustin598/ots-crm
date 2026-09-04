@@ -99,3 +99,20 @@ export function rtNextRunLabel(hour: string, now: Date = new Date()): string {
 	today.setHours(h || 0, m || 0, 0, 0);
 	return `${now.getTime() < today.getTime() ? 'azi' : 'mâine'}, ${hour}`;
 }
+
+/**
+ * Bidul top-of-page din Keyword Planner, în moneda contului Google Ads.
+ * Google NU dă un CPC mediu — doar intervalul low–high, deci îl arătăm ca interval.
+ * Micro-unități → unități: 1.000.000 micro = 1 RON.
+ */
+export function rtCpc(lowMicros: number | null, highMicros: number | null): string | null {
+	const fmt = (micros: number) =>
+		(micros / 1_000_000).toLocaleString('ro-RO', {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2
+		});
+	if (lowMicros == null && highMicros == null) return null;
+	if (lowMicros == null) return fmt(highMicros!);
+	if (highMicros == null) return fmt(lowMicros);
+	return `${fmt(lowMicros)}–${fmt(highMicros)}`;
+}

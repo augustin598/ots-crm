@@ -1,7 +1,9 @@
-// Volume de căutare lunare pentru cuvintele cheie, din Google Ads API
-// (KeywordPlanIdeaService.generateKeywordHistoricalMetrics). Rulează lunar, nu zilnic.
-// Skip grațios dacă tenantul n-are integrarea Google Ads. Dependențele externe sunt
-// injectabile → testabil fără API. NOTĂ: un dev token de test întoarce volume goale.
+// Volume de căutare lunare + bidurile top-of-page pentru cuvintele cheie, din Google
+// Ads API (KeywordPlanIdeaService.generateKeywordHistoricalMetrics). Rulează lunar, nu
+// zilnic. Skip grațios dacă tenantul n-are integrarea Google Ads. Dependențele externe
+// sunt injectabile → testabil fără API. NOTĂ: un dev token de test întoarce volume goale.
+// Google NU întoarce un CPC mediu aici, doar intervalul low/high al bidului de top —
+// în micro-unități ale monedei contului (RON la noi).
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { rankKeyword, rankProject } from '$lib/server/db/schema';
@@ -16,11 +18,18 @@ interface KeywordLite {
 	keyword: string;
 }
 
+/** Ce reține un cuvânt cheie dintr-un răspuns Keyword Planner. */
+export interface KeywordMetrics {
+	volume: number | null;
+	cpcLowMicros: number | null;
+	cpcHighMicros: number | null;
+}
+
 export interface VolumeDeps {
 	loadKeywords?: (tenantId: string) => Promise<KeywordLite[]>;
-	/** Întoarce volumele per keyword, sau null dacă nu există integrare Google Ads. */
-	fetchVolumes?: (tenantId: string, keywords: string[]) => Promise<Map<string, number | null> | null>;
-	saveVolume?: (keywordId: string, volume: number | null, now: Date) => Promise<void>;
+	/** Întoarce metricile per keyword, sau null dacă nu există integrare Google Ads. */
+	fetchVolumes?: (tenantId: string, keywords: string[]) => Promise<Map<string, KeywordMetrics> | null>;
+	saveVolume?: (keywordId: string, metrics: KeywordMetrics, now: Date) => Promise<void>;
 	now?: () => Date;
 }
 
@@ -41,7 +50,7 @@ async function defaultLoadKeywords(tenantId: string): Promise<KeywordLite[]> {
 async function defaultFetchVolumes(
 	tenantId: string,
 	keywords: string[]
-): Promise<Map<string, number | null> | null> {
+): Promise<Map<string, KeywordMetrics> | null> {
 	const { getAuthenticatedClient } = await import('$lib/server/google-ads/auth');
 	const auth = await getAuthenticatedClient(tenantId);
 	if (!auth) return null;
@@ -61,12 +70,20 @@ async function defaultFetchVolumes(
 		refresh_token: integration.refreshToken
 	});
 
-	// generateKeywordHistoricalMetrics întoarce avg_monthly_searches per keyword.
+	// generateKeywordHistoricalMetrics întoarce avg_monthly_searches și intervalul de
+	// bid top-of-page per keyword (micro-unități ale monedei contului).
 	const response = await (
 		customer as unknown as {
 			keywordPlanIdeas: {
 				generateKeywordHistoricalMetrics: (req: Record<string, unknown>) => Promise<{
-					results?: Array<{ text?: string; keyword_metrics?: { avg_monthly_searches?: number | string } }>;
+					results?: Array<{
+						text?: string;
+						keyword_metrics?: {
+							avg_monthly_searches?: number | string;
+							low_top_of_page_bid_micros?: number | string;
+							high_top_of_page_bid_micros?: number | string;
+						};
+					}>;
 				}>;
 			};
 		}
@@ -78,18 +95,29 @@ async function defaultFetchVolumes(
 		keyword_plan_network: 'GOOGLE_SEARCH'
 	});
 
-	const map = new Map<string, number | null>();
+	const num = (v: number | string | undefined | null) => (v != null ? Number(v) : null);
+	const map = new Map<string, KeywordMetrics>();
 	for (const r of response.results ?? []) {
-		const vol = r.keyword_metrics?.avg_monthly_searches;
-		if (r.text) map.set(r.text.toLowerCase(), vol != null ? Number(vol) : null);
+		if (!r.text) continue;
+		map.set(r.text.toLowerCase(), {
+			volume: num(r.keyword_metrics?.avg_monthly_searches),
+			cpcLowMicros: num(r.keyword_metrics?.low_top_of_page_bid_micros),
+			cpcHighMicros: num(r.keyword_metrics?.high_top_of_page_bid_micros)
+		});
 	}
 	return map;
 }
 
-async function defaultSaveVolume(keywordId: string, volume: number | null, now: Date) {
+async function defaultSaveVolume(keywordId: string, metrics: KeywordMetrics, now: Date) {
 	await db
 		.update(rankKeyword)
-		.set({ volume, volumeUpdatedAt: now, updatedAt: now })
+		.set({
+			volume: metrics.volume,
+			cpcLowMicros: metrics.cpcLowMicros,
+			cpcHighMicros: metrics.cpcHighMicros,
+			volumeUpdatedAt: now,
+			updatedAt: now
+		})
 		.where(eq(rankKeyword.id, keywordId));
 }
 
@@ -111,7 +139,7 @@ export async function refreshKeywordVolumes(tenantId: string, deps: VolumeDeps =
 
 	let updated = 0;
 	for (const batch of chunk(keywords, BATCH)) {
-		let volumes: Map<string, number | null> | null;
+		let volumes: Map<string, KeywordMetrics> | null;
 		try {
 			volumes = await fetchVolumes(tenantId, batch.map((k) => k.keyword));
 		} catch (e) {
@@ -122,9 +150,10 @@ export async function refreshKeywordVolumes(tenantId: string, deps: VolumeDeps =
 
 		for (const kw of batch) {
 			const key = kw.keyword.toLowerCase();
-			// Nu suprascrie un volum cunoscut cu null când Google omite keyword-ul din răspuns.
-			if (!volumes.has(key)) continue;
-			await saveVolume(kw.id, volumes.get(key) ?? null, now());
+			// Nu suprascrie valorile cunoscute când Google omite keyword-ul din răspuns.
+			const metrics = volumes.get(key);
+			if (!metrics) continue;
+			await saveVolume(kw.id, metrics, now());
 			updated++;
 		}
 	}

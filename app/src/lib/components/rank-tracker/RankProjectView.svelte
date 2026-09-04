@@ -44,7 +44,7 @@
 
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { distribution, rankDayKey, visibility } from '$lib/logic/rank-tracker';
-	import { rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSerpLink } from './lib';
+	import { rtCpc, rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSerpLink } from './lib';
 	import {
 		getRankProjectDetail,
 		getRankRunStatus,
@@ -615,6 +615,7 @@
 							<th class="num">Poziție</th>
 							<th class="num">Pagina</th>
 							<th class="num">Volum</th>
+							<th class="num" title="Bid top-of-page din Google Ads Keyword Planner (interval low–high, RON). Google nu publică un CPC mediu.">CPC RON</th>
 							<th class="num" title="Afișări în Google Search Console, ultima zi cu date">AFIȘĂRI</th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 1 zi</span></th>
 							<th class="num"><span class="rt-th"><ArrowUpDownIcon size={11} /> 7 zile</span></th>
@@ -685,6 +686,9 @@
 									{/if}
 								</td>
 								<td class="num">{#if r.volume}{rtNum(r.volume)}{:else}<span class="iv-muted">—</span>{/if}</td>
+								<td class="num rt-cpc">
+									{#if rtCpc(r.cpcLowMicros, r.cpcHighMicros)}{rtCpc(r.cpcLowMicros, r.cpcHighMicros)}{:else}<span class="iv-muted">—</span>{/if}
+								</td>
 								<td class="num">{r.gsc ? r.gsc.impressions : '—'}</td>
 								<td class="num"><RtGain value={r.delta1} /></td>
 								<td class="num"><RtGain value={r.delta7} /></td>
@@ -730,7 +734,7 @@
 							</tr>
 						{:else}
 							<tr style="cursor: default">
-								<td colspan="14">
+								<td colspan="15">
 									<div class="cl-empty" style="padding: 40px 0">
 										<SearchIcon size={20} />
 										<h3>Niciun cuvânt cheie</h3>

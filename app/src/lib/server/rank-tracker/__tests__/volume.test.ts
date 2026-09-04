@@ -25,21 +25,28 @@ describe('refreshKeywordVolumes', () => {
 		expect(r.reason).toContain('Google Ads');
 	});
 
-	test('actualizează volumele din răspuns (case-insensitive)', async () => {
-		const saved: { id: string; vol: number | null }[] = [];
+	test('actualizează volumele și bidurile din răspuns (case-insensitive)', async () => {
+		const saved: { id: string; vol: number | null; low: number | null; high: number | null }[] = [];
 		const r = await refreshKeywordVolumes('t1', {
 			loadKeywords: async () => [
 				{ id: 'k1', keyword: 'SEO Bucuresti' },
 				{ id: 'k2', keyword: 'agentie seo' }
 			],
-			fetchVolumes: async () => new Map([['seo bucuresti', 1900], ['agentie seo', 480]]),
-			saveVolume: async (id, vol) => {
-				saved.push({ id, vol });
+			fetchVolumes: async () =>
+				new Map([
+					['seo bucuresti', { volume: 1900, cpcLowMicros: 4_155_007, cpcHighMicros: 67_767_750 }],
+					['agentie seo', { volume: 480, cpcLowMicros: null, cpcHighMicros: null }]
+				]),
+			saveVolume: async (id, m) => {
+				saved.push({ id, vol: m.volume, low: m.cpcLowMicros, high: m.cpcHighMicros });
 			},
 			now: () => new Date('2026-09-01T00:00:00Z')
 		});
 		expect(r.updated).toBe(2);
-		expect(saved).toEqual([{ id: 'k1', vol: 1900 }, { id: 'k2', vol: 480 }]);
+		expect(saved).toEqual([
+			{ id: 'k1', vol: 1900, low: 4_155_007, high: 67_767_750 },
+			{ id: 'k2', vol: 480, low: null, high: null }
+		]);
 	});
 
 	test('fără cuvinte cheie → skip', async () => {
@@ -52,8 +59,8 @@ describe('refreshKeywordVolumes', () => {
 		const r = await refreshKeywordVolumes('t1', {
 			loadKeywords: async () => [{ id: 'k1', keyword: 'necunoscut' }],
 			fetchVolumes: async () => new Map(),
-			saveVolume: async (_id, vol) => {
-				saved.push(vol);
+			saveVolume: async (_id, m) => {
+				saved.push(m.volume);
 			}
 		});
 		expect(saved).toEqual([]); // omis → sărit, volumul anterior rămâne intact
@@ -64,9 +71,10 @@ describe('refreshKeywordVolumes', () => {
 		const saved: { id: string; vol: number | null }[] = [];
 		await refreshKeywordVolumes('t1', {
 			loadKeywords: async () => [{ id: 'k1', keyword: 'nișă rară' }],
-			fetchVolumes: async () => new Map([['nișă rară', 0]]),
-			saveVolume: async (id, vol) => {
-				saved.push({ id, vol });
+			fetchVolumes: async () =>
+				new Map([['nișă rară', { volume: 0, cpcLowMicros: null, cpcHighMicros: null }]]),
+			saveVolume: async (id, m) => {
+				saved.push({ id, vol: m.volume });
 			}
 		});
 		expect(saved).toEqual([{ id: 'k1', vol: 0 }]);

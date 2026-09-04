@@ -199,6 +199,8 @@
 .rt-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 
 /* semnal că poziția scrapată nu se potrivește cu ce raportează Search Console */
+/* intervalul de bid: cifre înguste, ca să nu împingă coloanele următoare */
+.rt-cpc { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12.5px; }
 /* poziția scrapată + eventualul semnal de încredere, aliniate la dreapta coloanei */
 .rt-pos-cell { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .rt-trust { font-size: 10.5px; font-weight: 800; padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
