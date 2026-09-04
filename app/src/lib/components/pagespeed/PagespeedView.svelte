@@ -342,7 +342,10 @@
 <div class="cl-wrap" data-screen-label="PageSpeed Insights">
 	<div class="cl-hero">
 		<div>
-			<h1>PageSpeed Insights</h1>
+			<div class="psi-title">
+				<h1>PageSpeed Insights</h1>
+				<span class="psi-tag info">Beta</span>
+			</div>
 		</div>
 		<div class="cl-hero-actions">
 			<div class="cl-search">
@@ -521,7 +524,12 @@
 					<thead>
 						<tr>
 							<th>Site</th>
-							<th class="num">Scor</th>
+							<th class="num">
+								<!-- iconița spune la ce strategie se referă scorul (comută cu selectorul mobil/desktop) -->
+								<span class="psi-th-ic" title="Scor Performance pe {strategy === 'mobile' ? 'mobil' : 'desktop'}">
+									Scor <PsiStratIcon {strategy} size={12} />
+								</span>
+							</th>
 							<th class="num" title="Diferența față de măsurătoarea anterioară a aceluiași site, nu față de acum 7 zile">
 								Δ față de anterior
 							</th>

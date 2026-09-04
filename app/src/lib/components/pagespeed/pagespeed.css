@@ -81,6 +81,8 @@
 .cl-hero p strong { color: var(--cl-text); font-weight: 600; }
 .cl-hero p strong.danger { color: var(--cl-danger); }
 .cl-hero-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* titlu + pastila „Beta" (PageSpeed și Rank Tracker sunt module tinere) */
+.psi-title { display: flex; align-items: center; gap: 10px; }
 
 /* Search */
 .cl-search { display: flex; align-items: center; gap: 8px; background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: 9px; padding: 7px 12px; min-width: 280px; color: var(--cl-text-3); }
@@ -151,6 +153,8 @@
 .cl-list-table thead th { text-align: left; padding: 10px 14px; background: var(--cl-surface-2); border-bottom: 1px solid var(--cl-border); color: var(--cl-text-3); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .cl-list-table thead th.num { text-align: right; }
 .cl-list-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* antet de coloană cu iconiță (ex. „Scor" + strategia măsurată) */
+.psi-th-ic { display: inline-flex; align-items: center; gap: 5px; }
 .cl-list-table tbody tr { border-bottom: 1px solid var(--cl-border); cursor: pointer; }
 .cl-list-table tbody tr:hover { background: var(--cl-surface-2); }
 .cl-list-table tbody tr:last-child { border-bottom: 0; }

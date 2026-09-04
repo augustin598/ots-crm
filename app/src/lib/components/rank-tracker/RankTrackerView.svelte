@@ -228,7 +228,10 @@
 <div class="cl-wrap" data-screen-label="Rank Tracker">
 	<div class="cl-hero">
 		<div>
-			<h1>Rank Tracker</h1>
+			<div class="psi-title">
+				<h1>Rank Tracker</h1>
+				<span class="psi-tag info">Beta</span>
+			</div>
 			<p>
 				<strong>{totals.keywordCount}</strong> cuvinte cheie pe <strong>{totals.projectCount}</strong>
 				{totals.projectCount === 1 ? 'proiect' : 'proiecte'} · rulare zilnică
