@@ -6,7 +6,7 @@ import { and, eq, isNotNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { logError, logInfo, serializeError } from '$lib/server/logger';
+import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { isoWeekKey, scheduledRunForWeek } from '$lib/logic/pagespeed';
 import { runPagespeedScan, type ScanSummary } from '$lib/server/pagespeed/scan';
 import {
@@ -15,6 +15,9 @@ import {
 } from '$lib/server/pagespeed/report';
 
 const BUCHAREST_TZ = 'Europe/Bucharest';
+
+/** Peste atât, o rezervare „running" e considerată abandonată și se preia. */
+const STALE_CLAIM_MS = 30 * 60 * 1000;
 
 function bucharestNow(d: Date): { dayOfWeek: number; hour: number } {
 	const parts = new Intl.DateTimeFormat('en-GB', {
@@ -99,7 +102,11 @@ export async function processPagespeedWeeklyReport(
 		try {
 			// idempotență: un singur raport per (tenant, săptămână)
 			const [existing] = await db
-				.select({ id: table.pagespeedReport.id })
+				.select({
+					id: table.pagespeedReport.id,
+					status: table.pagespeedReport.status,
+					createdAt: table.pagespeedReport.createdAt
+				})
 				.from(table.pagespeedReport)
 				.where(
 					and(
@@ -108,7 +115,23 @@ export async function processPagespeedWeeklyReport(
 					)
 				)
 				.limit(1);
-			if (existing) continue;
+			if (existing) {
+				// O rezervare rămasă „running" înseamnă că rularea a murit pe drum (pod
+				// rotit la deploy). Peste pragul de mai jos o preluăm, altfel săptămâna
+				// ar rămâne blocată pentru totdeauna. Pragul e mult peste durata reală a
+				// unei scanări (~7 min) și peste re-livrarea BullMQ la stall (~5 min),
+				// deci nu reintroduce dublarea emailului.
+				const ageMs = Date.now() - new Date(existing.createdAt).getTime();
+				const abandonat = existing.status === 'running' && ageMs > STALE_CLAIM_MS;
+				if (!abandonat) continue;
+				logWarning(
+					'scheduler',
+					`[pagespeed-weekly] preiau rezervarea abandonată (tenant ${tenantId}, ${weekKey}, vechime ${Math.round(ageMs / 60000)} min)`
+				);
+				await db
+					.delete(table.pagespeedReport)
+					.where(eq(table.pagespeedReport.id, existing.id));
+			}
 
 			// Rezervăm rândul ÎNAINTE de scanare: scanarea completă poate depăși
 			// lockDuration-ul worker-ului (5 min), caz în care BullMQ marchează jobul

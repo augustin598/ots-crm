@@ -7,6 +7,7 @@ await import('$lib/server/db/schema'); // eager-load înainte de mock (mock.modu
 const selectQueue: unknown[][] = [];
 const inserted: Record<string, unknown>[] = [];
 const updated: Record<string, unknown>[] = [];
+const deleted: boolean[] = [];
 
 const dbMock = {
 	select: () => {
@@ -31,6 +32,11 @@ const dbMock = {
 				updated.push(val);
 			}
 		})
+	}),
+	delete: () => ({
+		where: async () => {
+			deleted.push(true);
+		}
 	})
 };
 
@@ -103,6 +109,7 @@ beforeEach(() => {
 	selectQueue.length = 0;
 	inserted.length = 0;
 	updated.length = 0;
+	deleted.length = 0;
 });
 
 describe('processPagespeedWeeklyReport', () => {
@@ -117,7 +124,7 @@ describe('processPagespeedWeeklyReport', () => {
 
 	test('raport deja existent pentru (tenant, săptămână) → idempotent, skip', async () => {
 		selectQueue.push([SETTINGS]); // setările
-		selectQueue.push([{ id: 'r-existent' }]); // raportul existent
+		selectQueue.push([{ id: 'r-existent', status: 'sent', createdAt: new Date() }]); // raportul existent
 		const { deps, calls } = makeDeps();
 		await processPagespeedWeeklyReport(MONDAY_7AM, deps);
 		expect(calls.scans).toBe(0);
@@ -222,7 +229,7 @@ describe('rezervarea rândului de raport (anti-dublare la job „stalled")', () 
 
 	test('a doua livrare (după stall) vede rândul rezervat și iese fără scanare/email', async () => {
 		selectQueue.push([SETTINGS]);
-		selectQueue.push([{ id: 'r-rezervat' }]); // rândul rezervat de prima livrare
+		selectQueue.push([{ id: 'r-rezervat', status: 'running', createdAt: new Date() }]); // rezervat acum de prima livrare
 		const { deps, calls } = makeDeps();
 		await processPagespeedWeeklyReport(MONDAY_7AM, deps);
 		expect(calls.scans).toBe(0);
@@ -262,10 +269,47 @@ describe('recuperare (ora programată ratată)', () => {
 
 	test('recuperarea nu dublează: raportul săptămânii există deja', async () => {
 		selectQueue.push([SETTINGS]);
-		selectQueue.push([{ id: 'r-existent' }]);
+		selectQueue.push([{ id: 'r-existent', status: 'sent', createdAt: new Date() }]);
 		const { deps, calls } = makeDeps();
 		await processPagespeedWeeklyReport(new Date('2026-09-03T09:00:00Z'), deps);
 		expect(calls.scans).toBe(0);
 		expect(calls.emails.length).toBe(0);
+	});
+});
+
+describe('rezervare abandonată (pod rotit în timpul scanării)', () => {
+	test('„running" mai vechi de 30 min → se preia și se rulează din nou', async () => {
+		selectQueue.push([SETTINGS]);
+		selectQueue.push([
+			{ id: 'r-mort', status: 'running', createdAt: new Date(Date.now() - 45 * 60 * 1000) }
+		]);
+		selectQueue.push([{ isEnabled: true }]); // emailSettings
+		const { deps, calls } = makeDeps();
+		await processPagespeedWeeklyReport(MONDAY_7AM, deps);
+		expect(deleted.length).toBe(1); // rezervarea moartă e înlăturată
+		expect(calls.scans).toBe(1);
+		expect(calls.emails.length).toBe(1);
+	});
+
+	test('„running" recent (5 min) → NU se preia, rularea în curs e lăsată în pace', async () => {
+		selectQueue.push([SETTINGS]);
+		selectQueue.push([
+			{ id: 'r-viu', status: 'running', createdAt: new Date(Date.now() - 5 * 60 * 1000) }
+		]);
+		const { deps, calls } = makeDeps();
+		await processPagespeedWeeklyReport(MONDAY_7AM, deps);
+		expect(deleted.length).toBe(0);
+		expect(calls.scans).toBe(0);
+	});
+
+	test('raport încheiat („sent"), oricât de vechi → nu se repetă săptămâna', async () => {
+		selectQueue.push([SETTINGS]);
+		selectQueue.push([
+			{ id: 'r-vechi', status: 'sent', createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000) }
+		]);
+		const { deps, calls } = makeDeps();
+		await processPagespeedWeeklyReport(MONDAY_7AM, deps);
+		expect(calls.scans).toBe(0);
+		expect(deleted.length).toBe(0);
 	});
 });
