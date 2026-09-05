@@ -200,3 +200,14 @@ describe('fetchPagespeed — rețea', () => {
 		expect(calls).toBe(3);
 	});
 });
+
+describe('fonturile PDF-ului de raport', () => {
+	test('sunt găsite în layoutul de dezvoltare (probează fișierul, nu directorul)', async () => {
+		const { resolve } = await import('path');
+		const { existsSync } = await import('fs');
+		// Dockerfile copiază src/lib/server/assets → build/server/chunks/assets;
+		// testul verifică sursa, ca fonturile să nu dispară dintr-un refactor
+		const font = resolve(import.meta.dirname, '..', '..', 'assets', 'DejaVuSans-Bold.ttf');
+		expect(existsSync(font)).toBe(true);
+	});
+});

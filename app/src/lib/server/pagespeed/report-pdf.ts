@@ -6,11 +6,19 @@ import { existsSync } from 'fs';
 import { psiFmt, psiScoreLevel } from '$lib/logic/pagespeed';
 import type { PagespeedReportData } from './report';
 
+/**
+ * Fonturile DejaVu (diacritice) vin din src/lib/server/assets. Căutăm după FIȘIER,
+ * nu după director: pe producție `build/assets` există (assets SvelteKit) dar nu are
+ * fonturile — Dockerfile-ul le copiază lângă chunk-uri, în build/server/chunks/assets.
+ */
 function resolveAssetsDir(): string {
 	const dir = import.meta.dirname ?? '.';
-	const sameLevel = resolve(dir, '..', 'assets');
-	if (existsSync(sameLevel)) return sameLevel;
-	return resolve(dir, '..', '..', 'assets');
+	const candidates = [
+		resolve(dir, 'assets'), // prod: chunk-uri aplatizate, assets/ alături
+		resolve(dir, '..', 'assets'), // dev: src/lib/server/pagespeed → src/lib/server/assets
+		resolve(dir, '..', '..', 'assets')
+	];
+	return candidates.find((c) => existsSync(resolve(c, 'DejaVuSans.ttf'))) ?? candidates[0];
 }
 
 const ASSETS_DIR = resolveAssetsDir();

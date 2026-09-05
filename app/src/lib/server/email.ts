@@ -3732,12 +3732,21 @@ export async function sendPagespeedReportEmail(
 				...(brand.logoAttachment ? [brand.logoAttachment] : [])
 			];
 			if (data.attachPdf) {
-				const { generatePagespeedReportPdf } = await import('$lib/server/pagespeed/report-pdf');
-				attachments.push({
-					filename: `raport-pagespeed-${data.weekKey.toLowerCase()}.pdf`,
-					content: await generatePagespeedReportPdf(data),
-					contentType: 'application/pdf'
-				});
+				// PDF-ul e un bonus: dacă generarea pică (fonturi lipsă, disc plin),
+				// raportul pleacă tot, fără atașament — informația din email e cea utilă
+				try {
+					const { generatePagespeedReportPdf } = await import('$lib/server/pagespeed/report-pdf');
+					attachments.push({
+						filename: `raport-pagespeed-${data.weekKey.toLowerCase()}.pdf`,
+						content: await generatePagespeedReportPdf(data),
+						contentType: 'application/pdf'
+					});
+				} catch (pdfError) {
+					logWarning('email', 'PDF-ul raportului PageSpeed nu a putut fi generat — trimit fără atașament', {
+						tenantId,
+						metadata: { weekKey: data.weekKey, error: serializeError(pdfError).message }
+					});
+				}
 			}
 
 			return {
