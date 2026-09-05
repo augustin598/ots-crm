@@ -20,6 +20,7 @@ import { logError, logInfo, logWarning } from '$lib/server/logger';
 import { mapInvoiceToKeez } from './mapper';
 import { createKeezClientForTenant } from './factory';
 import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
+import { resolveKeezInvoiceStatus } from './invoice-status';
 
 function generateSyncId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -519,27 +520,30 @@ export async function pushInvoiceToKeez(
 		const keezStatus = keezInvoiceHeader?.status || keezInvoiceData?.status;
 		if (keezStatus) updateData.keezStatus = keezStatus;
 
-		if (keezStatus === 'Cancelled') {
-			updateData.status = 'cancelled';
-		} else if (keezStatus === 'Draft') {
-			updateData.status = 'draft';
-		} else if (keezStatus === 'Valid') {
-			if (keezInvoiceHeader?.remainingAmount !== undefined) {
-				const remainingAmountCents = Math.round(keezInvoiceHeader.remainingAmount * 100);
-				updateData.remainingAmount = remainingAmountCents;
-				const invoiceTotal = invoice.totalAmount || 0;
-				if (remainingAmountCents === 0) {
-					updateData.status = 'paid';
-					if (!invoice.paidDate) updateData.paidDate = new Date();
-				} else if (remainingAmountCents > 0 && remainingAmountCents < invoiceTotal) {
-					updateData.status = 'partially_paid';
-				} else if (remainingAmountCents > 0) {
-					const dueDate = parsedDueDate || invoice.dueDate;
-					if (dueDate && dueDate < new Date()) updateData.status = 'overdue';
-					else updateData.status = 'sent';
-				}
-			} else {
-				updateData.status = 'sent';
+		// Încasările marcate în CRM nu ajung în Keez (vezi `invoice-status.ts`):
+		// un rest de încasat integral nu retrogradează o factură deja achitată.
+		if (keezStatus === 'Cancelled' || keezStatus === 'Draft' || keezStatus === 'Valid') {
+			const resolvedStatus = resolveKeezInvoiceStatus({
+				keezStatus,
+				remainingAmount: keezInvoiceHeader?.remainingAmount,
+				totalAmount: invoice.totalAmount || 0,
+				dueDate: parsedDueDate || invoice.dueDate,
+				existing: invoice,
+				fallbackStatus: invoice.status as any
+			});
+			updateData.status = resolvedStatus.status;
+			if (resolvedStatus.remainingAmountCents !== null) {
+				updateData.remainingAmount = resolvedStatus.remainingAmountCents;
+			}
+			if (resolvedStatus.status === 'paid' && !invoice.paidDate) {
+				updateData.paidDate = new Date();
+			}
+			if (resolvedStatus.keptLocalPayment) {
+				logWarning(
+					'keez',
+					`Factura ${invoice.invoiceNumber} e achitată în CRM, dar Keez are încă rest de încasat — încasarea trebuie înregistrată manual în Keez`,
+					{ tenantId, metadata: { invoiceId: invoice.id, remainingAmount: keezInvoiceHeader?.remainingAmount } }
+				);
 			}
 		}
 

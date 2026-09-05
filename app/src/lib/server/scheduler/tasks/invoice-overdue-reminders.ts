@@ -137,6 +137,19 @@ export async function processInvoiceOverdueReminders(params: Record<string, any>
 							eq(table.invoice.tenantId, settings.tenantId),
 							eq(table.invoice.keezStatus, 'Valid'),
 							notInArray(table.invoice.status, ['paid', 'partially_paid', 'cancelled']),
+							// DUAL-PAID GUARD: o factură cu încasare DOVEDITĂ în CRM (referință
+							// de plată: PaymentIntent Stripe / nr. OP / chitanță) nu mai primește
+							// somații, chiar dacă statusul a rămas `overdue` — cazul facturii
+							// achitate cu cardul, unde Keez nu are înregistrată încasarea.
+							// Nu blocăm pe simplul `paidDate`: unul rămas din greșeală ar tăcea
+							// somațiile pentru totdeauna (statusul `paid` e deja exclus mai sus).
+							or(
+								isNull(table.invoice.paidDate),
+								and(
+									isNull(table.invoice.stripePaymentIntentId),
+									isNull(table.invoice.externalTransactionId)
+								)
+							),
 							lt(table.invoice.dueDate, now),
 							lte(table.invoice.overdueReminderCount, maxCount - 1),
 							or(eq(table.invoice.isCreditNote, false), isNull(table.invoice.isCreditNote)),

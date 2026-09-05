@@ -6,6 +6,7 @@ import type {
 	InvoiceSettings
 } from '$lib/server/db/schema';
 import * as table from '$lib/server/db/schema';
+import { resolveKeezInvoiceStatus } from './invoice-status';
 import { db } from '$lib/server/db';
 import { eq, and, or } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
@@ -924,51 +925,19 @@ export function mapKeezInvoiceToCRM(
 		logWarning('keez', `Mapper could not parse dueDate`, { metadata: { source: dueDateSource, type: typeof dueDateSource } });
 	}
 
-	// Determine status based on Keez status + remainingAmount
+	// Determine status based on Keez status + remainingAmount.
+	// Import inițial: nu există factură în CRM, deci nici încasare locală de
+	// protejat — logica e aceeași ca la sync (vezi `invoice-status.ts`).
 	const keezStatus = keezHeader.status || keezInvoice.status;
-	let invoiceStatus: 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' = 'sent';
-	let remainingAmountCents: number | null = null;
-
-	if (keezStatus === 'Cancelled') {
-		invoiceStatus = 'cancelled';
-	} else if (keezStatus === 'Draft') {
-		// Proforma — keep as draft, do NOT mark as paid
-		invoiceStatus = 'draft';
-	} else if (keezStatus === 'Valid') {
-		// Validated fiscal invoice — check remainingAmount for payment status
-		if (keezHeader.remainingAmount !== undefined) {
-			remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
-			if (remainingAmountCents === 0) {
-				invoiceStatus = 'paid';
-			} else if (remainingAmountCents > 0 && remainingAmountCents < totalAmount) {
-				invoiceStatus = 'partially_paid';
-			} else if (remainingAmountCents > 0) {
-				if (dueDate && dueDate < new Date()) {
-					invoiceStatus = 'overdue';
-				} else {
-					invoiceStatus = 'sent';
-				}
-			}
-		} else {
-			invoiceStatus = 'sent';
-		}
-	} else {
-		// Unknown status — fallback
-		if (keezHeader.remainingAmount !== undefined) {
-			remainingAmountCents = Math.round(keezHeader.remainingAmount * 100);
-			if (remainingAmountCents === 0 && keezStatus) {
-				invoiceStatus = 'paid';
-			} else if (remainingAmountCents > 0 && remainingAmountCents < totalAmount) {
-				invoiceStatus = 'partially_paid';
-			} else if (remainingAmountCents > 0) {
-				if (dueDate && dueDate < new Date()) {
-					invoiceStatus = 'overdue';
-				} else {
-					invoiceStatus = 'sent';
-				}
-			}
-		}
-	}
+	const resolvedStatus = resolveKeezInvoiceStatus({
+		keezStatus,
+		remainingAmount: keezHeader.remainingAmount,
+		totalAmount,
+		dueDate,
+		fallbackStatus: 'sent'
+	});
+	const invoiceStatus = resolvedStatus.status;
+	const remainingAmountCents = resolvedStatus.remainingAmountCents;
 
 	return {
 		tenantId,

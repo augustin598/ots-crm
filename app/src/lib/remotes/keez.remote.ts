@@ -5,6 +5,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { KeezClient, type KeezPartner } from '$lib/server/plugins/keez/client';
+import { resolveKeezInvoiceStatus } from '$lib/server/plugins/keez/invoice-status';
 import { encrypt, decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/keez/crypto';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from '$lib/server/plugins/keez/factory';
 import { syncKeezInvoicesForTenant, KeezSyncAbortedError } from '$lib/server/plugins/keez/sync';
@@ -703,38 +704,32 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 
 	// Update status based on Keez status + remainingAmount
 	const keezStatus = keezInvoiceHeader?.status || keezInvoiceData?.status;
-	if (keezStatus) {
+	if (keezStatus === 'Cancelled' || keezStatus === 'Draft' || keezStatus === 'Valid') {
 		updateData.keezStatus = keezStatus;
 	}
 
-	if (keezStatus === 'Cancelled') {
-		updateData.status = 'cancelled';
-	} else if (keezStatus === 'Draft') {
-		// Proforma — keep as draft, do NOT mark as paid even if remainingAmount is 0
-		updateData.status = 'draft';
-	} else if (keezStatus === 'Valid') {
-		// Validated fiscal invoice — check remainingAmount for payment status
-		if (keezInvoiceHeader?.remainingAmount !== undefined) {
-			const remainingAmountCents = Math.round(keezInvoiceHeader.remainingAmount * 100);
-			updateData.remainingAmount = remainingAmountCents;
-			const invoiceTotal = invoice.totalAmount || 0;
-			if (remainingAmountCents === 0) {
-				updateData.status = 'paid';
-				if (!invoice.paidDate) {
-					updateData.paidDate = new Date();
-				}
-			} else if (remainingAmountCents > 0 && remainingAmountCents < invoiceTotal) {
-				updateData.status = 'partially_paid';
-			} else if (remainingAmountCents > 0) {
-				const dueDate = parsedDueDate || invoice.dueDate;
-				if (dueDate && dueDate < new Date()) {
-					updateData.status = 'overdue';
-				} else {
-					updateData.status = 'sent';
-				}
-			}
-		} else {
-			updateData.status = 'sent';
+	// Încasările marcate în CRM nu ajung în Keez (vezi `invoice-status.ts`):
+	// un rest de încasat integral nu retrogradează o factură deja achitată.
+	if (keezStatus) {
+		const resolvedStatus = resolveKeezInvoiceStatus({
+			keezStatus,
+			remainingAmount: keezInvoiceHeader?.remainingAmount,
+			totalAmount: invoice.totalAmount || 0,
+			dueDate: parsedDueDate || invoice.dueDate,
+			existing: invoice,
+			fallbackStatus: invoice.status as any
+		});
+		updateData.status = resolvedStatus.status;
+		if (resolvedStatus.remainingAmountCents !== null) {
+			updateData.remainingAmount = resolvedStatus.remainingAmountCents;
+		}
+		if (resolvedStatus.status === 'paid' && !invoice.paidDate) {
+			updateData.paidDate = new Date();
+		}
+		if (resolvedStatus.keptLocalPayment) {
+			console.warn(
+				`[Keez] Factura ${invoice.invoiceNumber} e achitată în CRM, dar Keez are încă rest de încasat — încasarea trebuie înregistrată manual în Keez`
+			);
 		}
 	}
 

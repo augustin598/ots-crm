@@ -11,6 +11,7 @@ import { clearNotificationsByType } from '$lib/server/notifications';
 import { classifyKeezError } from './error-classification';
 import { reconcileMissingKeezInvoices } from './sync-reconcile';
 import { withTursoBusyRetry } from './db-retry';
+import { hasPaymentReference, resolveKeezInvoiceStatus } from './invoice-status';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -111,6 +112,20 @@ export function headerMatchesExisting(
 	// Remaining amount in cents
 	const headerRemainingCents = Math.round((header.remainingAmount ?? 0) * 100);
 	if (headerRemainingCents !== (existing.remainingAmount ?? 0)) return false;
+
+	// Drift de încasare: factura are referință de plată în CRM (card/OP/cash), dar
+	// statusul a rămas retrogradat de un sync anterior. Nimic din header nu se
+	// schimbă (Keez nu știe de încasare), deci fără această verificare smart-sync-ul
+	// ar sări la infinit peste rândul de reparat. Doar pe documente `Valid`:
+	// acolo `resolveKeezInvoiceStatus` chiar poate reveni la `paid`, deci runda
+	// următoare converge (altfel am reciti la nesfârșit același rând).
+	if (
+		existing.status !== 'paid' &&
+		(header.status ?? '').trim() === 'Valid' &&
+		hasPaymentReference(existing)
+	) {
+		return false;
+	}
 
 	// Due date — both sides parsed to a ms timestamp (or null). Strict equality.
 	const headerDue = parseKeezDate(header.dueDate);
@@ -298,45 +313,35 @@ async function _syncKeezInvoicesForTenantInner(
 				const parsedIssueDate = parseKeezDate(issueDateSource);
 				const parsedDueDate = parseKeezDate(invoiceHeader.dueDate || keezInvoice.dueDate);
 
-				// Determine status based on Keez status + remainingAmount
+				// Determine status based on Keez status + remainingAmount.
+				// Încasările marcate în CRM (card/OP/cash) nu ajung în Keez, deci
+				// `remainingAmount` integral NU retrogradează o factură achitată —
+				// vezi `invoice-status.ts`.
 				const keezStatus = invoiceHeader.status || keezInvoice.status;
-				let invoiceStatus: 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' =
-					existing.status as any;
-				let remainingCents: number | null = null;
+				const resolvedStatus = resolveKeezInvoiceStatus({
+					keezStatus,
+					remainingAmount: invoiceHeader.remainingAmount,
+					totalAmount: existing.totalAmount || 0,
+					dueDate: parsedDueDate || existing.dueDate,
+					existing,
+					fallbackStatus: existing.status as any
+				});
+				const invoiceStatus = resolvedStatus.status;
+				const remainingCents = resolvedStatus.remainingAmountCents;
 
-				if (keezStatus === 'Cancelled') {
-					invoiceStatus = 'cancelled';
-				} else if (keezStatus === 'Draft') {
-					// Proforma — keep as draft, do NOT mark as paid
-					invoiceStatus = 'draft';
-				} else if (keezStatus === 'Valid') {
-					// Validated fiscal invoice — check remainingAmount
-					if (invoiceHeader.remainingAmount !== undefined) {
-						remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
-						const existingTotal = existing.totalAmount || 0;
-						if (remainingCents === 0) {
-							invoiceStatus = 'paid';
-						} else if (remainingCents > 0 && remainingCents < existingTotal) {
-							invoiceStatus = 'partially_paid';
-						} else if (remainingCents > 0) {
-							const dueDate = parsedDueDate || existing.dueDate;
-							invoiceStatus = dueDate && dueDate < new Date() ? 'overdue' : 'sent';
+				if (resolvedStatus.keptLocalPayment) {
+					logWarning(
+						'keez',
+						`Factura ${existing.invoiceNumber} e achitată în CRM, dar Keez are încă rest de încasat — încasarea trebuie înregistrată manual în Keez`,
+						{
+							tenantId,
+							metadata: {
+								invoiceId: existing.id,
+								keezExternalId: invoiceHeader.externalId,
+								remainingAmount: invoiceHeader.remainingAmount
+							}
 						}
-					} else {
-						invoiceStatus = 'sent';
-					}
-				} else if (invoiceHeader.remainingAmount !== undefined) {
-					// Fallback for unknown status
-					remainingCents = Math.round(invoiceHeader.remainingAmount * 100);
-					const existingTotal = existing.totalAmount || 0;
-					if (remainingCents === 0 && keezStatus) {
-						invoiceStatus = 'paid';
-					} else if (remainingCents > 0 && remainingCents < existingTotal) {
-						invoiceStatus = 'partially_paid';
-					} else if (remainingCents > 0) {
-						const dueDate = parsedDueDate || existing.dueDate;
-						invoiceStatus = dueDate && dueDate < new Date() ? 'overdue' : 'sent';
-					}
+					);
 				}
 
 				// Calculate totals from Keez — try detail lines first, then invoice-level, then header

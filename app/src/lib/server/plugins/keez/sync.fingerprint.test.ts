@@ -48,6 +48,34 @@ describe('headerMatchesExisting', () => {
 		expect(headerMatchesExisting(baseHeader, baseExisting as any)).toBe(true);
 	});
 
+	// Bug OTSH 8 (2026-09-05): plata cu cardul e doar în CRM, headerul Keez nu se
+	// mișcă → fără verificarea de drift, rândul retrogradat nu s-ar repara.
+	it('returns false when the CRM has a collection but the status was downgraded', () => {
+		const existing = {
+			...baseExisting,
+			remainingAmount: 12000,
+			status: 'overdue',
+			paidDate: new Date('2026-08-31T00:30:00.000Z'),
+			stripePaymentIntentId: 'pi_123',
+			externalTransactionId: 'pi_123'
+		};
+		const header = { ...baseHeader, remainingAmount: 120 };
+		expect(headerMatchesExisting(header, existing as any)).toBe(false);
+	});
+
+	it('returns true once the drifted invoice is back on paid', () => {
+		const existing = {
+			...baseExisting,
+			remainingAmount: 12000,
+			status: 'paid',
+			paidDate: new Date('2026-08-31T00:30:00.000Z'),
+			stripePaymentIntentId: 'pi_123',
+			externalTransactionId: 'pi_123'
+		};
+		const header = { ...baseHeader, remainingAmount: 120 };
+		expect(headerMatchesExisting(header, existing as any)).toBe(true);
+	});
+
 	it('returns false when status differs', () => {
 		const header = { ...baseHeader, status: 'Cancelled' };
 		expect(headerMatchesExisting(header, baseExisting as any)).toBe(false);
