@@ -11,6 +11,7 @@ import {
 	isoWeekInterval,
 	cwvPass,
 	nextRunDate,
+	scheduledRunForWeek,
 	PSI_DAYS,
 	PSI_HOURS
 } from '../pagespeed';
@@ -140,5 +141,25 @@ describe('constante UI', () => {
 		expect(PSI_THRESHOLDS.lcp.good).toBe(2500);
 		expect(PSI_THRESHOLDS.inp.good).toBe(200);
 		expect(PSI_THRESHOLDS.cls.ni).toBe(0.25);
+	});
+});
+
+describe('scheduledRunForWeek — momentul programat al săptămânii (pentru catch-up)', () => {
+	test('luni 07:00 în 2026-W36 = 31 aug. 2026, 04:00 UTC (EEST = UTC+3)', () => {
+		expect(scheduledRunForWeek('2026-W36', 1, '07:00').toISOString()).toBe(
+			'2026-08-31T04:00:00.000Z'
+		);
+	});
+
+	test('vineri 18:00 în aceeași săptămână = 4 sept. 2026', () => {
+		expect(scheduledRunForWeek('2026-W36', 5, '18:00').toISOString()).toBe(
+			'2026-09-04T15:00:00.000Z'
+		);
+	});
+
+	test('iarna (EET = UTC+2): luni 07:00 în 2026-W03', () => {
+		expect(scheduledRunForWeek('2026-W03', 1, '07:00').toISOString()).toBe(
+			'2026-01-12T05:00:00.000Z'
+		);
 	});
 });

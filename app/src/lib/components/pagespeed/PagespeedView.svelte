@@ -704,7 +704,8 @@
 								{#if rp.alertCount}<span class="psi-tag danger">{rp.alertCount}</span>{:else}<span class="iv-muted-cell">0</span>{/if}
 							</td>
 							<td>
-								{#if rp.status === 'sent'}<span class="psi-tag ok">trimis</span>
+								{#if rp.status === 'running'}<span class="psi-tag info">în curs</span>
+								{:else if rp.status === 'sent'}<span class="psi-tag ok">trimis</span>
 								{:else if rp.status === 'partial'}<span class="psi-tag warn">parțial</span>
 								{:else if rp.status === 'skipped'}<span class="psi-tag">sărit</span>
 								{:else}<span class="psi-tag danger">eșuat</span>{/if}

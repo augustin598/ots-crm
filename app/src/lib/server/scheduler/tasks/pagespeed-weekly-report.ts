@@ -7,7 +7,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { logError, logInfo, serializeError } from '$lib/server/logger';
-import { isoWeekKey } from '$lib/logic/pagespeed';
+import { isoWeekKey, scheduledRunForWeek } from '$lib/logic/pagespeed';
 import { runPagespeedScan, type ScanSummary } from '$lib/server/pagespeed/scan';
 import {
 	buildPagespeedReportData,
@@ -88,10 +88,14 @@ export async function processPagespeedWeeklyReport(
 
 	for (const settings of allSettings) {
 		result.checked++;
-		const scheduledHour = Number(String(settings.hour).split(':')[0]);
-		if (settings.dayOfWeek !== cal.dayOfWeek || scheduledHour !== cal.hour) continue;
+		// Recuperare, nu potrivire exactă: rulăm dacă momentul programat al săptămânii
+		// a trecut și nu există încă raport. Compararea strictă „zi ȘI oră" pierdea
+		// toată săptămâna dacă exact acel ceas era ratat (deploy, pod restartat).
+		const scheduledAt = scheduledRunForWeek(weekKey, settings.dayOfWeek, String(settings.hour));
+		if (now < scheduledAt) continue;
 
 		const tenantId = settings.tenantId;
+		let claimedReportId: string | null = null;
 		try {
 			// idempotență: un singur raport per (tenant, săptămână)
 			const [existing] = await db
@@ -105,6 +109,29 @@ export async function processPagespeedWeeklyReport(
 				)
 				.limit(1);
 			if (existing) continue;
+
+			// Rezervăm rândul ÎNAINTE de scanare: scanarea completă poate depăși
+			// lockDuration-ul worker-ului (5 min), caz în care BullMQ marchează jobul
+			// „stalled" și îl re-livrează. Fără rezervare, a doua livrare ar rescana și
+			// ar trimite un al doilea email (cu date parțiale). Indexul unic
+			// (tenant_id, week_key) face din acest rând lacătul real.
+			const reportId = generateId();
+			claimedReportId = reportId;
+			await db.insert(table.pagespeedReport).values({
+				id: reportId,
+				tenantId,
+				weekKey,
+				sentAt: null,
+				siteCount: 0,
+				avgMobile: null,
+				avgDesktop: null,
+				deltaMobile: null,
+				alertCount: 0,
+				status: 'running',
+				note: 'scanare în curs',
+				recipients: [],
+				createdAt: new Date()
+			});
 
 			const [emailConfig] = await db
 				.select({ isEnabled: table.emailSettings.isEnabled })
@@ -159,21 +186,20 @@ export async function processPagespeedWeeklyReport(
 				else if (notes.length > 0) status = 'partial';
 			}
 
-			await db.insert(table.pagespeedReport).values({
-				id: generateId(),
-				tenantId,
-				weekKey,
-				sentAt,
-				siteCount: data.siteCount,
-				avgMobile: data.avgMobile,
-				avgDesktop: data.avgDesktop,
-				deltaMobile: data.deltaMobile,
-				alertCount: data.alertCount,
-				status,
-				note: notes.length ? notes.join(' · ') : null,
-				recipients,
-				createdAt: new Date()
-			});
+			await db
+				.update(table.pagespeedReport)
+				.set({
+					sentAt,
+					siteCount: data.siteCount,
+					avgMobile: data.avgMobile,
+					avgDesktop: data.avgDesktop,
+					deltaMobile: data.deltaMobile,
+					alertCount: data.alertCount,
+					status,
+					note: notes.length ? notes.join(' · ') : null,
+					recipients
+				})
+				.where(eq(table.pagespeedReport.id, reportId));
 			result.processed++;
 			logInfo(
 				'scheduler',
@@ -183,6 +209,15 @@ export async function processPagespeedWeeklyReport(
 			result.errors++;
 			const { message } = serializeError(error);
 			logError('scheduler', `[pagespeed-weekly] tenant ${tenantId} a eșuat: ${message}`);
+			// rândul rezervat nu rămâne pe „running": îl marcăm eșuat, ca să fie vizibil
+			// în „Rapoarte trimise" și retrimiterea manuală să fie o decizie conștientă
+			if (claimedReportId) {
+				await db
+					.update(table.pagespeedReport)
+					.set({ status: 'failed', note: `eroare: ${message}`.slice(0, 500) })
+					.where(eq(table.pagespeedReport.id, claimedReportId))
+					.catch(() => {});
+			}
 		}
 	}
 

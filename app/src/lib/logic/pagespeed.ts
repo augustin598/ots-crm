@@ -156,6 +156,25 @@ function bucharestWallToUtc(y: number, m: number, d: number, hh: number, mm: num
 }
 
 /**
+ * Momentul programat (instant UTC) pentru săptămâna ISO dată — ex. „lunea din
+ * 2026-W36, ora 07:00 București". Jobul orar îl compară cu `now`: dacă momentul
+ * a trecut și încă nu există raport pe săptămâna aceea, rulează în recuperare
+ * (altfel un singur ceas ratat — deploy, pod restartat — pierdea toată săptămâna).
+ */
+export function scheduledRunForWeek(weekKey: string, dayOfWeek: number, hour: string): Date {
+	const [hh, mm] = hour.split(':').map(Number);
+	const monday = isoWeekMonday(weekKey);
+	const day = new Date(monday.getTime() + (dayOfWeek - 1) * 86400000);
+	return bucharestWallToUtc(
+		day.getUTCFullYear(),
+		day.getUTCMonth() + 1,
+		day.getUTCDate(),
+		hh,
+		mm
+	);
+}
+
+/**
  * Următoarea rulare programată (instant UTC) pentru ziua săptămânii (1=Luni…7=Duminică)
  * și ora „HH:MM", interpretate în Europe/Bucharest. Dacă momentul de azi a trecut,
  * întoarce săptămâna următoare.

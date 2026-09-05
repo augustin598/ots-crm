@@ -6546,7 +6546,8 @@ export const pagespeedReport = sqliteTable(
 		avgDesktop: integer('avg_desktop'),
 		deltaMobile: integer('delta_mobile'),
 		alertCount: integer('alert_count').notNull().default(0),
-		status: text('status', { enum: ['sent', 'partial', 'skipped', 'failed'] })
+		// 'running' = rând rezervat de jobul săptămânal înainte de scanare (lacăt anti-dublare)
+		status: text('status', { enum: ['running', 'sent', 'partial', 'skipped', 'failed'] })
 			.notNull()
 			.default('sent'),
 		note: text('note'),
