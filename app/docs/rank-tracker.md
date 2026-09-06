@@ -90,6 +90,30 @@ blocat; îl folosim ca martor pentru cât de mult ne putem baza pe poziția scra
   sunt definiți pe `.cl-wrap` și nu cascadează la frați.
 - Breadcrumbul vine din layout-ul `[tenant]`; designul are `cl-crumbs`, noi NU (ar fi dublat).
 
+### Pagina din portalul clientului (6 sep. 2026)
+
+`RankClientView` urmează structura paginii soră `PagespeedClientView`, ca cele două module SEO
+din portal să arate identic: hero → 5 KPI-uri → **Distribuția pozițiilor** (rând întreg, imediat
+sub carduri) → tabelul „Site-urile tale" → graficul pe 30 de zile. Ce s-a reparat:
+
+- KPI-urile foloseau `cl-kpi` fără containerul de icon și cu valoarea înaintea etichetei — `.cl-kpi`
+  e `display: flex`, deci ieșea „2 PROIECTE" pe un rând; iar `.cl-kpis` are 5 coloane implicit, așa
+  că 3 carduri lăsau două coloane goale. Acum: icon + `lbl`/`val`/`sub`, 5 carduri, subtitluri scurte
+  (`.cl-kpi-sub` are `line-clamp: 2` și tăia textele lungi).
+- `data.trend` și `data.lastRunAt` erau ignorate: pagina nu avea grafic și nu spunea cât de proaspete
+  sunt datele. Graficul primește `height={170}`, nu 240 — SVG-ul are `viewBox` 680 și se scalează cu
+  lățimea, deci pe toată lățimea 240 randa 380px.
+- Coloane: `Cuvinte · Top 5 · Top 10 · Top {depth} · Vizibilitate (bară + Δ 7 zile) · Poz. medie ·
+  Verificat`. Pragurile vin din `positionCounts()` (`$lib/logic/rank-tracker.ts`) — cumulative și
+  inclusive; „top 5" NU se poate deduce din `distribution` (bucketele sunt 1–3, 4–10, …). A treia
+  coloană e adâncimea reală căutată, nu 20/100. Coloana „Distribuție" a fost scoasă din tabel:
+  repeta informația din coloanele de praguri și din secțiunea dedicată, iar tabelul cerea 1241px
+  într-un container de 1126px, deci ultima coloană ieșea din zona vizibilă.
+- Proiectele sunt sortate după vizibilitate (desc) și filtrate `active && !paused`, exact ca
+  `activeRows` din read model — altfel KPI-urile nu ar fi fost suma rândurilor din tabel.
+- `totals.counts` / `totals.avgPosition` (ponderată pe cuvinte clasate) și `lastRunAt` sunt calculate
+  în `buildRankProjects`, deci hub-ul admin le poate folosi fără recalculare în componentă.
+
 ### Poziția afișată vs. măsurătoarea zilei (6 sep. 2026)
 
 - **`position` = poziția „curentă", `measuredPosition` = ce a găsit scanarea de azi.** Când scanarea de azi

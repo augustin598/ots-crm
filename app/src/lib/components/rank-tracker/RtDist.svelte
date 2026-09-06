@@ -12,10 +12,18 @@
 
 	const n = $derived(total || RT_BUCKETS.reduce((a, k) => a + (buckets[k] ?? 0), 0) || 1);
 	const shown = $derived(rtBucketsFor(depth));
+	// Bara e singurul conținut al unei celule de tabel: fără etichetă, un cititor de
+	// ecran nu anunță nimic acolo.
+	const summary = $derived(
+		shown
+			.filter((k) => (buckets[k] ?? 0) > 0)
+			.map((k) => `${rtBucketLabel(k, depth)}: ${buckets[k]}`)
+			.join(', ') || 'fără date'
+	);
 </script>
 
 <div>
-	<div class="rt-dist">
+	<div class="rt-dist" role="img" aria-label="Distribuția pozițiilor — {summary}">
 		{#each RT_BUCKETS as k (k)}
 			{#if (buckets[k] ?? 0) > 0}
 				<i

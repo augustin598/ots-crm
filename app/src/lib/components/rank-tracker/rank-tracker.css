@@ -146,6 +146,11 @@
 .cl-wrap .psi-drawer:focus-visible,
 .cl-wrap .psi-modal:focus-visible { outline: none; }
 .rt-table-scroll .cl-list-table { min-width: 1240px; }
+/* tabelul din portal are 8 coloane, nu 16: 1240px l-ar întinde inutil, iar paddingul
+   implicit de 14px împingea ultima coloană în afara zonei vizibile pe 1440px */
+.rt-client-table .cl-list-table { min-width: 880px; }
+.rt-client-table .cl-list-table th,
+.rt-client-table .cl-list-table td { padding-left: 12px; padding-right: 12px; }
 /* Reset-ul global al aplicației scoate aspectul nativ al input-urilor, așa că un
    `accent-color` singur lăsa un pătrat negru plin. Desenăm bifa explicit, în stilul
    celorlalte controale (`psi-seg-box`): chenar subțire, colț rotunjit, accent la bifare. */

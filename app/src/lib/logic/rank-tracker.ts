@@ -187,6 +187,36 @@ export function distribution(positions: (number | null)[]): Record<RankBucket, n
 	return dist;
 }
 
+export interface RankPositionCounts {
+	/** Câte cuvinte au o poziție (non-null), oriunde în adâncimea căutată. */
+	ranked: number;
+	top3: number;
+	top5: number;
+	top10: number;
+	top20: number;
+}
+
+/**
+ * Câte cuvinte stau în primele 3 / 5 / 10 / 20 rezultate. Praguri INCLUSIVE și
+ * CUMULATIVE: un cuvânt pe locul 2 se numără în toate patru. Neclasatele (`null`)
+ * nu intră nici în `ranked`.
+ *
+ * Există ca funcție pură, nu derivat din `distribution()`: bucketele sunt 1–3, 4–10,
+ * … deci „top 5" nu se poate obține din ele.
+ */
+export function positionCounts(positions: (number | null)[]): RankPositionCounts {
+	const out: RankPositionCounts = { ranked: 0, top3: 0, top5: 0, top10: 0, top20: 0 };
+	for (const p of positions) {
+		if (p == null) continue;
+		out.ranked++;
+		if (p <= 3) out.top3++;
+		if (p <= 5) out.top5++;
+		if (p <= 10) out.top10++;
+		if (p <= 20) out.top20++;
+	}
+	return out;
+}
+
 /** Cea mai bună poziție (minimul valorilor non-null) sau null dacă nu există. */
 export function bestPosition(positions: (number | null)[]): number | null {
 	let best: number | null = null;

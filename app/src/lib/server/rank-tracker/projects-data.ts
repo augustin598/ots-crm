@@ -15,7 +15,9 @@ import {
 	rankDayKey,
 	normalizeTopResults,
 	effectivePosition,
+	positionCounts,
 	type PositionDeltaKind,
+	type RankPositionCounts,
 	type RankBucket,
 	type RankSerpResult
 } from '$lib/logic/rank-tracker';
@@ -35,6 +37,12 @@ export interface RankProjectListRow {
 	visibility: number;
 	deltaVisibility: number | null;
 	distribution: Record<RankBucket, number>;
+	/**
+	 * Câte cuvinte stau în primele 3/5/10/20 (praguri cumulative) plus câte au vreo
+	 * poziție. `distribution` nu le poate înlocui: bucketele sunt 1–3, 4–10, … deci
+	 * „top 5" nu se poate deduce din ele.
+	 */
+	counts: RankPositionCounts;
 	lastRunAt: string | null;
 	lastRunStatus: string | null;
 	/**
@@ -56,7 +64,13 @@ export interface RankProjectsData {
 		keywordCount: number;
 		avgVisibility: number;
 		alertsLast7d: number;
+		/** Poziția medie a portofoliului activ, ponderată pe numărul de cuvinte. */
+		avgPosition: number | null;
+		/** Însumate pe proiectele active — pentru KPI-urile din portal și hub. */
+		counts: RankPositionCounts;
 	};
+	/** Cea mai recentă rulare din toate proiectele (ISO) sau null. */
+	lastRunAt: string | null;
 	/** Ultimele 30 de zile pentru graficul de portofoliu din hub (dispozitivul principal). */
 	trend: { days: string[]; visibility: (number | null)[]; avgPosition: (number | null)[] };
 	/** Câte poziții se caută efectiv — etichetele „peste N" din hub trebuie să spună adevărul. */
@@ -241,6 +255,7 @@ export async function buildRankProjects(
 		}
 		const nums = nowPositions.filter((x): x is number => x != null);
 		const vis = visibility(nowPositions);
+		const counts = positionCounts(nowPositions);
 		const thenVis = visibility(thenPositions);
 		const lastRun = lastRunByProject.get(p.id);
 		return {
@@ -253,6 +268,7 @@ export async function buildRankProjects(
 			visibility: vis,
 			deltaVisibility: nowPositions.length ? Math.round((vis - thenVis) * 10) / 10 : null,
 			distribution: dist,
+			counts,
 			lastRunAt: lastRun?.startedAt?.toISOString() ?? null,
 			lastRunStatus: lastRun?.status ?? null,
 			upToday,
@@ -268,14 +284,40 @@ export async function buildRankProjects(
 		? Math.round((activeRows.reduce((a, r) => a + r.visibility, 0) / activeRows.length) * 10) / 10
 		: 0;
 
+	// Agregatele de portofoliu, pe proiectele active: sumele de praguri și poziția medie
+	// PONDERATĂ pe numărul de cuvinte (media mediilor ar da aceeași greutate unui proiect
+	// cu 3 cuvinte și unuia cu 200).
+	const totalCounts: RankPositionCounts = { ranked: 0, top3: 0, top5: 0, top10: 0, top20: 0 };
+	let weightedPos = 0;
+	let weightedKw = 0;
+	for (const r of activeRows) {
+		totalCounts.ranked += r.counts.ranked;
+		totalCounts.top3 += r.counts.top3;
+		totalCounts.top5 += r.counts.top5;
+		totalCounts.top10 += r.counts.top10;
+		totalCounts.top20 += r.counts.top20;
+		if (r.avgPosition != null && r.counts.ranked > 0) {
+			weightedPos += r.avgPosition * r.counts.ranked;
+			weightedKw += r.counts.ranked;
+		}
+	}
+	const lastRunAtAll = rows
+		.map((r) => r.lastRunAt)
+		.filter((x): x is string => !!x)
+		.sort()
+		.at(-1) ?? null;
+
 	return {
 		projects: rows,
 		totals: {
 			projectCount: rows.filter((r) => r.active).length,
 			keywordCount: keywords.length,
 			avgVisibility: avgVis,
-			alertsLast7d: rows.reduce((a, r) => a + r.alertsLast7d, 0)
+			alertsLast7d: rows.reduce((a, r) => a + r.alertsLast7d, 0),
+			avgPosition: weightedKw ? Math.round((weightedPos / weightedKw) * 10) / 10 : null,
+			counts: totalCounts
 		},
+		lastRunAt: lastRunAtAll,
 		trend: {
 			days: trendDays,
 			visibility: trendDays.map((d) => {

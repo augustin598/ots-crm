@@ -71,7 +71,24 @@ export function rtDaysAgoLabel(daysAgo: number): string {
 	return `acum ${daysAgo} zile`;
 }
 
-/** Nivelul de culoare al pastilei de poziție. */
+/**
+ * „azi, 06:14" / „ieri, 06:14" / „acum 3 zile" — cât de proaspătă e măsurătoarea.
+ * Clientul are nevoie de vechime, nu de data completă: „6 sep. 2026, 06:14" nu-i spune
+ * dacă datele sunt de azi sau de săptămâna trecută.
+ */
+export function rtUpdatedLabel(iso: string | Date, now: Date = new Date()): string {
+	const d = iso instanceof Date ? iso : new Date(iso);
+	if (Number.isNaN(d.getTime())) return '—';
+	const hhmm = d.toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+	const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+	const daysAgo = Math.round((startOf(now) - startOf(d)) / 86400000);
+	if (daysAgo <= 0) return `azi, ${hhmm}`;
+	if (daysAgo === 1) return `ieri, ${hhmm}`;
+	if (daysAgo < 30) return `acum ${daysAgo} zile`;
+	return rtDay(d.toISOString().slice(0, 10)).short;
+}
+
+/** Nivelul de culoare al pastilei de poziție. *//** Nivelul de culoare al pastilei de poziție. */
 export function rtPosLevel(pos: number | null): 'top3' | 'top10' | 'top20' | 'low' | 'out' {
 	if (pos == null) return 'out';
 	if (pos <= 3) return 'top3';

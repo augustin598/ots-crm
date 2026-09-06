@@ -19,6 +19,7 @@ import {
 	isPlausibleHost,
 	normalizeTopResults,
 	effectivePosition,
+	positionCounts,
 	RANK_HOURS,
 	// re-exporturi din ../pagespeed (nu reimplementate)
 	isoWeekKey,
@@ -422,5 +423,35 @@ describe('effectivePosition — ultima poziție confirmată când scanarea de az
 			position: 11,
 			stale: { dayKey: '2026-09-04', daysAgo: 2 }
 		});
+	});
+});
+
+describe('positionCounts — câte cuvinte stau în top 3 / 5 / 10 / 20', () => {
+	test('praguri inclusive, cumulative (un cuvânt pe 2 intră în toate)', () => {
+		const c = positionCounts([1, 2, 3, 4, 5, 6, 10, 11, 20, 21, null]);
+		expect(c.ranked).toBe(10);
+		expect(c.top3).toBe(3);
+		expect(c.top5).toBe(5);
+		expect(c.top10).toBe(7);
+		expect(c.top20).toBe(9);
+	});
+
+	test('array gol → toate zero', () => {
+		expect(positionCounts([])).toEqual({ ranked: 0, top3: 0, top5: 0, top10: 0, top20: 0 });
+	});
+
+	test('doar neclasate → toate zero, dar lungimea nu contează', () => {
+		expect(positionCounts([null, null, null])).toEqual({
+			ranked: 0,
+			top3: 0,
+			top5: 0,
+			top10: 0,
+			top20: 0
+		});
+	});
+
+	test('pozițiile dincolo de 20 se numără doar la `ranked`', () => {
+		const c = positionCounts([25, 30, 99]);
+		expect(c).toEqual({ ranked: 3, top3: 0, top5: 0, top10: 0, top20: 0 });
 	});
 });
