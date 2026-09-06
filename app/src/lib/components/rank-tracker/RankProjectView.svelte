@@ -45,7 +45,7 @@
 
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { distribution, rankDayKey, visibility } from '$lib/logic/rank-tracker';
-	import { rtCpc, rtCpcMidMicros, rtCpcRange, rtDays, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSerpLink } from './lib';
+	import { rtCpc, rtCpcMidMicros, rtCpcRange, rtDays, rtDaysAgoLabel, rtDevicesLabel, rtLocaleLabel, rtNextRunLabel, rtNum, rtSerpLink } from './lib';
 	import {
 		getRankProjectDetail,
 		getRankRunStatus,
@@ -138,26 +138,25 @@
 	// ---- rânduri pentru dispozitivul selectat ----
 	const pRows = $derived((detail?.keywords ?? []).filter((k) => k.device === device));
 	const days = $derived(rtDays(detail?.trend.days ?? []));
+	const depth = $derived(detail?.searchDepth ?? 100);
 
 	const st = $derived.by(() => {
 		const positions = pRows.map((r) => r.position);
 		const nums = positions.filter((p): p is number => p != null);
 		const dist = distribution(positions);
-		const lastRun = detail?.runs?.[0] ?? null;
 		return {
 			vis: visibility(positions),
 			avg: nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10 : null,
 			dist,
-			up: lastRun?.up ?? 0,
-			down: lastRun?.down ?? 0,
-			// `positionDelta` întoarce `delta: null` când un cuvânt IESE din adâncimea căutată
-			// („lost"). E cel mai rău rezultat posibil, iar serverul chiar ridică alertă pentru
-			// el — dar filtrul pe `delta1 != null` îl excludea, deci KPI-ul putea arăta 0 într-o
-			// zi în care mai multe cuvinte dispăruseră complet.
+			// Din delta pe 1 zi per cuvânt, nu din contoarele ultimei rulări: o reverificare
+			// manuală pe un singur cuvânt le rescria și KPI-ul cădea la 0 ↑ / 0 ↓.
+			up: pRows.filter((r) => r.kind1 === 'up').length,
+			down: pRows.filter((r) => r.kind1 === 'down' || r.kind1 === 'lost').length,
+			// „lost" = a ieșit din adâncimea căutată ACUM (față de ~ieri). Filtrul vechi
+			// (`position == null && spark30.some(...)`) număra ca „alertă azi" orice cuvânt
+			// pierdut oricând în ultimele 30 de zile — KPI-ul nu mai cobora niciodată.
 			alerts: pRows.filter(
-				(r) =>
-					(r.delta1 != null && r.delta1 <= -(detail?.alertThreshold ?? 5)) ||
-					(r.position == null && r.spark30.some((v) => v != null))
+				(r) => r.kind1 === 'lost' || (r.delta1 != null && r.delta1 <= -(detail?.alertThreshold ?? 5))
 			).length
 		};
 	});
@@ -221,9 +220,7 @@
 		[
 			'down',
 			'Au scăzut',
-			scopedRows.filter(
-				(r) => (r.delta7 ?? 0) < 0 || (r.position == null && r.spark30.some((v) => v != null))
-			).length
+			scopedRows.filter((r) => (r.delta7 ?? 0) < 0 || r.kind7 === 'lost').length
 		],
 		['ai', 'AI Overview', scopedRows.filter((r) => r.aiOverview !== 'absent').length],
 		['canib', 'Canibalizare', scopedRows.filter((r) => r.cannibalization.flagged).length]
@@ -244,11 +241,7 @@
 		const out = scopedRows.filter((k) => {
 			if (tab === 'top10' && !(k.position != null && k.position <= 10)) return false;
 			if (tab === 'up' && !((k.delta7 ?? 0) > 0)) return false;
-			if (
-				tab === 'down' &&
-				!((k.delta7 ?? 0) < 0 || (k.position == null && k.spark30.some((v) => v != null)))
-			)
-				return false;
+			if (tab === 'down' && !((k.delta7 ?? 0) < 0 || k.kind7 === 'lost')) return false;
 			if (tab === 'ai' && k.aiOverview === 'absent') return false;
 			if (tab === 'canib' && !k.cannibalization.flagged) return false;
 			return true;
@@ -514,7 +507,7 @@
 						{st.up}<span style="font-size: 15px; color: var(--cl-text-3); font-weight: 700"> ↑ / {st.down} ↓</span>
 					</div>
 					<div class="cl-kpi-sub">
-						față de rularea de ieri{trackedDevices.length > 1 ? ' · ambele dispozitive' : ''}
+						față de ziua precedentă · {device === 'mobile' ? 'mobil' : 'desktop'}
 					</div>
 				</div>
 			</div>
@@ -730,11 +723,21 @@
 								     despre cât de sigură e poziția noastră scrapată -->
 								<td class="num">
 									<span class="rt-pos-cell">
-										<RtPos pos={r.position} depth={detail?.searchDepth ?? 100} />
-										{#if r.gsc?.trust === 'scrape-missing'}
-											<span class="rt-trust missing" title="Google raportează afișări, dar noi n-am găsit site-ul — măsurătoarea noastră e nesigură (rulare blocată?)">nemăsurat</span>
-										{:else if r.gsc?.trust === 'divergent'}
-											<span class="rt-trust divergent" title="Poziția scrapată diferă cu peste 10 locuri față de media din Search Console">divergent</span>
+										<RtPos pos={r.position} {depth} stale={r.stale} />
+										{#if r.stale}
+											<span class="rt-stale" title="Scanarea de azi nu a găsit site-ul în primele {depth}; afișăm ultima poziție confirmată.">
+												{rtDaysAgoLabel(r.stale.daysAgo)}
+											</span>
+										{/if}
+										{#if r.gsc && r.gsc.trust !== 'ok' && r.gsc.position >= 1}
+											{@const gp = Math.round(r.gsc.position)}
+											<span
+												class="rt-trust {r.gsc.trust === 'scrape-missing' ? 'missing' : 'divergent'}"
+												title={r.gsc.trust === 'scrape-missing'
+													? `Ultima scanare nu a găsit site-ul în primele ${depth}, dar Google Search Console îl raportează pe poziția medie ~${gp} (media pe dispozitive și pagini, cu ~2 zile întârziere).${r.stale ? ` Afișăm ultima poziție confirmată, ${rtDaysAgoLabel(r.stale.daysAgo)}.` : ' Probabil scanarea a fost blocată.'}`
+													: `Poziția scrapată diferă cu peste 10 locuri față de media din Search Console (~${gp}).`}
+											>Google ~{gp}</span
+											>
 										{/if}
 									</span>
 								</td>
@@ -769,12 +772,12 @@
 								</td>
 								<td class="num">
 									<div style="display: flex; justify-content: flex-end">
-										<Rt7 values={r.spark30.slice(-7)} checked={r.checked30.slice(-7)} days={detail?.trend.days.slice(-7) ?? []} />
+										<Rt7 values={r.spark30.slice(-7)} checked={r.checked30.slice(-7)} days={detail?.trend.days.slice(-7) ?? []} {depth} />
 									</div>
 								</td>
 								<td class="num">
 									<div style="display: flex; justify-content: flex-end">
-										<RtSpark values={r.spark30} checked={r.checked30} />
+										<RtSpark values={r.spark30} checked={r.checked30} {depth} />
 									</div>
 								</td>
 								<td><RtFeats list={r.features} /></td>
@@ -833,7 +836,7 @@
 					<p class="cl-section-sub" style="margin-left: auto">după volum de căutare</p>
 				</div>
 				{#if topSeries.length && days.length}
-					<RtRankChart {days} height={230} series={topSeries} />
+					<RtRankChart {days} height={230} series={topSeries} {depth} />
 				{:else}
 					<div class="cl-budget-empty" style="padding: 30px 0; text-align: center">
 						Graficul apare după prima rulare.
@@ -853,7 +856,7 @@
 					<p class="cl-hint">Niciun competitor detectat încă în SERP-urile urmărite.</p>
 				{/if}
 				<div style="margin-top: 16px">
-					<RtDist buckets={st.dist} total={pRows.length} />
+					<RtDist buckets={st.dist} total={pRows.length} {depth} />
 				</div>
 			</div>
 		</div>
@@ -862,8 +865,8 @@
 	<div class="rt-pad" style="padding: 14px 28px 60px">
 		<div class="cl-section" style="padding: 0">
 			<div class="cl-section-head" style="padding: 16px 20px 12px; margin-bottom: 0">
-				<h3><CalendarDaysIcon size={15} /> Istoric rulări zilnice</h3>
-				<p class="cl-section-sub" style="margin-left: auto">fiecare rulare salvează poziția fiecărui cuvânt cheie</p>
+				<h3><CalendarDaysIcon size={15} /> Istoric rulări</h3>
+				<p class="cl-section-sub" style="margin-left: auto">ultimele {detail?.runs?.length ?? 0} rulări · fiecare salvează poziția cuvintelor verificate</p>
 			</div>
 			<div class="rt-runs-scroll">
 			<table class="cl-list-table">
@@ -878,6 +881,7 @@
 					{#each detail?.runs ?? [] as r (r.id)}
 						{@const dayKey = rankDayKey(new Date(r.startedAt))}
 						{@const t = trendByDay.get(dayKey)}
+						{@const representative = r.keywordsChecked >= Math.max(1, Math.ceil(pRows.length / 2))}
 						<tr style="cursor: default">
 							<td style="font-weight: 700; white-space: nowrap">{rtDays([dayKey])[0].short} {dayKey.slice(0, 4)}</td>
 							<td>
@@ -889,8 +893,13 @@
 							<td class="num"><span class="psi-delta up">▲ {r.up}</span></td>
 							<td class="num"><span class="psi-delta down">▼ {r.down}</span></td>
 							<td class="num"><span class="iv-muted">{r.flat}</span></td>
-							<td class="num" style="font-weight: 800">{t?.avg ?? '—'}</td>
-							<td class="num">{#if t?.vis != null}<RtVis pct={t.vis} />{:else}<span class="iv-muted">—</span>{/if}</td>
+							<!-- vizibilitatea/poziția sunt ale ZILEI, nu ale rulării: o rulare blocată la
+							     primul cuvânt sau o reverificare pe 1 cuvânt le afișa ca și cum le-ar fi
+							     produs ea („0%" pe o zi cu un singur cuvânt verificat) -->
+							<td class="num" style="font-weight: 800" title={representative ? undefined : 'rulare parțială — media zilei nu e reprezentativă'}>
+								{representative ? (t?.avg ?? '—') : '—'}
+							</td>
+							<td class="num">{#if representative && t?.vis != null}<RtVis pct={t.vis} />{:else}<span class="iv-muted">—</span>{/if}</td>
 							<td class="num">
 								{#if r.failed}<span class="psi-tag danger">{r.failed}</span>{:else}<span class="iv-muted">0</span>{/if}
 							</td>
@@ -962,6 +971,7 @@
 			buckets={st.dist}
 			total={pRows.length}
 			lastDay={days.length ? days[days.length - 1].full : ''}
+			{depth}
 			onclose={() => (preview = false)}
 			onsend={onSendReport}
 		/>

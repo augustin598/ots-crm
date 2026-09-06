@@ -13,11 +13,12 @@ import { requireStaff } from '$lib/server/get-actor';
 import { getSchedulerQueue } from '$lib/server/scheduler';
 import { RANK_HOURS, normalizeKeyword, isoWeekKey } from '$lib/logic/rank-tracker';
 import { buildRankProjects, buildRankProjectDetail } from '$lib/server/rank-tracker/projects-data';
-import { getRankRunProgress, rankRunProgressKey } from '$lib/server/rank-tracker/run';
-import { getRedis } from '$lib/server/redis';
+import { getRankRunProgress } from '$lib/server/rank-tracker/run';
 // import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
 // fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
 import { encryptVerified } from '$lib/server/plugins/smartbill/crypto';
+import { buildRankReportData } from '$lib/server/rank-tracker/report';
+import { sendRankReportEmail } from '$lib/server/email';
 
 const MAX_KEYWORDS = Number(env.RANK_MAX_KEYWORDS_PER_PROJECT ?? 500) || 500;
 
@@ -388,15 +389,9 @@ export const startRankCheck = command(startCheckSchema, async (input) => {
 		keywordIds = owned.map((k) => k.id);
 	}
 
-	// deja o rulare activă?
-	const raw = await getRedis().get(rankRunProgressKey(tenantId, projectId));
-	if (raw) {
-		try {
-			if (!JSON.parse(raw).finishedAt) throw error(409, 'O verificare este deja în curs pentru acest proiect.');
-		} catch (e) {
-			if ((e as { status?: number })?.status === 409) throw e;
-		}
-	}
+	// deja o rulare activă? (stale-aware: o rulare moartă după restart nu blochează 30 min)
+	const progress = await getRankRunProgress(tenantId, projectId);
+	if (progress && !progress.finishedAt) throw error(409, 'O verificare este deja în curs pentru acest proiect.');
 
 	// Buget orar în CUVINTE: o reverificare punctuală trece, o rulare completă repetată nu.
 	const hourAgo = new Date(Date.now() - 3_600_000);
@@ -439,7 +434,6 @@ export const startRankCheck = command(startCheckSchema, async (input) => {
 export const sendRankReportNow = command(async () => {
 	const { event, tenantId } = requireTenantEvent();
 	await requireStaff(event);
-	const { buildRankReportData } = await import('$lib/server/rank-tracker/report');
 	const weekKey = isoWeekKey(new Date());
 	const data = await buildRankReportData(tenantId, weekKey);
 	const [settings] = await db
@@ -449,7 +443,6 @@ export const sendRankReportNow = command(async () => {
 		.limit(1);
 	const recipients = (settings?.recipients as string[]) ?? [];
 	if (recipients.length === 0) return { sent: 0, note: 'fără destinatari' };
-	const { sendRankReportEmail } = await import('$lib/server/email');
 	for (const recipient of recipients) await sendRankReportEmail(tenantId, recipient, data);
 	return { sent: recipients.length };
 });

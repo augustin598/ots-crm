@@ -25,6 +25,7 @@
 		total,
 		lastDay,
 		sending = false,
+		depth = 100,
 		onclose,
 		onsend
 	}: {
@@ -38,6 +39,7 @@
 		total: number;
 		lastDay: string;
 		sending?: boolean;
+		depth?: number;
 		onclose: () => void;
 		onsend: () => void;
 	} = $props();
@@ -86,7 +88,7 @@
 					<div class="psi-mail-kpi"><span>În top 10</span><b>{buckets['1-3'] + buckets['4-10']}</b></div>
 				</div>
 				<div class="psi-mail-body">
-					<div style="margin-bottom: 16px"><RtDist {buckets} {total} /></div>
+					<div style="margin-bottom: 16px"><RtDist {buckets} {total} {depth} /></div>
 					<table class="psi-mail-table">
 						<thead>
 							<tr><th>Au urcat în ultimele 7 zile</th><th class="r">Acum</th><th class="r">Câștig</th></tr>
@@ -95,7 +97,7 @@
 							{#each up as r (r.id)}
 								<tr>
 									<td>{r.keyword}</td>
-									<td class="r">{r.position == null ? '100+' : '#' + r.position}</td>
+									<td class="r">{r.position == null ? `${depth}+` : '#' + r.position}</td>
 									<td class="r" style="color: var(--psi-good-text); font-weight: 700">+{r.delta7}</td>
 								</tr>
 							{:else}
@@ -107,7 +109,7 @@
 						<div class="psi-mail-alert" style="margin-top: 18px">
 							<b>Au scăzut ({down.length})</b>
 							{#each down as r (r.id)}
-								<div>{r.keyword} — {r.position == null ? 'ieșit din top 100' : 'poziția ' + r.position} ({r.delta7})</div>
+								<div>{r.keyword} — {r.position == null ? `ieșit din primele ${depth}` : 'poziția ' + r.position} ({r.delta7})</div>
 							{/each}
 						</div>
 					{/if}

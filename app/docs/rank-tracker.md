@@ -90,6 +90,31 @@ blocat; îl folosim ca martor pentru cât de mult ne putem baza pe poziția scra
   sunt definiți pe `.cl-wrap` și nu cascadează la frați.
 - Breadcrumbul vine din layout-ul `[tenant]`; designul are `cl-crumbs`, noi NU (ar fi dublat).
 
+### Poziția afișată vs. măsurătoarea zilei (6 sep. 2026)
+
+- **`position` = poziția „curentă", `measuredPosition` = ce a găsit scanarea de azi.** Când scanarea de azi
+  dă `null`, dar Search Console raportează afișări pe o poziție în adâncimea căutată (`gscTrust ===
+  'scrape-missing'`), `effectivePosition()` din `$lib/logic/rank-tracker.ts` afișează ultima poziție
+  confirmată din ultimele 7 zile, cu `stale = { dayKey, daysAgo }`. UI: pastilă cu contur întrerupt +
+  „acum 2 zile" + badge-ul „Google ~N". Fără coroborare GSC rămâne „30+" — nu inventăm poziții din istoric.
+  Motiv măsurat: „agentie de videochat" (luckystudio.ro) — pagina 1 identică cu cea din 4 sep., site-ul
+  era pe 11 (primul de pe pagina 2), GSC ~11, dar snapshotul zilei era `null` și tabelul arăta „30+".
+- Aceeași regulă în hub și în detaliu (`resolvePosition` în `projects-data.ts`), deci vizibilitatea,
+  distribuția și poziția medie nu diverg între cele două pagini.
+- **„Mișcări azi" = delta pe 1 zi per cuvânt** (`kind1`), nu contoarele ultimei rulări (o reverificare
+  manuală pe un cuvânt le rescria). „Scăderi peste prag … azi" și tabul „Au scăzut" folosesc `kind1`/`kind7 ===
+  'lost'`, nu „e null și a fost cândva clasat" (care număra la nesfârșit cuvintele pierdute acum 3 săptămâni).
+- **Etichetele urmează adâncimea** (`searchDepth` în ambele read model-uri): „peste 30", „21–30", fără
+  bucketul „51–100", axa graficului se oprește la 30, sparkline-ul pune „negăsit" la 31, nu la 101.
+- **Istoric rulări**: ultimele 10 (`RUN_HISTORY_LIMIT`); poziția medie/vizibilitatea zilei apar doar la
+  rulările reprezentative (≥ jumătate din cuvinte verificate) — o reverificare pe 1 cuvânt arăta „0%".
+- **Runner**: alertele nu se dublează la a doua rulare din aceeași zi (set `alreadyAlerted` pe
+  `keyword:device:type` din alertele zilei); cuvântul la care a venit blocarea intră în
+  `unattemptedKeywordIds` (era sărit la reluare); `top_results` reține toate rezultatele căutate (30), nu
+  doar prima pagină, ca un „negăsit" să poată fi auditat; guard-ul „rulare deja activă" (runner + `startRankCheck`)
+  trece prin `getRankRunProgress` (stale-aware), nu prin cheia Redis brută.
+- `sendRankReportNow` importă `report`/`email` STATIC (rolldown compila `await import()` în `await void 0`).
+
 ### Diferențe acceptate față de design
 - **KD (dificultate)** rămâne „—": nu există sursă gratuită în v1.
 - **Verificare per cuvânt**: backendul rulează per proiect (`startRankCheck(projectId)`),

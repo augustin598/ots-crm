@@ -18,6 +18,7 @@ import {
 	parseLocale,
 	isPlausibleHost,
 	normalizeTopResults,
+	effectivePosition,
 	RANK_HOURS,
 	// re-exporturi din ../pagespeed (nu reimplementate)
 	isoWeekKey,
@@ -378,5 +379,48 @@ describe('normalizeTopResults — curăță și datele deja salvate', () => {
 			{ position: 10, domain: '0.0.0.6', url: 'https://6', title: 'Studio', snippet: '' }
 		]);
 		expect(out.map((x) => x.domain)).toEqual(['waze.com']);
+	});
+});
+
+describe('effectivePosition — ultima poziție confirmată când scanarea de azi n-a găsit site-ul', () => {
+	const series = [
+		{ dayKey: '2026-09-06', position: null }, // azi: negăsit în primele 30
+		{ dayKey: '2026-09-04', position: 11 },
+		{ dayKey: '2026-09-02', position: 13 }
+	];
+
+	test('azi clasat → poziția de azi, fără marcaj', () => {
+		const r = effectivePosition([{ dayKey: '2026-09-06', position: 7 }, ...series.slice(1)], '2026-09-06', true);
+		expect(r).toEqual({ position: 7, stale: null });
+	});
+
+	test('azi negăsit + GSC confirmă → ultima confirmată, marcată cu vechimea', () => {
+		const r = effectivePosition(series, '2026-09-06', true);
+		expect(r).toEqual({ position: 11, stale: { dayKey: '2026-09-04', daysAgo: 2 } });
+	});
+
+	test('azi negăsit FĂRĂ confirmare GSC → rămâne negăsit', () => {
+		expect(effectivePosition(series, '2026-09-06', false)).toEqual({ position: null, stale: null });
+	});
+
+	test('ultima confirmată e prea veche → negăsit (nu afișăm o poziție de acum 2 săptămâni)', () => {
+		const old = [
+			{ dayKey: '2026-09-06', position: null },
+			{ dayKey: '2026-08-20', position: 4 }
+		];
+		expect(effectivePosition(old, '2026-09-06', true)).toEqual({ position: null, stale: null });
+		expect(effectivePosition(old, '2026-09-06', true, 30).position).toBe(4);
+	});
+
+	test('serie goală → negăsit', () => {
+		expect(effectivePosition([], '2026-09-06', true)).toEqual({ position: null, stale: null });
+	});
+
+	test('ordinea seriei nu contează; instantaneele din viitor (după todayKey) sunt ignorate', () => {
+		const shuffled = [series[2], { dayKey: '2026-09-09', position: 1 }, series[0], series[1]];
+		expect(effectivePosition(shuffled, '2026-09-06', true)).toEqual({
+			position: 11,
+			stale: { dayKey: '2026-09-04', daysAgo: 2 }
+		});
 	});
 });

@@ -14,6 +14,8 @@ import {
 	pageForPosition,
 	rankDayKey,
 	normalizeTopResults,
+	effectivePosition,
+	type PositionDeltaKind,
 	type RankBucket,
 	type RankSerpResult
 } from '$lib/logic/rank-tracker';
@@ -35,8 +37,13 @@ export interface RankProjectListRow {
 	distribution: Record<RankBucket, number>;
 	lastRunAt: string | null;
 	lastRunStatus: string | null;
-	lastRunUp: number | null;
-	lastRunDown: number | null;
+	/**
+	 * Cuvinte urcate/coborâte față de ~ieri (delta pe 1 zi, dispozitivul principal) —
+	 * NU contoarele ultimei rulări: o reverificare manuală pe un singur cuvânt le
+	 * rescria pe cele ale scanării zilnice și „Mișcări azi" arăta 0 ↑ / 0 ↓.
+	 */
+	upToday: number;
+	downToday: number;
 	alertsLast7d: number;
 	active: boolean;
 	paused: boolean;
@@ -52,9 +59,54 @@ export interface RankProjectsData {
 	};
 	/** Ultimele 30 de zile pentru graficul de portofoliu din hub (dispozitivul principal). */
 	trend: { days: string[]; visibility: (number | null)[]; avgPosition: (number | null)[] };
+	/** Câte poziții se caută efectiv — etichetele „peste N" din hub trebuie să spună adevărul. */
+	searchDepth: number;
+}
+
+/**
+ * Cea mai recentă zi GSC per (cuvânt, dispozitiv) + clicurile însumate pe fereastră.
+ * O singură interogare pentru tot setul de cuvinte, nu una per cuvânt.
+ */
+async function loadLatestGsc(keywordIds: string[]) {
+	const rows = keywordIds.length
+		? await db
+				.select()
+				.from(table.rankGscDaily)
+				.where(inArray(table.rankGscDaily.keywordId, keywordIds))
+				.orderBy(desc(table.rankGscDaily.gscDate))
+				.limit(keywordIds.length * GSC_WINDOW_DAYS * 2)
+		: [];
+	const latest = new Map<string, (typeof rows)[number]>();
+	const clicksWindow = new Map<string, number>();
+	for (const row of rows) {
+		const key = `${row.keywordId}:${row.device}`;
+		if (!latest.has(key)) latest.set(key, row); // sortat desc → prima e cea mai nouă
+		clicksWindow.set(key, (clicksWindow.get(key) ?? 0) + row.clicks);
+	}
+	return { latest, clicksWindow };
+}
+
+/**
+ * Poziția „curentă" a unui (cuvânt, dispozitiv): măsurătoarea de azi sau, când azi
+ * n-am găsit site-ul dar Search Console îl confirmă în adâncimea căutată, ultima
+ * poziție confirmată (marcată `stale`). Aceeași regulă în hub și în detaliu.
+ */
+function resolvePosition(
+	series: { dayKey: string; position: number | null }[],
+	todayKey: string,
+	gscRow: { position: number | null; impressions: number } | undefined
+) {
+	const measured = series[0]?.position ?? null;
+	const trust: GscTrust = gscRow
+		? gscTrust(measured, gscRow.position, gscRow.impressions, SERP_DEPTH)
+		: 'ok';
+	const eff = effectivePosition(series, todayKey, trust === 'scrape-missing');
+	return { measured, trust, position: eff.position, stale: eff.stale };
 }
 
 const DAY_MS = 86_400_000;
+/** Câte rulări arătăm în „Istoric rulări zilnice" — restul sunt zgomot (reverificări, blocări). */
+export const RUN_HISTORY_LIMIT = 10;
 
 function daysAgoKey(now: Date, days: number): string {
 	return rankDayKey(new Date(now.getTime() - days * DAY_MS));
@@ -117,15 +169,13 @@ export async function buildRankProjects(
 				.select({
 					projectId: table.rankRun.projectId,
 					startedAt: table.rankRun.startedAt,
-					status: table.rankRun.status,
-					up: table.rankRun.up,
-					down: table.rankRun.down
+					status: table.rankRun.status
 				})
 				.from(table.rankRun)
 				.where(inArray(table.rankRun.projectId, projectIds))
 				.orderBy(desc(table.rankRun.startedAt))
 		: [];
-	const lastRunByProject = new Map<string, { startedAt: Date; status: string; up: number; down: number }>();
+	const lastRunByProject = new Map<string, { startedAt: Date; status: string }>();
 	for (const r of runs) if (!lastRunByProject.has(r.projectId)) lastRunByProject.set(r.projectId, r);
 
 	// Alerte din ultimele 7 zile per proiect (alert → run → project).
@@ -140,6 +190,7 @@ export async function buildRankProjects(
 	const alertsByProject = new Map<string, number>();
 	for (const a of alerts) alertsByProject.set(a.projectId, (alertsByProject.get(a.projectId) ?? 0) + 1);
 
+	const gsc = await loadLatestGsc(keywordIds);
 	const todayKey = rankDayKey(now);
 	const keywordCountByProject = new Map<string, number>();
 	for (const k of keywords) keywordCountByProject.set(k.projectId, (keywordCountByProject.get(k.projectId) ?? 0) + 1);
@@ -166,10 +217,16 @@ export async function buildRankProjects(
 		const nowPositions: (number | null)[] = [];
 		const thenPositions: (number | null)[] = [];
 		const dist: Record<RankBucket, number> = { '1-3': 0, '4-10': 0, '11-20': 0, '21-50': 0, '51-100': 0, '100+': 0 };
+		let upToday = 0;
+		let downToday = 0;
 		for (const kw of projKeywords) {
 			const series = (seriesByKeyword.get(`${kw.id}:${primaryDevice}`) ?? []).filter((s) => s.dayKey <= todayKey);
-			const nowPos = series[0]?.position ?? null;
+			const nowPos = resolvePosition(series, todayKey, gsc.latest.get(`${kw.id}:${primaryDevice}`)).position;
 			const then = snapshotAtLookback(series, todayKey, 7, 3);
+			const d1 = snapshotAtLookback(series, todayKey, 1, 2);
+			const kind1 = positionDelta(d1?.position ?? null, nowPos).kind;
+			if (kind1 === 'up') upToday++;
+			else if (kind1 === 'down' || kind1 === 'lost') downToday++;
 			nowPositions.push(nowPos);
 			thenPositions.push(then?.position ?? null);
 			dist[bucketFor(nowPos)]++;
@@ -198,8 +255,8 @@ export async function buildRankProjects(
 			distribution: dist,
 			lastRunAt: lastRun?.startedAt?.toISOString() ?? null,
 			lastRunStatus: lastRun?.status ?? null,
-			lastRunUp: lastRun?.up ?? null,
-			lastRunDown: lastRun?.down ?? null,
+			upToday,
+			downToday,
 			alertsLast7d: alertsByProject.get(p.id) ?? 0,
 			active: p.active,
 			paused: !!p.pausedAt
@@ -230,7 +287,8 @@ export async function buildRankProjects(
 				if (!nums.length) return null;
 				return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10;
 			})
-		}
+		},
+		searchDepth: SERP_DEPTH
 	};
 }
 
@@ -268,12 +326,23 @@ export interface RankKeywordDetail {
 	cpcHighMicros: number | null;
 	targetUrl: string | null;
 	device: 'desktop' | 'mobile';
+	/**
+	 * Poziția „curentă": măsurătoarea de azi sau, dacă azi nu l-am găsit dar Search
+	 * Console îl confirmă, ultima poziție confirmată (atunci `stale` e setat).
+	 */
 	position: number | null;
+	/** Ce a măsurat CHIAR ultima scanare (null = negăsit în `searchDepth`). */
+	measuredPosition: number | null;
+	/** Setat când `position` vine dintr-o zi anterioară, nu din scanarea de azi. */
+	stale: { dayKey: string; daysAgo: number } | null;
 	page: number | null;
 	rankingUrl: string | null;
 	delta1: number | null;
 	delta7: number | null;
 	delta30: number | null;
+	/** Felul mișcării pe 1 / 7 zile — `lost` = a ieșit din adâncimea căutată ACUM, nu oricând. */
+	kind1: PositionDeltaKind;
+	kind7: PositionDeltaKind;
 	best: number | null;
 	features: string[];
 	aiOverview: 'absent' | 'present' | 'cited';
@@ -317,6 +386,9 @@ export interface RankProjectDetailData {
 	visibility: number;
 	avgPosition: number | null;
 	distribution: Record<RankBucket, number>;
+	/** Cuvinte urcate/coborâte față de ~ieri pe dispozitivul principal (vezi `RankProjectListRow`). */
+	upToday: number;
+	downToday: number;
 	aiPresent: number;
 	aiCited: number;
 	keywords: RankKeywordDetail[];
@@ -397,24 +469,8 @@ export async function buildRankProjectDetail(
 				.orderBy(desc(table.rankSnapshot.dayKey))
 		: [];
 
-	// O singură interogare pentru tot proiectul, nu una per cuvânt. Luăm ultimele
-	// GSC_WINDOW_DAYS zile și păstrăm în JS cea mai recentă per (cuvânt, dispozitiv).
-	const gscRows = keywordIds.length
-		? await db
-				.select()
-				.from(table.rankGscDaily)
-				.where(inArray(table.rankGscDaily.keywordId, keywordIds))
-				.orderBy(desc(table.rankGscDaily.gscDate))
-				.limit(keywordIds.length * GSC_WINDOW_DAYS * 2)
-		: [];
-	const latestGsc = new Map<string, (typeof gscRows)[number]>();
 	// Clicurile pe toată fereastra: o singură zi e prea puțin ca să evaluezi traficul.
-	const clicksWindow = new Map<string, number>();
-	for (const row of gscRows) {
-		const key = `${row.keywordId}:${row.device}`;
-		if (!latestGsc.has(key)) latestGsc.set(key, row); // sortat desc → prima e cea mai nouă
-		clicksWindow.set(key, (clicksWindow.get(key) ?? 0) + row.clicks);
-	}
+	const { latest: latestGsc, clicksWindow } = await loadLatestGsc(keywordIds);
 
 	const todayKey = rankDayKey(now);
 	// Ultimele 30 de zile calendaristice (chei) pentru grafic + spark.
@@ -437,6 +493,8 @@ export async function buildRankProjectDetail(
 	const trackedDevices = project.devices as ('desktop' | 'mobile')[];
 	const primaryDevice: 'desktop' | 'mobile' = trackedDevices.includes('desktop') ? 'desktop' : 'mobile';
 	const primaryNow: (number | null)[] = [];
+	let upToday = 0;
+	let downToday = 0;
 	let aiPresent = 0;
 	let aiCited = 0;
 	// Serii pentru graficul de trend: vizibilitate + poziție medie pe dispozitivul principal.
@@ -451,11 +509,15 @@ export async function buildRankProjectDetail(
 				continue;
 			}
 			const nowSnap = series[0] ?? null;
-			const nowPos = nowSnap?.position ?? null;
 			const seriesLite = series.map((s) => ({ dayKey: s.dayKey, position: s.position }));
+			const gscRow = latestGsc.get(`${kw.id}:${device}`);
+			const resolved = resolvePosition(seriesLite, todayKey, gscRow);
+			const nowPos = resolved.position;
 			const d1 = snapshotAtLookback(seriesLite, todayKey, 1, 2)?.position ?? null;
 			const d7 = snapshotAtLookback(seriesLite, todayKey, 7, 3)?.position ?? null;
 			const d30 = snapshotAtLookback(seriesLite, todayKey, 30, 5)?.position ?? null;
+			const move1 = positionDelta(d1, nowPos);
+			const move7 = positionDelta(d7, nowPos);
 			const posByDay = new Map(series.map((s) => [s.dayKey, s.position]));
 			const spark30 = days.map((d) => (posByDay.has(d) ? posByDay.get(d)! : null));
 			const checked30 = days.map((d) => posByDay.has(d));
@@ -463,6 +525,8 @@ export async function buildRankProjectDetail(
 			if (device === primaryDevice) {
 				primaryNow.push(nowPos);
 				dist[bucketFor(nowPos)]++;
+				if (move1.kind === 'up') upToday++;
+				else if (move1.kind === 'down' || move1.kind === 'lost') downToday++;
 				if (nowSnap?.aiOverview === 'present' || nowSnap?.aiOverview === 'cited') aiPresent++;
 				if (nowSnap?.aiOverview === 'cited') aiCited++;
 				for (const s of series) {
@@ -487,11 +551,18 @@ export async function buildRankProjectDetail(
 				targetUrl: kw.targetUrl,
 				device,
 				position: nowPos,
+				measuredPosition: resolved.measured,
+				stale: resolved.stale,
 				page: pageForPosition(nowPos),
-				rankingUrl: nowSnap?.rankingUrl ?? null,
-				delta1: positionDelta(d1, nowPos).delta,
-				delta7: positionDelta(d7, nowPos).delta,
+				// URL-ul zilei în care am confirmat poziția afișată, nu al scanării fără rezultat.
+				rankingUrl:
+					(resolved.stale ? series.find((s) => s.dayKey === resolved.stale!.dayKey) : nowSnap)?.rankingUrl ??
+					null,
+				delta1: move1.delta,
+				delta7: move7.delta,
 				delta30: positionDelta(d30, nowPos).delta,
+				kind1: move1.kind,
+				kind7: move7.kind,
 				best: bestPosition(series.map((s) => s.position)),
 				features: (nowSnap?.serpFeatures ?? []) as string[],
 				aiOverview: (nowSnap?.aiOverview ?? 'absent') as 'absent' | 'present' | 'cited',
@@ -499,20 +570,18 @@ export async function buildRankProjectDetail(
 				checked30,
 				competitors: (nowSnap?.competitors ?? {}) as Record<string, number>,
 				topResults: normalizeTopResults(nowSnap?.topResults),
-				gsc: (() => {
-					const row = latestGsc.get(`${kw.id}:${device}`);
-					if (!row) return null;
-					return {
-						date: row.gscDate,
-						clicks: row.clicks,
-						clicksWindow: clicksWindow.get(`${kw.id}:${device}`) ?? row.clicks,
-						impressions: row.impressions,
-						ctr: row.ctr ?? 0,
-						position: row.position ?? 0,
-						// SERP_DEPTH: dincolo de el, „negăsit" e corect, nu o măsurătoare ratată
-						trust: gscTrust(nowPos, row.position, row.impressions, SERP_DEPTH)
-					};
-				})(),
+				gsc: gscRow
+					? {
+							date: gscRow.gscDate,
+							clicks: gscRow.clicks,
+							clicksWindow: clicksWindow.get(`${kw.id}:${device}`) ?? gscRow.clicks,
+							impressions: gscRow.impressions,
+							ctr: gscRow.ctr ?? 0,
+							position: gscRow.position ?? 0,
+							// față de MĂSURĂTOARE, nu de poziția afișată: badge-ul spune de ce e „stale"
+							trust: resolved.trust
+						}
+					: null,
 				cannibalization: detectCannibalization(
 					series.map((s) => ({ dayKey: s.dayKey, rankingUrl: s.rankingUrl }))
 				)
@@ -547,7 +616,7 @@ export async function buildRankProjectDetail(
 		.from(table.rankRun)
 		.where(eq(table.rankRun.projectId, projectId))
 		.orderBy(desc(table.rankRun.startedAt))
-		.limit(15);
+		.limit(RUN_HISTORY_LIMIT);
 
 	const nums = primaryNow.filter((x): x is number => x != null);
 	const shareOfVoice: Record<string, number> = {};
@@ -574,6 +643,8 @@ export async function buildRankProjectDetail(
 		visibility: visibility(primaryNow),
 		avgPosition: nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10 : null,
 		distribution: dist,
+		upToday,
+		downToday,
 		aiPresent,
 		aiCited,
 		keywords: detailKeywords,

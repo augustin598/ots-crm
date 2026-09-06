@@ -5,8 +5,9 @@
 	let {
 		values,
 		days,
-		checked
-	}: { values: (number | null)[]; days: string[]; checked?: boolean[] } = $props();
+		checked,
+		depth = 100
+	}: { values: (number | null)[]; days: string[]; checked?: boolean[]; depth?: number } = $props();
 
 	const cells = $derived(
 		values.map((pos, i) => {
@@ -16,7 +17,7 @@
 			const cls =
 				!ran ? 'empty' : pos == null ? 'empty' : prev == null ? '' : pos < prev ? 'up' : pos > prev ? 'down' : '';
 			const day = days[i] ? rtDay(days[i]) : null;
-			const state = !ran ? 'fără rulare' : pos == null ? 'peste 100' : 'poziția ' + pos;
+			const state = !ran ? 'fără rulare' : pos == null ? `negăsit în primele ${depth}` : 'poziția ' + pos;
 			return {
 				key: days[i] ?? String(i),
 				cls,

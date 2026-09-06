@@ -14,6 +14,9 @@
 .rt-pos.low { background: var(--cl-surface-2); color: var(--cl-text-2); border-color: var(--cl-border); }
 .rt-pos.out { background: var(--cl-surface-2); color: var(--cl-text-3); border-color: var(--cl-border); font-weight: 700; font-size: 12px; }
 .rt-pos.sm { min-width: 28px; height: 22px; font-size: 12px; padding: 0 6px; }
+/* poziție confirmată într-o zi anterioară (scanarea de azi n-a găsit site-ul): contur întrerupt */
+.rt-pos.stale { border-style: dashed; border-color: currentColor; opacity: .85; }
+.rt-stale { font-size: 10.5px; font-weight: 700; color: var(--cl-text-3); white-space: nowrap; }
 
 /* cuvânt cheie în tabel */
 .rt-kw { min-width: 0; }

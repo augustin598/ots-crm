@@ -60,6 +60,11 @@ mock.module('$lib/server/logger', () => ({ logInfo: () => {}, logWarning: () => 
 mock.module('$lib/server/scheduler', () => ({ getSchedulerQueue: () => ({ add: async (name: string, data: unknown) => { queueAdds.push({ name, data }); } }) }));
 mock.module('$lib/server/plugins/smartbill/crypto', () => ({ encryptVerified: (_t: string, val: string) => `enc:${val}`, decrypt: (_t: string, c: string) => c, DecryptionError: class extends Error {} }));
 
+// Importate STATIC în remote (nu dinamic — rolldown le-ar compila în `await void 0`);
+// aici le înlocuim ca testul să nu tragă după el tot graful email/report.
+mock.module('$lib/server/email', () => ({ sendRankReportEmail: async () => {} }));
+mock.module('$lib/server/rank-tracker/report', () => ({ buildRankReportData: async () => ({}) }));
+
 const remote = await import('../rank-tracker.remote');
 
 beforeEach(() => {
@@ -159,6 +164,25 @@ describe('startRankCheck — guard și buget orar', () => {
 		redisStore.set('t1:rank:run:p1', JSON.stringify({ runId: 'r', total: 1, done: 0 })); // fără finishedAt
 		await expect(remote.startRankCheck({ projectId: 'p1' })).rejects.toThrow();
 		expect(queueAdds.length).toBe(0);
+	});
+
+	test('o rulare moartă în Redis (fără semn de viață de peste 5 min) nu mai dă 409', async () => {
+		selectQueue.push([{ id: 'p1', devices: ['desktop'] }]);
+		redisStore.set(
+			't1:rank:run:p1',
+			JSON.stringify({
+				runId: 'dead',
+				total: 26,
+				done: 2,
+				startedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+				updatedAt: new Date(Date.now() - 20 * 60_000).toISOString()
+			})
+		);
+		selectQueue.push([]); // nicio rulare manuală în ultima oră
+		selectQueue.push([{ id: 'k1' }]); // 1 cuvânt activ
+		const r = await remote.startRankCheck({ projectId: 'p1' });
+		expect((r as { started: boolean }).started).toBe(true);
+		expect(queueAdds.length).toBe(1);
 	});
 
 	test('peste bugetul orar de cuvinte → 429', async () => {

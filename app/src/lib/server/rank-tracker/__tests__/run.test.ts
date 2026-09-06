@@ -16,6 +16,7 @@ const dbMock = {
 		const chain: Record<string, unknown> = {
 			from: () => chain,
 			where: () => chain,
+			innerJoin: () => chain,
 			orderBy: () => chain,
 			limit: () => chain,
 			then: (resolve: (rows: unknown[]) => void) => resolve(selectQueue.shift() ?? [])
@@ -355,5 +356,89 @@ describe('runRankProjectCheck — guard și skip', () => {
 		selectQueue.push([project()], []);
 		const r = await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers: { mode: 'scraper', primary: fakeProvider('scraper', () => serp(1)), fallback: null }, now: () => NOW });
 		expect(r.skipped).toBe(true);
+	});
+});
+
+describe('runRankProjectCheck — alerte la re-rulare în aceeași zi', () => {
+	test('o a doua rulare în aceeași zi NU ridică din nou aceeași alertă', async () => {
+		// baseline: ieri pe 3; azi negăsit → „lost" — dar alerta a fost deja ridicată de
+		// rularea de dimineață (MĂSURAT 6 sep.: două rulări cron pe zi → alerte și emailuri duble)
+		selectQueue.push(
+			[project({ devices: ['desktop'] })],
+			[keyword('k1')],
+			[{ keywordId: 'k1', device: 'desktop', dayKey: '2026-09-01', position: 3 }],
+			[{ keywordId: 'k1', device: 'desktop', type: 'lost' }] // alertele de azi, deja persistate
+		);
+		const providers = { mode: 'scraper' as const, primary: fakeProvider('scraper', () => serp(null)), fallback: null };
+		const r = await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers, sleep: async () => {}, now: () => NOW });
+		expect(r.checked).toBe(1);
+		expect(r.alerts).toBe(0);
+		expect(alertInserts.length).toBe(0);
+	});
+
+	test('alerta se ridică normal când azi nu există una identică', async () => {
+		selectQueue.push(
+			[project({ devices: ['desktop'] })],
+			[keyword('k1')],
+			[{ keywordId: 'k1', device: 'desktop', dayKey: '2026-09-01', position: 3 }],
+			[]
+		);
+		const providers = { mode: 'scraper' as const, primary: fakeProvider('scraper', () => serp(null)), fallback: null };
+		const r = await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers, sleep: async () => {}, now: () => NOW });
+		expect(r.alerts).toBe(1);
+	});
+});
+
+describe('runRankProjectCheck — reluarea după blocare și auditul SERP-ului', () => {
+	test('cuvântul la care s-a produs blocarea intră în lista de reluat (nu doar cele de după el)', async () => {
+		selectQueue.push([project({ devices: ['desktop'] })], [keyword('k1'), keyword('k2'), keyword('k3')], []);
+		let calls = 0;
+		const providers = {
+			mode: 'scraper' as const,
+			primary: fakeProvider('scraper', () => {
+				calls++;
+				if (calls === 2) throw new SerpProviderError('captcha', 'blocked', false);
+				return serp(3);
+			}),
+			fallback: null
+		};
+		// shuffle → identitate (j = i), ca ordinea k1,k2,k3 să fie deterministă
+		const r = await runRankProjectCheck(
+			{ tenantId: 't1', projectId: 'p1' },
+			{ providers, sleep: async () => {}, now: () => NOW, shuffle: () => 0.999 }
+		);
+		expect(r.checked).toBe(1);
+		expect(r.failed).toBe(1);
+		expect(r.unattemptedKeywordIds).toEqual(['k2', 'k3']);
+	});
+
+	test('o rulare moartă (fără semn de viață) NU mai blochează pornirea uneia noi', async () => {
+		redisStore.set(
+			rankRunProgressKey('t1', 'p1'),
+			JSON.stringify({
+				runId: 'dead',
+				total: 26,
+				done: 3,
+				currentKeyword: 'a',
+				startedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+				updatedAt: new Date(Date.now() - 20 * 60_000).toISOString()
+			})
+		);
+		selectQueue.push([project({ devices: ['desktop'] })], [keyword('k1')], []);
+		const providers = { mode: 'scraper' as const, primary: fakeProvider('scraper', () => serp(2)), fallback: null };
+		const r = await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers, sleep: async () => {}, now: () => NOW });
+		expect(r.skipped).toBe(false);
+		expect(snapshotUpserts.length).toBe(1);
+	});
+
+	test('snapshotul reține TOATE rezultatele organice căutate, nu doar prima pagină', async () => {
+		selectQueue.push([project({ devices: ['desktop'] })], [keyword('k1')], []);
+		const wide = serp(null);
+		for (let i = 11; i <= 25; i++) {
+			wide.organic.push({ position: i, url: `https://site${i}.ro/x`, domain: `site${i}.ro`, title: `t${i}`, snippet: '' });
+		}
+		const providers = { mode: 'scraper' as const, primary: fakeProvider('scraper', () => wide), fallback: null };
+		await runRankProjectCheck({ tenantId: 't1', projectId: 'p1' }, { providers, sleep: async () => {}, now: () => NOW });
+		expect((snapshotUpserts[0].values.topResults as unknown[]).length).toBe(25);
 	});
 });

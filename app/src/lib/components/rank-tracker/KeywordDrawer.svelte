@@ -18,7 +18,7 @@
 	import RtRankChart from './RtRankChart.svelte';
 	import RtCompRow from './RtCompRow.svelte';
 	import { ctrForPosition } from '$lib/logic/rank-tracker';
-	import { RT_FEATURES, rtDays, rtLocaleLabel, rtNum, rtSerpLink } from './lib';
+	import { RT_FEATURES, rtDay, rtDays, rtDaysAgoLabel, rtLocaleLabel, rtNum, rtSerpLink } from './lib';
 	import type { RankKeywordDetail } from '$lib/server/rank-tracker/projects-data';
 
 	let {
@@ -212,12 +212,14 @@
 		<div class="psi-drawer-body">
 			<div class="rt-kpi-mini">
 				<div class="rt-mini">
-					<span>Poziție azi</span>
+					<span>{keyword.stale ? 'Ultima poziție confirmată' : 'Poziție azi'}</span>
 					<b>{keyword.position == null ? `${searchDepth}+` : '#' + keyword.position}</b>
 					<em>
 						{keyword.position == null
 							? `negăsit în primele ${searchDepth}`
-							: `pagina ${keyword.page} · ${rtd.length ? rtd[rtd.length - 1].short : ''}`}
+							: keyword.stale
+								? `${rtDaysAgoLabel(keyword.stale.daysAgo)} (${rtDay(keyword.stale.dayKey).short}) · azi negăsit în primele ${searchDepth}`
+								: `pagina ${keyword.page} · ${rtd.length ? rtd[rtd.length - 1].short : ''}`}
 					</em>
 				</div>
 				<div class="rt-mini">
@@ -242,7 +244,7 @@
 					<h3><TrendingUpIcon size={15} /> Istoric poziții · 30 de zile</h3>
 					<p class="cl-section-sub" style="margin-left: auto">o rulare pe zi, {checkHour}</p>
 				</div>
-				<RtRankChart days={rtd} height={240} {series} />
+				<RtRankChart days={rtd} height={240} {series} depth={searchDepth} />
 			</div>
 
 			{#if keyword.cannibalization.flagged}
@@ -386,8 +388,14 @@
 						</p>
 						{#if keyword.gsc.trust === 'scrape-missing'}
 							<p class="cl-hint">
-								Google raportează afișări pentru acest cuvânt, dar rularea noastră nu a găsit
-								site-ul. Verifică istoricul rulărilor — probabil au fost blocate.
+								Google raportează afișări pentru acest cuvânt, dar ultima scanare nu a găsit
+								site-ul în primele {searchDepth}.
+								{#if keyword.stale}
+									Afișăm ultima poziție confirmată ({rtDay(keyword.stale.dayKey).short}); scanarea
+									de azi probabil a fost blocată sau incompletă.
+								{:else}
+									Verifică istoricul rulărilor — probabil au fost blocate.
+								{/if}
 							</p>
 						{/if}
 					{:else if gscProperty}

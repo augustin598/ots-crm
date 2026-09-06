@@ -39,6 +39,38 @@ export const RT_BUCKET_LABELS: Record<RankBucket, string> = {
 	'100+': 'peste 100'
 };
 
+/**
+ * Eticheta bucketului, cu „peste N" pentru cel din urmă: adâncimea căutată e 30 (vezi
+ * `SERP_DEPTH`), deci „peste 100" afirma ceva ce nu am verificat.
+ */
+export function rtBucketLabel(k: RankBucket, depth: number = 100): string {
+	if (k === '100+') return `peste ${depth}`;
+	// bucketele tăiate de adâncime: „21–50" cu adâncime 30 înseamnă de fapt „21–30"
+	if (k === '21-50' && depth < 50) return `21–${depth}`;
+	if (k === '51-100' && depth < 100) return `51–${depth}`;
+	return RT_BUCKET_LABELS[k];
+}
+
+/** Limita inferioară a unui bucket — bucketele care încep dincolo de adâncime nu pot avea date. */
+const RT_BUCKET_FLOOR: Record<RankBucket, number> = { '1-3': 1, '4-10': 4, '11-20': 11, '21-50': 21, '51-100': 51, '100+': 0 };
+
+/** Bucketele care au sens la adâncimea dată (cu 30: fără „51–100"). */
+export function rtBucketsFor(depth: number = 100): RankBucket[] {
+	return RT_BUCKETS.filter((k) => RT_BUCKET_FLOOR[k] <= depth);
+}
+
+/** Textul pentru „negăsit": „30+" (pastile) sau „peste 30" (propoziții). */
+export function rtOutLabel(depth: number = 100): string {
+	return `${depth}+`;
+}
+
+/** „acum 2 zile" / „ieri" / „azi" pentru marcajul de poziție confirmată. */
+export function rtDaysAgoLabel(daysAgo: number): string {
+	if (daysAgo <= 0) return 'azi';
+	if (daysAgo === 1) return 'ieri';
+	return `acum ${daysAgo} zile`;
+}
+
 /** Nivelul de culoare al pastilei de poziție. */
 export function rtPosLevel(pos: number | null): 'top3' | 'top10' | 'top20' | 'low' | 'out' {
 	if (pos == null) return 'out';

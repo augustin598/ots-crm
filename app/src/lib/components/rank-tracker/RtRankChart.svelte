@@ -15,12 +15,15 @@
 		days,
 		series,
 		height = 230,
-		marks = []
+		marks = [],
+		depth = 100
 	}: {
 		days: RtDay[];
 		series: Series[];
 		height?: number;
 		marks?: { i: number; label: string }[];
+		/** Adâncimea căutată: axa se oprește la ea (cu 30, jumătatea de jos a scalei 1–100 era goală). */
+		depth?: number;
 	} = $props();
 
 	const W = 680;
@@ -28,7 +31,8 @@
 	const padR = 14;
 	const padT = 12;
 	const padB = 26;
-	const ticks = [1, 3, 10, 20, 50, 100];
+	const ticks = $derived([...[1, 3, 10, 20, 50, 100].filter((t) => t < depth), depth]);
+	const floor = $derived(depth + 1);
 
 	// funcții simple: citesc `height`/`days` la fiecare randare
 	const H = $derived(height);
@@ -36,7 +40,7 @@
 		return padL + (i / Math.max(1, days.length - 1)) * (W - padL - padR);
 	}
 	function y(p: number): number {
-		return padT + (Math.log(Math.max(1, Math.min(101, p))) / Math.log(101)) * (H - padT - padB);
+		return padT + (Math.log(Math.max(1, Math.min(floor, p))) / Math.log(floor)) * (H - padT - padB);
 	}
 
 	function segments(values: (number | null)[]): string[] {
@@ -122,7 +126,7 @@
 	<div class="psi-chart-legend">
 		{#each series as s (s.label)}
 			{@const lv = lastValue(s.values)}
-			<span><i style:background={s.color}></i> {s.label} <b style="margin-left: 2px">{lv == null ? '100+' : '#' + lv}</b></span>
+			<span><i style:background={s.color}></i> {s.label} <b style="margin-left: 2px">{lv == null ? `${depth}+` : '#' + lv}</b></span>
 		{/each}
 		<span style="margin-left: auto; color: var(--cl-text-3)">scală inversată · 1 = sus</span>
 	</div>

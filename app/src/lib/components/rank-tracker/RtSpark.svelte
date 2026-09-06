@@ -5,8 +5,9 @@
 		values,
 		checked,
 		w = 84,
-		h = 26
-	}: { values: (number | null)[]; checked?: boolean[]; w?: number; h?: number } = $props();
+		h = 26,
+		depth = 100
+	}: { values: (number | null)[]; checked?: boolean[]; w?: number; h?: number; depth?: number } = $props();
 
 	// `null` din `spark30` înseamnă „nu s-a rulat în ziua aia" SAU „neclasat" — nu le putem
 	// deosebi. Le tratam pe toate ca 101, ceea ce desena o linie plată „în afara top 100"
@@ -18,7 +19,9 @@
 	const firstIdx = $derived(
 		checked ? checked.findIndex((c) => c) : values.findIndex((v) => v != null)
 	);
-	const vals = $derived(firstIdx < 0 ? [] : values.slice(firstIdx).map((v) => (v == null ? 101 : v)));
+	// „negăsit" = un pas sub adâncimea căutată (31 la adâncime 30), nu 101 — altfel un cuvânt
+	// pe 28 care iese din primele 30 desena o prăbușire de 70 de locuri.
+	const vals = $derived(firstIdx < 0 ? [] : values.slice(firstIdx).map((v) => (v == null ? depth + 1 : v)));
 	const empty = $derived(vals.length < 2);
 
 	const geom = $derived.by(() => {

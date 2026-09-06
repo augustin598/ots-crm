@@ -106,6 +106,50 @@ export function snapshotAtLookback(
 	return best;
 }
 
+/** Câte zile în urmă acceptăm o poziție confirmată drept „poziția curentă" a unui cuvânt. */
+export const RANK_STALE_MAX_DAYS = 7;
+
+export interface RankEffectivePosition {
+	position: number | null;
+	/** Setat când `position` e ultima confirmată, NU măsurătoarea de azi. */
+	stale: { dayKey: string; daysAgo: number } | null;
+}
+
+/**
+ * Poziția de afișat pentru un cuvânt, din seria lui de instantanee (orice ordine).
+ *
+ * MĂSURAT 6 sep. 2026 pe luckystudio.ro, „agentie de videochat": pagina 1 din
+ * scanarea de azi era IDENTICĂ cu cea din 4 sep., site-ul fusese pe 11 (primul de pe
+ * pagina 2), iar Search Console îl raporta tot pe ~11 — dar snapshotul de azi era
+ * `null` și tabelul afișa „30+". O măsurătoare ratată nu e o poziție pierdută.
+ *
+ * Regula: dacă cel mai recent instantaneu e `null`, dar `corroborated` (Search Console
+ * raportează afișări pe o poziție în adâncimea căutată) și există o poziție confirmată
+ * în ultimele `maxAgeDays` zile, o afișăm pe aceea, marcată `stale` — cu ziua ei, ca
+ * UI-ul să spună explicit „ultima confirmată, acum 2 zile". Fără coroborare, `null`
+ * rămâne `null`: nu inventăm poziții din istoric.
+ */
+export function effectivePosition(
+	series: { dayKey: string; position: number | null }[],
+	todayKey: string,
+	corroborated: boolean,
+	maxAgeDays: number = RANK_STALE_MAX_DAYS
+): RankEffectivePosition {
+	const todayMs = dayKeyToUtc(todayKey);
+	const past = series.filter((s) => s.dayKey <= todayKey).sort((a, b) => (a.dayKey < b.dayKey ? 1 : -1));
+	const latest = past[0];
+	if (!latest) return { position: null, stale: null };
+	if (latest.position != null) return { position: latest.position, stale: null };
+	if (!corroborated) return { position: null, stale: null };
+	for (const snap of past) {
+		if (snap.position == null) continue;
+		const daysAgo = Math.round((todayMs - dayKeyToUtc(snap.dayKey)) / 86400000);
+		if (daysAgo > maxAgeDays) break;
+		return { position: snap.position, stale: { dayKey: snap.dayKey, daysAgo } };
+	}
+	return { position: null, stale: null };
+}
+
 /** Pagina Google (10 rezultate/pagină) în care apare poziția; null → null. */
 export function pageForPosition(pos: number | null): number | null {
 	if (pos == null) return null;

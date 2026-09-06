@@ -62,6 +62,7 @@
 		projectsQuery.current?.totals ?? { projectCount: 0, keywordCount: 0, avgVisibility: 0, alertsLast7d: 0 }
 	);
 	const trend = $derived(projectsQuery.current?.trend ?? null);
+	const depth = $derived(projectsQuery.current?.searchDepth ?? 100);
 	const run = $derived(runQuery.current ?? null);
 	const running = $derived((run?.running ?? 0) > 0);
 
@@ -128,8 +129,8 @@
 				weightedAvg += p.avgPosition * p.keywordCount;
 				weightedKw += p.keywordCount;
 			}
-			up += p.lastRunUp ?? 0;
-			down += p.lastRunDown ?? 0;
+			up += p.upToday;
+			down += p.downToday;
 		}
 		return {
 			dist,
@@ -306,7 +307,7 @@
 					<div class="cl-kpi-val">
 						{portfolio.up}<span style="font-size: 15px; color: var(--cl-text-3); font-weight: 700"> ↑ / {portfolio.down} ↓</span>
 					</div>
-					<div class="cl-kpi-sub">față de rularea de ieri</div>
+					<div class="cl-kpi-sub">față de ziua precedentă</div>
 				</div>
 			</div>
 			<div class="cl-kpi">
@@ -381,12 +382,12 @@
 						<div class="rt-proj-num"><b>{p.keywordCount}</b><span>cuvinte</span></div>
 					</div>
 					<div style="margin-top: 14px">
-						<RtDist buckets={p.distribution} total={p.keywordCount} compact />
+						<RtDist buckets={p.distribution} total={p.keywordCount} compact {depth} />
 					</div>
 					<div class="rt-proj-foot">
 						<RtGain value={p.deltaVisibility} suffix=" pct" />
 						<span>7 zile</span>
-						<span style="margin-left: auto">{p.lastRunUp ?? 0} ↑ · {p.lastRunDown ?? 0} ↓ azi</span>
+						<span style="margin-left: auto">{p.upToday} ↑ · {p.downToday} ↓ azi</span>
 						<a href="{base}/{p.id}" aria-label="Deschide {p.domain}" style="display: inline-flex; color: inherit">
 							<ChevronRightIcon size={13} />
 						</a>
@@ -416,7 +417,7 @@
 					</p>
 				</div>
 				{#if days.length && (trend?.avgPosition ?? []).some((v) => v != null)}
-					<RtRankChart {days} height={220} series={avgSeries} />
+					<RtRankChart {days} height={220} series={avgSeries} {depth} />
 				{:else}
 					<div class="cl-budget-empty" style="padding: 30px 0; text-align: center">
 						Graficul apare după primele rulări zilnice.
@@ -425,7 +426,7 @@
 			</div>
 			<div class="cl-section">
 				<div class="cl-section-head"><h3><BarChart3Icon size={15} /> Distribuția pozițiilor</h3></div>
-				<RtDist buckets={portfolio.dist} total={portfolio.keywords} />
+				<RtDist buckets={portfolio.dist} total={portfolio.keywords} {depth} />
 				<div style="margin-top: 18px">
 					<div class="cl-section-head" style="margin-bottom: 8px">
 						<h3 style="font-size: 13px"><TriangleAlertIcon size={14} /> Scăderi de urmărit</h3>
@@ -439,7 +440,7 @@
 								<span class="cl-truncate">{a.keyword}</span>
 								<span class="rt-tag">{alertLabel(a.type)}</span>
 							</div>
-							<div style="text-align: right"><RtPos pos={a.toPosition} sm /></div>
+							<div style="text-align: right"><RtPos pos={a.toPosition} sm {depth} /></div>
 							<div style="text-align: right"><RtGain value={a.delta} /></div>
 						</div>
 					{/each}
@@ -517,6 +518,7 @@
 			buckets={portfolio.dist}
 			total={portfolio.keywords}
 			lastDay={lastRunAt ? psiFmtDateTime(lastRunAt) : ''}
+			{depth}
 			onclose={() => (preview = false)}
 			onsend={onSendReport}
 		/>

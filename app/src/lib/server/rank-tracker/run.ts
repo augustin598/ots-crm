@@ -117,18 +117,13 @@ export async function runRankProjectCheck(
 		skipped: true
 	});
 
-	// Guard: rulare deja activă pentru acest proiect.
-	const existingRaw = await redis.get(key);
-	if (existingRaw) {
-		try {
-			const existing = JSON.parse(existingRaw) as RankRunProgress;
-			if (!existing.finishedAt) {
-				logInfo('scheduler', `[rank] rulare deja activă pentru proiectul ${opts.projectId} — sărit`);
-				return emptySummary();
-			}
-		} catch {
-			/* stare coruptă — o suprascriem */
-		}
+	// Guard: rulare deja activă pentru acest proiect. Prin `getRankRunProgress`, nu prin
+	// cheia brută: o rulare ucisă de un restart rămânea „activă" în Redis până la expirare
+	// (30 min) și sărea orice rulare nouă, deși UI-ul nu mai arăta nimic în curs.
+	const existing = await getRankRunProgress(opts.tenantId, opts.projectId);
+	if (existing && !existing.finishedAt) {
+		logInfo('scheduler', `[rank] rulare deja activă pentru proiectul ${opts.projectId} — sărit`);
+		return emptySummary();
 	}
 
 	const [project] = await db
@@ -229,6 +224,19 @@ export async function runRankProjectCheck(
 		const k = `${s.keywordId}:${s.device}`;
 		if (!baseline.has(k)) baseline.set(k, s.position); // primul = cel mai recent (desc)
 	}
+
+	// Alertele deja ridicate AZI pentru aceleași cuvinte: a doua rulare a zilei (catch-up,
+	// reluare după blocare, reverificare manuală) compară cu același baseline de ieri și ar
+	// ridica aceeași alertă — și ar trimite același email — încă o dată (MĂSURAT 6 sep.:
+	// două rulări cron pe zi → „agentie de videochat dispărut" de două ori în hub).
+	const todaysAlerts = keywordIds.length
+		? await db
+				.select({ keywordId: rankAlert.keywordId, device: rankAlert.device, type: rankAlert.type })
+				.from(rankAlert)
+				.innerJoin(rankRun, eq(rankAlert.runId, rankRun.id))
+				.where(and(eq(rankRun.projectId, project.id), eq(rankRun.dayKey, todayKey), inArray(rankAlert.keywordId, keywordIds)))
+		: [];
+	const alreadyAlerted = new Set(todaysAlerts.map((a) => `${a.keywordId}:${a.device}:${a.type}`));
 
 	const providers = deps.providers ?? (await resolveSerpProvider(opts.tenantId));
 	let activeProvider = providers.primary;
@@ -345,7 +353,9 @@ export async function runRankProjectCheck(
 					serpFeatures: result.features,
 					aiOverview: result.aiOverview,
 					competitors: competitorPositions(result.organic, competitors),
-					topResults: result.organic.slice(0, 10),
+					// TOT ce s-a căutat (până la SERP_DEPTH), nu doar prima pagină: un „negăsit"
+					// trebuie să poată fi auditat („cine era pe 11–30?"). UI-ul taie la prima pagină.
+					topResults: result.organic,
 					provider: activeProvider.name,
 					createdAt: measuredAt
 				})
@@ -359,7 +369,7 @@ export async function runRankProjectCheck(
 						serpFeatures: result.features,
 						aiOverview: result.aiOverview,
 						competitors: competitorPositions(result.organic, competitors),
-						topResults: result.organic.slice(0, 10),
+						topResults: result.organic,
 						provider: activeProvider.name
 					}
 				});
@@ -377,7 +387,7 @@ export async function runRankProjectCheck(
 			else if (kind === 'flat') flat++;
 
 			const alert = computeAlert(prevPos, nextPos, project.alertThreshold);
-			if (alert) {
+			if (alert && !alreadyAlerted.has(`${job.keywordId}:${job.device}:${alert.type}`)) {
 				alertRows.push({
 					id: generateId(),
 					tenantId: opts.tenantId,
@@ -455,9 +465,14 @@ export async function runRankProjectCheck(
 
 	// Cuvintele neatinse (blocare la mijloc sau buget parțial): re-programabile de apelant
 	// după cooldown-ul motorului, în loc să aștepte cronul de a doua zi.
+	// Cuvântul la care a venit blocarea a fost „încercat" (numărat la `failed`), dar NU
+	// verificat — fără el în listă, reluarea de după cooldown îl sărea de fiecare dată.
 	const attempted = checked + failed;
+	const firstUnattempted = blocked ? attempted - 1 : attempted;
 	const unattemptedKeywordIds =
-		attempted < jobs.length ? [...new Set(jobs.slice(attempted).map((j) => j.keywordId))] : undefined;
+		firstUnattempted < jobs.length
+			? [...new Set(jobs.slice(firstUnattempted).map((j) => j.keywordId))]
+			: undefined;
 
 	return {
 		runId,
