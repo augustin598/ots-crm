@@ -68,7 +68,7 @@ export const ACCESS_CATEGORY_LABELS: Record<AccessCategory, string> = {
 	hosting: 'Hosting',
 	content: 'Content',
 	interviuri: 'Interviuri',
-	seo: 'SEO & PageSpeed'
+	seo: 'SEO, PageSpeed & Rank Tracker'
 };
 
 /** Copie fresh a flag-urilor „totul oprit" — pt fallback-uri în UI. */

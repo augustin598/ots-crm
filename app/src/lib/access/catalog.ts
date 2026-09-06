@@ -391,9 +391,9 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 		id: 'portal.seo.view',
 		domain: 'portal',
 		groupLabel: 'Campanii & Marketing',
-		label: 'SEO & PageSpeed',
+		label: 'SEO, PageSpeed & Rank Tracker',
 		description:
-			'Vezi hub-ul SEO & GEO & AEO și scanările PageSpeed — doar site-urile companiei tale.'
+			'Vezi hub-ul SEO & GEO & AEO, scanările PageSpeed și pozițiile Google (Rank Tracker) — doar site-urile companiei tale.'
 	},
 	{
 		id: 'portal.team.manage',

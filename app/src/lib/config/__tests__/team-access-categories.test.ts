@@ -111,7 +111,7 @@ describe('access category: seo (hub SEO & GEO & AEO + PageSpeed în portal)', ()
 	it('mirror-ul client conține seo, cu eticheta decisă', async () => {
 		expect(ACCESS_CATEGORIES).toContain('seo');
 		const { ACCESS_CATEGORY_LABELS } = await import('$lib/config/team');
-		expect(ACCESS_CATEGORY_LABELS.seo).toBe('SEO & PageSpeed');
+		expect(ACCESS_CATEGORY_LABELS.seo).toBe('SEO, PageSpeed & Rank Tracker');
 	});
 
 	it('presetele au valorile decise pentru seo', () => {
@@ -131,15 +131,18 @@ describe('access category: seo (hub SEO & GEO & AEO + PageSpeed în portal)', ()
 		expect(capabilitiesToLegacyFlags(['portal.seo.view']).seo).toBe(true);
 	});
 
-	it('rutele portal /seo și /pagespeed cer portal.seo.view', () => {
+	it('rutele portal /seo, /pagespeed și /rank-tracker cer portal.seo.view', () => {
 		expect(routeRequiresCapability('/client/ots/seo', 'ots')).toBe('portal.seo.view');
 		expect(routeRequiresCapability('/client/ots/pagespeed', 'ots')).toBe('portal.seo.view');
+		expect(routeRequiresCapability('/client/ots/rank-tracker', 'ots')).toBe('portal.seo.view');
+		expect(routeRequiresCapability('/client/ots/rank-tracker/abc', 'ots')).toBe('portal.seo.view');
 	});
 
 	it('routeRequiresAccess (legacy) mapează /seo și /pagespeed pe categoria seo', async () => {
 		const { routeRequiresAccess } = await import('$lib/server/portal-access');
 		expect(routeRequiresAccess('/client/ots/seo', 'ots')).toBe('seo');
 		expect(routeRequiresAccess('/client/ots/pagespeed', 'ots')).toBe('seo');
+		expect(routeRequiresAccess('/client/ots/rank-tracker', 'ots')).toBe('seo');
 		// backlinks/content rămân pe categoriile lor
 		expect(routeRequiresAccess('/client/ots/backlinks', 'ots')).toBe('backlinks');
 		expect(routeRequiresAccess('/client/ots/content', 'ots')).toBe('content');

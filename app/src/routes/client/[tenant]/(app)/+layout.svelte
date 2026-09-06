@@ -29,11 +29,33 @@
 	const currentPath = $derived(page.url.pathname);
 	const access = $derived(data.accessFlags);
 
-	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content', '/interviuri'];
+	// Serviciile livrate — blurate când contul e restricționat (factură restantă). Modulele
+	// SEO noi (hub, PageSpeed, Rank Tracker) intră la fel ca Backlinks și Content.
+	const restrictedPrefixes = ['/reports', '/tasks', '/marketing', '/backlinks', '/access-data', '/leads', '/content', '/interviuri', '/seo', '/pagespeed', '/rank-tracker'];
 
 	// Modulul Content e un layout edge-to-edge cu breadcrumb propriu (Content › Website ›
 	// Editor); ascunde topbar-ul shell + scoate p-6 din <main> ca să stea flush.
 	const isContentRoute = $derived(/^\/client\/[^/]+\/content(\/|$)/.test(currentPath));
+
+	type SeoNavItem = { id: string; label: string; icon: 'seo' | 'seo-links' | 'pagespeed' | 'rank-tracker' | 'content'; href: string };
+	function seoGroup(access: Record<string, boolean>): Array<SeoNavItem & { children?: SeoNavItem[] }> {
+		const children: SeoNavItem[] = [
+			...(access.backlinks ? [{ id: 'backlinks', label: 'Backlinks', icon: 'seo-links' as const, href: '/backlinks' }] : []),
+			...(access.seo
+				? [
+						{ id: 'seo-pagespeed', label: 'PageSpeed Insights', icon: 'pagespeed' as const, href: '/pagespeed' },
+						{ id: 'seo-rank', label: 'Rank Tracker', icon: 'rank-tracker' as const, href: '/rank-tracker' }
+					]
+				: []),
+			...(data.contentEnabled && access.content
+				? [{ id: 'content', label: 'Content', icon: 'content' as const, href: '/content' }]
+				: [])
+		];
+		if (children.length === 0) return [];
+		// fără acces la hub, grupul duce la primul copil permis (nu la o pagină de 403)
+		const href = access.seo ? '/seo' : children[0].href;
+		return [{ id: 'seo', label: 'SEO & GEO & AEO', icon: 'seo' as const, href, children }];
+	}
 	// La fel și detaliul de task: are breadcrumb propriu (⚙ › Tasks › titlu) în
 	// client-task-detail-body — fără topbar-ul shell (dubla breadcrumb-ul) și fără p-6.
 	const isTaskDetailRoute = $derived(/^\/client\/[^/]+\/tasks\/[^/]+(\/|$)/.test(currentPath));
@@ -193,50 +215,10 @@
 								}
 							]
 						: []),
-					...(access.seo
-						? [
-								{
-									id: 'seo',
-									label: 'SEO & GEO & AEO',
-									icon: 'seo' as const,
-									href: '/seo',
-									children: [
-										{
-											id: 'seo-pagespeed',
-											label: 'PageSpeed Insights',
-											icon: 'pagespeed' as const,
-											href: '/pagespeed'
-										},
-										{
-											id: 'seo-rank',
-											label: 'Rank Tracker',
-											icon: 'rank-tracker' as const,
-											href: '/rank-tracker'
-										}
-									]
-								}
-							]
-						: []),
-					...(access.backlinks
-						? [
-								{
-									id: 'backlinks',
-									label: 'Backlinks',
-									icon: 'seo-links' as const,
-									href: '/backlinks'
-								}
-							]
-						: []),
-					...(data.contentEnabled && access.content
-						? [
-								{
-									id: 'content',
-									label: 'Content',
-									icon: 'content' as const,
-									href: '/content'
-								}
-							]
-						: []),
+					// Aceeași grupare ca în admin („SEO & GEO & AEO" → Backlinks, PageSpeed, Rank
+					// Tracker, Content). Fiecare copil păstrează propriul gate de acces; grupul
+					// apare dacă măcar un copil e permis, iar hub-ul /seo cere categoria `seo`.
+					...seoGroup(access),
 					...(data.interviuriEnabled && access.interviuri
 						? [
 								{
