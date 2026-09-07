@@ -287,6 +287,13 @@
 .psi-chart-legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 10px; font-size: 11.5px; color: var(--cl-text-2); }
 .psi-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .psi-chart-legend i { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+/* tooltip la hover peste grafic — poziționat procentual, deci urmează scalarea svg-ului */
+.psi-chart-plot { position: relative; }
+.psi-chart-tip { position: absolute; z-index: 2; pointer-events: none; background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: 9px; box-shadow: 0 8px 22px rgba(15,23,42,.16); padding: 7px 9px; font-size: 11.5px; white-space: nowrap; min-width: 118px; }
+.psi-chart-tip-h { font-size: 11px; font-weight: 800; color: var(--cl-text); margin-bottom: 4px; }
+.psi-chart-tip-r { display: flex; align-items: center; gap: 6px; color: var(--cl-text-2); line-height: 1.6; }
+.psi-chart-tip-r i { width: 12px; height: 3px; border-radius: 2px; flex: none; }
+.psi-chart-tip-r b { margin-left: auto; padding-left: 12px; color: var(--cl-text); font-weight: 800; }
 
 /* programare raport */
 .psi-next { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 12px; background: var(--cl-surface-2); border: 1px solid var(--cl-border); }
