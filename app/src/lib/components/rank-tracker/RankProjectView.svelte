@@ -729,13 +729,18 @@
 												{rtDaysAgoLabel(r.stale.daysAgo)}
 											</span>
 										{/if}
-										{#if r.gsc && r.gsc.trust !== 'ok' && r.gsc.position >= 1}
+										<!-- DOAR `scrape-missing`: noi n-am găsit site-ul, dar Google raportează afișări,
+										     deci cifra NOASTRĂ e nesigură. „Divergent" nu mai aprinde nimic: poziția din
+										     Search Console e o medie pe 7 zile, peste dispozitive, pagini și locații, deci
+										     diferă legitim de o măsurătoare punctuală — MĂSURAT 7 sep. 2026 pe „job
+										     videochat iasi" (heylux.ro): SERP-ul salvat confirma poziția 9, iar GSC raporta
+										     ~33 din 3 afișări de acum două zile. Un badge care dă alarme false se învață
+										     ignorat, inclusiv când e real. -->
+										{#if r.gsc && r.gsc.trust === 'scrape-missing' && r.gsc.position >= 1}
 											{@const gp = Math.round(r.gsc.position)}
 											<span
-												class="rt-trust {r.gsc.trust === 'scrape-missing' ? 'missing' : 'divergent'}"
-												title={r.gsc.trust === 'scrape-missing'
-													? `Ultima scanare nu a găsit site-ul în primele ${depth}, dar Google Search Console îl raportează pe poziția medie ~${gp} (media pe dispozitive și pagini, cu ~2 zile întârziere).${r.stale ? ` Afișăm ultima poziție confirmată, ${rtDaysAgoLabel(r.stale.daysAgo)}.` : ' Probabil scanarea a fost blocată.'}`
-													: `Poziția scrapată diferă cu peste 10 locuri față de media din Search Console (~${gp}).`}
+												class="rt-trust missing"
+												title={`Ultima scanare nu a găsit site-ul în primele ${depth}, dar Google Search Console îl raportează pe poziția medie ~${gp} (media pe dispozitive și pagini, cu ~2 zile întârziere).${r.stale ? ` Afișăm ultima poziție confirmată, ${rtDaysAgoLabel(r.stale.daysAgo)}.` : ' Probabil scanarea a fost blocată.'}`}
 											>Google ~{gp}</span
 											>
 										{/if}

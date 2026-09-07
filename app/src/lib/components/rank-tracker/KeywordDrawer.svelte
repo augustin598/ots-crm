@@ -386,6 +386,15 @@
 							{keyword.gsc.date}: {keyword.gsc.impressions} afișări · {keyword.gsc.clicks} clicuri ·
 							CTR {keyword.gsc.ctr}% · poziție medie {keyword.gsc.position}
 						</p>
+						{#if keyword.gsc.trust === 'divergent'}
+							<p class="cl-hint">
+								Diferența față de poziția noastră e normală: media din Search Console e pe
+								{keyword.gsc.impressions}
+								{keyword.gsc.impressions === 1 ? 'afișare' : 'afișări'}, peste toate dispozitivele,
+								paginile și locațiile, cu ~2 zile întârziere. Noi măsurăm o singură dată, pentru
+								locația proiectului.
+							</p>
+						{/if}
 						{#if keyword.gsc.trust === 'scrape-missing'}
 							<p class="cl-hint">
 								Google raportează afișări pentru acest cuvânt, dar ultima scanare nu a găsit
