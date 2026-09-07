@@ -10,7 +10,10 @@
 		if (!o) resolveConfirm(false);
 	}}
 >
-	<Dialog.Content class="sm:max-w-md">
+	<!-- z peste modalele proprii (.psi-modal-back z-index 100, .iv-modal-backdrop 200,
+	     checkout 999, FeatureHint 1100): confirmarea trebuie să fie mereu deasupra,
+	     altfel butonul care o deschide pare că „nu face nimic". -->
+	<Dialog.Content class="sm:max-w-md z-[2001]" overlayClass="z-[2000]">
 		<Dialog.Header>
 			<Dialog.Title>{confirmState.title}</Dialog.Title>
 			<Dialog.Description class="whitespace-pre-line">
