@@ -14,6 +14,7 @@
 		TIER_COLORS,
 		SETUP_DEFAULT_DESCRIPTION,
 		HOURLY_RATES,
+		RATE_MODES,
 		WEB_DEV_SLUGS,
 		type Category,
 		type Tier
@@ -38,6 +39,7 @@
 	tierColors={TIER_COLORS}
 	setupDefaultDescription={SETUP_DEFAULT_DESCRIPTION}
 	hourlyRates={HOURLY_RATES}
+	rateModes={RATE_MODES}
 	{isWebDev}
 	{onRequest}
 />

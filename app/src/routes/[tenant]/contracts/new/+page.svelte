@@ -20,6 +20,7 @@
 	import { getDefaultContractClauses } from '$lib/contract-templates';
 	import type { ContractClause } from '$lib/contract-templates';
 	import { untrack } from 'svelte';
+	import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
 	let { data }: { data: any } = $props();
 
@@ -88,14 +89,14 @@
 	}
 
 	let lineItems = $state<ServiceLineItem[]>([
-		{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: 'Luna' }
+		{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: KEEZ_UNIT.MONTH }
 	]);
 	let discountPercent = $state(0);
 
 	function addLineItem() {
 		lineItems = [
 			...lineItems,
-			{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: 'Luna' }
+			{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: KEEZ_UNIT.MONTH }
 		];
 	}
 

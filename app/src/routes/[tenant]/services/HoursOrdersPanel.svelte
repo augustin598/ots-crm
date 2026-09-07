@@ -20,7 +20,15 @@
 	const STATUS_LABEL: Record<string, string> = {
 		pending_payment: 'Plată neconfirmată',
 		paid: 'Plătită',
-		failed: 'Plată eșuată'
+		failed: 'Plată eșuată',
+		refunded: 'Returnată'
+	};
+
+	/** Regimurile peste standard se văd din prima: ele au SLA de confirmat. */
+	const MODE_LABEL: Record<string, string> = {
+		urgent: 'Urgență',
+		weekend: 'Weekend',
+		night: 'Noapte'
 	};
 
 	function statusClass(status: string): string {
@@ -29,6 +37,8 @@
 				return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
 			case 'failed':
 				return 'bg-destructive/15 text-destructive border-destructive/30';
+			case 'refunded':
+				return 'bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30';
 			default:
 				return 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
 		}
@@ -129,7 +139,25 @@
 							</td>
 							<td class="px-4 py-3 whitespace-nowrap">
 								<div class="font-medium">{o.rateLabel}</div>
-								<div class="text-xs text-muted-foreground">{o.rateEur} €/h</div>
+								<div class="text-xs text-muted-foreground">
+									{o.rateEur} €/h
+									{#if o.baseRateEur && o.baseRateEur !== o.rateEur}
+										· standard {o.baseRateEur} €/h
+									{/if}
+								</div>
+								{#if MODE_LABEL[o.modeSlug]}
+									<Badge
+										variant="outline"
+										class="mt-1 text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-300"
+									>
+										{MODE_LABEL[o.modeSlug]} +{o.modeMultiplierPct - 100}%
+									</Badge>
+									{#if o.requestedWindow}
+										<div class="text-xs text-muted-foreground mt-1">
+											Cerut: {o.requestedWindow}
+										</div>
+									{/if}
+								{/if}
 							</td>
 							<td class="px-4 py-3 text-right whitespace-nowrap font-semibold tabular-nums">
 								{o.hours} h

@@ -14,6 +14,8 @@
  *
  * Mirrors the shape produced by recurring-template.ts:upsertRecurringInvoiceForHostingAccount.
  */
+import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
+
 export interface RecurringLineItem {
 	description: string;
 	quantity: number;
@@ -40,6 +42,6 @@ export function buildRecurringLineItem(args: {
 		rate: args.netCents / 100,
 		taxRate: args.taxRatePercent,
 		currency: args.currency,
-		unitOfMeasure: 'Buc'
+		unitOfMeasure: KEEZ_UNIT.PIECE
 	};
 }

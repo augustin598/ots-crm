@@ -7,7 +7,9 @@
  *  - clientul se creează/leagă cu aceeași politică anti-enumeration ca la
  *    hosting (CUI la firme, email la PF; UNIQUE race recovery) — răspunsul e
  *    identic indiferent dacă clientul exista deja;
- *  - suma = ore × tarif din CATALOG (nu din payload) + TVA-ul tenantului →
+ *  - suma = ore × tarif efectiv din CATALOG (tarif de bază × multiplicatorul
+ *    regimului de lucru: standard / urgență / weekend / noapte — niciodată din
+ *    payload) + TVA-ul tenantului →
  *    PaymentIntent EUR pe BRUT, cu `metadata.crmPurpose='hours_purchase'`:
  *    contractul cu webhook-ul care emite factura Keez și trimite emailurile
  *    DOAR pentru acest flux (fără provisioning DA, fără reemitere).
@@ -19,8 +21,15 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { and, eq, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { getHourlyRate } from '$lib/constants/ots-catalog';
-import { HOURS_MIN, HOURS_MAX, hoursNetCents } from '$lib/logic/hours-pricing';
+import { getHourlyRate, getRateMode, hourlyRateLabelFor } from '$lib/constants/ots-catalog';
+import {
+	HOURS_MIN,
+	HOURS_MAX,
+	RATE_MODE_SLUGS,
+	DEFAULT_RATE_MODE,
+	effectiveRateEur,
+	hoursNetCents
+} from '$lib/logic/hours-pricing';
 import { computeVatBreakdown } from '$lib/utils/vat';
 import { resolveVatPercent } from '$lib/server/vat/rate';
 import { guardPublicServicesSubmission } from '$lib/server/public-services-guard';
@@ -43,7 +52,17 @@ function generateId(): string {
 
 const hoursOrderSchema = v.object({
 	rateSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
+	/** Regimul de lucru; multiplicatorul vine din catalog, nu de aici. */
+	modeSlug: v.optional(v.picklist(RATE_MODE_SLUGS), DEFAULT_RATE_MODE),
 	hours: v.pipe(v.number(), v.integer(), v.minValue(HOURS_MIN), v.maxValue(HOURS_MAX)),
+	/** Când cere clientul lucrarea (text wall-clock) — fără el SLA-ul nu se poate arbitra. */
+	requestedWindow: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(160))),
+	/**
+	 * OUG 34/2014: la persoane fizice, începerea imediată a serviciului stinge
+	 * dreptul de retragere în 14 zile doar cu acord expres. Obligatoriu la orice
+	 * regim peste standard.
+	 */
+	consentImmediateStart: v.optional(v.boolean(), false),
 	billingType: v.optional(v.picklist(['company', 'person']), 'company'),
 	contactName: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(120)),
 	contactEmail: v.pipe(v.string(), v.trim(), v.maxLength(255), v.regex(EMAIL_REGEX)),
@@ -77,9 +96,24 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 		throw error(503, 'Plățile online nu sunt disponibile momentan. Scrie-ne și rezolvăm direct.');
 	}
 
-	// Tariful vine din catalog, NU din payload — clientul nu-și alege prețul.
+	// Tariful și multiplicatorul vin din catalog, NU din payload — clientul nu-și
+	// alege prețul, doar specializarea și regimul.
 	const rate = getHourlyRate(data.rateSlug);
 	if (!rate) throw error(400, 'Specializarea selectată nu există.');
+	const mode = getRateMode(data.modeSlug ?? DEFAULT_RATE_MODE);
+	if (!mode) throw error(400, 'Regimul de lucru selectat nu există.');
+	if (data.hours > mode.maxHours) {
+		throw error(
+			400,
+			`Pentru regimul „${mode.label}" vindem online maximum ${mode.maxHours} ore odată. Scrie-ne pentru un volum mai mare.`
+		);
+	}
+	const effectiveRate = effectiveRateEur(rate.rate, mode.multiplierPct);
+	const rateLabel = hourlyRateLabelFor(rate, mode);
+	const requestedWindow = data.requestedWindow?.trim() || null;
+	if (mode.slug !== DEFAULT_RATE_MODE && !requestedWindow) {
+		throw error(400, 'Spune-ne când ai nevoie de lucrare, ca să putem confirma regimul.');
+	}
 
 	const normalizedEmail = data.contactEmail.toLowerCase();
 	const billingType = data.billingType ?? 'company';
@@ -93,7 +127,7 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
 	const vatPercent = resolveVatPercent(settings?.defaultTaxRate);
-	const netCents = hoursNetCents(rate.rate, data.hours);
+	const netCents = hoursNetCents(effectiveRate, data.hours);
 	const { vatCents, grossCents } = computeVatBreakdown(netCents, vatPercent);
 
 	// ── Validare identitate + căutare client existent ────────────────────────
@@ -112,6 +146,13 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 		// PF: nume + prenume vin într-un singur câmp; cerem minim două cuvinte
 		// ca factura să nu iasă pe „Ion".
 		throw error(400, 'Te rugăm să completezi numele și prenumele.');
+	}
+
+	if (billingType === 'person' && mode.slug !== DEFAULT_RATE_MODE && !data.consentImmediateStart) {
+		throw error(
+			400,
+			'Pentru regimurile cu start imediat avem nevoie de acordul tău expres privind începerea lucrării.'
+		);
 	}
 
 	const clientMatch = () =>
@@ -237,8 +278,13 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 					tenantId,
 					clientId: clientRow.id,
 					rateSlug: rate.slug,
-					rateLabel: rate.label,
-					rateEur: rate.rate,
+					rateLabel,
+					rateEur: effectiveRate,
+					modeSlug: mode.slug,
+					modeMultiplierPct: mode.multiplierPct,
+					baseRateEur: rate.rate,
+					modeSlaSnapshot: mode.sla,
+					requestedWindow,
 					hours: data.hours,
 					netCents,
 					vatCents,
@@ -263,7 +309,7 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 		logError('packages', `comandă ore: INSERT eșuat — ${message}`, {
 			tenantId,
 			stackTrace: stack,
-			metadata: { rateSlug: rate.slug, hours: data.hours, clientId: clientRow.id }
+			metadata: { rateSlug: rate.slug, modeSlug: mode.slug, hours: data.hours, clientId: clientRow.id }
 		});
 		throw error(500, 'Nu am putut înregistra comanda. Te rugăm să încerci din nou.');
 	}
@@ -316,9 +362,12 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 				crmHoursOrderId: orderId,
 				crmNetCents: String(netCents),
 				crmVatCents: String(vatCents),
-				crmVatPercent: String(vatPercent)
+				crmVatPercent: String(vatPercent),
+				// Regimul stă și aici: o dispută pe Stripe se rezolvă fără acces la DB.
+				crmRateMode: mode.slug,
+				crmRateMultiplierPct: String(mode.multiplierPct)
 			},
-			description: `Extra work — ${rate.label} × ${data.hours} h`
+			description: `Extra work — ${rateLabel} × ${data.hours} h`
 		});
 		if (!intent.client_secret) throw new Error('Stripe nu a returnat clientSecret.');
 
@@ -342,6 +391,8 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 				orderId,
 				clientId: clientRow.id,
 				rateSlug: rate.slug,
+				modeSlug: mode.slug,
+				rateEur: effectiveRate,
 				hours: data.hours,
 				grossCents,
 				paymentIntentId: intent.id

@@ -8,6 +8,7 @@ import { keezUpdateSkipReason } from './update-guard';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
+import { keezMeasureUnitId } from '$lib/constants/keez-measure-units';
 
 function generateSyncId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -164,17 +165,8 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		const itemVatPercent = lineItem.taxRate != null ? lineItem.taxRate / 100 : defaultVatPercent;
 		// Use per-item currency if available, otherwise use invoice currency
 		const itemCurrency = lineItem.currency || currency;
-		// Map unit of measure - Keez uses measureUnitId as number (1 = "Buc")
-		let measureUnitId = 1; // Default to "Buc"
-		if (lineItem.unitOfMeasure) {
-			const unitMap: Record<string, number> = {
-				Pcs: 1,
-				Buc: 1,
-				Hours: 2,
-				Days: 3
-			};
-			measureUnitId = unitMap[lineItem.unitOfMeasure] || 1;
-		}
+		// Unitatea de măsură vine din tabelul comun (nomenclatorul Keez).
+		const measureUnitId = keezMeasureUnitId(lineItem.unitOfMeasure);
 
 		let resolvedExternalId: string;
 		try {

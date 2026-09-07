@@ -15,6 +15,7 @@
 	import { extractErrorMessage } from '$lib/utils';
 	import { DEFAULT_VAT_PERCENT } from '$lib/utils/vat';
 	import type { KeezItem } from '$lib/server/plugins/keez/client';
+	import { KEEZ_DEFAULT_MEASURE_UNIT_ID } from '$lib/constants/keez-measure-units';
 	import { createKeezItem } from '$lib/remotes/keez.remote';
 
 	interface LineItem {
@@ -125,7 +126,7 @@
 					name: newItemName.trim(),
 					code: newItemCode.trim() || '',
 					currencyCode: 'RON',
-					measureUnitId: 1,
+					measureUnitId: KEEZ_DEFAULT_MEASURE_UNIT_ID,
 					categoryExternalId: 'MISCSRV',
 					categoryName: 'Servicii diverse',
 					isActive: true,

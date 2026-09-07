@@ -21,6 +21,7 @@ import { and, eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getLatestBnrRate } from '$lib/server/bnr/client';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -354,7 +355,7 @@ export async function upsertRecurringInvoiceForHostingAccount(
 		rate: effectiveAmount / 100,
 		taxRate: taxRatePercent,
 		currency: effectiveCurrency,
-		unitOfMeasure: 'Buc'
+		unitOfMeasure: KEEZ_UNIT.PIECE
 	};
 	const lineItemsJson = JSON.stringify([lineItem]);
 

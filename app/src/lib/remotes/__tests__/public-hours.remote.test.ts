@@ -370,3 +370,109 @@ describe('createHoursOrder — refuzuri', () => {
 		expect(updatedRows).toHaveLength(0);
 	});
 });
+
+describe('createHoursOrder — regimuri de lucru', () => {
+	const URGENT = {
+		...INPUT,
+		modeSlug: 'urgent' as const,
+		requestedWindow: '2026-09-12 · 09:00–13:00'
+	};
+
+	test('tariful efectiv, eticheta și snapshot-ul regimului ajung în comandă', async () => {
+		const res = await createHoursOrder(URGENT);
+
+		const order = orderRow();
+		// 65 € × 1,5 = 97,5 → 98 € (rotunjit la euro întreg, ca rate_eur să rămână INTEGER).
+		expect(order.rateEur).toBe(98);
+		expect(order.baseRateEur).toBe(65);
+		expect(order.modeSlug).toBe('urgent');
+		expect(order.modeMultiplierPct).toBe(150);
+		expect(order.rateLabel).toBe('Development (Urgență 48h)');
+		expect(order.requestedWindow).toBe('2026-09-12 · 09:00–13:00');
+		expect(order.modeSlaSnapshot).toContain('48 de ore lucrătoare');
+		expect(order.netCents).toBe(98000);
+		expect(res.breakdown).toEqual({
+			netCents: 98000,
+			vatCents: 20580,
+			grossCents: 118580,
+			vatPercent: 21
+		});
+
+		const pi = createdIntents[0];
+		expect(pi.amount).toBe(118580);
+		expect(pi.metadata.crmRateMode).toBe('urgent');
+		expect(pi.metadata.crmRateMultiplierPct).toBe('150');
+		expect(pi.description).toContain('Development (Urgență 48h)');
+	});
+
+	test('multiplicatorul vine din catalog, nu din payload', async () => {
+		await createHoursOrder({ ...URGENT, modeMultiplierPct: 900, rateEur: 5 } as never);
+		expect(orderRow().rateEur).toBe(98);
+		expect(orderRow().modeMultiplierPct).toBe(150);
+	});
+
+	test('regim necunoscut → 400', async () => {
+		await expectHttpError(createHoursOrder({ ...URGENT, modeSlug: 'holiday' } as never), 400);
+		expect(orderRow()).toBeUndefined();
+	});
+
+	test('peste plafonul de ore al regimului → 400', async () => {
+		// Noaptea vindem online maximum 16 h; 17 h e sub HOURS_MAX, deci schema trece.
+		await expectHttpError(
+			createHoursOrder({ ...URGENT, modeSlug: 'night', hours: 17 } as never),
+			400
+		);
+		expect(orderRow()).toBeUndefined();
+		// Aceleași ore în regim standard (plafon 100 h) trec.
+		await createHoursOrder({ ...INPUT, hours: 17 });
+		expect(orderRow().hours).toBe(17);
+	});
+
+	test('regim peste standard fără interval cerut → 400', async () => {
+		await expectHttpError(createHoursOrder({ ...URGENT, requestedWindow: '  ' }), 400);
+		expect(orderRow()).toBeUndefined();
+	});
+
+	test('PF fără acordul de începere imediată → 400; cu acord trece', async () => {
+		const pf = {
+			...URGENT,
+			billingType: 'person' as const,
+			companyName: undefined,
+			cui: undefined,
+			vatPayer: false
+		};
+		await expectHttpError(createHoursOrder(pf), 400);
+		expect(orderRow()).toBeUndefined();
+
+		await createHoursOrder({ ...pf, consentImmediateStart: true });
+		expect(orderRow().billingType).toBe('person');
+		expect(orderRow().rateEur).toBe(98);
+	});
+
+	test('firma nu are nevoie de acordul OUG 34/2014 (nu e consumator)', async () => {
+		await createHoursOrder(URGENT);
+		expect(orderRow().rateEur).toBe(98);
+	});
+
+	test('weekend și noapte au tarifele publicate', async () => {
+		await createHoursOrder({ ...URGENT, modeSlug: 'weekend' } as never);
+		expect(orderRow().rateEur).toBe(111);
+		expect(orderRow().rateLabel).toBe('Development (Weekend)');
+
+		insertedRows = [];
+		await createHoursOrder({ ...URGENT, modeSlug: 'night', hours: 10 } as never);
+		expect(orderRow().rateEur).toBe(130);
+		expect(orderRow().rateLabel).toBe('Development (Noapte)');
+	});
+
+	test('comanda fără regim rămâne pe tariful standard de azi', async () => {
+		await createHoursOrder(INPUT);
+		const order = orderRow();
+		expect(order.modeSlug).toBe('standard');
+		expect(order.modeMultiplierPct).toBe(100);
+		expect(order.rateEur).toBe(65);
+		expect(order.baseRateEur).toBe(65);
+		expect(order.rateLabel).toBe('Development');
+		expect(order.requestedWindow).toBeNull();
+	});
+});

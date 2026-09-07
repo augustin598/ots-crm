@@ -17,7 +17,27 @@
 	„Înapoi": o a doua trimitere ar crea altă comandă și alt intent.
 -->
 <script lang="ts" module>
-	export type HoursCheckoutRate = { slug: string; label: string; rate: number; hours: number };
+	import type { RateModeSlug } from '$lib/logic/hours-pricing';
+
+	export type HoursCheckoutRate = {
+		slug: string;
+		label: string;
+		/** Tariful EFECTIV al regimului ales (bază × multiplicator, rotunjit) — suma se calculează din el. */
+		rate: number;
+		/** Tariful standard, pentru comparație în sumar. */
+		baseRate: number;
+		hours: number;
+		/** Regimul de lucru, din catalogul public (`PublicCatalog.rateModes`). */
+		mode: {
+			slug: RateModeSlug;
+			label: string;
+			suffix: string;
+			description: string;
+			sla: string;
+			multiplierPct: number;
+			maxHours: number;
+		};
+	};
 </script>
 
 <script lang="ts">
@@ -62,7 +82,20 @@
 		el.focus();
 	};
 
-	const money = $derived(computeVatBreakdown(hoursNetCents(rate.rate, rate.hours), vatPercent));
+	// Pasul 1 arată calculul local (aceleași funcții ca pe server). După crearea
+	// comenzii afișăm defalcarea întoarsă de server: dacă între deschiderea paginii
+	// și plată s-a schimbat catalogul sau cota de TVA, suma de pe buton e cea
+	// încasată efectiv de Stripe, nu cea din memoria browserului.
+	let serverMoney = $state<{
+		netCents: number;
+		vatCents: number;
+		grossCents: number;
+		vatPercent: number;
+	} | null>(null);
+	const money = $derived(
+		serverMoney ?? computeVatBreakdown(hoursNetCents(rate.rate, rate.hours), vatPercent)
+	);
+	const shownVatPercent = $derived(serverMoney?.vatPercent ?? vatPercent);
 	// Sumele cu TVA au subdiviziuni: „50,40 €", nu „50,4 €" — la plată se afișează
 	// mereu doi zecimali; `formatEur` din catalog e pentru prețurile întregi.
 	const eur = (cents: number) =>
@@ -90,6 +123,20 @@
 	// Acord explicit cu Termenii + GDPR înainte de plată, ca la checkout-ul de hosting.
 	let consentTerms = $state(false);
 	let touched = $state(false);
+
+	// ── Regim de lucru peste standard ──
+	// Serverul cere un interval pentru urgență/weekend/noapte: fără el, SLA-ul
+	// cumpărat nu se poate nici confirma, nici contesta.
+	const premiumMode = $derived(rate.mode.slug !== 'standard');
+	let requestedDate = $state('');
+	let requestedSlot = $state('');
+	const todayIso = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, ora locală
+	const SLOTS = ['09:00–13:00', '13:00–18:00', '18:00–22:00', '22:00–08:00', 'Oricând în ziua aceea'];
+	const requestedWindow = $derived(
+		[requestedDate.trim(), requestedSlot.trim()].filter(Boolean).join(' · ')
+	);
+	/** OUG 34/2014: la PF, începerea imediată stinge dreptul de retragere doar cu acord expres. */
+	let consentImmediateStart = $state(false);
 
 	// Verificarea ANAF e informativă (autocompletare); validarea reală e pe server.
 	let cuiChecking = $state(false);
@@ -124,6 +171,14 @@
 		billingType === 'person' && city.trim().length < 2 ? 'Scrie localitatea.' : null
 	);
 	const consentError = $derived(consentTerms ? null : 'Bifează acordul cu Termenii și politica GDPR.');
+	const windowError = $derived(
+		premiumMode && requestedDate.trim().length === 0 ? 'Alege ziua în care ai nevoie de lucrare.' : null
+	);
+	const immediateStartError = $derived(
+		premiumMode && billingType === 'person' && !consentImmediateStart
+			? 'Confirmă că suntem de acord să începem imediat.'
+			: null
+	);
 	const detailsValid = $derived(
 		!nameError &&
 			!emailError &&
@@ -131,6 +186,8 @@
 			!cuiError &&
 			!addressError &&
 			!cityError &&
+			!windowError &&
+			!immediateStartError &&
 			!consentError
 	);
 	const show = (err: string | null) => touched && err !== null;
@@ -142,6 +199,8 @@
 		if (emailError) return { id: 'hc-email', message: emailError };
 		if (addressError) return { id: 'hc-address', message: addressError };
 		if (cityError) return { id: 'hc-city', message: cityError };
+		if (windowError) return { id: 'hc-date', message: windowError };
+		if (immediateStartError) return { id: 'hc-immediate', message: immediateStartError };
 		if (consentError) return { id: 'hc-consent', message: consentError };
 		return null;
 	});
@@ -205,7 +264,10 @@
 		try {
 			const res = await createHoursOrder({
 				rateSlug: rate.slug,
+				modeSlug: rate.mode.slug,
 				hours: rate.hours,
+				requestedWindow: requestedWindow || undefined,
+				consentImmediateStart: premiumMode ? consentImmediateStart : undefined,
 				billingType,
 				contactName: contactName.trim(),
 				contactEmail: contactEmail.trim(),
@@ -220,6 +282,7 @@
 				note: note.trim() || undefined,
 				consentTerms: true as const
 			});
+			serverMoney = res.breakdown;
 			const stripe = await loadStripe(res.publishableKey);
 			if (!stripe) throw new Error('Stripe.js nu s-a putut încărca. Verifică conexiunea.');
 			stripeJs = stripe;
@@ -321,10 +384,16 @@
 			<CheckCircleIcon class="hc-success-icon" aria-hidden="true" />
 			<h2>Plata a fost confirmată</h2>
 			<p>
-				Ai cumpărat <strong>{rate.hours} {rate.hours === 1 ? 'oră' : 'ore'} de {rate.label}</strong>.
-				Factura și linkul de acces în portalul clientului sosesc pe
-				<strong>{contactEmail.trim()}</strong> în câteva minute. Te contactăm ca să planificăm
-				lucrarea.
+				Ai cumpărat <strong>{rate.hours} {rate.hours === 1 ? 'oră' : 'ore'} de {rate.label}</strong>{premiumMode
+					? `, în regim ${rate.mode.label.toLowerCase()}`
+					: ''}. Factura și linkul de acces în portalul clientului sosesc pe
+				<strong>{contactEmail.trim()}</strong> în câteva minute.
+				{#if premiumMode}
+					Îți confirmăm disponibilitatea pentru <strong>{requestedWindow}</strong> în maximum 4 ore
+					lucrătoare; dacă nu putem onora regimul, îți returnăm integral suma.
+				{:else}
+					Te contactăm ca să planificăm lucrarea.
+				{/if}
 			</p>
 			<button type="button" class="hc-btn-primary ots-gloss" {@attach focusOnMount} onclick={onClose}>
 				Închide
@@ -559,6 +628,38 @@
 							/>
 						</div>
 						{/if}
+						{#if premiumMode}
+							<div class="hc-field">
+								<label class="hc-label" for="hc-date">
+									{rate.mode.slug === 'urgent' ? 'Până când ai nevoie de lucrare?' : 'Când vrei să lucrăm?'} *
+								</label>
+								<input
+									id="hc-date"
+									name="requestedDate"
+									type="date"
+									class="hc-input"
+									bind:value={requestedDate}
+									min={todayIso}
+									aria-invalid={show(windowError) ? 'true' : undefined}
+									aria-describedby="hc-date-hint"
+								/>
+								<span id="hc-date-hint" class={['hc-hint', show(windowError) && 'hc-hint-err']}>
+									{show(windowError) ? windowError : rate.mode.sla}
+								</span>
+							</div>
+							<div class="hc-field">
+								<label class="hc-label" for="hc-slot">Intervalul preferat (opțional)</label>
+								<select id="hc-slot" name="requestedSlot" class="hc-input" bind:value={requestedSlot}>
+									<option value="">Alege un interval</option>
+									{#each SLOTS as slot (slot)}
+										<option value={slot}>{slot}</option>
+									{/each}
+								</select>
+								<span class="hc-hint">
+									Maximum {rate.mode.maxHours} ore per comandă online în acest regim.
+								</span>
+							</div>
+						{/if}
 						<div class="hc-field hc-span-2">
 							<label class="hc-label" for="hc-note">Pe ce vrei să folosim orele? (opțional)</label>
 							<textarea
@@ -571,6 +672,34 @@
 								placeholder="Ex.: modificări pe pagina de checkout, integrare cu un API extern…"
 							></textarea>
 						</div>
+						{#if premiumMode && billingType === 'person'}
+							<!-- OUG 34/2014: fără acordul expres, un consumator poate cere banii înapoi
+							     în 14 zile chiar și după ce am lucrat noaptea sau în weekend. -->
+							<div class="hc-field hc-span-2">
+								<label class={['hc-check', show(immediateStartError) && 'hc-check-error']}>
+									<input
+										id="hc-immediate"
+										type="checkbox"
+										name="consentImmediateStart"
+										bind:checked={consentImmediateStart}
+										aria-invalid={show(immediateStartError) ? 'true' : undefined}
+										aria-describedby="hc-immediate-hint"
+									/>
+									<span>
+										Cer expres începerea lucrării în intervalul de mai sus și înțeleg că, după
+										executarea integrală a serviciului, îmi pierd dreptul de retragere în 14 zile. *
+									</span>
+								</label>
+								<span
+									id="hc-immediate-hint"
+									class={['hc-hint', show(immediateStartError) && 'hc-hint-err']}
+								>
+									{show(immediateStartError)
+										? immediateStartError
+										: 'Cerut de OUG 34/2014 pentru serviciile începute imediat, la cererea ta.'}
+								</span>
+							</div>
+						{/if}
 						<div class="hc-field hc-span-2">
 							<label class={['hc-check', show(consentError) && 'hc-check-error']}>
 								<input
@@ -628,8 +757,14 @@
 				<div class="hc-summary-head">Sumar comandă</div>
 				<div class="hc-cart-item">
 					<div class="hc-cart-name">
-						<strong>Extra work — {rate.label}</strong>
+						<strong>Extra work — {rate.label}{rate.mode.suffix ? ` (${rate.mode.suffix})` : ''}</strong>
 						<span>{rate.hours} h × {rate.rate} €/h</span>
+						{#if premiumMode}
+							<span class="hc-cart-mode">
+								Regim {rate.mode.label} — tarif standard {rate.baseRate} €/h, majorat cu
+								{rate.mode.multiplierPct - 100}%
+							</span>
+						{/if}
 					</div>
 					<div class="hc-cart-price">{eur(money.netCents)}</div>
 				</div>
@@ -639,7 +774,7 @@
 						<strong>{eur(money.netCents)}</strong>
 					</div>
 					<div class="hc-total-row">
-						<span>TVA {vatPercent}%</span>
+						<span>TVA {shownVatPercent}%</span>
 						<strong>{eur(money.vatCents)}</strong>
 					</div>
 					<div class="hc-total-row big">
@@ -650,6 +785,10 @@
 				<p class="hc-fine">
 					Plată unică, în EUR. Orele se consumă pe cererile tale, cu estimare confirmată
 					înainte de fiecare lucrare. Factura fiscală se emite automat după plată.
+					{#if premiumMode}
+						{rate.mode.sla} Îți confirmăm disponibilitatea în maximum 4 ore lucrătoare; dacă nu
+						putem onora regimul, îți returnăm integral suma.
+					{/if}
 				</p>
 			</aside>
 		</div>
@@ -972,6 +1111,12 @@
 		color: #475569;
 		margin-top: 2px;
 		display: block;
+	}
+	/* Linia cu regimul: mai stinsă decât „12 h × 98 €/h", ca prețul să rămână primul citit. */
+	.hc-cart-name span.hc-cart-mode {
+		font-size: 11px;
+		color: #64748b;
+		line-height: 1.5;
 	}
 	.hc-cart-price {
 		font-weight: 700;

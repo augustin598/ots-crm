@@ -2376,8 +2376,15 @@ export const serviceHoursOrder = sqliteTable('service_hours_order', {
 		.references(() => tenant.id),
 	clientId: text('client_id').references(() => client.id),
 	rateSlug: text('rate_slug').notNull(),
-	rateLabel: text('rate_label').notNull(),
-	rateEur: integer('rate_eur').notNull(), // EUR intregi pe ora, fara TVA (snapshot)
+	rateLabel: text('rate_label').notNull(), // include regimul: "Development (Urgenta 48h)"
+	rateEur: integer('rate_eur').notNull(), // EUR intregi pe ora, fara TVA — tariful EFECTIV (baza x regim)
+	// Regimul de lucru (urgenta / weekend / noapte). Multiplicatorul si baza raman
+	// snapshot, ca tariful efectiv sa fie reconstituibil dupa o schimbare de catalog.
+	modeSlug: text('mode_slug').notNull().default('standard'),
+	modeMultiplierPct: integer('mode_multiplier_pct').notNull().default(100),
+	baseRateEur: integer('base_rate_eur'), // null pe comenzile de dinaintea regimurilor (= rate_eur)
+	modeSlaSnapshot: text('mode_sla_snapshot'), // angajamentul comercial, inghetat la plata
+	requestedWindow: text('requested_window'), // wall-clock, text: cand cere clientul lucrarea
 	hours: integer('hours').notNull(),
 	netCents: integer('net_cents').notNull(),
 	vatCents: integer('vat_cents').notNull(),

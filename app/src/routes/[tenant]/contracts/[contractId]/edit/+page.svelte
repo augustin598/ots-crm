@@ -20,6 +20,7 @@
 	import { getDefaultContractClauses } from '$lib/contract-templates';
 	import type { ContractClause } from '$lib/contract-templates';
 	import { untrack } from 'svelte';
+	import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
 	let { data }: { data: any } = $props();
 
@@ -124,7 +125,7 @@
 						unitOfMeasure: item.unitOfMeasure || 'Luna'
 					}));
 				} else {
-					lineItems = [{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: 'Luna' }];
+					lineItems = [{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: KEEZ_UNIT.MONTH }];
 				}
 
 				discountPercent = contract.discountPercent || 0;
@@ -189,7 +190,7 @@
 	function addLineItem() {
 		lineItems = [
 			...lineItems,
-			{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: 'Luna' }
+			{ id: crypto.randomUUID(), description: '', price: 0, unitOfMeasure: KEEZ_UNIT.MONTH }
 		];
 	}
 

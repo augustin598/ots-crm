@@ -11,9 +11,16 @@ Romanian counties must be mapped to ISO codes (e.g., `RO-SV` for Suceava).
 Refer to `src/lib/server/plugins/keez/mapper.ts` for the full mapping table.
 
 ## Measure Units
-- `1`: Buc / Pcs
-- `2`: Hours
-- `3`: Days
+NU le scrie de mână — folosește `keezMeasureUnitId()` / `keezMeasureUnitName()` din
+`src/lib/constants/keez-measure-units.ts`, singurul tabel din proiect (fixat de
+`src/lib/constants/__tests__/keez-measure-units.test.ts` contra documentației
+oficiale: https://app.keez.ro/help/api/data_measure_unit.html).
+
+Valorile uzuale: `1` Buc, `2` Luna om, `3` An, `4` Zi, `5` Ora, `13` Luna.
+
+Versiunea anterioară a acestui document spunea `2: Hours` și `3: Days` — greșit:
+2 e „Luna om", 3 e „An". Din cauza asta articolele de extra work plecau în Keez
+cu unitate de bucată sau de lună-om, în loc de oră.
 
 ## Totals Calculation
 Keez requires both RON totals and original currency totals if different.

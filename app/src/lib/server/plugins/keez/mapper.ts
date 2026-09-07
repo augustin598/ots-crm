@@ -14,6 +14,11 @@ import { getLatestBnrRate, getLatestBnrRateWithDate } from '$lib/server/bnr/clie
 import { BnrRateStaleError } from '$lib/server/whmcs/errors';
 import { logWarning, logError, serializeError } from '$lib/server/logger';
 import { resolveVatBps, invoiceVatPercentFromBps } from '$lib/server/vat/rate';
+import {
+	KEEZ_DEFAULT_MEASURE_UNIT_ID,
+	keezMeasureUnitId,
+	keezMeasureUnitName
+} from '$lib/constants/keez-measure-units';
 import type {
 	KeezInvoice,
 	KeezInvoiceDetail,
@@ -567,21 +572,8 @@ export async function mapInvoiceToKeez(
 						grossAmountCurrency = itemNetGross;
 					}
 
-					// Map unit of measure - Keez uses measureUnitId as integer (1 = Buc)
-					let measureUnitId = 1; // Default to Buc
-					if (item.unitOfMeasure) {
-						const unitMap: Record<string, number> = {
-							// Romanian shortNames (from Keez nomenclator)
-							Buc: 1, 'Luna om': 2, An: 3, Zi: 4, Ora: 5, Kg: 6, Km: 7,
-							KWh: 8, KW: 9, M: 10, L: 11, Min: 12, Luna: 13, Mp: 14,
-							Oz: 15, Per: 16, Trim: 17, T: 18, Sapt: 19, Mc: 20,
-							Cutie: 22, Pag: 23, Rola: 24, Coala: 25, Tambur: 26, Set: 27,
-							// English aliases
-							Pcs: 1, 'Man-month': 2, Year: 3, Day: 4, Hour: 5,
-							Hours: 5, Days: 4, Month: 13, Months: 13
-						};
-						measureUnitId = unitMap[item.unitOfMeasure] || 1;
-					}
+					// Unitatea de măsură vine din tabelul comun (nomenclatorul Keez).
+					const measureUnitId = keezMeasureUnitId(item.unitOfMeasure);
 
 					// itemDescription becomes the "Notă Articol" field on the Keez
 					// invoice line. Use ONLY the line note (e.g. "Transaction ID: ...")
@@ -667,7 +659,8 @@ export async function mapInvoiceToKeez(
 							itemExternalId: invoice.id,
 							itemName: 'Invoice Total',
 							itemDescription: invoice.notes || undefined,
-							measureUnitId: 1,
+							// Linie sintetică (factura n-are linii): o singură „bucată".
+							measureUnitId: KEEZ_DEFAULT_MEASURE_UNIT_ID,
 							quantity: 1,
 							unitPrice: Math.round(fallbackNetRON * 10000) / 10000,
 							unitPriceCurrency: !isRON ? Math.round(fallbackNetCurrency * 10000) / 10000 : undefined,
@@ -1208,14 +1201,7 @@ export function mapKeezDetailsToLineItems(
 			}
 		}
 
-		// Map unit of measure - reverse mapping from Keez measureUnitId (integer)
-		const unitMap: Record<number, string> = {
-			1: 'Buc', 2: 'Luna om', 3: 'An', 4: 'Zi', 5: 'Ora', 6: 'Kg', 7: 'Km',
-			8: 'KWh', 9: 'KW', 10: 'M', 11: 'L', 12: 'Min', 13: 'Luna', 14: 'Mp',
-			15: 'Oz', 16: 'Per', 17: 'Trim', 18: 'T', 19: 'Sapt', 20: 'Mc',
-			22: 'Cutie', 23: 'Pag', 24: 'Rola', 25: 'Coala', 26: 'Tambur', 27: 'Set'
-		};
-		const unitOfMeasure = unitMap[detail.measureUnitId] || null;
+		const unitOfMeasure = keezMeasureUnitName(detail.measureUnitId);
 
 		// Extract note from itemDescription if it's different from itemName
 		const note =

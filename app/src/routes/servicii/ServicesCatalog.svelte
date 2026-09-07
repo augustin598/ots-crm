@@ -38,7 +38,13 @@
 	import ServicesQuoteModal from './ServicesQuoteModal.svelte';
 	import HoursCheckoutModal, { type HoursCheckoutRate } from './HoursCheckoutModal.svelte';
 	import CartToast, { type CartToastKind } from './CartToast.svelte';
-	import { HOURS_MIN, HOURS_MAX } from '$lib/logic/hours-pricing';
+	import {
+		HOURS_MIN,
+		HOURS_MAX,
+		DEFAULT_RATE_MODE,
+		effectiveRateEur,
+		type RateModeSlug
+	} from '$lib/logic/hours-pricing';
 	import { ServicesCart } from './services-cart.svelte';
 	import { computeQuoteSummary, isTierOffered } from '$lib/logic/quote-pricing';
 	import { dragScroll } from '$lib/actions/drag-scroll';
@@ -83,16 +89,31 @@
 	let hoursBySlug = $state<Record<string, number>>({});
 	let hoursCheckout = $state<HoursCheckoutRate | null>(null);
 
+	// Regimul de lucru (standard / urgență / weekend / noapte) e global pe tab, nu
+	// per card: alegi CÂND se lucrează, apoi câte ore din fiecare specializare.
+	// Multiplicatorii vin din `load`, ca tarifele — nu-i calculăm în bundle.
+	let rateModeSlug = $state<RateModeSlug>(DEFAULT_RATE_MODE);
+	const rateMode = $derived(
+		catalog.rateModes.find((m) => m.slug === rateModeSlug) ?? catalog.rateModes[0]
+	);
+	const maxHours = $derived(Math.min(HOURS_MAX, rateMode?.maxHours ?? HOURS_MAX));
+	/** Tariful efectiv al regimului ales — aceeași funcție ca pe server, ca să nu difere niciun cent. */
+	function rateFor(baseRate: number): number {
+		return effectiveRateEur(baseRate, rateMode?.multiplierPct ?? 100);
+	}
+
+	// Orele se retează la plafonul regimului: trecerea de la standard (100 h) la
+	// noapte (16 h) nu are voie să lase în card un număr pe care serverul îl refuză.
 	function hoursFor(slug: string): number {
-		return hoursBySlug[slug] ?? DEFAULT_HOURS;
+		return Math.min(maxHours, hoursBySlug[slug] ?? DEFAULT_HOURS);
 	}
 	function stepHours(slug: string, delta: number) {
-		hoursBySlug[slug] = Math.min(HOURS_MAX, Math.max(HOURS_MIN, hoursFor(slug) + delta));
+		hoursBySlug[slug] = Math.min(maxHours, Math.max(HOURS_MIN, hoursFor(slug) + delta));
 	}
 	function setHours(slug: string, raw: string) {
 		const n = Number.parseInt(raw, 10);
 		if (!Number.isFinite(n)) return;
-		hoursBySlug[slug] = Math.min(HOURS_MAX, Math.max(HOURS_MIN, n));
+		hoursBySlug[slug] = Math.min(maxHours, Math.max(HOURS_MIN, n));
 	}
 
 	let selectedCategory = $state<Category | null>(null);
@@ -365,16 +386,49 @@
 				</div>
 				<p class="sv-rates-intro">
 					Pachetele de dezvoltare au un scope fix, stabilit înainte de start. Modificările sau
-					funcționalitățile cerute peste el se facturează pe oră, după specializarea implicată.
-					Alege câte ore ai nevoie și plătește cu cardul; factura și accesul în portal vin pe
-					email imediat după plată.
+					funcționalitățile cerute peste el se facturează pe oră, după specializarea implicată
+					și după regimul de lucru. Alege când ai nevoie de lucrare și câte ore, apoi plătește
+					cu cardul; factura și accesul în portal vin pe email imediat după plată.
 				</p>
+				<div class="sv-modes" role="group" aria-label="Regim de lucru">
+					{#each catalog.rateModes as mode (mode.slug)}
+						<button
+							type="button"
+							class="sv-mode"
+							aria-pressed={rateModeSlug === mode.slug}
+							onclick={() => (rateModeSlug = mode.slug)}
+						>
+							{mode.label}
+							{#if mode.multiplierPct > 100}
+								<i>+{mode.multiplierPct - 100}%</i>
+							{/if}
+						</button>
+					{/each}
+				</div>
+				{#if rateMode}
+					<p class="sv-mode-note">
+						<strong>{rateMode.label}.</strong>
+						{rateMode.description}
+						{rateMode.sla}
+						{#if rateMode.multiplierPct > 100}
+							Tarifele de mai jos sunt majorate cu {rateMode.multiplierPct - 100}% față de
+							cele standard, rotunjite la euro întreg. Maximum {rateMode.maxHours} ore per
+							comandă online; regimurile nu se cumulează — se aplică cel mai mare.
+						{/if}
+					</p>
+				{/if}
 				<div class="sv-rategrid">
 					{#each catalog.hourlyRates as rate (rate.slug)}
 						{@const h = hoursFor(rate.slug)}
+						{@const eff = rateFor(rate.rate)}
 						<div class="sv-rate">
-							<span class="sv-rate-val">{rate.rate} €<i>/h</i></span>
-							<span class="sv-rate-label">{rate.label}</span>
+							<span class="sv-rate-val">{eff} €<i>/h</i></span>
+							<span class="sv-rate-label">
+								{rate.label}
+								{#if eff !== rate.rate}
+									<em>standard {rate.rate} €/h</em>
+								{/if}
+							</span>
 							<div class="sv-rate-stepper" role="group" aria-label={`Ore ${rate.label}`}>
 								<button
 									type="button"
@@ -389,7 +443,7 @@
 										name={`hours-${rate.slug}`}
 										inputmode="numeric"
 										min={HOURS_MIN}
-										max={HOURS_MAX}
+										max={maxHours}
 										value={h}
 										onchange={(e) => setHours(rate.slug, e.currentTarget.value)}
 									/>
@@ -398,16 +452,23 @@
 								<button
 									type="button"
 									onclick={() => stepHours(rate.slug, 1)}
-									disabled={h >= HOURS_MAX}
+									disabled={h >= maxHours}
 									aria-label="Adaugă o oră"
 								>+</button>
 							</div>
-							<span class="sv-rate-total">{formatEur(rate.rate * h)} <i>fără TVA</i></span>
+							<span class="sv-rate-total">{formatEur(eff * h)} <i>fără TVA</i></span>
 							<button
 								type="button"
 								class="sv-btn sv-btn-primary ots-gloss sv-rate-buy"
 								onclick={() =>
-									(hoursCheckout = { slug: rate.slug, label: rate.label, rate: rate.rate, hours: h })}
+									(hoursCheckout = {
+										slug: rate.slug,
+										label: rate.label,
+										rate: eff,
+										baseRate: rate.rate,
+										hours: h,
+										mode: rateMode
+									})}
 							>
 								Cumpără orele <ArrowRightIcon class="h-4 w-4" />
 							</button>
@@ -419,6 +480,14 @@
 					cumpărate se consumă pe cererile tale, cu estimare confirmată înainte de fiecare
 					lucrare; nu facturăm muncă neaprobată. Pentru cerințe recurente e de regulă mai
 					avantajos un pachet de mentenanță decât ora de extra work.
+				</p>
+				<p class="sv-fine">
+					Regimurile peste standard înseamnă lucru în afara programului normal: la
+					<strong>Urgență</strong> intrăm peste planificarea curentă, la
+					<strong>Weekend &amp; sărbători</strong> lucrăm sâmbăta, duminica sau în zilele libere
+					legale din România, iar la <strong>Noapte</strong> între 20:00 și 08:00. Ne spui la
+					plată intervalul de care ai nevoie și îți confirmăm disponibilitatea în maximum 4 ore
+					lucrătoare; dacă nu putem onora regimul cumpărat, îți returnăm integral banii.
 				</p>
 			</div>
 		{/if}
@@ -564,6 +633,7 @@
 	tierColors={catalog.tierColors}
 	setupDefaultDescription={catalog.setupDefaultDescription}
 	hourlyRates={catalog.hourlyRates}
+	rateModes={catalog.rateModes}
 	{isWebDev}
 	onRequest={handleTierPick}
 	requestLabel={'Adaugă {tier}'}
@@ -1269,6 +1339,64 @@
 	}
 
 	/* ===== Tarife orare ===== */
+	/* Regimul de lucru: un segmented control, nu încă un rând de filtre — schimbă
+	   prețurile de sub el, deci trebuie să arate ca un comutator, nu ca o navigație. */
+	.sv-modes {
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		padding: 4px;
+		margin: 0 0 12px;
+		background: var(--bg-soft);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+	}
+	.sv-mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 9px 16px;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		font-family: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--ink2);
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.sv-mode:hover {
+		color: var(--ink);
+	}
+	.sv-mode i {
+		font-style: normal;
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--muted);
+	}
+	.sv-mode[aria-pressed='true'] {
+		background: var(--accent);
+		color: white;
+		box-shadow: 0 2px 8px rgba(24, 119, 242, 0.28);
+	}
+	.sv-mode[aria-pressed='true'] i {
+		color: rgba(255, 255, 255, 0.75);
+	}
+	.sv-mode:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.sv-mode-note {
+		max-width: 720px;
+		margin: 0 0 22px;
+		font-size: 13px;
+		line-height: 1.7;
+		color: var(--ink2);
+	}
+	.sv-mode-note strong {
+		color: var(--ink);
+	}
 	.sv-rates-intro {
 		max-width: 720px;
 		margin: -6px 0 22px;
@@ -1311,9 +1439,19 @@
 		color: var(--muted);
 	}
 	.sv-rate-label {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
 		font-size: 13px;
 		font-weight: 600;
 		color: var(--ink2);
+	}
+	/* Tariful standard rămâne vizibil sub cel majorat: clientul vede de unde vine prețul. */
+	.sv-rate-label em {
+		font-style: normal;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--muted);
 	}
 	.sv-rate-stepper {
 		display: inline-flex;

@@ -32,6 +32,8 @@ import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { vatPercentToBps } from '$lib/utils/vat';
 import { eurCentsToRonCents, formatExchangeRate } from '$lib/logic/hours-pricing';
+import { getRateMode } from '$lib/constants/ots-catalog';
+import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
 /** Peste atât cursul e probabil vechi (weekend + sărbătoare = max ~4 zile); avertizăm, nu blocăm. */
 const BNR_RATE_WARN_HOURS = 5 * 24;
@@ -160,6 +162,14 @@ export async function emitKeezHoursInvoice(params: {
 	// un id de articol — echivalentul cache-ului de pe hostingProduct, fără
 	// coloană nouă. Fără el, fiecare factură ar crea articol nou în nomenclator.
 	const lineDescription = hoursLineDescription(order.rateLabel);
+
+	// Regimul de lucru intră pe factură, nu doar în DB: SLA-ul înghețat la plată
+	// și intervalul cerut de client sunt singura probă scrisă într-o dispută pe
+	// „am plătit urgență, nu s-a lucrat în weekend".
+	const modeNote =
+		order.modeSlug && order.modeSlug !== 'standard'
+			? ` Regim ${getRateMode(order.modeSlug)?.label ?? order.modeSlug} (+${order.modeMultiplierPct - 100}% față de tariful standard de ${order.baseRateEur ?? order.rateEur} €/h)${order.requestedWindow ? `, interval cerut: ${order.requestedWindow}` : ''}.${order.modeSlaSnapshot ? ` ${order.modeSlaSnapshot}` : ''}`
+			: '';
 	let cachedArticleId: string | null = null;
 	try {
 		const [cached] = await db
@@ -217,7 +227,7 @@ export async function emitKeezHoursInvoice(params: {
 						paidDate: now,
 						paymentMethod: 'card',
 						stripePaymentIntentId,
-						notes: `Ore extra work ${order.rateLabel} × ${order.hours} h — comandă online /servicii. Încasat ${(order.grossCents / 100).toFixed(2)} EUR prin card (Stripe ${stripePaymentIntentId}), curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`
+						notes: `Ore extra work ${order.rateLabel} × ${order.hours} h — comandă online /servicii.${modeNote} Încasat ${(order.grossCents / 100).toFixed(2)} EUR prin card (Stripe ${stripePaymentIntentId}), curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`
 					});
 
 					// Linia rămâne în EUR (tarif × ore); mapper-ul o convertește în RON cu
@@ -232,7 +242,7 @@ export async function emitKeezHoursInvoice(params: {
 						amount: order.netCents,
 						taxRate: lineTaxRate,
 						currency: 'EUR',
-						unitOfMeasure: 'Ora',
+						unitOfMeasure: KEEZ_UNIT.HOUR,
 						keezItemExternalId: cachedArticleId
 					});
 

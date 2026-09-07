@@ -1,0 +1,1 @@
+ALTER TABLE `service_hours_order` ADD `mode_multiplier_pct` integer DEFAULT 100 NOT NULL;

@@ -14,6 +14,9 @@ export const TIER_LABELS: Record<Tier, string> = {
 export { formatFeatureValue, isBooleanFeature, formatEur } from './ots-catalog-format';
 export type { FeatureValue } from './ots-catalog-format';
 import type { FeatureValue } from './ots-catalog-format';
+// Slug-urile regimurilor de lucru stau în modulul pur (client-safe), ca modalul
+// public să le poată valida fără să importe catalogul cu prețuri.
+import type { RateModeSlug } from '$lib/logic/hours-pricing';
 
 export interface Feature {
 	id: string;
@@ -673,6 +676,88 @@ export const HOURLY_RATES: HourlyRate[] = [
 
 export function getHourlyRate(slug: string): HourlyRate | undefined {
 	return HOURLY_RATES.find((r) => r.slug === slug);
+}
+
+// ---- Regimuri de lucru (urgență / weekend / noapte) ----------------------
+//
+// Al doilea ax peste specializare: aceeași oră costă diferit după CÂND se
+// lucrează. Multiplicatorul se aplică pe tariful de bază și se rotunjește la
+// euro întreg (`effectiveRateEur`), ca `service_hours_order.rate_eur` să rămână
+// INTEGER și ca prețul afișat, cel încasat de Stripe și cel facturat în Keez să
+// fie același număr.
+//
+// Rotunjirea urcă 65 și 55 cu ~50,8% la urgență (98, nu 97,5) — de aceea UI-ul
+// afișează numele regimului și tariful efectiv, nu un badge „+50%" care ar
+// minți. Grila completă e fixată de testul golden din
+// `src/lib/logic/__tests__/hours-pricing.test.ts`.
+//
+// Regimurile NU se cumulează: weekend noaptea = ×2.00, nu 1,7 × 2.
+export interface RateMode {
+	/** Identificator stabil — ajunge în DB (service_hours_order.mode_slug) și în metadata Stripe. */
+	slug: RateModeSlug;
+	label: string;
+	/**
+	 * Sufixul din `rate_label` („Development (Urgență 48h)") — apare pe linia de
+	 * factură Keez. Gol la standard: comenzile obișnuite păstrează exact
+	 * denumirea de articol folosită până acum în nomenclatorul Keez.
+	 */
+	suffix: string;
+	/** O propoziție sub selector, în tabul „Tarife orare". */
+	description: string;
+	/** Angajamentul comercial — se îngheață în `mode_sla_snapshot` la plată. */
+	sla: string;
+	/** Procent aplicat tarifului de bază (100 = fără majorare). */
+	multiplierPct: number;
+	/** Plafon de ore per comandă; scade cu regimul, ca să nu iasă o singură plată de 16.000 €. */
+	maxHours: number;
+}
+
+export const RATE_MODES: RateMode[] = [
+	{
+		slug: 'standard',
+		label: 'Standard',
+		suffix: '',
+		description: 'Lucrare planificată în programul normal: luni–vineri, 09:00–18:00.',
+		sla: 'Programare în fluxul normal de lucru, luni–vineri 09:00–18:00, după confirmarea estimării.',
+		multiplierPct: 100,
+		maxHours: 100
+	},
+	{
+		slug: 'urgent',
+		label: 'Urgență',
+		suffix: 'Urgență 48h',
+		description: 'Intră peste planificarea curentă, cu start în maximum 48 de ore lucrătoare.',
+		sla: 'Start în maximum 48 de ore lucrătoare de la confirmarea brief-ului, peste planificarea curentă.',
+		multiplierPct: 150,
+		maxHours: 40
+	},
+	{
+		slug: 'weekend',
+		label: 'Weekend & sărbători',
+		suffix: 'Weekend',
+		description: 'Lucrare executată sâmbăta, duminica sau într-o sărbătoare legală.',
+		sla: 'Execuție sâmbătă, duminică sau într-o zi de sărbătoare legală din România, în intervalul cerut.',
+		multiplierPct: 170,
+		maxHours: 24
+	},
+	{
+		slug: 'night',
+		label: 'Noapte',
+		suffix: 'Noapte',
+		description: 'Intervenție în afara programului, între 20:00 și 08:00.',
+		sla: 'Execuție în intervalul 20:00–08:00, în noaptea cerută.',
+		multiplierPct: 200,
+		maxHours: 16
+	}
+];
+
+export function getRateMode(slug: string): RateMode | undefined {
+	return RATE_MODES.find((m) => m.slug === slug);
+}
+
+/** Denumirea din `rate_label` / linia de factură: „Development (Urgență 48h)". */
+export function hourlyRateLabelFor(rate: HourlyRate, mode: RateMode): string {
+	return mode.suffix ? `${rate.label} (${mode.suffix})` : rate.label;
 }
 
 // Sluguri pentru care `PackageComparisonDialog` afișează

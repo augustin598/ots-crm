@@ -6,7 +6,7 @@
  * client. Valorile vin exclusiv din `+page.server.ts`, după deblocare.
  */
 
-import type { Bundle, Category, Feature, Tier, TierColors } from '$lib/constants/ots-catalog';
+import type { Bundle, Category, Feature, RateMode, Tier, TierColors } from '$lib/constants/ots-catalog';
 
 export type PublicCatalogGroup = {
 	id: string;
@@ -23,6 +23,8 @@ export type PublicCatalog = {
 	tierLabels: Record<Tier, string>;
 	tierColors: Record<Tier, TierColors>;
 	hourlyRates: { slug: string; label: string; rate: number }[];
+	/** Regimurile de lucru (standard / urgență / weekend / noapte) — tariful efectiv se calculează în pagină cu `effectiveRateEur`. */
+	rateModes: RateMode[];
 	/** Cota TVA a tenantului (%, întreg) — pentru totalul afișat la cumpărarea orelor. */
 	vatPercent: number;
 	webDevSlugs: string[];

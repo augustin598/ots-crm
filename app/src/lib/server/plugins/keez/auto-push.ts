@@ -21,6 +21,7 @@ import { mapInvoiceToKeez } from './mapper';
 import { createKeezClientForTenant } from './factory';
 import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
 import { resolveKeezInvoiceStatus } from './invoice-status';
+import { keezMeasureUnitId } from '$lib/constants/keez-measure-units';
 
 function generateSyncId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -184,7 +185,9 @@ export async function pushInvoiceToKeez(
 					name: uniqueName,
 					description: lineItem.description || undefined,
 					currencyCode: currency,
-					measureUnitId: 1,
+					// Unitatea articolului trebuie să fie cea a liniei: orele de extra
+					// work se vând pe oră, nu pe bucată.
+					measureUnitId: keezMeasureUnitId(lineItem.unitOfMeasure),
 					vatRate: vatPercent,
 					isActive: true,
 					categoryExternalId: 'MISCSRV'

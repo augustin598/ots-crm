@@ -896,6 +896,31 @@ export async function handleChargeRefunded(charge: Stripe.Charge) {
 		typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
 	if (!paymentIntentId) return;
 
+	const fullyRefunded = charge.amount_refunded >= charge.amount;
+
+	// Comenzile de ore (hours_purchase) au status propriu. Fără pasul ăsta rămân
+	// „paid" în panoul admin după un refund, iar dacă factura Keez nu s-a emis
+	// (best-effort), lookup-ul de mai jos iese devreme și nu le atinge nimeni.
+	// Doar din `paid`: un refund pe o comandă deja marcată altfel nu se rescrie.
+	if (fullyRefunded) {
+		const refundedOrders = await db
+			.update(table.serviceHoursOrder)
+			.set({ status: 'refunded', updatedAt: new Date() })
+			.where(
+				and(
+					eq(table.serviceHoursOrder.stripePaymentIntentId, paymentIntentId),
+					eq(table.serviceHoursOrder.status, 'paid')
+				)
+			)
+			.returning({ id: table.serviceHoursOrder.id, tenantId: table.serviceHoursOrder.tenantId });
+		for (const order of refundedOrders) {
+			logInfo('packages', `charge.refunded — comanda de ore ${order.id} marcată refunded`, {
+				tenantId: order.tenantId,
+				metadata: { orderId: order.id, chargeId: charge.id, paymentIntentId }
+			});
+		}
+	}
+
 	const [invoiceRow] = await db
 		.select({
 			id: table.invoice.id,
@@ -914,7 +939,6 @@ export async function handleChargeRefunded(charge: Stripe.Charge) {
 		return;
 	}
 
-	const fullyRefunded = charge.amount_refunded >= charge.amount;
 	await db
 		.update(table.invoice)
 		.set({

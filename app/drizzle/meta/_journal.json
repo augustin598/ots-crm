@@ -3702,6 +3702,41 @@
       "when": 1788550079238002,
       "tag": "0531_rank_keyword_cpc_high_micros",
       "breakpoints": true
+    },
+    {
+      "idx": 532,
+      "version": "6",
+      "when": 1788786476908000,
+      "tag": "0532_hours_order_mode_slug",
+      "breakpoints": true
+    },
+    {
+      "idx": 533,
+      "version": "6",
+      "when": 1788786476908001,
+      "tag": "0533_hours_order_mode_multiplier_pct",
+      "breakpoints": true
+    },
+    {
+      "idx": 534,
+      "version": "6",
+      "when": 1788786476908002,
+      "tag": "0534_hours_order_base_rate_eur",
+      "breakpoints": true
+    },
+    {
+      "idx": 535,
+      "version": "6",
+      "when": 1788786476908003,
+      "tag": "0535_hours_order_mode_sla_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 536,
+      "version": "6",
+      "when": 1788786476908004,
+      "tag": "0536_hours_order_requested_window",
+      "breakpoints": true
     }
   ]
 }

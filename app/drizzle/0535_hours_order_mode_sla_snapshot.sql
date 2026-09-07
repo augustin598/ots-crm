@@ -1,0 +1,1 @@
+ALTER TABLE `service_hours_order` ADD `mode_sla_snapshot` text;

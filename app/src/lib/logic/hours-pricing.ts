@@ -9,6 +9,37 @@
 export const HOURS_MIN = 1;
 export const HOURS_MAX = 100;
 
+/**
+ * Regimurile de lucru — doar identitatea, aici. Etichetele, multiplicatorii și
+ * plafoanele stau în `RATE_MODES` din `ots-catalog` (server-only) și ajung în
+ * browser prin `load`, ca restul prețurilor.
+ */
+export const RATE_MODE_SLUGS = ['standard', 'urgent', 'weekend', 'night'] as const;
+export type RateModeSlug = (typeof RATE_MODE_SLUGS)[number];
+export const DEFAULT_RATE_MODE: RateModeSlug = 'standard';
+
+export function isRateModeSlug(value: string): value is RateModeSlug {
+	return (RATE_MODE_SLUGS as readonly string[]).includes(value);
+}
+
+/**
+ * Tariful efectiv al unui regim: bază × multiplicator, rotunjit la euro întreg.
+ *
+ * Rotunjirea e obligatorie, nu cosmetică: `service_hours_order.rate_eur` e
+ * INTEGER, iar `hoursNetCents` refuză tarifele fracționare. Aceeași funcție
+ * rulează pe server (la calculul sumei încasate) și în pagină (la prețul
+ * afișat) — fără ea, cele două ar putea diverge cu un cent.
+ */
+export function effectiveRateEur(baseRateEur: number, multiplierPct: number): number {
+	if (!Number.isInteger(baseRateEur) || baseRateEur <= 0) {
+		throw new Error(`Tarif de bază invalid: ${baseRateEur}`);
+	}
+	if (!Number.isInteger(multiplierPct) || multiplierPct < 100) {
+		throw new Error(`Multiplicator invalid: ${multiplierPct}`);
+	}
+	return Math.round((baseRateEur * multiplierPct) / 100);
+}
+
 export function isValidHours(hours: number): boolean {
 	return Number.isInteger(hours) && hours >= HOURS_MIN && hours <= HOURS_MAX;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `service_hours_order` ADD `mode_slug` text DEFAULT 'standard' NOT NULL;

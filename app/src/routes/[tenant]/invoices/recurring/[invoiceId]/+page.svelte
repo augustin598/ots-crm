@@ -38,6 +38,7 @@
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 	import { untrack } from 'svelte';
+	import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
 	const tenantSlug = $derived(page.params.tenant);
 	const recurringInvoiceId = $derived(page.params.invoiceId || '');
@@ -656,7 +657,7 @@
 					discount: 0,
 					note: dialogItemNote,
 					currency: (service.currency as Currency) || currency,
-					unitOfMeasure: 'Pcs',
+					unitOfMeasure: KEEZ_UNIT.PIECE,
 					serviceId: dialogServiceId // Track service ID for this line item
 				};
 				lineItems = [...lineItems, newItem];
@@ -691,7 +692,7 @@
 				discount: 0,
 				note: dialogItemNote,
 				currency: currency,
-				unitOfMeasure: 'Pcs'
+				unitOfMeasure: KEEZ_UNIT.PIECE
 			};
 			lineItems = [...lineItems, newItem];
 		}
@@ -716,7 +717,7 @@
 			discountType: '',
 			discount: 0,
 			currency: currency,
-			unitOfMeasure: 'Pcs'
+			unitOfMeasure: KEEZ_UNIT.PIECE
 		};
 		lineItems = [...lineItems, newItem];
 	}

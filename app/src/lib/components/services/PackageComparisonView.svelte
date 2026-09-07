@@ -39,6 +39,8 @@
 		tierColors: Record<Tier, TierColors>;
 		setupDefaultDescription: string;
 		hourlyRates: { label: string; rate: number }[];
+		/** Regimurile de lucru — nota de subsol cu majorările; fără ele nota nu se afișează. */
+		rateModes?: { label: string; multiplierPct: number }[];
 		/** Categoriile de web dev primesc badge „Recomandat" pe Silver + tarife orare. */
 		isWebDev?: boolean;
 		onRequest?: (tier: Tier) => void;
@@ -57,12 +59,21 @@
 		tierColors,
 		setupDefaultDescription,
 		hourlyRates,
+		rateModes = [],
 		isWebDev = false,
 		onRequest,
 		requestLabel = 'Vreau {tier}',
 		activeTier = null,
 		activeLabel = 'În ofertă'
 	}: Props = $props();
+
+	/** „Urgență +50%, Weekend & sărbători +70%, Noapte +100%" — din catalog, nu scris de mână. */
+	const surcharges = $derived(
+		rateModes
+			.filter((m) => m.multiplierPct > 100)
+			.map((m) => `${m.label} +${m.multiplierPct - 100}%`)
+			.join(', ')
+	);
 </script>
 
 <Dialog bind:open>
@@ -270,6 +281,13 @@
 							</div>
 						{/each}
 					</div>
+					{#if surcharges.length > 0}
+						<p class="text-[11px] text-muted-foreground mt-3">
+							Tarifele de mai sus sunt cele standard (luni–vineri, 09:00–18:00, lucrare
+							planificată). Lucrul în afara programului se tarifează majorat: {surcharges}.
+							Regimurile nu se cumulează — se aplică cel mai mare.
+						</p>
+					{/if}
 				</section>
 			{/if}
 		{/if}

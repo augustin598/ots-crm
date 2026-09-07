@@ -23,6 +23,7 @@ import {
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logWarning } from '$lib/server/logger';
 import { env } from '$env/dynamic/private';
+import { keezMeasureUnitId } from '$lib/constants/keez-measure-units';
 
 function generateIntegrationId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -476,7 +477,8 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 				name: uniqueName,
 				description: lineItem.description || undefined,
 				currencyCode: currency,
-				measureUnitId: 1,
+				// Unitatea articolului = unitatea liniei (ore la extra work, nu bucăți).
+				measureUnitId: keezMeasureUnitId(lineItem.unitOfMeasure),
 				vatRate: vatPercent,
 				isActive: true,
 				categoryExternalId: 'MISCSRV'

@@ -68,7 +68,9 @@ export interface KeezInvoiceDetail {
 	itemExternalId?: string; // Identificatorul Keez al articolului (externalId)
 	itemName: string; // Numele articolului
 	itemDescription?: string; // Descrierea articolului
-	measureUnitId: number; // Unitatea de măsură (integer: 1=Buc/Pcs, 2=Hours, 3=Days)
+	// Unitatea de măsură, id din nomenclatorul Keez (1=Buc, 4=Zi, 5=Ora, 13=Luna).
+	// Rezolvă-l cu `keezMeasureUnitId()` din $lib/constants/keez-measure-units.
+	measureUnitId: number;
 	quantity: number; // Cantitatea articolului (Numeric 2 zecimale)
 	unitPrice: number; // Prețul articolului (Numeric 4 zecimale)
 	unitPriceCurrency?: number; // Prețul articolului în valuta facturii (Numeric 4 zecimale)

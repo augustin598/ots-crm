@@ -1,0 +1,1 @@
+ALTER TABLE `service_hours_order` ADD `base_rate_eur` integer;
