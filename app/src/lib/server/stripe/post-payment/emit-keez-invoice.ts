@@ -3,7 +3,7 @@ import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
-import { pushInvoiceToKeez } from '$lib/server/plugins/keez/auto-push';
+import { pushInvoiceToKeez, validateInvoiceInKeezForTenant } from '$lib/server/plugins/keez/auto-push';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
@@ -340,6 +340,17 @@ export async function emitKeezFiscalInvoice(params: {
 				tenantId,
 				metadata: { invoiceId, keezExternalId }
 			});
+			// Factura e deja ÎNCASATĂ (card Stripe) → proforma devine fiscală acum,
+			// aceeași regulă ca la `invoice.paid` (keez/auto-validate-policy.ts).
+			// Rândul e inserat cu status='paid', deci nu trece prin hook-ul invoice.paid.
+			const validateResult = await validateInvoiceInKeezForTenant(tenantId, invoiceId);
+			if (!validateResult.success) {
+				logError('keez', `emit-keez: ${invoiceNumber} rămâne proformă — validarea a eșuat: ${validateResult.error}`, {
+					tenantId,
+					action: 'keez_validate_on_paid_failed',
+					metadata: { invoiceId, keezExternalId, error: validateResult.error }
+				});
+			}
 			// Cache the Keez article externalId on the hostingProduct row so
 			// SUBSEQUENT invoices for the same product reuse the article (no
 			// `· #OTSH-xxxx` suffix on the PDF). Read the resolved externalId

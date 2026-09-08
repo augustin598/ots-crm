@@ -212,8 +212,20 @@ describe('markHostingInvoicesPaid', () => {
 		expect(emitted).toHaveLength(0);
 	});
 
-	test('draft → skipped not_payable', async () => {
-		selectQueue = [[invoice({ status: 'draft' })]];
+	test('draft (proformă de hosting) → marcată achitată', async () => {
+		// Proforma neplătită e `Draft` în Keez și poate rămâne `draft` în CRM până la
+		// trimitere; clientul plătește prin OP de pe ea, deci trebuie să fie marcabilă.
+		const existing = invoice({ status: 'draft' });
+		selectQueue = [[existing], [{ ...existing, status: 'paid' }]];
+
+		const res = await markHostingInvoicesPaid(baseParams());
+
+		expect(res.marked).toEqual([{ id: 'inv-1', invoiceNumber: 'OTSH 11' }]);
+		expect(res.skipped).toEqual([]);
+	});
+
+	test('cancelled → skipped not_payable', async () => {
+		selectQueue = [[invoice({ status: 'cancelled' })]];
 
 		const res = await markHostingInvoicesPaid(baseParams());
 

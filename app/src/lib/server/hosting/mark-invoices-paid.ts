@@ -31,7 +31,11 @@ import { notifyPaymentSucceeded } from '$lib/server/stripe/notifications';
  *   identic cu fluxul card, unde banii sunt deja încasați.
  */
 
-const PAYABLE_STATUSES = ['pending', 'sent', 'overdue', 'partially_paid'];
+// `draft` = proforma de hosting (Keez `Draft`) încă netrimisă sau readusă la
+// ciornă — clientul poate plăti prin OP de pe proforma primită, deci staff-ul
+// trebuie să o poată marca. Plata declanșează `invoice.paid` → plugin-ul Keez
+// o transformă în factură fiscală (vezi keez/hooks.ts onInvoicePaid).
+const PAYABLE_STATUSES = ['draft', 'pending', 'sent', 'overdue', 'partially_paid'];
 
 /** Valori `invoice.paymentMethod` consumate de UI (chip „Transfer") și de maparea Keez. */
 const METHOD_TO_INVOICE_VALUE: Record<'op' | 'cash', string> = {

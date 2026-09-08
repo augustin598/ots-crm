@@ -23,7 +23,9 @@ export type KeezDerivedStatus =
 	| 'paid'
 	| 'partially_paid'
 	| 'overdue'
-	| 'cancelled';
+	| 'cancelled'
+	// stare de încasare CRM păstrată peste un Draft din Keez (charge.refunded), niciodată dedusă din Keez
+	| 'refunded';
 
 /** Ce citim din rândul `invoice` existent ca să știm dacă CRM-ul a încasat. */
 export type LocalInvoiceCollection = {
@@ -126,8 +128,18 @@ export function resolveKeezInvoiceStatus(params: ResolveKeezStatusParams): Resol
 		// Storno: stare a documentului, autoritară în Keez chiar dacă am încasat.
 		status = 'cancelled';
 	} else if (keezStatus === 'Draft') {
-		// Proformă — nu se marchează achitată nici dacă restul e 0.
-		status = 'draft';
+		// Proformă — nu se marchează achitată nici dacă restul e 0. Dar o proformă
+		// deja EMISĂ (reînnoirea de hosting trimisă clientului, eventual restantă
+		// sau încasată în CRM) nu se retrogradează la `draft`: `draft` nu e status
+		// plătibil pentru OP/cash și ar ascunde restanța. Keez nu știe nimic despre
+		// trimitere/încasare, deci CRM-ul rămâne sursa de adevăr pe aceste stări.
+		// `refunded` e tot stare de încasare CRM (webhook charge.refunded pe o
+		// factură de ore rămasă Draft în Keez) — nu se transformă în ciornă.
+		const issuedLocally = ['sent', 'overdue', 'partially_paid', 'paid', 'refunded'];
+		status =
+			existing?.status && issuedLocally.includes(existing.status)
+				? (existing.status as KeezDerivedStatus)
+				: 'draft';
 	} else if (keezStatus === 'Valid') {
 		// Document fiscal validat fără rest raportat: nu știm nimic despre
 		// încasare → „trimisă" (comportamentul dinainte de unificare).

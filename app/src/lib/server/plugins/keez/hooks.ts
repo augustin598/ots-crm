@@ -1,7 +1,17 @@
-import type { HookHandler, InvoiceCreatedEvent, InvoiceUpdatedEvent, InvoiceDeletedEvent } from '../types';
+import type {
+	HookHandler,
+	InvoiceCreatedEvent,
+	InvoiceUpdatedEvent,
+	InvoiceDeletedEvent,
+	InvoicePaidEvent
+} from '../types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
+import { shouldAutoValidateOnCreate, shouldValidateOnPaid } from './auto-validate-policy';
+import { keezPartnerPreflight } from './partner-preflight';
+import { validateInvoiceInKeezForTenant } from './auto-push';
+import { createNotification } from '$lib/server/notifications';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from './factory';
 import { mapInvoiceToKeez, generateNextInvoiceNumber } from './mapper';
 import { keezUpdateSkipReason } from './update-guard';
@@ -92,6 +102,20 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	if (!client) {
 		logError('keez', `Client not found: ${invoice.clientId}`, { tenantId });
 		return;
+	}
+
+	// Preflight pe partener ÎNAINTE de orice apel Keez (solx.ro, 3-4 sep 2026: PJ
+	// fără CUI → articol nou în nomenclator la fiecare încercare zilnică, apoi 400
+	// `ERROR_FISCAL_NUMBER_IS_NULL`). Aruncăm cu mesaj acționabil: emitentul face
+	// rollback pe factura CRM și staff-ul vede exact ce trebuie completat.
+	const partnerProblem = keezPartnerPreflight(client);
+	if (partnerProblem) {
+		logError('keez', `Keez preflight failed for invoice ${invoice.id}: ${partnerProblem.message}`, {
+			tenantId,
+			action: 'keez_partner_preflight_failed',
+			metadata: { invoiceId: invoice.id, clientId: client.id, code: partnerProblem.code }
+		});
+		throw new Error(partnerProblem.message);
 	}
 
 	// Get line items
@@ -361,6 +385,24 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 	// At this point response is guaranteed to be defined (lastError would have caused a throw above)
 	const keezResponse = response!;
 
+	// Persistăm IMEDIAT legătura cu Keez, înainte de orice pas care mai poate
+	// arunca (fetch, validare, recalcul totaluri). Dacă hook-ul pică de aici
+	// încolo, emitentul vede `keezExternalId` pe rând și NU mai șterge factura
+	// CRM (vezi keez/rollback-policy.ts) — altfel documentul rămâne orfan în Keez
+	// și sync-ul îl reimportă fără serie și fără cont de hosting (cazul OTSH 13).
+	invoice.keezExternalId = keezResponse.externalId;
+	invoice.keezInvoiceId = keezResponse.externalId;
+	invoice.keezStatus = 'Draft';
+	await db
+		.update(table.invoice)
+		.set({
+			keezExternalId: keezResponse.externalId,
+			keezInvoiceId: keezResponse.externalId,
+			keezStatus: 'Draft',
+			updatedAt: new Date()
+		})
+		.where(eq(table.invoice.id, invoice.id));
+
 	// Fetch the created invoice from Keez to get all actual data (number, series, VAT, currency, dates, etc.)
 	let keezInvoiceData: any = null;
 	let keezInvoiceHeader: any = null;
@@ -387,10 +429,31 @@ export const onInvoiceCreated: HookHandler<InvoiceCreatedEvent> = async (event) 
 		logWarning('keez', `Could not fetch invoice ${keezResponse.externalId} from Keez: ${fetchErr.message}`, { tenantId, stackTrace: fetchErr.stack });
 	}
 
-	// Auto-validate invoice in Keez ONLY for recurring invoices (fully automated flow)
-	// Manual invoices always stay as Proforma (Draft) in Keez — user validates manually
-	const isRecurring = (event as any).isRecurring === true;
-	if (isRecurring) {
+	// Validare automată (Draft → Valid) DOAR pentru șabloanele recurente NON-hosting.
+	// Facturile de hosting rămân PROFORME până la încasare — vezi
+	// `auto-validate-policy.ts` (incident OTSH 12/13, 2026-09-03: reînnoirile de
+	// hosting deveneau fiscale și ajungeau la ANAF înainte de a fi plătite).
+	// Facturile manuale rămân proforme; staff-ul le validează din UI.
+	const isRecurring = event.isRecurring === true;
+	const autoValidate = shouldAutoValidateOnCreate({
+		isRecurring,
+		hostingAccountId: invoice.hostingAccountId
+	});
+	logInfo(
+		'keez',
+		`Auto-validate decision for invoice ${invoice.id}: ${autoValidate.validate ? 'VALIDATE' : 'keep Draft'} (${autoValidate.reason})`,
+		{
+			tenantId,
+			action: 'keez_auto_validate_decision',
+			metadata: {
+				invoiceId: invoice.id,
+				isRecurring,
+				hostingAccountId: invoice.hostingAccountId ?? null,
+				...autoValidate
+			}
+		}
+	);
+	if (autoValidate.validate) {
 		try {
 			await keezClient.validateInvoice(keezResponse.externalId);
 			logInfo('keez', `Invoice validated in Keez (Draft → Valid): ${keezResponse.externalId}`, { tenantId, action: 'keez_invoice_validated', metadata: { invoiceId: invoice.id, keezExternalId: keezResponse.externalId } });
@@ -906,5 +969,101 @@ export const onInvoiceDeleted: HookHandler<InvoiceDeletedEvent> = async (event) 
 		// Don't fail the CRM deletion if Keez deletion fails
 		const delErr = serializeError(error);
 		logError('keez', `Failed to delete invoice ${invoice.id} from Keez: ${delErr.message}`, { tenantId, stackTrace: delErr.stack });
+	}
+};
+
+async function tenantAdminUserIds(tenantId: string): Promise<string[]> {
+	const rows = await db
+		.select({ userId: table.tenantUser.userId })
+		.from(table.tenantUser)
+		.where(
+			and(
+				eq(table.tenantUser.tenantId, tenantId),
+				or(eq(table.tenantUser.role, 'owner'), eq(table.tenantUser.role, 'admin'))
+			)
+		);
+	return rows.map((r) => r.userId);
+}
+
+/**
+ * `invoice.paid` → proforma din Keez devine factură fiscală.
+ *
+ * Singurul moment în care o factură de hosting are voie să devină fiscală este
+ * încasarea (vezi `auto-validate-policy.ts`). Evenimentul vine din toate căile
+ * de plată: webhook Stripe (`stripe/invoice-payment.ts`), OP/cash din contul de
+ * hosting (`hosting/mark-invoices-paid.ts`), „Marchează achitată" din /invoices.
+ *
+ * Nu aruncă niciodată: plata e deja înregistrată, iar un eșec la Keez (ex.
+ * `ERROR_DOCUMENT_DATE_GRATER_THEN_LAST_INVOICE_DATE` când o proformă mai veche
+ * se plătește după ce s-a validat una mai nouă) se semnalează staff-ului prin
+ * notificare, ca să valideze manual din Keez.
+ */
+export const onInvoicePaid: HookHandler<InvoicePaidEvent> = async (event) => {
+	const { tenantId } = event;
+	const invoiceId = event.invoice.id;
+	try {
+		// Recitim rândul: evenimentul poate purta un snapshot fără keezStatus/keezExternalId.
+		const [invoice] = await db
+			.select()
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, tenantId)))
+			.limit(1);
+		if (!invoice) return;
+
+		const decision = shouldValidateOnPaid(invoice);
+		logInfo(
+			'keez',
+			`invoice.paid → ${decision.validate ? 'validating proforma' : 'no validation'} for ${invoice.invoiceNumber} (${decision.reason})`,
+			{
+				tenantId,
+				action: 'keez_validate_on_paid_decision',
+				metadata: { invoiceId, keezStatus: invoice.keezStatus, status: invoice.status, ...decision }
+			}
+		);
+		if (!decision.validate) return;
+
+		const result = await validateInvoiceInKeezForTenant(tenantId, invoiceId);
+		if (result.success) {
+			logInfo('keez', `Proforma ${invoice.invoiceNumber} validated in Keez after payment`, {
+				tenantId,
+				action: 'keez_invoice_validated',
+				metadata: { invoiceId, keezExternalId: invoice.keezExternalId, trigger: 'invoice.paid' }
+			});
+			return;
+		}
+
+		logError(
+			'keez',
+			`Validarea proformei ${invoice.invoiceNumber} în Keez a eșuat după încasare: ${result.error}`,
+			{ tenantId, action: 'keez_validate_on_paid_failed', metadata: { invoiceId, error: result.error } }
+		);
+		const [tenant] = await db
+			.select({ slug: table.tenant.slug })
+			.from(table.tenant)
+			.where(eq(table.tenant.id, tenantId))
+			.limit(1);
+		const admins = await tenantAdminUserIds(tenantId);
+		await Promise.all(
+			admins.map((userId) =>
+				createNotification({
+					tenantId,
+					userId,
+					clientId: invoice.clientId,
+					type: 'keez.sync_error',
+					title: 'Proformă neconvertită în factură fiscală',
+					message: `${invoice.invoiceNumber} e încasată, dar validarea în Keez a eșuat: ${result.error}. Validează manual din Keez.`,
+					link: tenant ? `/${tenant.slug}/invoices/${invoiceId}` : undefined,
+					metadata: { invoiceId, error: result.error },
+					priority: 'high'
+				})
+			)
+		);
+	} catch (error) {
+		const err = serializeError(error);
+		logError('keez', `onInvoicePaid failed for invoice ${invoiceId}: ${err.message}`, {
+			tenantId,
+			stackTrace: err.stack,
+			metadata: { invoiceId }
+		});
 	}
 };

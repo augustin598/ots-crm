@@ -268,6 +268,54 @@ describe('resolveKeezInvoiceStatus', () => {
 		expect(r.status).toBe('draft');
 	});
 
+	it('proforma de hosting trimisă clientului nu e retrogradată la ciornă de sync', () => {
+		// OTSH 12 ca proformă: auto-send o pune pe `sent`; `draft` nu ar mai fi
+		// plătibilă prin OP/cash din contul de hosting.
+		for (const local of ['sent', 'overdue', 'partially_paid'] as const) {
+			const r = resolveKeezInvoiceStatus({
+				keezStatus: 'Draft',
+				remainingAmount: TOTAL / 100,
+				totalAmount: TOTAL,
+				dueDate: DUE_PAST,
+				existing: { status: local, paidDate: null }
+			});
+			expect(r.status).toBe(local);
+		}
+	});
+
+	it('proforma încasată în CRM (validarea Keez a eșuat) rămâne achitată', () => {
+		const r = resolveKeezInvoiceStatus({
+			keezStatus: 'Draft',
+			remainingAmount: TOTAL / 100,
+			totalAmount: TOTAL,
+			dueDate: DUE_PAST,
+			existing: paidByCard()
+		});
+		expect(r.status).toBe('paid');
+	});
+
+	it('factura de ore rambursată (Draft în Keez) nu redevine ciornă și nici achitată', () => {
+		const r = resolveKeezInvoiceStatus({
+			keezStatus: 'Draft',
+			remainingAmount: TOTAL / 100,
+			totalAmount: TOTAL,
+			dueDate: DUE_PAST,
+			existing: paidByCard({ status: 'refunded' })
+		});
+		expect(r.status).toBe('refunded');
+	});
+
+	it('proforma încă netrimisă rămâne ciornă', () => {
+		const r = resolveKeezInvoiceStatus({
+			keezStatus: 'Draft',
+			remainingAmount: TOTAL / 100,
+			totalAmount: TOTAL,
+			dueDate: DUE_FUTURE,
+			existing: { status: 'draft', paidDate: null }
+		});
+		expect(r.status).toBe('draft');
+	});
+
 	it('fără remainingAmount pe document validat → trimisă', () => {
 		const r = resolveKeezInvoiceStatus({
 			keezStatus: 'Valid',

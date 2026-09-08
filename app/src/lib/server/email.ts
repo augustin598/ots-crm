@@ -1239,11 +1239,15 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 		throw new Error('Invoice not found');
 	}
 
+	// Proformele (Keez `Draft` — toate reînnoirile de hosting până la încasare) se
+	// numesc explicit așa în subiect și titlu, ca PDF-ul atașat („FACTURA PROFORMA").
+	const invoiceDocLabel = invoice.keezStatus === 'Draft' ? 'Factura proformă' : 'Factura';
+
 	await sendWithPersistence(
 		{
 			tenantId: invoice.tenantId,
 			toEmail: clientEmail,
-			subject: `Factura ${invoice.invoiceNumber}`,
+			subject: `${invoiceDocLabel} ${invoice.invoiceNumber}`,
 			emailType: 'invoice',
 			metadata: { invoiceId, invoiceNumber: invoice.invoiceNumber },
 			htmlBody: '',
@@ -1383,14 +1387,14 @@ export async function sendInvoiceEmail(invoiceId: string, clientEmail: string): 
 			return {
 				from: `"${tenantName}" <${fromEmail}>`,
 				to: clientEmail,
-				subject: `Factura ${invoice.invoiceNumber} de la ${tenantName}`,
+				subject: `${invoiceDocLabel} ${invoice.invoiceNumber} de la ${tenantName}`,
 				...(attachments.length > 0 ? { attachments } : {}),
 				html: renderBrandedEmail({
 					themeColor,
 					headerLogoHtml,
-					title: `Factura ${invoice.invoiceNumber}`,
+					title: `${invoiceDocLabel} ${invoice.invoiceNumber}`,
 					bodyHtml,
-					previewTitle: `Factura ${invoice.invoiceNumber}`
+					previewTitle: `${invoiceDocLabel} ${invoice.invoiceNumber}`
 				}),
 				text: trimPlainText(`
 			Factura ${invoice.invoiceNumber}

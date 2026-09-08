@@ -6,6 +6,7 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { KeezClient, type KeezPartner } from '$lib/server/plugins/keez/client';
 import { resolveKeezInvoiceStatus } from '$lib/server/plugins/keez/invoice-status';
+import { statusAfterKeezValidation } from '$lib/server/plugins/keez/auto-validate-policy';
 import { encrypt, decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/keez/crypto';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from '$lib/server/plugins/keez/factory';
 import { syncKeezInvoicesForTenant, KeezSyncAbortedError } from '$lib/server/plugins/keez/sync';
@@ -1385,12 +1386,13 @@ export const validateInvoiceInKeez = command(
 
 		await keezClient.validateInvoice(invoice.keezExternalId);
 
-		// Update local invoice: proforma → validated fiscal invoice
+		// Update local invoice: proforma → validated fiscal invoice. O proformă deja
+		// încasată (hosting plătit prin OP) NU se retrogradează la `sent`.
 		await db
 			.update(table.invoice)
 			.set({
 				keezStatus: 'Valid',
-				status: 'sent',
+				status: statusAfterKeezValidation(invoice.status),
 				updatedAt: new Date()
 			})
 			.where(eq(table.invoice.id, data.invoiceId));

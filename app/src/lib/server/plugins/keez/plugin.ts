@@ -1,5 +1,5 @@
 import type { Plugin, PluginConfig, HooksManager } from '../types';
-import { onInvoiceCreated, onInvoiceUpdated, onInvoiceDeleted } from './hooks';
+import { onInvoiceCreated, onInvoiceUpdated, onInvoiceDeleted, onInvoicePaid } from './hooks';
 import { logInfo } from '$lib/server/logger';
 
 export class KeezPlugin implements Plugin {
@@ -19,6 +19,8 @@ export class KeezPlugin implements Plugin {
 		hooks.on('invoice.created', onInvoiceCreated);
 		hooks.on('invoice.updated', onInvoiceUpdated);
 		hooks.on('invoice.deleted', onInvoiceDeleted);
+		// Proformă → fiscală DOAR la încasare (hosting): vezi auto-validate-policy.ts
+		hooks.on('invoice.paid', onInvoicePaid);
 	}
 
 	async onEnable(tenantId: string): Promise<void> {

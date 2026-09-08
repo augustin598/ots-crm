@@ -26,7 +26,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 import { getLatestBnrRateWithDate } from '$lib/server/bnr/client';
-import { pushInvoiceToKeez } from '$lib/server/plugins/keez/auto-push';
+import { pushInvoiceToKeez, validateInvoiceInKeezForTenant } from '$lib/server/plugins/keez/auto-push';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
@@ -291,6 +291,16 @@ export async function emitKeezHoursInvoice(params: {
 				tenantId,
 				metadata: { invoiceId, keezExternalId }
 			});
+			// Încasată cu cardul → fiscală acum (regula din keez/auto-validate-policy.ts;
+			// rândul e inserat direct `paid`, deci hook-ul invoice.paid nu se declanșează).
+			const validateResult = await validateInvoiceInKeezForTenant(tenantId, invoiceId);
+			if (!validateResult.success) {
+				logError('keez', `emit-keez-hours: ${invoiceNumber} rămâne proformă — validarea a eșuat: ${validateResult.error}`, {
+					tenantId,
+					action: 'keez_validate_on_paid_failed',
+					metadata: { invoiceId, keezExternalId, error: validateResult.error }
+				});
+			}
 
 			// Descrierea din Stripe Dashboard arată factura, ca la hosting.
 			try {

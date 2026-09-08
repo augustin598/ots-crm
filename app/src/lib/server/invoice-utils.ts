@@ -8,7 +8,8 @@ import { KeezClient } from './plugins/keez/client';
 import { decrypt } from './plugins/keez/crypto';
 import { generateNextInvoiceNumber as generateNextKeezInvoiceNumber } from './plugins/keez/mapper';
 import { generateNextInvoiceNumber as generateNextSmartBillInvoiceNumber } from './plugins/smartbill/mapper';
-import { logInfo, logWarning } from '$lib/server/logger';
+import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { canRollbackCreatedInvoice } from './plugins/keez/rollback-policy';
 import { classifyClientVat } from '$lib/server/vat/classify-client';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
 import {
@@ -929,7 +930,30 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 			isRecurring: true
 		});
 	} catch (error) {
-		// Rollback: delete the invoice and revert recurring invoice update
+		// Rollback DOAR dacă documentul nu a ajuns în Keez. Dacă hook-ul a creat
+		// documentul în Keez și a picat după (OTSH 13, 2026-09-04: pod oprit la
+		// deploy), ștergerea rândului CRM lasă în Keez un document orfan pe care
+		// sync-ul îl reimportă fără cont de hosting și fără serie, iar șablonul
+		// readus la data veche re-facturează același ciclu. Păstrăm rândul cu
+		// legăturile lui și semnalăm eroarea — staff-ul verifică în Keez.
+		const [afterHook] = await db
+			.select({ keezExternalId: table.invoice.keezExternalId })
+			.from(table.invoice)
+			.where(eq(table.invoice.id, invoiceId))
+			.limit(1);
+		if (!canRollbackCreatedInvoice({ keezExternalId: afterHook?.keezExternalId })) {
+			const { message } = serializeError(error);
+			logError(
+				'scheduler',
+				`Factura ${invoiceNumber} a fost creată în Keez (${afterHook?.keezExternalId}), dar hook-ul a eșuat după: ${message}. Rândul CRM și șablonul au fost PĂSTRATE — verifică documentul în Keez.`,
+				{
+					tenantId: recurringInvoice.tenantId,
+					metadata: { invoiceId, recurringInvoiceId, keezExternalId: afterHook?.keezExternalId }
+				}
+			);
+			return { success: true, invoiceId, hookError: message };
+		}
+
 		await db.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
 		await db
 			.update(table.recurringInvoice)

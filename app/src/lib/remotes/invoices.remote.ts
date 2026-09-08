@@ -7,7 +7,8 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { getHooksManager } from '$lib/server/plugins/hooks';
 import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
-import { logInfo } from '$lib/server/logger';
+import { logInfo, logError } from '$lib/server/logger';
+import { canRollbackCreatedInvoice } from '$lib/server/plugins/keez/rollback-policy';
 import { requireStaff } from '$lib/server/get-actor';
 import { checkPortalCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
 import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
@@ -650,7 +651,21 @@ export const createInvoice = command(
 				userId: event.locals.user.id
 			});
 		} catch (error) {
-			// Rollback: delete the invoice and line items if hook fails
+			// Rollback DOAR dacă documentul nu a ajuns în Keez — altfel rămâne orfan
+			// acolo și sync-ul îl reimportă ca factură nouă (vezi keez/rollback-policy.ts).
+			const [afterHook] = await db
+				.select({ keezExternalId: table.invoice.keezExternalId })
+				.from(table.invoice)
+				.where(eq(table.invoice.id, invoiceId))
+				.limit(1);
+			if (!canRollbackCreatedInvoice({ keezExternalId: afterHook?.keezExternalId })) {
+				logError(
+					'keez',
+					`Factura ${fullInvoice.invoiceNumber} există în Keez (${afterHook?.keezExternalId}), dar hook-ul a eșuat după creare — rândul CRM a fost păstrat`,
+					{ tenantId: event.locals.tenant.id, metadata: { invoiceId } }
+				);
+				return { success: true, invoiceId };
+			}
 			await db.transaction(async (tx) => {
 				await tx.delete(table.invoiceLineItem).where(eq(table.invoiceLineItem.invoiceId, invoiceId));
 				await tx.delete(table.invoice).where(eq(table.invoice.id, invoiceId));

@@ -21,6 +21,7 @@ import { mapInvoiceToKeez } from './mapper';
 import { createKeezClientForTenant } from './factory';
 import { invoiceVatPercentFromBps } from '$lib/server/vat/rate';
 import { resolveKeezInvoiceStatus } from './invoice-status';
+import { statusAfterKeezValidation } from './auto-validate-policy';
 import { keezMeasureUnitId } from '$lib/constants/keez-measure-units';
 
 function generateSyncId(): string {
@@ -684,11 +685,13 @@ export async function validateInvoiceInKeezForTenant(
 		const keezClient = await createKeezClientForTenant(tenantId, integration);
 		await keezClient.validateInvoice(invoice.keezExternalId);
 
+		// Validarea vine de regulă DUPĂ încasare (proformă de hosting plătită):
+		// statusul CRM nu se retrogradează la `sent` peste `paid`.
 		await db
 			.update(table.invoice)
 			.set({
 				keezStatus: 'Valid',
-				status: 'sent',
+				status: statusAfterKeezValidation(invoice.status),
 				updatedAt: new Date()
 			})
 			.where(eq(table.invoice.id, invoiceId));
