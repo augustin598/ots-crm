@@ -402,6 +402,12 @@ async function _syncKeezInvoicesForTenantInner(
 				if (invoiceHeader.series && invoiceHeader.number) {
 					const newNumber = `${invoiceHeader.series} ${invoiceHeader.number}`;
 					if (newNumber !== existing.invoiceNumber) updateData.invoiceNumber = newNumber;
+					// Seria de pe rând e sursa afișării („OTSH 16", nu „OTS 16"): fără ea
+					// panoul cade pe seria implicită a tenantului și rescrie OTSH → OTS.
+					const headerSeries = String(invoiceHeader.series).trim();
+					if (headerSeries && headerSeries !== existing.invoiceSeries) {
+						updateData.invoiceSeries = headerSeries;
+					}
 				}
 
 				// Currency logic:
@@ -552,6 +558,9 @@ async function _syncKeezInvoicesForTenantInner(
 						tenantId: invoiceInsertData.tenantId || tenantId,
 						clientId: invoiceInsertData.clientId || clientId,
 						invoiceNumber: invoiceInsertData.invoiceNumber || invoiceHeader.externalId,
+						// Seria din headerul Keez, altfel UI-ul afișează OTSH ca OTS (vezi
+						// formatInvoiceNumberDisplay: per-rând > seria implicită a tenantului).
+						invoiceSeries: invoiceHeader.series ? String(invoiceHeader.series).trim() : null,
 						status: invoiceInsertData.status || 'sent',
 						amount: invoiceInsertData.amount || 0,
 						// `||` would import a genuine 0% Keez invoice as 19%.
