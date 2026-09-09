@@ -637,6 +637,7 @@
 	{isWebDev}
 	onRequest={handleTierPick}
 	requestLabel={'Adaugă {tier}'}
+	requestLabelSingle="Adaugă în ofertă"
 	activeTier={selectedCategory ? cart.tierOf(selectedCategory.slug) : null}
 	activeLabel="În ofertă ✓"
 />

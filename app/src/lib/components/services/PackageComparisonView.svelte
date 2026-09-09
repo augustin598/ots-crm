@@ -29,6 +29,7 @@
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
 	import type { Category, Tier, TierColors } from '$lib/constants/ots-catalog';
+	import { isTierOffered } from '$lib/logic/quote-pricing';
 	import CategoryIcon from './CategoryIcon.svelte';
 
 	type Props = {
@@ -46,6 +47,8 @@
 		onRequest?: (tier: Tier) => void;
 		/** Textul butonului de cerere; `{tier}` e înlocuit cu numele pachetului. */
 		requestLabel?: string;
+		/** Textul butonului când categoria are un singur pachet — numele tier-ului n-ar distinge nimic. */
+		requestLabelSingle?: string;
 		/** Tier-ul deja ales pentru această categorie (coșul de pe /servicii); butonul lui arată `activeLabel`. */
 		activeTier?: Tier | null;
 		activeLabel?: string;
@@ -63,9 +66,33 @@
 		isWebDev = false,
 		onRequest,
 		requestLabel = 'Vreau {tier}',
+		requestLabelSingle = 'Vreau acest pachet',
 		activeTier = null,
 		activeLabel = 'În ofertă'
 	}: Props = $props();
+
+	/**
+	 * Doar pachetele care chiar există la categoria asta. Google Ads Setup e un
+	 * singur tarif one-time (Bronze): fără filtru, dialogul arăta trei carduri
+	 * goale cu „—" și butoane inactive, plus trei coloane identice în tabel.
+	 */
+	const offeredTiers = $derived.by(() => {
+		const cat = category;
+		if (!cat) return tiers;
+		const offered = tiers.filter((t) => isTierOffered(cat, t));
+		return offered.length > 0 ? offered : tiers;
+	});
+
+	const isSingleTier = $derived(offeredTiers.length === 1);
+
+	/** Un singur pachet nu se întinde pe patru coloane — cardul rămâne centrat. */
+	const tierGridClass = $derived(
+		{
+			1: 'grid-cols-1 max-w-sm mx-auto',
+			2: 'grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto',
+			3: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+		}[offeredTiers.length] ?? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+	);
 
 	/** „Urgență +50%, Weekend & sărbători +70%, Noapte +100%" — din catalog, nu scris de mână. */
 	const surcharges = $derived(
@@ -96,8 +123,8 @@
 			</DialogHeader>
 
 			<!-- Pe telefon o singură coloană: la două, prețurile („1.200 €/lună") și butoanele se rupeau pe rânduri. -->
-			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
-				{#each tiers as tier (tier)}
+			<div class={cn('grid gap-4 my-6', tierGridClass)}>
+				{#each offeredTiers as tier (tier)}
 					{@const colors = tierColors[tier]}
 					{@const price = category.prices[tier]}
 					{@const setup = category.setupFees?.[tier]}
@@ -183,7 +210,7 @@
 										<CheckIcon class="h-3.5 w-3.5" aria-hidden="true" />
 										{activeLabel}
 									{:else}
-										{requestLabel.replace('{tier}', tierLabels[tier])}
+										{isSingleTier ? requestLabelSingle : requestLabel.replace('{tier}', tierLabels[tier])}
 									{/if}
 								</Button>
 							{/if}
@@ -200,11 +227,11 @@
 
 			<!-- Pe telefon tabelul derulează orizontal, cu coloana de funcționalități fixă în stânga. -->
 			<div class="overflow-x-auto rounded-xl border bg-white dark:bg-background" {@attach dragScroll}>
-				<table class="w-full min-w-[540px] sm:min-w-0 text-sm">
+				<table class={cn('w-full text-sm', !isSingleTier && 'min-w-[540px] sm:min-w-0')}>
 					<thead>
 						<tr class="border-b-2 border-border">
 							<th class="sticky left-0 z-10 w-[150px] bg-white dark:bg-background text-left px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:static sm:w-auto">Funcționalitate</th>
-							{#each tiers as tier (tier)}
+							{#each offeredTiers as tier (tier)}
 								{@const colors = tierColors[tier]}
 								<th class="px-3 py-3 font-bold text-center {colors.text}">
 									<div class="inline-flex items-center gap-1.5">
@@ -226,7 +253,7 @@
 										{/if}
 									</span>
 								</td>
-								{#each tiers as tier (tier)}
+								{#each offeredTiers as tier (tier)}
 									{@const value = feature.values[tier]}
 									<td class="px-3 py-3 text-center align-top">
 										{#if isBooleanFeature(value)}
