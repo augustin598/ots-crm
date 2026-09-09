@@ -2,8 +2,11 @@ import { query, command, getRequestEvent } from '$app/server';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
+import { unlink } from 'fs/promises';
+import { logError, logInfo } from '$lib/server/logger';
 import { getGoogleAdsStatus, getAuthenticatedClient } from '$lib/server/google-ads/auth';
+import { reconcileMccAccounts } from '$lib/server/google-ads/reconcile-accounts';
 import { listMonthlySpend, formatCustomerId, listMccSubAccounts } from '$lib/server/google-ads/client';
 import { saveGoogleSessionCookies, clearGoogleSession, getDecryptedGoogleCookies } from '$lib/server/google-ads/google-cookies';
 import { syncGoogleAdsInvoicesForTenant } from '$lib/server/google-ads/sync';
@@ -454,7 +457,26 @@ export const fetchGoogleAdsAccounts = command(async () => {
 		}
 	}
 
-	return { fetched: subAccounts.length };
+	// Accounts that vanished from the MCC (removed/closed/moved) used to stay
+	// active forever and fail every sync. Deactivate them; keep the client
+	// mapping so history stays attributed.
+	const storedRows = await db
+		.select({ id: table.googleAdsAccount.id, googleAdsCustomerId: table.googleAdsAccount.googleAdsCustomerId, isActive: table.googleAdsAccount.isActive })
+		.from(table.googleAdsAccount)
+		.where(eq(table.googleAdsAccount.tenantId, tenantId));
+	const { deactivateIds } = reconcileMccAccounts(storedRows, subAccounts);
+	if (deactivateIds.length > 0) {
+		await db
+			.update(table.googleAdsAccount)
+			.set({ isActive: false, updatedAt: now })
+			.where(and(eq(table.googleAdsAccount.tenantId, tenantId), inArray(table.googleAdsAccount.id, deactivateIds)));
+		logInfo('google-ads', `Deactivated ${deactivateIds.length} account(s) no longer listed under the MCC`, {
+			tenantId,
+			metadata: { deactivateIds }
+		});
+	}
+
+	return { fetched: subAccounts.length, deactivated: deactivateIds.length };
 });
 
 /** Assign a Google Ads account to a CRM client */
@@ -538,7 +560,6 @@ export const triggerGoogleAdsSync = command(async () => {
 		return result;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		const { logError } = await import('$lib/server/logger');
 		logError('google-ads-sync', `Sync command failed: ${message}`, {
 			tenantId: event.locals.tenant.id,
 			userId: event.locals.user.id,
@@ -583,7 +604,6 @@ export const deleteGoogleAdsInvoice = command(
 			} catch {
 				// Fallback: try filesystem
 				try {
-					const { unlink } = await import('fs/promises');
 					await unlink(invoice.pdfPath);
 				} catch {
 					// File might not exist, that's ok
@@ -738,7 +758,6 @@ export const bulkDownloadGoogleInvoices = command(
 		// Try to get OAuth access token for Bearer auth (primary method)
 		let accessToken: string | null = null;
 		try {
-			const { getAuthenticatedClient } = await import('$lib/server/google-ads/auth');
 			const authResult = await getAuthenticatedClient(tenantId);
 			if (authResult) {
 				accessToken = (await authResult.oauth2Client.getAccessToken()).token || null;
@@ -870,7 +889,12 @@ export const setGoogleAdsCookies = command(
 		}
 
 		await saveGoogleSessionCookies(integration.id, tenantId, data.cookiesJson);
-		return { success: true };
+
+		// Probe right away (ads.google.com billing page, fetch only) so the user
+		// learns immediately whether the Cookie-Editor export is a live session
+		// instead of finding out at the next monthly sync.
+		const probe = await refreshGoogleSessionHeadless(tenantId, integration.id);
+		return { success: true, probe: probe.status, cookieCount: probe.cookieCount ?? null };
 	}
 );
 

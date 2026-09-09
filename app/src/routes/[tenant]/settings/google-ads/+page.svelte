@@ -174,8 +174,14 @@
 		}
 		savingCookies = true;
 		try {
-			await setGoogleAdsCookies({ cookiesJson: json }).updates(statusQuery);
-			toast.success('Cookies Google salvate');
+			const result = await setGoogleAdsCookies({ cookiesJson: json }).updates(statusQuery);
+			if (result.probe === 'refreshed') {
+				toast.success(`Cookies Google salvate: sesiunea este validă (${result.cookieCount ?? 0} cookie-uri).`);
+			} else if (result.probe === 'expired') {
+				toast.error('Cookies salvate, dar Google le respinge. Loghează-te pe ads.google.com, apoi exportă din nou din Cookie-Editor (JSON) și lipește imediat.', { duration: 8000 });
+			} else {
+				toast.warning('Cookies salvate. Verificarea sesiunii a fost neconcludentă; încearcă „Verifică Sesiunea (Server)" din pagina Facturi Google Ads.');
+			}
 			cookieJsonInput = '';
 		} catch (e: any) {
 			clientLogger.apiError('google_ads_save_cookies', e);

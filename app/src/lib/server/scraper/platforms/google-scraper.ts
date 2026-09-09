@@ -8,58 +8,8 @@ import {
 	failSession
 } from '../invoice-scraper';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
-
-// ── Date Parsing ─────────────────────────────────────────────────
-
-/**
- * Date parser for Romanian and English date formats.
- * Replicates the logic from google-ads-invoice-extractor.user.js
- */
-function parseDate(text: string): string | undefined {
-	if (!text) return undefined;
-
-	// Romanian: "30 noiembrie 2025", "10 dec. 2025"
-	const roMonths: Record<string, string> = {
-		ian: '01', ianuarie: '01', feb: '02', februarie: '02',
-		mar: '03', martie: '03', apr: '04', aprilie: '04',
-		mai: '05', iun: '06', iunie: '06', iul: '07', iulie: '07',
-		aug: '08', august: '08', sep: '09', septembrie: '09',
-		oct: '10', octombrie: '10', noi: '11', noiembrie: '11', noiembre: '11',
-		dec: '12', decembrie: '12'
-	};
-
-	const m = text.match(/(\d{1,2})\s+([a-zăâîșț]+)\.?\s+(\d{4})/i);
-	if (m) {
-		const monthKey = m[2].toLowerCase().replace('.', '');
-		const mm = roMonths[monthKey] || roMonths[monthKey.substring(0, 3)];
-		if (mm) return `${m[3]}-${mm}-${m[1].padStart(2, '0')}`;
-	}
-
-	// English: "November 30, 2025", "Dec 10, 2025"
-	const enMonths: Record<string, string> = {
-		jan: '01', january: '01', feb: '02', february: '02',
-		mar: '03', march: '03', apr: '04', april: '04',
-		may: '05', jun: '06', june: '06', jul: '07', july: '07',
-		aug: '08', august: '08', sep: '09', september: '09',
-		oct: '10', october: '10', nov: '11', november: '11',
-		dec: '12', december: '12'
-	};
-	const m2 = text.match(/([a-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/i);
-	if (m2) {
-		const enKey = m2[1].toLowerCase();
-		const enMm = enMonths[enKey] || enMonths[enKey.substring(0, 3)];
-		if (enMm) return `${m2[3]}-${enMm}-${m2[2].padStart(2, '0')}`;
-	}
-
-	// Day-month-year: "9 Apr 2025"
-	const m3 = text.match(/(\d{1,2})\s+(\w{3,9})\s+(\d{4})/);
-	if (m3) {
-		const mm = enMonths[m3[2].toLowerCase()];
-		if (mm) return `${m3[3]}-${mm}-${m3[1].padStart(2, '0')}`;
-	}
-
-	return undefined;
-}
+// Date parsing (RO/EN) lives in invoice-parsing.ts, shared with the ingest API.
+import { parseInvoiceDateText } from '$lib/server/google-ads/invoice-parsing';
 
 // ── Account Info Extraction ──────────────────────────────────────
 
@@ -1072,7 +1022,7 @@ async function extractInvoicesFromPage(page: Page): Promise<ScrapedInvoice[]> {
 				invoices = rawLinks.map((inv) => ({
 					platform: 'google' as const,
 					invoiceId: inv.invoiceId || `google_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-					date: parseDate(inv.date || '') || new Date().toISOString().slice(0, 10),
+					date: parseInvoiceDateText(inv.date || '') || new Date().toISOString().slice(0, 10),
 					accountId: customerId,
 					accountName,
 					downloadUrl: inv.url,
@@ -1156,7 +1106,7 @@ async function extractInvoicesFromPage(page: Page): Promise<ScrapedInvoice[]> {
 		invoices = rawLinks.map((inv) => ({
 			platform: 'google' as const,
 			invoiceId: inv.invoiceId || `google_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-			date: parseDate(inv.date || '') || new Date().toISOString().slice(0, 10),
+			date: parseInvoiceDateText(inv.date || '') || new Date().toISOString().slice(0, 10),
 			accountId: customerId,
 			accountName,
 			downloadUrl: inv.url,

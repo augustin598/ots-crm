@@ -7,6 +7,7 @@ import { getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
 import { FB_USER_AGENT } from '$lib/server/meta-ads/constants';
 import { logInfo, logWarning, logError, serializeError, type LogSource } from '$lib/server/logger';
 import type { ScraperPlatform, StoredCookie } from './invoice-scraper';
+import { classifyGoogleProbe, GOOGLE_SESSION_PROBE_URL } from './google-probe';
 
 export type SessionRefreshStatus =
 	| 'refreshed' // session validated (and refreshedAt stamped)
@@ -98,23 +99,21 @@ async function probeMeta(cookies: StoredCookie[], integrationId: string): Promis
 }
 
 async function probeGoogle(cookies: StoredCookie[]): Promise<Probe> {
-	// payments.google.com is the domain the Google invoice PDF download uses.
+	// NOT payments.google.com/payments/u/0/w/home: that page answers 200 even
+	// logged out, which kept a dead session marked "active" for months. The
+	// ads.google.com billing page redirects logged-out requests to ServiceLogin.
 	try {
-		const res = await fetch('https://payments.google.com/payments/u/0/w/home', {
+		const res = await fetch(GOOGLE_SESSION_PROBE_URL, {
 			headers: {
 				Cookie: cookieHeader(cookies),
 				'User-Agent': CHROME_131_UA,
 				Accept: 'text/html,application/xhtml+xml,*/*',
-				Referer: 'https://payments.google.com/'
+				Referer: 'https://ads.google.com/'
 			},
 			redirect: 'manual',
 			signal: AbortSignal.timeout(15_000)
 		});
-		if (res.status >= 300 && res.status < 400) {
-			const loc = res.headers.get('location') || '';
-			return /ServiceLogin|accounts\.google\.com\/(signin|v3)/.test(loc) ? 'expired' : 'error';
-		}
-		return res.ok ? 'alive' : 'error';
+		return classifyGoogleProbe(res.status, res.headers.get('location'));
 	} catch {
 		return 'error';
 	}

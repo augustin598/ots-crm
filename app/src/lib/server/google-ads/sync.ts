@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { getAuthenticatedClient, updateLastSyncAt } from './auth';
 import { listInvoices, downloadInvoicePdf, getSyncMonths, formatCustomerId, listMonthlySpend } from './client';
 import { getDecryptedGoogleCookies, type GoogleAdsCookie } from './google-cookies';
+import { classifyListInvoicesError } from './sync-errors';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { uploadBuffer } from '$lib/server/storage';
 
@@ -242,14 +243,23 @@ export async function syncGoogleAdsInvoicesForTenant(tenantId: string) {
 					}
 				}
 			} catch (monthErr) {
-				// Not all accounts have monthly invoicing - skip silently
-				const errMsg = monthErr instanceof Error ? monthErr.message : String(monthErr);
-				if (errMsg.includes('INVALID_VALUE') || errMsg.includes('billingSetups') || errMsg.includes('BILLING_SETUP_NOT_ON_MONTHLY_INVOICING')) {
+				// The google-ads-api library throws plain GoogleAdsFailure objects, so
+				// String(err) used to log "[object Object]". Classify + describe instead.
+				const { kind, message } = classifyListInvoicesError(monthErr);
+				if (kind === 'not_monthly_invoicing') {
+					// Card-paying accounts: the Invoice API has nothing for them. Their
+					// PDFs come from the payments.google.com documents page (userscript).
 					logInfo('google-ads-sync', `No monthly invoicing for ${mapping.accountName} (${cleanCustomerId}) - skipping`, { tenantId });
+				} else if (kind === 'account_inaccessible') {
+					logWarning('google-ads-sync', `Account ${mapping.accountName} (${cleanCustomerId}) is no longer accessible from the MCC - skipping (${month} ${year})`, {
+						tenantId,
+						metadata: { error: message }
+					});
+					break; // same answer for every month; don't spam the log
 				} else {
 					logError('google-ads-sync', `Failed to list invoices for ${mapping.accountName} (${month} ${year})`, {
 						tenantId,
-						metadata: { error: errMsg.slice(0, 500) }
+						metadata: { error: message }
 					});
 					errors++;
 				}

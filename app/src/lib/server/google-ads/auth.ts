@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { interactiveBrowserAvailable } from '$lib/server/scraper/browser-availability';
 
 const CALLBACK_PATH = '/api/google-ads/callback';
 
@@ -266,7 +267,9 @@ export async function getGoogleAdsStatus(tenantId: string) {
 			syncEnabled: false,
 			lastSyncResults: null,
 			integrationId: null,
-			googleSessionStatus: 'none' as const
+			googleSessionStatus: 'none' as const,
+			googleSessionRefreshedAt: null,
+			browserScanAvailable: interactiveBrowserAvailable()
 		};
 	}
 
@@ -280,7 +283,10 @@ export async function getGoogleAdsStatus(tenantId: string) {
 		syncEnabled: integration.syncEnabled,
 		lastSyncResults: integration.lastSyncResults ? JSON.parse(integration.lastSyncResults) : null,
 		integrationId: integration.id,
-		googleSessionStatus: integration.googleSessionStatus
+		googleSessionStatus: integration.googleSessionStatus,
+		googleSessionRefreshedAt: integration.googleSessionRefreshedAt,
+		// "Scan cu Browser" needs a visible Chrome; false on the production pod.
+		browserScanAvailable: interactiveBrowserAvailable()
 	};
 }
 

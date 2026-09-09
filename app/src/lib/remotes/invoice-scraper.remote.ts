@@ -14,6 +14,7 @@ import {
 import { scrapeMetaInvoices } from '$lib/server/scraper/platforms/meta-scraper';
 import { scrapeGoogleInvoices } from '$lib/server/scraper/platforms/google-scraper';
 import { scrapeTiktokInvoices } from '$lib/server/scraper/platforms/tiktok-scraper';
+import { interactiveBrowserAvailable, BROWSER_SCAN_UNAVAILABLE_MESSAGE } from '$lib/server/scraper/browser-availability';
 
 // ── Auth helper ───────────────────────────────────────────────────
 
@@ -41,6 +42,11 @@ export const startScraperSession = command(
 	}),
 	async (data) => {
 		const { tenantId } = requireAdmin();
+		// No display on this host (production pod): a headless browser would open
+		// on the server and the user could never log in. Say so instead of hanging.
+		if (!interactiveBrowserAvailable()) {
+			throw error(409, BROWSER_SCAN_UNAVAILABLE_MESSAGE);
+		}
 		console.log(`[SCRAPER-DEBUG] startScraperSession called: platform=${data.platform}, tenantId=${tenantId}, integrationId=${data.integrationId}`);
 		try {
 			const sessionId = await createSession(

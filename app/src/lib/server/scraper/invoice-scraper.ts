@@ -8,6 +8,7 @@ import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from '
 import { saveFbSessionCookies, getDecryptedFbCookies } from '$lib/server/meta-ads/fb-cookies';
 import { saveGoogleSessionCookies, getDecryptedGoogleCookies } from '$lib/server/google-ads/google-cookies';
 import { saveTtSessionCookies, getDecryptedTtCookies } from '$lib/server/tiktok-ads/tt-cookies';
+import { interactiveBrowserAvailable, BROWSER_SCAN_UNAVAILABLE_MESSAGE } from './browser-availability';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -337,8 +338,7 @@ export async function launchInteractiveBrowser(): Promise<Browser> {
 		}
 
 		const isProduction = process.env.NODE_ENV === 'production';
-		const isMac = process.platform === 'darwin';
-		const hasDisplay = isMac || !!process.env.DISPLAY;
+		const hasDisplay = interactiveBrowserAvailable();
 		// Force headless if no X server available (Linux servers without display), but macOS doesn't need DISPLAY
 		const useHeadless = isProduction || !hasDisplay;
 		const headlessMode = useHeadless ? 'shell' : false;
@@ -469,6 +469,17 @@ export async function createSession(
 	tenantId: string,
 	integrationId: string
 ): Promise<string> {
+	// A visible browser the user can log into only exists on a machine with a
+	// display. On the production pod puppeteer would fall back to headless-shell
+	// and the user would wait forever for a login screen nobody can see.
+	if (!interactiveBrowserAvailable()) {
+		logWarning('invoice-scraper', 'Scan cu Browser requested on a host without a display; refusing', {
+			tenantId,
+			metadata: { platform, integrationId, hostPlatform: process.platform }
+		});
+		throw new Error(BROWSER_SCAN_UNAVAILABLE_MESSAGE);
+	}
+
 	const sessionId = generateSessionId();
 	console.log(`[SCRAPER-DEBUG] createSession: ${sessionId}, platform=${platform}, tenantId=${tenantId}`);
 

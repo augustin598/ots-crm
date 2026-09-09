@@ -45,12 +45,16 @@
 	// Session status check
 	const connectionStatusQuery = getGoogleAdsConnectionStatus();
 	const googleIntegrationId = $derived(connectionStatusQuery.current?.integrationId || '');
+	// "Scan cu Browser" opens a visible Chrome on the machine running the app:
+	// only true on a dev machine with a display, never on the production pod.
+	const browserScanAvailable = $derived(connectionStatusQuery.current?.browserScanAvailable === true);
 	let scraperPanelRef: ScraperPanel | undefined = $state();
+	const userscriptHref = $derived(`${page.url.origin}/google-ads-invoice-extractor.user.js`);
 	const sessionWarning = $derived.by(() => {
 		const status = connectionStatusQuery.current;
 		if (!status || !status.connected) return null;
 		if (status.googleSessionStatus !== 'active') {
-			return 'Sesiunea Google Ads nu este activă — facturile PDF nu pot fi descărcate. Setează cookies din Settings.';
+			return 'Sesiunea Google salvată pe server nu este activă, deci descărcarea PDF-urilor de pe server nu funcționează. Trimite facturile direct din browserul tău cu scriptul Tampermonkey v3 (vezi „Import Facturi").';
 		}
 		return null;
 	});
@@ -569,17 +573,19 @@
 			</Button>
 			{#if googleIntegrationId}
 				<Button variant="outline" size="sm" onclick={handleServerSessionRefresh} disabled={refreshingSession}
-					title="Reîmprospătează sesiunea Google pe server (headless, fără fereastră)">
-					{#if refreshingSession}<ServerIcon class="mr-2 h-4 w-4 animate-pulse" />Refresh sesiune...{:else}<ServerIcon class="mr-2 h-4 w-4" />Refresh Sesiune (Server){/if}
+					title="Verifică sesiunea Google salvată pe server (fără browser)">
+					{#if refreshingSession}<ServerIcon class="mr-2 h-4 w-4 animate-pulse" />Verific sesiunea...{:else}<ServerIcon class="mr-2 h-4 w-4" />Verifică Sesiunea (Server){/if}
 				</Button>
-				<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()}>
-					<MonitorIcon class="mr-2 h-4 w-4" />Scan cu Browser
-				</Button>
+				{#if browserScanAvailable}
+					<Button variant="outline" size="sm" onclick={() => scraperPanelRef?.start()} title="Deschide un Chrome vizibil pe acest calculator; te loghezi tu în Google Ads">
+						<MonitorIcon class="mr-2 h-4 w-4" />Scan cu Browser (local)
+					</Button>
+				{/if}
 			{/if}
 		</div>
 	</div>
 
-	{#if googleIntegrationId}
+	{#if googleIntegrationId && browserScanAvailable}
 		<ScraperPanel bind:this={scraperPanelRef} platform="google" integrationId={googleIntegrationId} onImport={handleScraperImport} showTrigger={false} />
 	{/if}
 
@@ -596,12 +602,25 @@
 	{#if showBulkImport}
 		<Card class="p-4 space-y-3">
 			<p class="text-sm font-medium">Import facturi Google Ads</p>
-			<p class="text-xs text-muted-foreground">1. Folosește scriptul Tampermonkey pe pagina Google Ads → Billing → Documents pentru a copia link-urile. Lipește JSON-ul aici:</p>
+			<div class="rounded-md border bg-muted/30 p-3 text-xs space-y-2">
+				<p class="font-medium">Metoda recomandată: scriptul Tampermonkey v3, butonul „Trimite în CRM"</p>
+				<ol class="list-decimal pl-4 space-y-1">
+					<li>
+						Instalează
+						<a href={userscriptHref} class="underline font-medium" target="_blank" rel="noopener noreferrer">google-ads-invoice-extractor.user.js</a>
+						în Tampermonkey (deschide link-ul, apoi „Install"). Dacă ai deja v2, actualizează-l.
+					</li>
+					<li>În Google Ads intră pe contul clientului → Facturare → Documente și așteaptă să se încarce tabelul.</li>
+					<li>Apasă „▶ Trimite în CRM" din colțul dreapta-jos. PDF-urile se descarcă în browserul tău (logat în Google) și ajung direct aici; cele deja importate sunt sărite.</li>
+				</ol>
+				<p class="text-muted-foreground">La prima trimitere Tampermonkey cere permisiunea de a accesa {page.url.host}: alege „Always allow domain". Trebuie să fii logat în CRM în același browser.</p>
+			</div>
+			<p class="text-xs text-muted-foreground">Fallback: din script apasă „📋 JSON", lipește JSON-ul aici și selectează contul (descărcarea se face de pe server, cu sesiunea Google salvată):</p>
 			<textarea bind:value={bulkJson} placeholder="Lipeste JSON-ul aici..." class="w-full rounded-md border px-3 py-2 text-sm bg-background font-mono min-h-[100px]"></textarea>
 			<div class="flex items-center gap-2">
 				<select bind:value={bulkCustomerId} class="rounded-md border px-3 py-2 text-sm bg-background">
 					<option value="">Selectează contul</option>
-					{#each monthlySpend as account}
+					{#each monthlySpend as account (account.googleAdsCustomerId)}
 						<option value={account.googleAdsCustomerId}>{account.accountName}</option>
 					{/each}
 				</select>
@@ -630,7 +649,7 @@
 				<div>
 					<select bind:value={urlCustomerId} class="w-full rounded-md border px-3 py-2 text-sm bg-background">
 						<option value="">Selectează contul</option>
-						{#each monthlySpend as account}
+						{#each monthlySpend as account (account.googleAdsCustomerId)}
 							<option value={account.googleAdsCustomerId}>{account.accountName}</option>
 						{/each}
 					</select>
@@ -786,7 +805,7 @@
 										</div>
 										<!-- Expandable invoice list -->
 										{#if isPeriodExpanded && downloadedInvoices.length > 0}
-											{#each downloadedInvoices as inv}
+											{#each downloadedInvoices as inv (inv.id)}
 												<div class="flex items-center gap-3 px-6 py-2 pl-10 bg-muted/10 hover:bg-muted/20 transition-colors">
 													<Checkbox checked={selectedInvoices.has(inv.id)} onCheckedChange={() => toggleSelectInvoice(inv.id)} />
 													<div class="flex items-center gap-2 min-w-0 flex-1">

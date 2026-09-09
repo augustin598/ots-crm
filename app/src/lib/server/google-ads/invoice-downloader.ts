@@ -1,10 +1,13 @@
-import { db } from '$lib/server/db';
-import * as table from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
 import { type GoogleAdsCookie } from './google-cookies';
 import { formatCustomerId } from './client';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
-import { uploadBuffer } from '$lib/server/storage';
+import { isPdfBuffer, parseIssueDate } from './invoice-parsing';
+import {
+	resolveMappedAccount,
+	findExistingInvoice,
+	backfillExistingInvoice,
+	persistGoogleInvoicePdf
+} from './invoice-ingest';
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const DOWNLOAD_DELAY_MS = 1500;
@@ -23,24 +26,6 @@ export interface InvoiceLinkData {
 	amount?: string;
 }
 
-/** Parse an amount string like "7.536,54 RON" or "7,536.54 USD" into a number */
-function parseAmountString(amountStr?: string): number | null {
-	if (!amountStr) return null;
-	// Remove currency codes and whitespace: "7.536,54 RON" → "7.536,54"
-	const cleaned = amountStr.replace(/[A-Z]{3}/g, '').trim();
-	if (!cleaned) return null;
-	let value: number;
-	// Detect format: if comma appears after last dot → European format
-	if (cleaned.includes(',') && cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
-		// European: "7.536,54" → 7536.54
-		value = parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
-	} else {
-		// US: "7,536.54" → 7536.54
-		value = parseFloat(cleaned.replace(/,/g, ''));
-	}
-	return isNaN(value) ? null : value;
-}
-
 function buildCookieHeader(cookies: GoogleAdsCookie[]): string {
 	return cookies.map(c => `${c.name}=${c.value}`).join('; ');
 }
@@ -53,29 +38,30 @@ function hasExpiredCriticalCookies(cookies: GoogleAdsCookie[]): boolean {
 	);
 }
 
-function isPdf(buf: Buffer): boolean {
-	return buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+function normalizePdfUrl(pdfUrl: string): string {
+	let cleanUrl = pdfUrl
+		.replace(/&amp;/g, '&')
+		.replace(/\\u003d/g, '=')
+		.replace(/\\u0026/g, '&')
+		.trim();
+	if (cleanUrl.startsWith('/payments/')) {
+		cleanUrl = `https://payments.google.com${cleanUrl}`;
+	}
+	return cleanUrl;
 }
 
 /**
  * Download a single PDF from a URL using Bearer token (OAuth).
  */
 async function downloadInvoicePdfViaBearer(pdfUrl: string, accessToken: string): Promise<DownloadResult> {
-	let cleanUrl = pdfUrl
-		.replace(/&amp;/g, '&')
-		.replace(/\\u003d/g, '=')
-		.replace(/\\u0026/g, '&')
-		.trim();
-
-	if (cleanUrl.startsWith('/payments/')) {
-		cleanUrl = `https://payments.google.com${cleanUrl}`;
-	}
+	const cleanUrl = normalizePdfUrl(pdfUrl);
 
 	try {
 		const response = await fetch(cleanUrl, {
 			headers: {
 				'Authorization': `Bearer ${accessToken}`
-			}
+			},
+			signal: AbortSignal.timeout(30_000)
 		});
 
 		if (!response.ok) {
@@ -84,7 +70,7 @@ async function downloadInvoicePdfViaBearer(pdfUrl: string, accessToken: string):
 
 		const buffer = Buffer.from(await response.arrayBuffer());
 
-		if (isPdf(buffer) && buffer.length >= 100) {
+		if (isPdfBuffer(buffer) && buffer.length >= 100) {
 			return { success: true, pdfBuffer: buffer };
 		}
 
@@ -108,16 +94,7 @@ export async function downloadInvoicePdfViaCookies(pdfUrl: string, cookies: Goog
 	}
 
 	const cookieHeader = buildCookieHeader(cookies);
-
-	let cleanUrl = pdfUrl
-		.replace(/&amp;/g, '&')
-		.replace(/\\u003d/g, '=')
-		.replace(/\\u0026/g, '&')
-		.trim();
-
-	if (cleanUrl.startsWith('/payments/')) {
-		cleanUrl = `https://payments.google.com${cleanUrl}`;
-	}
+	const cleanUrl = normalizePdfUrl(pdfUrl);
 
 	logInfo('google-ads-dl', `Downloading PDF`, { metadata: { url: cleanUrl.substring(0, 200) } });
 
@@ -135,7 +112,8 @@ export async function downloadInvoicePdfViaCookies(pdfUrl: string, cookies: Goog
 					'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
 					'Referer': 'https://payments.google.com/'
 				},
-				redirect: 'manual'
+				redirect: 'manual',
+				signal: AbortSignal.timeout(30_000)
 			});
 
 			// Only retry on server errors (500/502/503)
@@ -178,7 +156,7 @@ export async function downloadInvoicePdfViaCookies(pdfUrl: string, cookies: Goog
 
 		const buffer = Buffer.from(await response.arrayBuffer());
 
-		if (isPdf(buffer) && buffer.length >= 100) {
+		if (isPdfBuffer(buffer) && buffer.length >= 100) {
 			return { success: true, pdfBuffer: buffer };
 		}
 
@@ -197,8 +175,9 @@ export async function downloadInvoicePdfViaCookies(pdfUrl: string, cookies: Goog
 }
 
 /**
- * Download multiple Google Ads invoices from an array of URLs extracted via browser console script.
- * Each link has: url, invoiceId (optional), date (optional), amount (optional).
+ * Download multiple Google Ads invoices from an array of URLs extracted via
+ * the browser scraper / Tampermonkey JSON. Persistence goes through
+ * persistGoogleInvoicePdf (shared with the userscript ingest API).
  */
 export async function downloadGoogleInvoicesFromLinks(
 	tenantId: string,
@@ -211,18 +190,9 @@ export async function downloadGoogleInvoicesFromLinks(
 
 	logInfo('google-ads-dl', `Bulk downloading ${links.length} invoices for ${cleanCustomerId}`, { tenantId });
 
-	// Find client for this account
-	const [account] = await db
-		.select({ clientId: table.googleAdsAccount.clientId, accountName: table.googleAdsAccount.accountName, currencyCode: table.googleAdsAccount.currencyCode })
-		.from(table.googleAdsAccount)
-		.where(and(
-			eq(table.googleAdsAccount.tenantId, tenantId),
-			eq(table.googleAdsAccount.googleAdsCustomerId, customerId)
-		))
-		.limit(1);
-
-	if (!account?.clientId) {
-		logError('google-ads-dl', `Account ${customerId} not mapped to a client`, { tenantId });
+	const account = await resolveMappedAccount(tenantId, cleanCustomerId);
+	if (!account) {
+		logError('google-ads-dl', `Account ${cleanCustomerId} not mapped to a client`, { tenantId });
 		return { downloaded: 0, skipped: 0, errors: links.length };
 	}
 
@@ -233,59 +203,10 @@ export async function downloadGoogleInvoicesFromLinks(
 	for (const link of links) {
 		const invoiceId = link.invoiceId || link.url.match(/(\d{8,12})/)?.[1] || crypto.randomUUID();
 
-		logInfo('google-ads-dl', `[DEBUG] Processing invoice ${invoiceId}`, {
-			tenantId,
-			metadata: {
-				linkAmount: link.amount || 'NULL',
-				linkDate: link.date || 'NULL',
-				linkUrl: link.url?.substring(0, 80) || 'NULL'
-			}
-		});
-
-		// Dedup
-		const [existing] = await db
-			.select({
-				id: table.googleAdsInvoice.id,
-				pdfPath: table.googleAdsInvoice.pdfPath,
-				totalAmountMicros: table.googleAdsInvoice.totalAmountMicros,
-				googleAdsCustomerId: table.googleAdsInvoice.googleAdsCustomerId,
-				clientId: table.googleAdsInvoice.clientId
-			})
-			.from(table.googleAdsInvoice)
-			.where(and(
-				eq(table.googleAdsInvoice.tenantId, tenantId),
-				eq(table.googleAdsInvoice.googleInvoiceId, invoiceId)
-			))
-			.limit(1);
-
+		// Already have the PDF: don't hit Google again, just fix attribution/amount.
+		const existing = await findExistingInvoice(tenantId, invoiceId);
 		if (existing?.pdfPath) {
-			const parsedBackfill = parseAmountString(link.amount);
-			logInfo('google-ads-dl', `[DEBUG] Invoice ${invoiceId} EXISTS — pdfPath: ${existing.pdfPath ? 'YES' : 'NO'}, totalAmountMicros: ${existing.totalAmountMicros}, link.amount: "${link.amount}", parsedBackfill: ${parsedBackfill}`, { tenantId });
-
-			// Build update fields: fix account attribution + backfill amount
-			const updateFields: Record<string, any> = {};
-
-			// Fix account attribution if stored under wrong account
-			if (existing.googleAdsCustomerId !== customerId || existing.clientId !== account.clientId) {
-				logInfo('google-ads-dl', `[DEBUG] FIXING attribution for invoice ${invoiceId} — googleAdsCustomerId: ${existing.googleAdsCustomerId} → ${customerId}, clientId: ${existing.clientId} → ${account.clientId}`, { tenantId });
-				updateFields.googleAdsCustomerId = customerId;
-				updateFields.clientId = account.clientId;
-			}
-
-			// Backfill amount if missing
-			if (existing.totalAmountMicros == null && parsedBackfill != null) {
-				const micros = Math.round(parsedBackfill * 1_000_000);
-				logInfo('google-ads-dl', `[DEBUG] BACKFILLING invoice ${invoiceId} — setting totalAmountMicros=${micros} (from "${link.amount}")`, { tenantId });
-				updateFields.totalAmountMicros = micros;
-			}
-
-			if (Object.keys(updateFields).length > 0) {
-				updateFields.updatedAt = new Date();
-				await db.update(table.googleAdsInvoice)
-					.set(updateFields)
-					.where(eq(table.googleAdsInvoice.id, existing.id));
-			}
-
+			await backfillExistingInvoice({ tenantId, existing, account, customerId: cleanCustomerId, amountText: link.amount });
 			skipped++;
 			continue;
 		}
@@ -307,40 +228,17 @@ export async function downloadGoogleInvoicesFromLinks(
 
 		if (result.success && result.pdfBuffer) {
 			try {
-				const upload = await uploadBuffer(
-					tenantId, result.pdfBuffer,
-					`google-ads-invoice-${cleanCustomerId}_${invoiceId}.pdf`,
-					'application/pdf',
-					{ type: 'google-ads-invoice', customerId: cleanCustomerId, invoiceId }
-				);
-
-				const issueDate = link.date ? new Date(link.date) : new Date();
-				const parsedAmount = parseAmountString(link.amount);
-				const totalAmountMicros = parsedAmount != null ? Math.round(parsedAmount * 1_000_000) : undefined;
-
-				if (existing) {
-					await db.update(table.googleAdsInvoice)
-						.set({
-							pdfPath: upload.path, status: 'synced', syncedAt: new Date(), updatedAt: new Date(),
-							googleAdsCustomerId: customerId,
-							clientId: account.clientId!,
-							...(totalAmountMicros != null && { totalAmountMicros })
-						})
-						.where(eq(table.googleAdsInvoice.id, existing.id));
-				} else {
-					await db.insert(table.googleAdsInvoice).values({
-						id: crypto.randomUUID(), tenantId, clientId: account.clientId!,
-						googleAdsCustomerId: customerId,
-						googleInvoiceId: invoiceId, invoiceNumber: invoiceId,
-						issueDate, currencyCode: account.currencyCode || 'USD', invoiceType: 'INVOICE',
-						pdfPath: upload.path, status: 'synced', syncedAt: new Date(),
-						createdAt: new Date(), updatedAt: new Date(),
-						...(totalAmountMicros != null && { totalAmountMicros })
-					});
-				}
-
-				downloaded++;
-				logInfo('google-ads-dl', `Downloaded invoice ${invoiceId}`, { tenantId });
+				const persisted = await persistGoogleInvoicePdf({
+					tenantId,
+					customerId: cleanCustomerId,
+					invoiceId,
+					issueDate: parseIssueDate(link.date),
+					amountText: link.amount,
+					pdfBuffer: result.pdfBuffer,
+					source: 'server-download'
+				});
+				if (persisted.status === 'skipped') skipped++;
+				else downloaded++;
 			} catch (uploadErr) {
 				logError('google-ads-dl', `Upload failed for ${invoiceId}`, {
 					tenantId, metadata: { error: uploadErr instanceof Error ? uploadErr.message : String(uploadErr) }

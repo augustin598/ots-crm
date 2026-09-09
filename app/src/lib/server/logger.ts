@@ -22,6 +22,7 @@ export type LogSource =
 	| 'invoice-view'
 	| 'google-ads'
 	| 'google-ads-dl'
+	| 'google-ads-ingest'
 	| 'google-ads-sync'
 	| 'meta-ads'
 	| 'invoice-downloader'
