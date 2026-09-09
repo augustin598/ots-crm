@@ -26,7 +26,9 @@ Flux, pe pagina `ads.google.com/aw/billing/documents` a unui sub-cont:
 
 Autentificare: `GM_xmlhttpRequest` trimite cookie-ul de sesiune CRM (`auth-crm`) al domeniului țintă; endpoint-urile cer `requireStaff`. Body-ul e JSON, deci CSRF-ul SvelteKit (doar pentru form/multipart) nu intervine. Configurare (adresă CRM + tenant) din butonul ⚙; implicit `https://clients.onetopsolution.ro` / `ots`.
 
-Limite: un PDF per request, max 6 MB (`BODY_SIZE_LIMIT` = 10M pe adapter).
+Limite: un PDF per request, max 6 MB (`BODY_SIZE_LIMIT` = 10M implicit în `adapter/files/index.ts`; nu e suprascris în `.env`/`app-config.json`).
+
+Siguranță: iframe-ul acceptă mesaje doar de la `https://ads.google.com` și descarcă doar URL-uri `payments.google.com/payments/apis-secure/doc…`; părintele acceptă rezultate doar de la `https://payments.google.com` și trimite doar către frame-urile cu acel `src`. Înainte de upload, scriptul cere confirmarea clientului/contului găsit de CRM (ID-ul contului e citit euristic din header; se poate corecta și e ținut minte per `ocid`). Serverul refuză cu 409 `attribution_conflict` orice factură care există deja pe alt cont, ca să nu mute facturi între clienți.
 
 ## Persistență comună
 

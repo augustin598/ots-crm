@@ -9,6 +9,7 @@ const selectQueue: unknown[][] = [];
 const inserts: Record<string, unknown>[] = [];
 const updates: Record<string, unknown>[] = [];
 const uploads: { fileName: string; size: number }[] = [];
+let failNextInsertWith: Error | null = null;
 
 mock.module('$lib/server/db', () => {
 	const chain: Record<string, unknown> = {};
@@ -32,7 +33,17 @@ mock.module('$lib/server/db', () => {
 		db: {
 			select: () => chain,
 			update: () => updateChain,
-			insert: () => ({ values: (v: Record<string, unknown>) => { inserts.push(v); return Promise.resolve(); } })
+			insert: () => ({
+				values: (v: Record<string, unknown>) => {
+					if (failNextInsertWith) {
+						const err = failNextInsertWith;
+						failNextInsertWith = null;
+						return Promise.reject(err);
+					}
+					inserts.push(v);
+					return Promise.resolve();
+				}
+			})
 		}
 	};
 });
@@ -55,7 +66,7 @@ mock.module('$lib/server/storage', () => ({
 	}
 }));
 
-const { persistGoogleInvoicePdf, GoogleAccountNotMappedError } = await import('../invoice-ingest');
+const { persistGoogleInvoicePdf, GoogleAccountNotMappedError, GoogleInvoiceAttributionConflictError } = await import('../invoice-ingest');
 
 const mappedAccount = { clientId: 'client-1', accountName: 'Heylux.ro', currencyCode: 'USD', clientName: 'Lucky Group' };
 const pdf = Buffer.from('%PDF-1.4\n' + 'x'.repeat(300));
@@ -74,6 +85,7 @@ beforeEach(() => {
 	inserts.length = 0;
 	updates.length = 0;
 	uploads.length = 0;
+	failNextInsertWith = null;
 });
 
 describe('persistGoogleInvoicePdf', () => {
@@ -126,6 +138,32 @@ describe('persistGoogleInvoicePdf', () => {
 		expect(uploads).toHaveLength(0);
 		expect(updates).toHaveLength(1);
 		expect(updates[0].totalAmountMicros).toBe(2210210000);
+	});
+
+	test('userscript may NOT move an invoice to another account (heuristic customer id) → conflict, no write', async () => {
+		selectQueue.push([mappedAccount]);
+		selectQueue.push([{ id: 'inv-row-4', pdfPath: 'tenant-1/old.pdf', totalAmountMicros: 100, googleAdsCustomerId: '1111111111', clientId: 'client-other' }]);
+		await expect(persistGoogleInvoicePdf(baseInput)).rejects.toBeInstanceOf(GoogleInvoiceAttributionConflictError);
+		expect(updates).toHaveLength(0);
+		expect(uploads).toHaveLength(0);
+	});
+
+	test('server-download source still follows an account reassignment', async () => {
+		selectQueue.push([mappedAccount]);
+		selectQueue.push([{ id: 'inv-row-5', pdfPath: 'tenant-1/old.pdf', totalAmountMicros: 100, googleAdsCustomerId: '1111111111', clientId: 'client-other' }]);
+		const result = await persistGoogleInvoicePdf({ ...baseInput, source: 'server-download' });
+		expect(result.status).toBe('skipped');
+		expect(updates).toHaveLength(1);
+		expect(updates[0].clientId).toBe('client-1');
+	});
+
+	test('insert loses a race on the unique index → re-read and report skipped', async () => {
+		selectQueue.push([mappedAccount]);
+		selectQueue.push([]); // nothing yet at check time
+		selectQueue.push([{ id: 'inv-row-6', pdfPath: 'tenant-1/cron.pdf', totalAmountMicros: null, googleAdsCustomerId: '5249299051', clientId: 'client-1' }]); // re-read after the constraint error
+		failNextInsertWith = new Error('SQLITE_CONSTRAINT: UNIQUE constraint failed: google_ads_invoice.tenant_id, google_ads_invoice.google_invoice_id');
+		const result = await persistGoogleInvoicePdf(baseInput);
+		expect(result).toEqual({ status: 'skipped', invoiceRowId: 'inv-row-6' });
 	});
 
 	test('existing row with PDF and amount, same attribution → skipped without any write', async () => {

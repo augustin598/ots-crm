@@ -21,6 +21,18 @@ export class GoogleAccountNotMappedError extends Error {
 	}
 }
 
+/**
+ * The userscript guesses the customer id from the page header. If an invoice is
+ * already filed under another account we refuse to move it rather than silently
+ * re-attributing a client's invoice to someone else.
+ */
+export class GoogleInvoiceAttributionConflictError extends Error {
+	constructor(public readonly invoiceId: string, public readonly storedCustomerId: string, public readonly requestedCustomerId: string) {
+		super(`Factura ${invoiceId} este deja înregistrată pe contul ${storedCustomerId}, nu pe ${requestedCustomerId}. Verifică ID-ul contului.`);
+		this.name = 'GoogleInvoiceAttributionConflictError';
+	}
+}
+
 export interface MappedAccount {
 	clientId: string;
 	accountName: string;
@@ -146,6 +158,9 @@ export async function persistGoogleInvoicePdf(input: PersistGoogleInvoiceInput):
 	if (!account) throw new GoogleAccountNotMappedError(cleanId);
 
 	const existing = await findExistingInvoice(input.tenantId, input.invoiceId);
+	if (existing && input.source === 'userscript' && digits(existing.googleAdsCustomerId) !== cleanId) {
+		throw new GoogleInvoiceAttributionConflictError(input.invoiceId, existing.googleAdsCustomerId, cleanId);
+	}
 	if (existing?.pdfPath) {
 		await backfillExistingInvoice({ tenantId: input.tenantId, existing, account, customerId: cleanId, amountText: input.amountText });
 		return { status: 'skipped', invoiceRowId: existing.id };
@@ -185,23 +200,41 @@ export async function persistGoogleInvoicePdf(input: PersistGoogleInvoiceInput):
 	}
 
 	const id = crypto.randomUUID();
-	await db.insert(table.googleAdsInvoice).values({
-		id,
-		tenantId: input.tenantId,
-		clientId: account.clientId,
-		googleAdsCustomerId: cleanId,
-		googleInvoiceId: input.invoiceId,
-		invoiceNumber: input.invoiceId,
-		issueDate: input.issueDate ?? now,
-		currencyCode: account.currencyCode,
-		invoiceType: 'INVOICE',
-		pdfPath: upload.path,
-		status: 'synced',
-		syncedAt: now,
-		createdAt: now,
-		updatedAt: now,
-		...(totalAmountMicros != null && { totalAmountMicros })
-	});
+	try {
+		await db.insert(table.googleAdsInvoice).values({
+			id,
+			tenantId: input.tenantId,
+			clientId: account.clientId,
+			googleAdsCustomerId: cleanId,
+			googleInvoiceId: input.invoiceId,
+			invoiceNumber: input.invoiceId,
+			issueDate: input.issueDate ?? now,
+			currencyCode: account.currencyCode,
+			invoiceType: 'INVOICE',
+			pdfPath: upload.path,
+			status: 'synced',
+			syncedAt: now,
+			createdAt: now,
+			updatedAt: now,
+			...(totalAmountMicros != null && { totalAmountMicros })
+		});
+	} catch (err) {
+		// Lost a race with the monthly cron / another tab on the unique index
+		// (tenant_id, google_invoice_id): the invoice exists now, so report it as
+		// such instead of failing the whole batch.
+		const message = err instanceof Error ? err.message : String(err);
+		if (/UNIQUE|constraint/i.test(message)) {
+			const raced = await findExistingInvoice(input.tenantId, input.invoiceId);
+			if (raced) {
+				logInfo('google-ads-dl', `Invoice ${input.invoiceId} was inserted concurrently; keeping the existing row`, {
+					tenantId: input.tenantId,
+					metadata: { source: input.source, customerId: cleanId, orphanedUpload: upload.path }
+				});
+				return { status: 'skipped', invoiceRowId: raced.id };
+			}
+		}
+		throw err;
+	}
 	logInfo('google-ads-dl', `Invoice ${input.invoiceId} imported`, {
 		tenantId: input.tenantId,
 		metadata: { source: input.source, customerId: cleanId, clientId: account.clientId, amount: parsedAmount }

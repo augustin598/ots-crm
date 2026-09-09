@@ -30,6 +30,14 @@ describe('classifyGoogleProbe', () => {
 		expect(classifyGoogleProbe(302, '/aw/overview?ocid=123')).toBe('error');
 	});
 
+	test('302 to ads.google.com/nav/login (first hop for stale cookies) → expired', () => {
+		expect(classifyGoogleProbe(302, 'https://ads.google.com/nav/login?dst=%2Faw%2Fbilling%2Fdocuments')).toBe('expired');
+	});
+
+	test('302 to the account picker (logged in, several accounts) → alive', () => {
+		expect(classifyGoogleProbe(302, 'https://ads.google.com/nav/selectaccount?dst=%2Faw%2Fbilling')).toBe('alive');
+	});
+
 	test('200 → alive', () => {
 		expect(classifyGoogleProbe(200, null)).toBe('alive');
 	});

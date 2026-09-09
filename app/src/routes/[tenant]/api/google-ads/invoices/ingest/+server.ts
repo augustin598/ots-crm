@@ -4,7 +4,11 @@ import { requireStaff } from '$lib/server/get-actor';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { formatCustomerId } from '$lib/server/google-ads/client';
 import { ingestInvoiceSchema, decodePdfBase64, parseIssueDate } from '$lib/server/google-ads/invoice-parsing';
-import { persistGoogleInvoicePdf, GoogleAccountNotMappedError } from '$lib/server/google-ads/invoice-ingest';
+import {
+	persistGoogleInvoicePdf,
+	GoogleAccountNotMappedError,
+	GoogleInvoiceAttributionConflictError
+} from '$lib/server/google-ads/invoice-ingest';
 import type { RequestHandler } from './$types';
 
 /** One invoice per request keeps every body well under BODY_SIZE_LIMIT (10M). */
@@ -67,6 +71,14 @@ export const POST: RequestHandler = async (event) => {
 	} catch (e) {
 		if (e instanceof GoogleAccountNotMappedError) {
 			return json({ ok: false, error: 'account_not_mapped', message: e.message, invoiceId }, { status: 404 });
+		}
+		if (e instanceof GoogleInvoiceAttributionConflictError) {
+			logWarning('google-ads-ingest', `Refused to re-attribute invoice ${invoiceId}`, {
+				tenantId,
+				userId: locals.user.id,
+				metadata: { requestedCustomerId: customerId, storedCustomerId: e.storedCustomerId }
+			});
+			return json({ ok: false, error: 'attribution_conflict', message: e.message, invoiceId }, { status: 409 });
 		}
 		const { message, stack } = serializeError(e);
 		logError('google-ads-ingest', `Failed to persist invoice ${invoiceId}: ${message}`, {

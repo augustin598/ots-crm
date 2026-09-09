@@ -34,6 +34,9 @@
 	var DELAY_BETWEEN_INVOICES_MS = 400;
 	var DOWNLOAD_TIMEOUT_MS = 60000;
 	var EXTRACT_TIMEOUT_MS = 6000;
+	var ADS_ORIGIN = 'https://ads.google.com';
+	var PAYMENTS_ORIGIN = 'https://payments.google.com';
+	var DOC_PATH_PREFIX = '/payments/apis-secure/doc';
 
 	var loc = window.location.href;
 	var isInIframe = window.self !== window.top;
@@ -110,9 +113,19 @@
 	}
 
 	function absoluteUrl(url) {
-		var clean = url.replace(/&amp;/g, '&');
-		if (clean.indexOf('/payments/') === 0) return 'https://payments.google.com' + clean;
+		var clean = String(url || '').replace(/&amp;/g, '&');
+		if (clean.indexOf('/payments/') === 0) return PAYMENTS_ORIGIN + clean;
 		return clean;
+	}
+
+	/** Only Google Payments document links may be fetched with the user's session. */
+	function isAllowedDocUrl(url) {
+		try {
+			var u = new URL(absoluteUrl(url), PAYMENTS_ORIGIN);
+			return u.origin === PAYMENTS_ORIGIN && u.pathname.indexOf(DOC_PATH_PREFIX) === 0;
+		} catch (e) {
+			return false;
+		}
 	}
 
 	/** Extract invoice rows from the current document (used inside the payments iframe). */
@@ -166,6 +179,7 @@
 
 	/** Download one invoice PDF with the page's own Google session. */
 	function downloadPdf(url) {
+		if (!isAllowedDocUrl(url)) return Promise.reject(new Error('URL de document neacceptat'));
 		return fetch(absoluteUrl(url), { credentials: 'include', headers: { Accept: 'application/pdf,*/*' } })
 			.then(function (res) {
 				if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -179,23 +193,30 @@
 
 	// ── IFRAME (payments.google.com inside ads.google.com) ───────────
 	function runInIframe() {
+		// Only the Google Ads shell may drive this frame; replies go back to the
+		// sender only. Never fetch arbitrary URLs with the user's Google session.
 		window.addEventListener('message', function (e) {
+			if (e.origin !== ADS_ORIGIN || !e.source) return;
 			var data = e.data || {};
+			var reply = function (msg) { try { e.source.postMessage(msg, e.origin); } catch (err) { /* frame gone */ } };
 			if (data.type === 'OTS_EXTRACT_REQUEST') {
-				window.parent.postMessage({ type: 'OTS_EXTRACT_RESULT', links: extractRowsFromDocument() }, '*');
+				reply({ type: 'OTS_EXTRACT_RESULT', links: extractRowsFromDocument() });
 			}
-			if (data.type === 'OTS_DOWNLOAD_REQUEST' && data.url) {
+			if (data.type === 'OTS_DOWNLOAD_REQUEST' && data.url && data.reqId) {
+				if (!isAllowedDocUrl(data.url)) {
+					return reply({ type: 'OTS_DOWNLOAD_RESULT', reqId: data.reqId, ok: false, error: 'URL de document neacceptat' });
+				}
 				downloadPdf(data.url).then(function (pdfBase64) {
-					window.parent.postMessage({ type: 'OTS_DOWNLOAD_RESULT', reqId: data.reqId, ok: true, pdfBase64: pdfBase64 }, '*');
+					reply({ type: 'OTS_DOWNLOAD_RESULT', reqId: data.reqId, ok: true, pdfBase64: pdfBase64 });
 				}).catch(function (err) {
-					window.parent.postMessage({ type: 'OTS_DOWNLOAD_RESULT', reqId: data.reqId, ok: false, error: String(err && err.message || err) }, '*');
+					reply({ type: 'OTS_DOWNLOAD_RESULT', reqId: data.reqId, ok: false, error: String(err && err.message || err) });
 				});
 			}
 		});
 
 		function checkAndNotify() {
 			var count = document.querySelectorAll('[data-url*="apis-secure"]').length;
-			if (count > 0) window.parent.postMessage({ type: 'OTS_INVOICES_READY', count: count }, '*');
+			if (count > 0) window.parent.postMessage({ type: 'OTS_INVOICES_READY', count: count }, ADS_ORIGIN);
 		}
 		setInterval(checkAndNotify, 2000);
 		setTimeout(checkAndNotify, 3000);
@@ -208,8 +229,11 @@
 		var pendingExtract = null;
 		var pendingDownloads = {};
 		var lastLinks = null;
+		var lastError = '';
 
 		window.addEventListener('message', function (e) {
+			// Only the Google Payments iframe may feed rows / PDFs into the flow.
+			if (e.origin !== PAYMENTS_ORIGIN) return;
 			var data = e.data || {};
 			if (data.type === 'OTS_INVOICES_READY') {
 				detectedCount = data.count;
@@ -217,9 +241,12 @@
 				if (!busy) setMainLabel();
 			}
 			if (data.type === 'OTS_EXTRACT_RESULT' && pendingExtract) {
+				// With several payments frames the first (empty) answer must not win;
+				// an empty table resolves at the timeout instead.
+				if (!data.links || !data.links.length) return;
 				var resolve = pendingExtract;
 				pendingExtract = null;
-				resolve(data.links || []);
+				resolve(data.links);
 			}
 			if (data.type === 'OTS_DOWNLOAD_RESULT' && data.reqId && pendingDownloads[data.reqId]) {
 				var cb = pendingDownloads[data.reqId];
@@ -229,18 +256,20 @@
 		});
 
 		function iframes() {
-			return Array.prototype.slice.call(document.querySelectorAll('iframe'));
+			return Array.prototype.slice.call(document.querySelectorAll('iframe')).filter(function (f) {
+				return typeof f.src === 'string' && f.src.indexOf(PAYMENTS_ORIGIN + '/') === 0;
+			});
 		}
 
 		function requestExtract() {
 			return new Promise(function (resolve) {
 				var frames = iframes();
-				if (frames.length === 0 || isInIframe === false && loc.indexOf('payments.google.com') !== -1) {
+				if (frames.length === 0) {
 					return resolve(extractRowsFromDocument());
 				}
 				pendingExtract = resolve;
 				frames.forEach(function (f) {
-					try { f.contentWindow.postMessage({ type: 'OTS_EXTRACT_REQUEST' }, '*'); } catch (err) { /* cross-origin frame without our script */ }
+					try { f.contentWindow.postMessage({ type: 'OTS_EXTRACT_REQUEST' }, PAYMENTS_ORIGIN); } catch (err) { /* frame not ready */ }
 				});
 				setTimeout(function () {
 					if (pendingExtract === resolve) {
@@ -266,7 +295,7 @@
 					else reject(new Error(data.error || 'download esuat'));
 				};
 				frames.forEach(function (f) {
-					try { f.contentWindow.postMessage({ type: 'OTS_DOWNLOAD_REQUEST', reqId: reqId, url: link.url, invoiceId: link.invoiceId }, '*'); } catch (err) { /* ignore */ }
+					try { f.contentWindow.postMessage({ type: 'OTS_DOWNLOAD_REQUEST', reqId: reqId, url: link.url, invoiceId: link.invoiceId }, PAYMENTS_ORIGIN); } catch (err) { /* ignore */ }
 				});
 			});
 		}
@@ -437,13 +466,26 @@
 							setStatus('Toate cele ' + links.length + ' facturi sunt deja in CRM (' + who + ').', '#00a854');
 							return { imported: 0, skipped: links.length, errors: 0, who: who };
 						}
+						// The customer id is read heuristically from the page header; make the
+						// user confirm the CRM client before anything gets filed under it.
+						var ok = confirm('Trimit ' + todo.length + ' facturi lipsa in CRM pentru:\n\n' + who + ' (ID ' + cid + ')\n\nDaca nu este contul potrivit, apasa Cancel si introdu ID-ul corect.');
+						if (!ok) {
+							var typed = prompt('ID-ul corect al contului Google Ads (xxx-xxx-xxxx), sau gol pentru a anula:', '');
+							var fixed = typed ? typed.replace(/\D/g, '') : '';
+							if (fixed.length === 10) {
+								var ocid = (loc.match(/[?&]ocid=(\d+)/) || [])[1] || '';
+								try { if (ocid) GM_setValue('ots_cid_' + ocid, fixed); } catch (err) { /* ignore */ }
+								throw new Error('ID salvat (' + fixed + '). Apasa din nou „Trimite in CRM".');
+							}
+							throw new Error('Anulat.');
+						}
 						return processSequentially(todo, cid, accountName, who, links.length - todo.length);
 					});
 			}).then(function (summary) {
 				if (summary) {
 					var line = '✅ ' + summary.imported + ' importate';
 					if (summary.skipped) line += ', ' + summary.skipped + ' existente';
-					if (summary.errors) line += ', ' + summary.errors + ' erori';
+					if (summary.errors) line += ', ' + summary.errors + ' erori' + (lastError ? ' (ultima: ' + lastError + ')' : '');
 					setStatus(line + '\n' + summary.who + '\nVezi CRM → Facturi → Google Ads.', summary.errors ? '#b35c00' : '#00a854');
 				}
 			}).catch(function (err) {
@@ -457,6 +499,7 @@
 		function processSequentially(todo, cid, accountName, who, alreadyThere) {
 			var imported = 0, skipped = alreadyThere, errors = 0;
 			var i = 0;
+			lastError = '';
 			function next() {
 				if (i >= todo.length) return Promise.resolve({ imported: imported, skipped: skipped, errors: errors, who: who });
 				var link = todo[i++];
@@ -477,10 +520,12 @@
 						if (res.json.status === 'skipped') skipped++; else imported++;
 					} else {
 						errors++;
+						lastError = link.invoiceId + ': ' + ((res.json && (res.json.message || res.json.error)) || ('HTTP ' + res.status));
 						console.warn('[OTS] ingest failed', link.invoiceId, res.status, res.text && res.text.slice(0, 300));
 					}
 				}).catch(function (err) {
 					errors++;
+					lastError = link.invoiceId + ': ' + String(err && err.message || err);
 					console.warn('[OTS] invoice failed', link.invoiceId, err);
 				}).then(function () { return sleep(DELAY_BETWEEN_INVOICES_MS); }).then(next);
 			}
