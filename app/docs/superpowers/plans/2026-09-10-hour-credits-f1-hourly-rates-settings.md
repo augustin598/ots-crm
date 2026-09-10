@@ -506,12 +506,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ```bash
 cd /Users/augustin598/Projects/CRM/app
-grep -l "hourly_rate\|hour_credit_settings" drizzle/*.sql; echo "exit=$?"
+grep -l 'CREATE TABLE `hourly_rate`\|CREATE TABLE `hourly_rate_mode`\|CREATE TABLE `hour_credit_settings`\|hourly_rate_tenant_slug_uidx\|hourly_rate_mode_tenant_slug_uidx\|hour_credit_settings_tenant_uidx' drizzle/*.sql; echo "exit=$?"
 ls drizzle/*.sql | tail -1
 ls drizzle/*.sql | wc -l; grep -c '"idx"' drizzle/meta/_journal.json
 ```
 
-Expected: `grep` nu găsește nimic (`exit=1`); ultima e `drizzle/0536_hours_order_requested_window.sql`; numărul de fișiere `.sql` = numărul de intrări din jurnal (537 = 537). Dacă ultima migrare NU e 0536 (altă sesiune a adăugat între timp), continuă numerotarea de la ultimul index existent și ajustează numele de mai jos.
+Expected: `grep` nu găsește nimic (`exit=1`) — atenție, un grep simplu pe „hourly_rate" prinde și coloana `tenant_user.hourly_rate` din migrările 0047/0258, care NU au legătură; ultima e `drizzle/0536_hours_order_requested_window.sql`; numărul de fișiere `.sql` = numărul de intrări din jurnal (numerotarea are goluri, deci numărul e mai mic decât indexul: la scrierea planului 534 = 534). Dacă ultima migrare NU e 0536 (altă sesiune a adăugat între timp), continuă numerotarea de la ultimul index existent și ajustează numele de mai jos.
 
 - [ ] **Step 2: Scrie cele 6 fișiere SQL (câte o instrucțiune per fișier, fără IF NOT EXISTS)**
 
@@ -620,7 +620,7 @@ tail -c 600 drizzle/meta/_journal.json
 ls drizzle/*.sql | wc -l; grep -c '"idx"' drizzle/meta/_journal.json
 ```
 
-Expected: cele 6 intrări la finalul jurnalului, `idx` 537–542, `when` strict crescător și > `REMOTE_MAX`; numărul de `.sql` = numărul de intrări (543 = 543).
+Expected: cele 6 intrări la finalul jurnalului, `idx` 537–542, `when` strict crescător și > `REMOTE_MAX`; numărul de `.sql` = numărul de intrări (ambele cu 6 mai mari decât la Step 1, ex. 540 = 540).
 
 - [ ] **Step 5: Aplică și VERIFICĂ pe remote**
 
