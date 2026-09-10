@@ -63,10 +63,12 @@ implicit 15), afișare `Xh Ym`. Minutele ponderate se rotunjesc la minut întreg
 
 | coloană | note |
 |---|---|
-| id, tenant_id, slug, label | `standard`, `urgent`, `weekend`, `night` |
+| id, tenant_id, slug, label | `standard`, `urgent`, `weekend`, `night` — slug-uri fixe, doar valorile se editează |
+| suffix | sufixul din `rate_label` / linia Keez („Urgență 48h"); gol la standard |
+| description | propoziția de sub selectorul de regim, pe `/servicii` |
 | multiplier_pct | 100 / 150 / 170 / 200 |
-| max_hours | plafon per comandă (100/40/24/16) |
-| sla_text | angajamentul comercial afișat pe `/servicii` |
+| max_hours | plafon per comandă publică (100/40/24/16) |
+| sla | angajamentul comercial afișat pe `/servicii` și înghețat pe comandă |
 | sort_order, is_active, created_at, updated_at | |
 
 **`hour_credit_settings`** — un rând per tenant (unic pe `tenant_id`).
@@ -149,8 +151,8 @@ Un singur cititor: `getHourlyCatalog(tenantId)` în
 `emit-keez-hours-invoice.ts`, `PackageComparisonDialog.svelte` (prin load) și
 logica de task. `hours-pricing.ts` rămâne pură și primește catalogul ca
 argument; testul golden rămâne, cu catalogul seed injectat. Constantele din
-`ots-catalog.ts` rămân doar ca seed pentru tenant nou și migrarea de
-backfill; un test verifică că seed-ul și tabelele nu divergă.
+`ots-catalog.ts` rămân doar ca seed la prima citire a unui tenant; un test
+verifică că seed-ul inserat e exact lista din constante.
 
 Validări: `rate_eur` întreg 1..999; `multiplier_pct` 100..500; `max_hours`
 1..500; nu se poate dezactiva ultima specializare activă; nu se poate
@@ -413,9 +415,10 @@ sunt scoped pe `locals.tenant`.
 ## 11. Fazare (fiecare fază = plan, PR și deploy propriu)
 
 1. **F1 — Prețuri pe oră în Settings**: tabelele `hourly_rate`,
-   `hourly_rate_mode`, `hour_credit_settings` + seed pentru **toți tenanții
-   existenți** printr-o migrare `INSERT … SELECT` peste `tenant` (o
-   instrucțiune per fișier) și seed la crearea unui tenant nou; pagina Settings;
+   `hourly_rate_mode`, `hour_credit_settings`; seed **lazy** în
+   `getHourlyCatalog`: un tenant fără rânduri primește constantele la prima
+   citire, idempotent prin indexul unic + `onConflictDoNothing` (acoperă și
+   tenanții existenți la deploy, și tenanții noi, fără migrare de date); pagina Settings;
    `getHourlyCatalog`; `/servicii`, comanda de ore și emitentul Keez citesc
    din DB. Rezultat vizibil: aceleași prețuri, dar editabile.
 2. **F2 — Ledger și alimentări**: `client_hour_ledger`,
