@@ -610,7 +610,9 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 		id: 'paid-ads',
 		label: 'Ads / Promovare plătită',
 		description: 'Campanii plătite pe platformele majore: trafic rapid și măsurabil.',
-		slugs: ['google-ads', 'meta-ads', 'tiktok-ads']
+		// google-ads-setup stă lângă google-ads (cerere 10 sep 2026): setup-ul
+		// tehnic one-time e pasul dinaintea campaniilor, nu o lucrare de site.
+		slugs: ['google-ads', 'google-ads-setup', 'meta-ads', 'tiktok-ads']
 	},
 	{
 		id: 'organic',
@@ -634,8 +636,8 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 	{
 		id: 'site-setup',
 		label: 'Site & Implementare',
-		description: 'Mentenanță tehnică și configurări one-time.',
-		slugs: ['wordpress-maintenance', 'google-ads-setup']
+		description: 'Mentenanță tehnică pentru site.',
+		slugs: ['wordpress-maintenance']
 	}
 ];
 
