@@ -3737,6 +3737,48 @@
       "when": 1788786476908004,
       "tag": "0536_hours_order_requested_window",
       "breakpoints": true
+    },
+    {
+      "idx": 537,
+      "version": "6",
+      "when": 1788786476908005,
+      "tag": "0537_hourly_rate",
+      "breakpoints": true
+    },
+    {
+      "idx": 538,
+      "version": "6",
+      "when": 1788786476908006,
+      "tag": "0538_hourly_rate_tenant_slug_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 539,
+      "version": "6",
+      "when": 1788786476908007,
+      "tag": "0539_hourly_rate_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 540,
+      "version": "6",
+      "when": 1788786476908008,
+      "tag": "0540_hourly_rate_mode_tenant_slug_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 541,
+      "version": "6",
+      "when": 1788786476908009,
+      "tag": "0541_hour_credit_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 542,
+      "version": "6",
+      "when": 1788786476908010,
+      "tag": "0542_hour_credit_settings_tenant_uidx",
+      "breakpoints": true
     }
   ]
 }
