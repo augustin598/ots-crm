@@ -12,7 +12,6 @@ import {
 	modeUpdateBlockReason,
 	referenceRateBlockReason,
 	formatMinutes,
-	errorMessage,
 	type CatalogRate,
 	type CatalogMode
 } from '../hourly-catalog';
@@ -44,8 +43,21 @@ const mode = (over: Partial<CatalogMode>): CatalogMode => ({
 const RATES = [
 	rate({ id: 'dev', slug: 'development', label: 'Development', rateEur: 65, sortOrder: 0 }),
 	rate({ id: 'des', slug: 'design-ui-ux', label: 'Design UI/UX', rateEur: 70, sortOrder: 1 }),
-	rate({ id: 'pm', slug: 'project-management', label: 'Project Management', rateEur: 55, sortOrder: 2 }),
-	rate({ id: 'ops', slug: 'devops-api', label: 'DevOps / API', rateEur: 80, sortOrder: 3, isActive: false })
+	rate({
+		id: 'pm',
+		slug: 'project-management',
+		label: 'Project Management',
+		rateEur: 55,
+		sortOrder: 2
+	}),
+	rate({
+		id: 'ops',
+		slug: 'devops-api',
+		label: 'DevOps / API',
+		rateEur: 80,
+		sortOrder: 3,
+		isActive: false
+	})
 ];
 
 describe('activeRates / activeModes', () => {
@@ -62,6 +74,18 @@ describe('activeRates / activeModes', () => {
 			mode({ id: 'c', slug: 'night', sortOrder: 3, isActive: false })
 		];
 		expect(activeModes(modes).map((m) => m.slug)).toEqual(['standard', 'urgent']);
+	});
+
+	test('sortOrder egal → tie-break alfabetic pe label', () => {
+		const tied = [
+			rate({ id: '2', slug: 'b', label: 'Ștampile', sortOrder: 0 }),
+			rate({ id: '1', slug: 'a', label: 'Analiză', sortOrder: 0 })
+		];
+		expect(activeRates(tied).map((r) => r.slug)).toEqual(['a', 'b']);
+	});
+
+	test('listă goală → listă goală', () => {
+		expect(activeRates([])).toEqual([]);
 	});
 });
 
@@ -83,6 +107,11 @@ describe('resolveReferenceRate', () => {
 	test('fără tarife active → null', () => {
 		expect(resolveReferenceRate([rate({ isActive: false })], DEFAULT_HOUR_CREDIT_RULES)).toBeNull();
 	});
+
+	test('referință explicită "" (șir gol) se comportă ca null', () => {
+		const rules = { ...DEFAULT_HOUR_CREDIT_RULES, referenceRateSlug: '' };
+		expect(resolveReferenceRate(RATES, rules)?.slug).toBe('project-management');
+	});
 });
 
 describe('forme publice', () => {
@@ -96,7 +125,15 @@ describe('forme publice', () => {
 
 	test('toPublicRateModes: doar active, fără id/sortOrder/isActive', () => {
 		const out = toPublicRateModes([
-			mode({ id: 'x', slug: 'urgent', label: 'Urgență', suffix: 'Urgență 48h', multiplierPct: 150, maxHours: 40, sortOrder: 1 }),
+			mode({
+				id: 'x',
+				slug: 'urgent',
+				label: 'Urgență',
+				suffix: 'Urgență 48h',
+				multiplierPct: 150,
+				maxHours: 40,
+				sortOrder: 1
+			}),
 			mode({ id: 'y', slug: 'night', sortOrder: 2, isActive: false })
 		]);
 		expect(out).toEqual([
@@ -111,6 +148,10 @@ describe('forme publice', () => {
 			}
 		]);
 	});
+
+	test('listă goală → listă goală', () => {
+		expect(toPublicHourlyRates([])).toEqual([]);
+	});
 });
 
 describe('slug-uri', () => {
@@ -120,17 +161,36 @@ describe('slug-uri', () => {
 		expect(slugifyRateLabel('DevOps / API')).toBe('devops-api');
 	});
 
+	test('slugifyRateLabel fără caractere alfanumerice → șir gol', () => {
+		expect(slugifyRateLabel('!!!')).toBe('');
+	});
+
+	test('slugifyRateLabel taie la RATE_SLUG_MAX_LENGTH fără cratimă finală', () => {
+		const slug = slugifyRateLabel('a'.repeat(39) + ' bcd');
+		expect(slug.length).toBeLessThanOrEqual(40);
+		expect(slug.endsWith('-')).toBe(false);
+	});
+
 	test('uniqueRateSlug adaugă sufix numeric la coliziune', () => {
 		expect(uniqueRateSlug('development', ['development'])).toBe('development-2');
 		expect(uniqueRateSlug('development', ['development', 'development-2'])).toBe('development-3');
 		expect(uniqueRateSlug('qa', [])).toBe('qa');
+	});
+
+	test('uniqueRateSlug rămâne ≤ RATE_SLUG_MAX_LENGTH la coliziune pe bază lungă', () => {
+		const base = 'a'.repeat(40);
+		const slug = uniqueRateSlug(base, [base]);
+		expect(slug.length).toBeLessThanOrEqual(40);
+		expect(slug.endsWith('-2')).toBe(true);
 	});
 });
 
 describe('reguli de blocare', () => {
 	test('nu poți dezactiva ultima specializare activă', () => {
 		const only = [rate({ slug: 'development' }), rate({ id: 'x', slug: 'qa', isActive: false })];
-		expect(rateDeactivationBlockReason(only, 'development', DEFAULT_HOUR_CREDIT_RULES)).toMatch(/ultima/);
+		expect(rateDeactivationBlockReason(only, 'development', DEFAULT_HOUR_CREDIT_RULES)).toMatch(
+			/ultima/
+		);
 	});
 
 	test('nu poți dezactiva tariful de referință ales explicit', () => {
@@ -139,12 +199,18 @@ describe('reguli de blocare', () => {
 	});
 
 	test('dezactivarea unei specializări obișnuite e permisă', () => {
-		expect(rateDeactivationBlockReason(RATES, 'design-ui-ux', DEFAULT_HOUR_CREDIT_RULES)).toBeNull();
+		expect(
+			rateDeactivationBlockReason(RATES, 'design-ui-ux', DEFAULT_HOUR_CREDIT_RULES)
+		).toBeNull();
 	});
 
 	test('regimul standard rămâne 100% și activ', () => {
-		expect(modeUpdateBlockReason('standard', { multiplierPct: 150, isActive: true })).toMatch(/standard/);
-		expect(modeUpdateBlockReason('standard', { multiplierPct: 100, isActive: false })).toMatch(/standard/);
+		expect(modeUpdateBlockReason('standard', { multiplierPct: 150, isActive: true })).toMatch(
+			/standard/
+		);
+		expect(modeUpdateBlockReason('standard', { multiplierPct: 100, isActive: false })).toMatch(
+			/standard/
+		);
 		expect(modeUpdateBlockReason('standard', { multiplierPct: 100, isActive: true })).toBeNull();
 		expect(modeUpdateBlockReason('urgent', { multiplierPct: 150, isActive: false })).toBeNull();
 	});
@@ -154,6 +220,10 @@ describe('reguli de blocare', () => {
 		expect(referenceRateBlockReason(RATES, 'development')).toBeNull();
 		expect(referenceRateBlockReason(RATES, 'devops-api')).toMatch(/activ/);
 		expect(referenceRateBlockReason(RATES, 'nu-exista')).toMatch(/exist/);
+	});
+
+	test('referința "" (șir gol) e tratată ca null, nu ca slug invalid', () => {
+		expect(referenceRateBlockReason(RATES, '')).toBeNull();
 	});
 });
 
@@ -165,12 +235,8 @@ describe('formatMinutes', () => {
 		expect(formatMinutes(135)).toBe('2 h 15 min');
 		expect(formatMinutes(-90)).toBe('-1 h 30 min');
 	});
-});
 
-describe('errorMessage', () => {
-	test('citește mesajul din Error, din HttpError (body.message) sau dă fallback', () => {
-		expect(errorMessage(new Error('x'))).toBe('x');
-		expect(errorMessage({ status: 400, body: { message: 'y' } })).toBe('y');
-		expect(errorMessage('z')).toBe('A apărut o eroare. Încearcă din nou.');
+	test('input non-finit → em dash', () => {
+		expect(formatMinutes(NaN)).toBe('—');
 	});
 });

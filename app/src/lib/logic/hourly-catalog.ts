@@ -116,8 +116,9 @@ export function resolveReferenceRate(
 	rules: HourCreditRules
 ): CatalogRate | null {
 	const active = activeRates(rates);
-	if (rules.referenceRateSlug) {
-		const explicit = active.find((r) => r.slug === rules.referenceRateSlug);
+	const explicitSlug = rules.referenceRateSlug || null;
+	if (explicitSlug) {
+		const explicit = active.find((r) => r.slug === explicitSlug);
 		if (explicit) return explicit;
 	}
 	if (active.length === 0) return null;
@@ -144,17 +145,19 @@ export function toPublicRateModes(modes: CatalogMode[]): PublicRateMode[] {
 export function slugifyRateLabel(label: string): string {
 	return label
 		.normalize('NFD')
-		.replace(/[̀-ͯ]/g, '')
+		.replace(/[\u0300-\u036f]/g, '')
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '')
-		.slice(0, RATE_SLUG_MAX_LENGTH);
+		.slice(0, RATE_SLUG_MAX_LENGTH)
+		.replace(/^-+|-+$/g, '');
 }
 
+/** `base` dacă e liber, altfel `base-2`, `base-3`… — mereu ≤ RATE_SLUG_MAX_LENGTH. */
 export function uniqueRateSlug(base: string, taken: readonly string[]): string {
 	if (!taken.includes(base)) return base;
 	for (let n = 2; ; n++) {
-		const candidate = `${base}-${n}`;
+		const suffix = `-${n}`;
+		const candidate = `${base.slice(0, RATE_SLUG_MAX_LENGTH - suffix.length)}${suffix}`;
 		if (!taken.includes(candidate)) return candidate;
 	}
 }
@@ -181,15 +184,17 @@ export function modeUpdateBlockReason(
 	input: { multiplierPct: number; isActive: boolean }
 ): string | null {
 	if (slug !== 'standard') return null;
-	if (input.multiplierPct !== 100) return 'Regimul standard rămâne la 100% — majorările se setează pe celelalte regimuri.';
+	if (input.multiplierPct !== 100)
+		return 'Regimul standard rămâne la 100% — majorările se setează pe celelalte regimuri.';
 	if (!input.isActive) return 'Regimul standard nu poate fi dezactivat.';
 	return null;
 }
 
 /** Referința explicită trebuie să existe și să fie activă. */
 export function referenceRateBlockReason(rates: CatalogRate[], slug: string | null): string | null {
-	if (slug === null) return null;
-	const found = rates.find((r) => r.slug === slug);
+	const wanted = slug || null;
+	if (wanted === null) return null;
+	const found = rates.find((r) => r.slug === wanted);
 	if (!found) return 'Specializarea aleasă ca referință nu există.';
 	if (!found.isActive) return 'Specializarea aleasă ca referință trebuie să fie activă.';
 	return null;
@@ -197,6 +202,7 @@ export function referenceRateBlockReason(rates: CatalogRate[], slug: string | nu
 
 /** 135 → „2 h 15 min"; 60 → „1 h"; 45 → „45 min". */
 export function formatMinutes(minutes: number): string {
+	if (!Number.isFinite(minutes)) return '—';
 	const sign = minutes < 0 ? '-' : '';
 	const abs = Math.abs(Math.trunc(minutes));
 	const h = Math.floor(abs / 60);
@@ -204,14 +210,4 @@ export function formatMinutes(minutes: number): string {
 	if (h === 0) return `${sign}${m} min`;
 	if (m === 0) return `${sign}${h} h`;
 	return `${sign}${h} h ${m} min`;
-}
-
-/** Mesajul unei erori venite dintr-un remote: Error, HttpError (`body.message`) sau necunoscut. */
-export function errorMessage(err: unknown): string {
-	if (err instanceof Error && err.message) return err.message;
-	if (err && typeof err === 'object' && 'body' in err) {
-		const body = (err as { body?: { message?: unknown } }).body;
-		if (body && typeof body.message === 'string') return body.message;
-	}
-	return 'A apărut o eroare. Încearcă din nou.';
 }
