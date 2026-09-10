@@ -23,13 +23,14 @@
 - Orice remote nou cere `requireStaff` sau scoping pe `client.id`; mutațiile de tarife doar owner/admin.
 - După fiecare componentă `.svelte` nouă/modificată: `mcp__svelte__svelte-autofixer` cu `desired_svelte_version: 5`; la final `NODE_OPTIONS=--max-old-space-size=8192 bun run check`.
 - Fără valori dinamice hardcodate (date, ani, counts).
+- Înainte de fiecare commit: `bunx prettier --write <fișierele tale>` (config: tab-uri, ghilimele simple, printWidth 100); `bun run lint` face `prettier --check .` și ar pica altfel. Blocurile de cod din plan NU sunt garantat formatate.
 - Commit-uri mici, mesaj în română, format `feat(hourly-rates): …`, cu linia `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` la final.
 
 ## Harta fișierelor
 
 | Fișier | Rol |
 |---|---|
-| `src/lib/logic/hourly-catalog.ts` (nou) | Tipuri + funcții pure: sortare, filtrare active, tarif de referință, forme publice, slugify, reguli de blocare, formatare minute, mesaj de eroare |
+| `src/lib/logic/hourly-catalog.ts` (nou) | Tipuri + funcții pure: sortare, filtrare active, tarif de referință, forme publice, slugify, reguli de blocare, formatare minute (erorile de remote se afișează cu `remoteErrorMessage` din `$lib/utils/remote-error`) |
 | `src/lib/logic/__tests__/hourly-catalog.test.ts` (nou) | Testele logicii pure |
 | `drizzle/0537_hourly_rate.sql` … `drizzle/0542_hour_credit_settings_tenant_uidx.sql` (noi) | 3 tabele + 3 indexuri unice, câte o instrucțiune per fișier |
 | `drizzle/meta/_journal.json` (modificat) | 6 intrări noi |
@@ -93,7 +94,6 @@ import {
 	modeUpdateBlockReason,
 	referenceRateBlockReason,
 	formatMinutes,
-	errorMessage,
 	type CatalogRate,
 	type CatalogMode
 } from '../hourly-catalog';
@@ -248,13 +248,6 @@ describe('formatMinutes', () => {
 	});
 });
 
-describe('errorMessage', () => {
-	test('citește mesajul din Error, din HttpError (body.message) sau dă fallback', () => {
-		expect(errorMessage(new Error('x'))).toBe('x');
-		expect(errorMessage({ status: 400, body: { message: 'y' } })).toBe('y');
-		expect(errorMessage('z')).toBe('A apărut o eroare. Încearcă din nou.');
-	});
-});
 ```
 
 - [ ] **Step 2: Rulează testul ca să vezi că pică**
@@ -387,8 +380,9 @@ export function resolveReferenceRate(
 	rules: HourCreditRules
 ): CatalogRate | null {
 	const active = activeRates(rates);
-	if (rules.referenceRateSlug) {
-		const explicit = active.find((r) => r.slug === rules.referenceRateSlug);
+	const explicitSlug = rules.referenceRateSlug || null;
+	if (explicitSlug) {
+		const explicit = active.find((r) => r.slug === explicitSlug);
 		if (explicit) return explicit;
 	}
 	if (active.length === 0) return null;
@@ -418,14 +412,16 @@ export function slugifyRateLabel(label: string): string {
 		.replace(/[\u0300-\u036f]/g, '')
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '')
-		.slice(0, RATE_SLUG_MAX_LENGTH);
+		.slice(0, RATE_SLUG_MAX_LENGTH)
+		.replace(/^-+|-+$/g, '');
 }
 
+/** `base` dacă e liber, altfel `base-2`, `base-3`… — mereu ≤ RATE_SLUG_MAX_LENGTH. */
 export function uniqueRateSlug(base: string, taken: readonly string[]): string {
 	if (!taken.includes(base)) return base;
 	for (let n = 2; ; n++) {
-		const candidate = `${base}-${n}`;
+		const suffix = `-${n}`;
+		const candidate = `${base.slice(0, RATE_SLUG_MAX_LENGTH - suffix.length)}${suffix}`;
 		if (!taken.includes(candidate)) return candidate;
 	}
 }
@@ -459,8 +455,9 @@ export function modeUpdateBlockReason(
 
 /** Referința explicită trebuie să existe și să fie activă. */
 export function referenceRateBlockReason(rates: CatalogRate[], slug: string | null): string | null {
-	if (slug === null) return null;
-	const found = rates.find((r) => r.slug === slug);
+	const wanted = slug || null;
+	if (wanted === null) return null;
+	const found = rates.find((r) => r.slug === wanted);
 	if (!found) return 'Specializarea aleasă ca referință nu există.';
 	if (!found.isActive) return 'Specializarea aleasă ca referință trebuie să fie activă.';
 	return null;
@@ -468,6 +465,7 @@ export function referenceRateBlockReason(rates: CatalogRate[], slug: string | nu
 
 /** 135 → „2 h 15 min"; 60 → „1 h"; 45 → „45 min". */
 export function formatMinutes(minutes: number): string {
+	if (!Number.isFinite(minutes)) return '—';
 	const sign = minutes < 0 ? '-' : '';
 	const abs = Math.abs(Math.trunc(minutes));
 	const h = Math.floor(abs / 60);
@@ -477,15 +475,6 @@ export function formatMinutes(minutes: number): string {
 	return `${sign}${h} h ${m} min`;
 }
 
-/** Mesajul unei erori venite dintr-un remote: Error, HttpError (`body.message`) sau necunoscut. */
-export function errorMessage(err: unknown): string {
-	if (err instanceof Error && err.message) return err.message;
-	if (err && typeof err === 'object' && 'body' in err) {
-		const body = (err as { body?: { message?: unknown } }).body;
-		if (body && typeof body.message === 'string') return body.message;
-	}
-	return 'A apărut o eroare. Încearcă din nou.';
-}
 ```
 
 - [ ] **Step 4: Rulează testele**
@@ -1486,7 +1475,8 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 	import { Label } from '$lib/components/ui/label';
 	import { Table, TableBody, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import { Clock, Gauge, Wallet } from '@lucide/svelte';
-	import { RATE_EUR_MAX, RATE_EUR_MIN, errorMessage } from '$lib/logic/hourly-catalog';
+	import { RATE_EUR_MAX, RATE_EUR_MIN } from '$lib/logic/hourly-catalog';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import RateRow from './RateRow.svelte';
 	import ModeRow from './ModeRow.svelte';
 	import CreditRulesForm from './CreditRulesForm.svelte';
@@ -1509,7 +1499,7 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 			);
 			newLabel = '';
 		} catch (err) {
-			createError = errorMessage(err);
+			createError = remoteErrorMessage(err, 'Nu am putut adăuga specializarea.');
 		} finally {
 			creating = false;
 		}
@@ -1617,7 +1607,8 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 	import { Switch } from '$lib/components/ui/switch';
 	import { Badge } from '$lib/components/ui/badge';
 	import { TableCell, TableRow } from '$lib/components/ui/table';
-	import { RATE_EUR_MAX, RATE_EUR_MIN, errorMessage, type CatalogRate } from '$lib/logic/hourly-catalog';
+	import { RATE_EUR_MAX, RATE_EUR_MIN, type CatalogRate } from '$lib/logic/hourly-catalog';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 
 	let { rate, isReference, canEdit }: { rate: CatalogRate; isReference: boolean; canEdit: boolean } =
 		$props();
@@ -1645,7 +1636,7 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 			}).updates(getHourlyRatesAdmin());
 			label = label.trim();
 		} catch (err) {
-			error = errorMessage(err);
+			error = remoteErrorMessage(err, 'Nu am putut salva specializarea.');
 		} finally {
 			saving = false;
 		}
@@ -1698,9 +1689,9 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 		MAX_HOURS_MIN,
 		MULTIPLIER_PCT_MAX,
 		MULTIPLIER_PCT_MIN,
-		errorMessage,
 		type CatalogMode
 	} from '$lib/logic/hourly-catalog';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 
 	let { mode, canEdit }: { mode: CatalogMode; canEdit: boolean } = $props();
 
@@ -1739,7 +1730,7 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 				isActive
 			}).updates(getHourlyRatesAdmin());
 		} catch (err) {
-			error = errorMessage(err);
+			error = remoteErrorMessage(err, 'Nu am putut salva regimul.');
 		} finally {
 			saving = false;
 		}
@@ -1812,7 +1803,6 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 	import { Switch } from '$lib/components/ui/switch';
 	import {
 		STEP_MINUTES_OPTIONS,
-		errorMessage,
 		formatMinutes,
 		type CatalogRate,
 		type HourCreditRules
@@ -1829,6 +1819,7 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 		resolvedReferenceSlug: string | null;
 		canEdit: boolean;
 	} = $props();
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 
 	const AUTO = '__auto__';
 
@@ -1859,7 +1850,7 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 			}).updates(getHourlyRatesAdmin());
 			saved = true;
 		} catch (err) {
-			error = errorMessage(err);
+			error = remoteErrorMessage(err, 'Nu am putut salva regulile.');
 		} finally {
 			saving = false;
 		}

@@ -146,7 +146,7 @@ Ruta `settings/hourly-rates`, owner/admin, înregistrată în layout-ul Settings
   ulterioare; soldul existent nu se recalculează (rândurile poartă snapshot).
 
 Un singur cititor: `getHourlyCatalog(tenantId)` în
-`$lib/server/hourly-catalog.ts` → `{ rates, modes, settings }`. Îl folosesc
+`$lib/server/hourly-catalog.ts` → `{ rates, modes, rules }`. Îl folosesc
 `servicii/catalog.server.ts`, `public-hours.remote.ts`,
 `emit-keez-hours-invoice.ts`, `PackageComparisonDialog.svelte` (prin load) și
 logica de task. `hours-pricing.ts` rămâne pură și primește catalogul ca
