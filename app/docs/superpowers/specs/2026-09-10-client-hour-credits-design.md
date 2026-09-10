@@ -310,7 +310,7 @@ Tabel per client (doar clienții bifați pentru alimentare din facturi, cu sold
 curentă, alimentare din facturi (da/nu, data și suma ultimei creditări),
 depășiri nefacturate (ore reale),
 depășiri în draft (€), depășiri neplătite (€, badge roșu), badge „sub prag".
-Filtre: doar abonamente, sub prag, cu depășiri. Sortare pe sold/disponibil.
+Filtre: doar clienți bifați, sub prag, cu depășiri. Sortare pe sold/disponibil.
 Buton Refresh manual; fără polling. Acțiuni owner/admin: „Importă comenzile
 plătite necreditate", „Importă facturile plătite necreditate", „Regenerează
 draftul".
@@ -336,7 +336,7 @@ sunt scoped pe `locals.tenant`.
   + istoric (fără ajustări, fără nume de useri interni).
 - **Email** (template + `demo-hour-credit-email.ts`): credit scăzut (o singură
   dată la trecerea sub prag; se reînarmează după ce soldul urcă peste prag),
-  consum la Done („Task X: N h, sold rămas M h"), alimentare (abonament sau
+  consum la Done („Task X: N h, sold rămas M h"), alimentare (factură plătită sau
   cumpărare). Link spre `/servicii` pentru cumpărare.
 - **WhatsApp**: aceleași trei evenimente, în grupul legat de task/client, prin
   `task-notifications.ts` și outbox-ul existent (politica de rate a
