@@ -5,10 +5,12 @@ mock.module('$env/static/private', () => ({}));
 mock.module('$env/dynamic/public', () => ({ env: {} }));
 mock.module('$env/static/public', () => ({}));
 
+const logWarningMock = mock(() => {});
+
 mock.module('$lib/server/logger', () => ({
 	logInfo: () => {},
 	logError: () => {},
-	logWarning: () => {},
+	logWarning: logWarningMock,
 	serializeError: (e: unknown) => ({ message: e instanceof Error ? e.message : String(e) })
 }));
 mock.module('$lib/server/plugins/keez/db-retry', () => ({
@@ -21,6 +23,7 @@ let rateRows: any[] = [];
 let modeRows: any[] = [];
 let rulesRows: any[] = [];
 let inserted: Array<{ table: unknown; rows: any[] }> = [];
+let failInserts = false;
 
 function rowsFor(t: unknown): any[] {
 	if (t === schema.hourlyRate) return rateRows;
@@ -39,8 +42,12 @@ mock.module('$lib/server/db', () => ({
 		insert: (t: unknown) => ({
 			values: (rows: any[]) => ({
 				onConflictDoNothing: async () => {
+					if (failInserts) {
+						throw new Error('SQLITE_BUSY');
+					}
 					inserted.push({ table: t, rows });
 					rowsFor(t).push(...rows);
+					return { rowsAffected: rows.length };
 				}
 			})
 		})
@@ -55,6 +62,8 @@ beforeEach(() => {
 	modeRows = [];
 	rulesRows = [];
 	inserted = [];
+	failInserts = false;
+	logWarningMock.mockClear();
 });
 
 describe('getHourlyCatalog — seed lazy', () => {
@@ -69,6 +78,9 @@ describe('getHourlyCatalog — seed lazy', () => {
 		).toBe(true);
 		expect(inserted[1].table).toBe(schema.hourlyRateMode);
 		expect(inserted[1].rows).toHaveLength(RATE_MODES.length);
+		expect(
+			inserted[1].rows.every((r) => r.createdAt instanceof Date && r.updatedAt instanceof Date)
+		).toBe(true);
 
 		expect(catalog.rates.map((r) => [r.slug, r.rateEur])).toEqual(
 			HOURLY_RATES.map((r) => [r.slug, r.rate])
@@ -157,6 +169,7 @@ describe('getHourlyCatalog — seed lazy', () => {
 			notifyEmail: false,
 			notifyWhatsapp: true
 		});
+		expect(logWarningMock).toHaveBeenCalledTimes(0);
 
 		const all = await getHourlyCatalog('t1', { includeInactive: true });
 		expect(all.rates.map((r) => r.slug)).toEqual(['qa', 'development']);
@@ -205,5 +218,59 @@ describe('getHourlyCatalog — seed lazy', () => {
 		];
 		const catalog = await getHourlyCatalog('t1');
 		expect(catalog.modes.map((m) => m.slug)).toEqual(['standard']);
+		expect(logWarningMock).toHaveBeenCalledTimes(1);
+	});
+
+	test('specializări existente, regimuri lipsă → seed doar pe hourly_rate_mode', async () => {
+		rateRows = [
+			{
+				id: 'a',
+				tenantId: 't1',
+				slug: 'development',
+				label: 'Dev',
+				rateEur: 65,
+				sortOrder: 0,
+				isActive: true
+			}
+		];
+		modeRows = [];
+
+		const catalog = await getHourlyCatalog('t1');
+
+		expect(inserted).toHaveLength(1);
+		expect(inserted[0].table).toBe(schema.hourlyRateMode);
+		expect(inserted[0].rows).toHaveLength(RATE_MODES.length);
+		expect(catalog.rates.map((r) => r.slug)).toEqual(['development']);
+	});
+
+	test('regimuri existente, specializări lipsă → seed doar pe hourly_rate', async () => {
+		rateRows = [];
+		modeRows = [
+			{
+				id: 'm',
+				tenantId: 't1',
+				slug: 'standard',
+				label: 'Standard',
+				suffix: '',
+				description: '',
+				sla: '',
+				multiplierPct: 100,
+				maxHours: 100,
+				sortOrder: 0,
+				isActive: true
+			}
+		];
+
+		const catalog = await getHourlyCatalog('t1');
+
+		expect(inserted).toHaveLength(1);
+		expect(inserted[0].table).toBe(schema.hourlyRate);
+		expect(inserted[0].rows).toHaveLength(HOURLY_RATES.length);
+		expect(catalog.modes.map((m) => m.slug)).toEqual(['standard']);
+	});
+
+	test('eșecul inserării la seed se propagă din getHourlyCatalog', async () => {
+		failInserts = true;
+		await expect(getHourlyCatalog('t1')).rejects.toThrow('SQLITE_BUSY');
 	});
 });
