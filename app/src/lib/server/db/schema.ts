@@ -2412,6 +2412,89 @@ export const serviceHoursOrder = sqliteTable('service_hours_order', {
 		.default(sql`current_timestamp`)
 });
 
+// ---- Tarife orare per tenant (Settings → Tarife orare) ------------------------
+//
+// Sursa de adevăr pentru /servicii, comanda de ore (service_hours_order), emitentul
+// Keez și creditul de ore. Constantele HOURLY_RATES / RATE_MODES din ots-catalog
+// rămân doar SEED la prima citire a unui tenant (vezi $lib/server/hourly-catalog.ts).
+export const hourlyRate = sqliteTable(
+	'hourly_rate',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		/** Identificator stabil — ajunge în service_hours_order.rate_slug și în metadata Stripe; nu se redenumește. */
+		slug: text('slug').notNull(),
+		label: text('label').notNull(),
+		/** EUR întregi pe oră, fără TVA. */
+		rateEur: integer('rate_eur').notNull(),
+		sortOrder: integer('sort_order').notNull().default(0),
+		isActive: boolean('is_active').notNull().default(true),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => [uniqueIndex('hourly_rate_tenant_slug_uidx').on(t.tenantId, t.slug)]
+);
+
+// Regimurile de lucru (standard / urgent / weekend / night). Slug-urile sunt fixe
+// (RATE_MODE_SLUGS din $lib/logic/hours-pricing.ts); doar valorile se editează.
+export const hourlyRateMode = sqliteTable(
+	'hourly_rate_mode',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		slug: text('slug').notNull(),
+		label: text('label').notNull(),
+		suffix: text('suffix').notNull().default(''),
+		description: text('description').notNull().default(''),
+		sla: text('sla').notNull().default(''),
+		multiplierPct: integer('multiplier_pct').notNull().default(100),
+		maxHours: integer('max_hours').notNull().default(100),
+		sortOrder: integer('sort_order').notNull().default(0),
+		isActive: boolean('is_active').notNull().default(true),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => [uniqueIndex('hourly_rate_mode_tenant_slug_uidx').on(t.tenantId, t.slug)]
+);
+
+// Regulile creditului de ore — un rând per tenant; lipsa rândului = valorile
+// implicite din DEFAULT_HOUR_CREDIT_RULES ($lib/logic/hourly-catalog.ts).
+export const hourCreditSettings = sqliteTable(
+	'hour_credit_settings',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		/** null = cel mai mic tarif activ. */
+		referenceRateSlug: text('reference_rate_slug'),
+		lowCreditThresholdMinutes: integer('low_credit_threshold_minutes').notNull().default(120),
+		stepMinutes: integer('step_minutes').notNull().default(15),
+		notifyEmail: boolean('notify_email').notNull().default(true),
+		notifyWhatsapp: boolean('notify_whatsapp').notNull().default(true),
+		updatedByUserId: text('updated_by_user_id').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => [uniqueIndex('hour_credit_settings_tenant_uidx').on(t.tenantId)]
+);
+
 // Acces cu parola pentru paginile publice (ex. catalogul de servicii de la /servicii).
 // O linie per (tenant, pageKey). `passwordHash` e argon2id; `cookieSecret` e secretul
 // HMAC folosit pentru cookie-ul de deblocare — se roteste la fiecare schimbare de parola,
