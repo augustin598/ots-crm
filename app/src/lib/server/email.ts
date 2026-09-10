@@ -28,6 +28,7 @@ import { htmlToPlainText } from './html-text';
 import * as storage from '$lib/server/storage';
 import { getAppBaseUrl } from '$lib/server/app-url';
 import { getCategory, TIER_LABELS, type Tier } from '$lib/constants/ots-catalog';
+import { tierLabelFor } from '$lib/constants/ots-catalog-format';
 
 // Re-export so existing callers can import the helper from `$lib/server/email`
 // alongside the production sender (`sendInvoicePaidEmail`). Demo scripts and
@@ -3080,7 +3081,7 @@ export async function sendPackageRequestEmail(
 	} catch {
 		// JSON stricat → subiectul clasic
 	}
-	const pivotLabel = `${getCategory(request.categorySlug)?.name ?? request.categorySlug} ${TIER_LABELS[request.tier as Tier] ?? request.tier}`;
+	const pivotLabel = `${getCategory(request.categorySlug)?.name ?? request.categorySlug} ${tierLabelFor(getCategory(request.categorySlug), request.tier, TIER_LABELS)}`;
 	const subject =
 		quoteCount > 1
 			? `Cerere ofertă nouă — ${quoteCount} servicii`
@@ -3156,7 +3157,7 @@ export async function sendPackageRequestEmail(
 			const safeCompanyName = request.companyName ? escapeHtml(request.companyName) : '';
 			const safeNote = request.note ? escapeHtml(request.note) : '';
 			const categoryLabel = escapeHtml(request.categorySlug);
-			const tierLabel = escapeHtml(request.tier.charAt(0).toUpperCase() + request.tier.slice(1));
+			const tierLabel = escapeHtml(tierLabelFor(getCategory(request.categorySlug), request.tier, TIER_LABELS));
 
 			// Parse services JSON (bundle) if present
 			let bundleServices: string[] = [];
@@ -3191,7 +3192,7 @@ export async function sendPackageRequestEmail(
 			const quoteSetup = quoteItems.reduce((sum, i) => sum + (i.setupEur ?? 0), 0);
 			const quoteItemLabel = (i: QuoteItem) => ({
 				name: getCategory(i.categorySlug)?.name ?? i.categorySlug,
-				tier: TIER_LABELS[i.tier] ?? i.tier,
+				tier: tierLabelFor(getCategory(i.categorySlug), i.tier, TIER_LABELS),
 				price:
 					i.monthlyEur !== null
 						? `${eur(i.monthlyEur)}/lună`

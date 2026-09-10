@@ -27,7 +27,7 @@
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import HelpCircleIcon from '@lucide/svelte/icons/help-circle';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
-	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
+	import { formatEur, formatFeatureValue, isBooleanFeature, tierLabelFor } from '$lib/constants/ots-catalog-format';
 	import type { Category, Tier, TierColors } from '$lib/constants/ots-catalog';
 	import { isTierOffered } from '$lib/logic/quote-pricing';
 	import CategoryIcon from './CategoryIcon.svelte';
@@ -151,7 +151,7 @@
 							<div class="flex items-center gap-2 mb-4">
 								<span class="h-2.5 w-2.5 rounded-full {colors.dot} ring-4 ring-current/10"></span>
 								<span class="text-[13px] font-bold uppercase tracking-wider {colors.text}">
-									{tierLabels[tier]}
+									{tierLabelFor(category, tier, tierLabels)}
 								</span>
 							</div>
 							<!-- Unitatea pe rândul ei: „18.000 € one-time" nu se mai rupe la mijloc pe cardul îngust. -->
@@ -201,7 +201,7 @@
 									variant={isActive ? 'outline' : 'default'}
 									aria-pressed={isActive}
 									aria-label={isActive
-										? `${activeLabel}: ${tierLabels[tier]}. Apasă pentru a-l scoate din ofertă`
+										? `${activeLabel}: ${tierLabelFor(category, tier, tierLabels)}. Apasă pentru a-l scoate din ofertă`
 										: undefined}
 									onclick={() => onRequest(tier)}
 									disabled={price === null && !setup}
@@ -236,7 +236,7 @@
 								<th class="px-3 py-3 font-bold text-center {colors.text}">
 									<div class="inline-flex items-center gap-1.5">
 										<span class="h-2 w-2 rounded-full {colors.dot}"></span>
-										{tierLabels[tier]}
+										{tierLabelFor(category, tier, tierLabels)}
 									</div>
 								</th>
 							{/each}

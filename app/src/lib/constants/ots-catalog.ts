@@ -35,6 +35,12 @@ export interface Category {
 	priceNote?: string;
 	features: Feature[];
 	notes?: string[];
+	/**
+	 * Nume de pachet specifice serviciului, peste TIER_LABELS. Un serviciu
+	 * one-time cu un singur tarif se vinde ca „Pachet Start", nu ca „Bronze".
+	 * Folosește `tierLabelFor()` din ots-catalog-format, nu TIER_LABELS direct.
+	 */
+	tierLabels?: Partial<Record<Tier, string>>;
 }
 
 export const SETUP_DEFAULT_DESCRIPTION =
@@ -407,8 +413,14 @@ export const CATEGORIES: Category[] = [
 		icon: 'settings',
 		prices: { bronze: null, silver: null, gold: null, platinum: null },
 		setupFees: { bronze: 700 },
-		priceNote: 'Tarif unic 700 € + TVA, facturat separat de abonamentul lunar Google Ads. Include configurarea GTM, GA4, Enhanced Conversions, Consent Mode v2, structurarea campaniilor, extensiile și remarketingul.',
+		// Un singur tarif one-time: se vinde ca „Pachet Start", nu ca „Bronze".
+		tierLabels: { bronze: 'Pachet Start' },
+		priceNote: 'Tarif unic 700 € + TVA, facturat separat de abonamentul lunar Google Ads. Include crearea și legarea contului, configurarea GTM, GA4, Enhanced Conversions, Consent Mode v2, structurarea campaniilor, extensiile și remarketingul.',
 		features: [
+			{ id: 'gs-0a', label: 'Creare cont Google Ads (sau preluare cont existent) și legare în MCC-ul agenției', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'gs-0b', label: 'Acordare acces: utilizatori și roluri pentru client, agenție și contabilitate', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'gs-0c', label: 'Configurare facturare: date fiscale, metodă de plată, plafon de cheltuieli', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'gs-0d', label: 'Legare conturi: Google Ads ↔ GA4, Search Console, Google Business Profile', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'gs-1', label: 'Configurare Google Tag Manager (event-uri: apel, formular, WhatsApp, Messenger)', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'gs-2', label: 'Configurare Google Analytics 4 (conectare GTM, măsurare avansată, import conversii)', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'gs-3', label: 'Enhanced Conversions + Search Console', values: { bronze: true, silver: true, gold: true, platinum: true } },
@@ -418,7 +430,8 @@ export const CATEGORIES: Category[] = [
 			{ id: 'gs-7', label: 'Google Consent Mode v2 prin GTM (GDPR compliant)', values: { bronze: true, silver: true, gold: true, platinum: true } },
 			{ id: 'gs-8', label: 'Durata implementare GTM + GA4', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
 			{ id: 'gs-9', label: 'Durata creare campanii', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
-			{ id: 'gs-10', label: 'Monitorizare post-lansare', values: { bronze: '30 zile', silver: '30 zile', gold: '30 zile', platinum: '30 zile' } }
+			{ id: 'gs-10', label: 'Monitorizare post-lansare', values: { bronze: '30 zile', silver: '30 zile', gold: '30 zile', platinum: '30 zile' } },
+			{ id: 'gs-11', label: 'Sesiune de predare: explicarea contului, a raportării și a accesului', values: { bronze: '30 min', silver: '30 min', gold: '30 min', platinum: '30 min' } }
 		]
 	},
 

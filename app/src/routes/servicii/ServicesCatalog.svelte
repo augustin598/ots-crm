@@ -50,7 +50,7 @@
 	import { dragScroll } from '$lib/actions/drag-scroll';
 	import FeatureHint from '$lib/components/services/FeatureHint.svelte';
 	import { FEATURE_HINTS } from '$lib/constants/ots-catalog-feature-hints';
-	import { formatEur, formatFeatureValue, isBooleanFeature } from '$lib/constants/ots-catalog-format';
+	import { formatEur, formatFeatureValue, isBooleanFeature, tierLabelFor } from '$lib/constants/ots-catalog-format';
 	import type { Category, Tier } from '$lib/constants/ots-catalog';
 	import type { PublicCatalog, PublicCompany } from './types';
 
@@ -583,7 +583,7 @@
 						{cart.count} {cart.count === 1 ? 'serviciu' : 'servicii'}
 					</span>
 					<span class="sv-cartbar-names">
-						{cartSummary.lines.map((l) => `${l.name} ${catalog.tierLabels[l.tier]}`).join(' · ')}
+						{cartSummary.lines.map((l) => `${l.name} ${tierLabelFor(catalog.categories.find((c) => c.slug === l.categorySlug), l.tier, catalog.tierLabels)}`).join(' · ')}
 					</span>
 				</div>
 				<div class="sv-cartbar-total">
@@ -615,7 +615,7 @@
 				kind={toast.kind}
 				category={toast.category}
 				tier={toast.tier}
-				tierLabel={toast.tier ? catalog.tierLabels[toast.tier] : ''}
+				tierLabel={toast.tier ? tierLabelFor(toast.category, toast.tier, catalog.tierLabels) : ''}
 				summary={cartSummary}
 				onView={openQuote}
 				onDismiss={() => (toast = null)}

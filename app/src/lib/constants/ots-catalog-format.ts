@@ -28,3 +28,16 @@ export function formatEur(value: number | null | undefined): string {
 	if (value === null || value === undefined) return '—';
 	return `${value.toLocaleString('ro-RO')} €`;
 }
+
+/**
+ * Numele pachetului pentru un serviciu: override-ul din categorie (ex. Google
+ * Ads Setup → „Pachet Start") sau eticheta standard (Bronze/Silver/...).
+ * Pur, fără date: merge și în bundle-ul paginii publice.
+ */
+export function tierLabelFor(
+	category: { tierLabels?: Partial<Record<string, string>> } | null | undefined,
+	tier: string,
+	defaults: Record<string, string>
+): string {
+	return category?.tierLabels?.[tier] ?? defaults[tier] ?? tier;
+}
