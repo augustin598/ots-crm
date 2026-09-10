@@ -111,6 +111,8 @@ verificarea `task.credit_settled_at` în interiorul tranzacției de Done.
 |---|---|---|
 | `client` | `hour_credit_minutes` integer default 0 | **cache** al soldului; se scrie doar în aceeași tranzacție cu ledger-ul |
 | `client` | `hour_credit_from_invoices` boolean default false | bifa „facturile plătite alimentează creditul de ore" |
+| `client` | `low_credit_notified_at` timestamp null | starea alertei „credit scăzut": setată la prima trecere sub prag, golită când soldul urcă peste prag; cât e setată nu se mai trimite nimic (review Gemini) |
+| `invoice_line_item` | `task_id` text null | leagă linia de depășire de task; doar pe facturile `hour-overage` |
 | `task` | `estimated_minutes`, `actual_minutes`, `rate_slug`, `mode_slug`, `credit_settled_at`, `overage_invoice_id`, `continuation_of_task_id` | vezi §6 |
 
 Index nou: `task(client_id, status)` pentru calculul rezervărilor.
@@ -180,8 +182,9 @@ de mai jos sunt adevărate:
 
 Conversie: `net = invoice.subtotal` (fără TVA) în moneda facturii; RON → EUR
 la cursul BNR al zilei plății (utilitarul BNR existent, `curs.bnr.ro`); EUR
-rămâne; alte monede → refuz cu log error și rând lipsă (adminul creditează
-manual). `minute = round_to_step(net_eur / referință × 60)`. Snapshot pe rând:
+rămâne; alte monede → nu se creditează, log error, iar factura apare în
+Bugete ore în lista „Necreditate" cu motivul „monedă neacceptată" (adminul
+creditează manual). `minute = round_to_step(net_eur / referință × 60)`. Snapshot pe rând:
 sumă, monedă, curs, referință.
 
 O factură = o creditare, oricâte evenimente sosesc (index unic). Facturile
@@ -280,9 +283,13 @@ luna calendaristică a datei Done, în `Europe/Bucharest`.
   (review Gemini). Nu se scrie niciodată pe o factură ieșită din `draft`.
 - Adminul confirmă draftul din Facturi ca pe orice factură; abia atunci pleacă
   în Keez. Nimic nu se emite automat.
-- Ștergerea manuală a draftului de către admin șterge și legătura
-  `task.overage_invoice_id`, iar task-urile respective apar în Bugete ore ca
-  „depășire nefacturată" cu buton „Regenerează draftul".
+- Liniile draftului `hour-overage` sunt **gestionate doar de sistem**: UI-ul
+  și remote-urile de facturi refuză editarea sau ștergerea individuală a
+  liniilor pe facturile cu `external_source='hour-overage'` (review Gemini:
+  altfel `task.overage_invoice_id` rămâne orfan). Adminul poate doar să șteargă
+  întregul draft; ștergerea golește `task.overage_invoice_id` pe toate
+  task-urile legate prin `invoice_line_item.task_id`, iar ele apar în Bugete
+  ore ca „depășire nefacturată" cu buton „Regenerează draftul".
 
 ### 6.4 Reopen, cancel, ștergere
 
@@ -357,7 +364,7 @@ sunt scoped pe `locals.tenant`.
 | Client nebifat, factură plătită | nimic; apare în Bugete ore doar dacă are ore din alte surse |
 | Client bifat, factură de hosting / ads / depășire / comandă de ore plătită | exclusă explicit; log info cu motivul |
 | Factură în altă monedă decât RON/EUR | nu se creditează; log error; ajustare manuală |
-| Curs BNR indisponibil la plată | reîncercare prin scheduler (coadă `pending` în ledger nu există; se reia din lista „necreditate") |
+| Curs BNR indisponibil la plată | nu se scrie nimic în ledger; task nou în scheduler-ul existent (`src/lib/server/scheduler`), rulat orar, reia facturile eligibile plătite în ultimele 30 de zile fără rând `invoice_credit`; lista „Necreditate" din Bugete ore arată motivul |
 | Draft lunar confirmat în timp ce alt Done adaugă linie | linia merge pe luna următoare |
 | Reopen după emitere fiscală | refuzat; task de continuare |
 | Sold cache ≠ sumă ledger | endpoint de reconciliere; log error |
@@ -382,7 +389,9 @@ sunt scoped pe `locals.tenant`.
 ## 11. Fazare (fiecare fază = plan, PR și deploy propriu)
 
 1. **F1 — Prețuri pe oră în Settings**: tabelele `hourly_rate`,
-   `hourly_rate_mode`, `hour_credit_settings` + seed; pagina Settings;
+   `hourly_rate_mode`, `hour_credit_settings` + seed pentru **toți tenanții
+   existenți** printr-o migrare `INSERT … SELECT` peste `tenant` (o
+   instrucțiune per fișier) și seed la crearea unui tenant nou; pagina Settings;
    `getHourlyCatalog`; `/servicii`, comanda de ore și emitentul Keez citesc
    din DB. Rezultat vizibil: aceleași prețuri, dar editabile.
 2. **F2 — Ledger și alimentări**: `client_hour_ledger`,
