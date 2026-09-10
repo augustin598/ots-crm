@@ -1333,7 +1333,7 @@ export const updateRateMode = command(
 
 export const updateHourCreditRules = command(
 	v.object({
-		referenceRateSlug: v.nullable(v.pipe(v.string(), v.maxLength(40))),
+		referenceRateSlug: v.nullable(v.pipe(v.string(), v.minLength(1), v.maxLength(40))),
 		lowCreditThresholdMinutes: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(100_000)),
 		stepMinutes: v.picklist(STEP_MINUTES_OPTIONS),
 		notifyEmail: v.boolean(),
@@ -1342,7 +1342,8 @@ export const updateHourCreditRules = command(
 	async (data) => {
 		const { tenantId, userId } = await requireOwnerOrAdmin();
 		const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
-		const reason = referenceRateBlockReason(catalog.rates, data.referenceRateSlug);
+		const referenceRateSlug = data.referenceRateSlug || null;
+		const reason = referenceRateBlockReason(catalog.rates, referenceRateSlug);
 		if (reason) throw error(400, reason);
 
 		const [existing] = await db
@@ -1357,7 +1358,7 @@ export const updateHourCreditRules = command(
 					? db
 							.update(table.hourCreditSettings)
 							.set({
-								referenceRateSlug: data.referenceRateSlug,
+								referenceRateSlug,
 								lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
 								stepMinutes: data.stepMinutes,
 								notifyEmail: data.notifyEmail,
@@ -1369,7 +1370,7 @@ export const updateHourCreditRules = command(
 					: db.insert(table.hourCreditSettings).values({
 							id: generateId(),
 							tenantId,
-							referenceRateSlug: data.referenceRateSlug,
+							referenceRateSlug,
 							lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
 							stepMinutes: data.stepMinutes,
 							notifyEmail: data.notifyEmail,
@@ -1807,6 +1808,7 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 		type CatalogRate,
 		type HourCreditRules
 	} from '$lib/logic/hourly-catalog';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 
 	let {
 		rules,
@@ -1819,7 +1821,6 @@ if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hour
 		resolvedReferenceSlug: string | null;
 		canEdit: boolean;
 	} = $props();
-	import { remoteErrorMessage } from '$lib/utils/remote-error';
 
 	const AUTO = '__auto__';
 
