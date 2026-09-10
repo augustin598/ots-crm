@@ -826,6 +826,7 @@ mock.module('$lib/server/db', () => ({
 				onConflictDoNothing: async () => {
 					inserted.push({ table: t, rows });
 					rowsFor(t).push(...rows);
+					return { rowsAffected: rows.length };
 				}
 			})
 		})
@@ -938,7 +939,7 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { HOURLY_RATES, RATE_MODES } from '$lib/constants/ots-catalog';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
-import { logError, logInfo } from '$lib/server/logger';
+import { logInfo, logWarning } from '$lib/server/logger';
 import { isRateModeSlug } from '$lib/logic/hours-pricing';
 import {
 	DEFAULT_HOUR_CREDIT_RULES,
@@ -971,7 +972,9 @@ function rowToRate(r: RateRow): CatalogRate {
 
 function rowToMode(r: ModeRow, tenantId: string): CatalogMode | null {
 	if (!isRateModeSlug(r.slug)) {
-		logError('server', `regim necunoscut în DB: ${r.slug} (tenant ${tenantId}) — ignorat`, {
+		// warning, nu error: rulează la fiecare încărcare /servicii; un rând rătăcit nu
+		// trebuie să umple Admin → Logs.
+		logWarning('server', `regim necunoscut în DB: ${r.slug} (tenant ${tenantId}) — ignorat`, {
 			tenantId
 		});
 		return null;
@@ -1055,26 +1058,39 @@ export function seedModeRows(tenantId: string): (typeof table.hourlyRateMode.$in
 }
 
 async function seedRates(tenantId: string): Promise<void> {
-	await withTursoBusyRetry(
+	const result = await withTursoBusyRetry(
 		() => db.insert(table.hourlyRate).values(seedRateRows(tenantId)).onConflictDoNothing(),
 		{ tenantId, label: 'hourly-catalog.seedRates' }
 	);
-	logInfo('server', `seed tarife orare pentru tenant ${tenantId}`, { tenantId });
+	// Două citiri simultane pot încerca amândouă seed-ul; doar cea care a inserat loghează.
+	if (result.rowsAffected > 0) {
+		logInfo('server', `seed tarife orare pentru tenant ${tenantId}: ${result.rowsAffected} rânduri`, {
+			tenantId
+		});
+	}
 }
 
 async function seedModes(tenantId: string): Promise<void> {
-	await withTursoBusyRetry(
+	const result = await withTursoBusyRetry(
 		() => db.insert(table.hourlyRateMode).values(seedModeRows(tenantId)).onConflictDoNothing(),
 		{ tenantId, label: 'hourly-catalog.seedModes' }
 	);
-	logInfo('server', `seed regimuri de lucru pentru tenant ${tenantId}`, { tenantId });
+	if (result.rowsAffected > 0) {
+		logInfo('server', `seed regimuri de lucru pentru tenant ${tenantId}: ${result.rowsAffected} rânduri`, {
+			tenantId
+		});
+	}
 }
 
 export async function getHourlyCatalog(
 	tenantId: string,
 	opts: { includeInactive?: boolean } = {}
 ): Promise<HourlyCatalog> {
-	let [rateRows, modeRows] = await Promise.all([loadRates(tenantId), loadModes(tenantId)]);
+	// Un singur round-trip în regim normal; seed-ul (doar la tenant fără rânduri în
+	// tabelul respectiv — seturile parțiale NU se completează) adaugă încă două.
+	const loaded = await Promise.all([loadRates(tenantId), loadModes(tenantId), loadRules(tenantId)]);
+	let [rateRows, modeRows] = loaded;
+	const rules = rowToRules(loaded[2]);
 	if (rateRows.length === 0) {
 		await seedRates(tenantId);
 		rateRows = await loadRates(tenantId);
@@ -1083,7 +1099,6 @@ export async function getHourlyCatalog(
 		await seedModes(tenantId);
 		modeRows = await loadModes(tenantId);
 	}
-	const rules = rowToRules(await loadRules(tenantId));
 
 	const rates = rateRows.map(rowToRate);
 	const modes = modeRows
