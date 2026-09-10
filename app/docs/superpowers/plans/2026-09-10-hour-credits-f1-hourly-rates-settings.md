@@ -1019,6 +1019,9 @@ async function loadRules(tenantId: string): Promise<RulesRow | undefined> {
 
 /** Rândurile de seed pentru un tenant nou — din constantele care erau până acum singura sursă. */
 export function seedRateRows(tenantId: string): (typeof table.hourlyRate.$inferInsert)[] {
+	// Timestamp-urile se dau explicit (convenția fișierului schema.ts): default-ul SQL
+	// `current_timestamp` ar stoca alt format decât rândurile scrise din aplicație.
+	const now = new Date();
 	return HOURLY_RATES.map((r, i) => ({
 		id: generateId(),
 		tenantId,
@@ -1026,11 +1029,14 @@ export function seedRateRows(tenantId: string): (typeof table.hourlyRate.$inferI
 		label: r.label,
 		rateEur: r.rate,
 		sortOrder: i,
-		isActive: true
+		isActive: true,
+		createdAt: now,
+		updatedAt: now
 	}));
 }
 
 export function seedModeRows(tenantId: string): (typeof table.hourlyRateMode.$inferInsert)[] {
+	const now = new Date();
 	return RATE_MODES.map((m, i) => ({
 		id: generateId(),
 		tenantId,
@@ -1042,7 +1048,9 @@ export function seedModeRows(tenantId: string): (typeof table.hourlyRateMode.$in
 		multiplierPct: m.multiplierPct,
 		maxHours: m.maxHours,
 		sortOrder: i,
-		isActive: true
+		isActive: true,
+		createdAt: now,
+		updatedAt: now
 	}));
 }
 
@@ -1235,6 +1243,7 @@ export const createHourlyRate = command(
 		const slug = uniqueRateSlug(base, catalog.rates.map((r) => r.slug));
 		const sortOrder = catalog.rates.reduce((max, r) => Math.max(max, r.sortOrder), -1) + 1;
 		const id = generateId();
+		const now = new Date();
 		await withTursoBusyRetry(
 			() =>
 				db.insert(table.hourlyRate).values({
@@ -1244,7 +1253,9 @@ export const createHourlyRate = command(
 					label: data.label,
 					rateEur: data.rateEur,
 					sortOrder,
-					isActive: true
+					isActive: true,
+					createdAt: now,
+					updatedAt: now
 				}),
 			{ tenantId, label: 'hourly-rates.create' }
 		);
@@ -1361,7 +1372,7 @@ export const updateHourCreditRules = command(
 			() =>
 				db
 					.insert(table.hourCreditSettings)
-					.values({ id: generateId(), tenantId, ...values })
+					.values({ id: generateId(), tenantId, createdAt: values.updatedAt, ...values })
 					.onConflictDoUpdate({ target: table.hourCreditSettings.tenantId, set: values }),
 			{ tenantId, label: 'hourly-rates.updateRules' }
 		);
