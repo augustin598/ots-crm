@@ -76,12 +76,12 @@ describe('activeRates / activeModes', () => {
 		expect(activeModes(modes).map((m) => m.slug)).toEqual(['standard', 'urgent']);
 	});
 
-	test('sortOrder egal → tie-break alfabetic pe label', () => {
+	test('sortOrder egal → tie-break alfabetic pe label (pinuiește colația ro: S înaintea lui Ș)', () => {
 		const tied = [
-			rate({ id: '2', slug: 'b', label: 'Ștampile', sortOrder: 0 }),
-			rate({ id: '1', slug: 'a', label: 'Analiză', sortOrder: 0 })
+			rate({ id: '2', slug: 'a', label: 'Șa', sortOrder: 0 }),
+			rate({ id: '1', slug: 'b', label: 'Sb', sortOrder: 0 })
 		];
-		expect(activeRates(tied).map((r) => r.slug)).toEqual(['a', 'b']);
+		expect(activeRates(tied).map((r) => r.slug)).toEqual(['b', 'a']);
 	});
 
 	test('listă goală → listă goală', () => {
@@ -180,6 +180,14 @@ describe('slug-uri', () => {
 	test('uniqueRateSlug rămâne ≤ RATE_SLUG_MAX_LENGTH la coliziune pe bază lungă', () => {
 		const base = 'a'.repeat(40);
 		const slug = uniqueRateSlug(base, [base]);
+		expect(slug.length).toBeLessThanOrEqual(40);
+		expect(slug.endsWith('-2')).toBe(true);
+	});
+
+	test('uniqueRateSlug fără cratimă dublă când tăierea cade exact pe o cratimă', () => {
+		const base = slugifyRateLabel('a'.repeat(37) + ' bc');
+		const slug = uniqueRateSlug(base, [base]);
+		expect(slug).not.toContain('--');
 		expect(slug.length).toBeLessThanOrEqual(40);
 		expect(slug.endsWith('-2')).toBe(true);
 	});

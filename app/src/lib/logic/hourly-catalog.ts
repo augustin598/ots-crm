@@ -157,7 +157,8 @@ export function uniqueRateSlug(base: string, taken: readonly string[]): string {
 	if (!taken.includes(base)) return base;
 	for (let n = 2; ; n++) {
 		const suffix = `-${n}`;
-		const candidate = `${base.slice(0, RATE_SLUG_MAX_LENGTH - suffix.length)}${suffix}`;
+		const stem = base.slice(0, RATE_SLUG_MAX_LENGTH - suffix.length).replace(/-+$/, '');
+		const candidate = `${stem}${suffix}`;
 		if (!taken.includes(candidate)) return candidate;
 	}
 }
