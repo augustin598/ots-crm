@@ -971,7 +971,7 @@ function rowToRate(r: RateRow): CatalogRate {
 
 function rowToMode(r: ModeRow, tenantId: string): CatalogMode | null {
 	if (!isRateModeSlug(r.slug)) {
-		logError('hourly-catalog', `regim necunoscut în DB: ${r.slug} (tenant ${tenantId}) — ignorat`, {
+		logError('server', `regim necunoscut în DB: ${r.slug} (tenant ${tenantId}) — ignorat`, {
 			tenantId
 		});
 		return null;
@@ -1059,7 +1059,7 @@ async function seedRates(tenantId: string): Promise<void> {
 		() => db.insert(table.hourlyRate).values(seedRateRows(tenantId)).onConflictDoNothing(),
 		{ tenantId, label: 'hourly-catalog.seedRates' }
 	);
-	logInfo('hourly-catalog', `seed tarife orare pentru tenant ${tenantId}`, { tenantId });
+	logInfo('server', `seed tarife orare pentru tenant ${tenantId}`, { tenantId });
 }
 
 async function seedModes(tenantId: string): Promise<void> {
@@ -1067,7 +1067,7 @@ async function seedModes(tenantId: string): Promise<void> {
 		() => db.insert(table.hourlyRateMode).values(seedModeRows(tenantId)).onConflictDoNothing(),
 		{ tenantId, label: 'hourly-catalog.seedModes' }
 	);
-	logInfo('hourly-catalog', `seed regimuri de lucru pentru tenant ${tenantId}`, { tenantId });
+	logInfo('server', `seed regimuri de lucru pentru tenant ${tenantId}`, { tenantId });
 }
 
 export async function getHourlyCatalog(
@@ -1098,6 +1098,8 @@ export async function getHourlyCatalog(
 	};
 }
 ```
+
+(`LogSource` din `$lib/server/logger` e o uniune închisă fără `'hourly-catalog'`; modulele server generice loghează cu sursa `'server'`.)
 
 - [ ] **Step 4: Rulează testele**
 
