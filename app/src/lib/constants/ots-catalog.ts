@@ -679,19 +679,21 @@ export interface CategoryGroup {
 
 export const CATEGORY_GROUPS: CategoryGroup[] = [
 	{
-		id: 'paid-ads',
-		label: 'Ads / Promovare plătită',
-		description: 'Campanii plătite pe platformele majore: trafic rapid și măsurabil.',
-		slugs: ['google-ads', 'meta-ads', 'tiktok-ads']
-	},
-	{
-		// Implementările one-time stau într-un tab propriu (cerere 10 sep 2026):
-		// același preț pe toate platformele, toate ca „Pachet Start".
+		// Setup-ul stă înaintea abonamentelor (cerere 10 sep 2026): e pasul întâi
+		// din colaborare, iar clientul îl vede în ordinea în care se cumpără.
+		// Implementările one-time au tab propriu: același preț pe toate
+		// platformele, toate ca „Pachet Start".
 		id: 'ads-setup',
 		label: 'Setup & Implementare Ads',
 		description:
 			'Implementare tehnică one-time: cont, măsurare, campanii. Se plătește o singură dată, la start.',
 		slugs: ['google-ads-setup', 'meta-ads-setup', 'tiktok-ads-setup']
+	},
+	{
+		id: 'paid-ads',
+		label: 'Ads / Promovare plătită',
+		description: 'Campanii plătite pe platformele majore: trafic rapid și măsurabil.',
+		slugs: ['google-ads', 'meta-ads', 'tiktok-ads']
 	},
 	{
 		id: 'organic',
