@@ -1,7 +1,8 @@
 # Credit de ore per client — design
 
 **Data:** 2026-09-10
-**Stare:** aprobat verbal în brainstorming; așteaptă review pe document
+**Stare:** aprobat verbal în brainstorming; revizuit 2026-09-10 (alimentare din
+facturi la tarif de referință + consum ponderat); așteaptă review pe document
 **Second opinion:** Gemini (flash) + opencode, pe întrebarea de credit insuficient,
 pe modelul de date și pe designul complet. Punctele lor sunt integrate mai jos.
 
@@ -17,8 +18,9 @@ dovedi orele lucrate.
 
 | Subiect | Decizie |
 |---|---|
-| Unitatea creditului | **Ore**, un singur bazin per client. Specializarea și regimul se rețin pe task doar pentru valorizare și pentru factura de depășire. |
-| Surse de alimentare | (a) abonament recurent din CRM cu „ore incluse/perioadă", creditat **la plata facturii** generate din el; (b) ore cumpărate pe `/servicii` (comandă plătită); (c) ajustare manuală owner/admin cu motiv. |
+| Unitatea creditului | **Ore la tarif de referință**, un singur bazin per client. Tariful de referință = cel mai mic tarif activ din Settings (azi Project Management, 55 €/h), suprascriibil în Settings. |
+| Surse de alimentare | (a) **facturile plătite** ale clienților bifați „facturile alimentează creditul" (abonamentul Lucky Studio rămâne în Keez, neschimbat): suma netă → EUR la BNR din ziua plății → ÷ tarif de referință = ore; se exclud automat facturile de hosting, de ads, de depășire și cele ale comenzilor de ore; (b) ore cumpărate pe `/servicii` (comandă plătită), convertite la aceeași referință; (c) ajustare manuală owner/admin cu motiv. |
+| Consum ponderat | Un task consumă `ore × (tarif specializare × regim ÷ referință)`. 2 h Development la 65 € scad 2,36 h; 2 h PM scad 2 h. Rezervările se ponderează la fel. |
 | Rollover | Orele neconsumate se reportează nelimitat. Nu expiră. |
 | Momentul scăderii | Estimare la creare (apare ca **rezervată**, nu scade soldul). Scădere **la Done**, pe orele efective confirmate. Anularea eliberează rezervarea. |
 | Credit insuficient | **Fără sold negativ.** La Done se scade cât există; diferența intră într-un **draft de factură cumulat lunar per client**, confirmat manual de admin, apoi emis în Keez. |
@@ -32,10 +34,16 @@ dovedi orele lucrate.
 | Permisiuni | Ajustare manuală doar owner/admin. Staff vede soldul și alocă ore pe task. |
 | Task: câmpuri | „Ore estimate", „Specializare", „Regim" apar doar când task-ul are client; obligatorii dacă orele > 0. Task-urile interne rămân neatinse. |
 
+**Exemplu Lucky Studio:** factură plătită 5.608 RON net ≈ 1.130 € (BNR ~4,96)
+→ ÷ 55 = **20,5 h** credit. Un task de 3 h Development (65 €) consumă 3 × 65/55
+= 3,55 h; rămân 16,95 h.
+
 ## 3. Model de date
 
-Unitatea de stocare: **minute întregi** (ca „cents" la bani). UI lucrează în pas
-de 15 minute (`hour_credit_settings.step_minutes`, implicit 15), afișare `Xh Ym`.
+Unitatea de stocare: **minute întregi la tarif de referință** (ca „cents" la
+bani). UI lucrează în pas de 15 minute (`hour_credit_settings.step_minutes`,
+implicit 15), afișare `Xh Ym`. Minutele ponderate se rotunjesc la minut întreg
+în sus la consum și la cel mai apropiat pas la alimentare.
 
 ### 3.1 Tabele noi
 
@@ -67,6 +75,7 @@ de 15 minute (`hour_credit_settings.step_minutes`, implicit 15), afișare `Xh Ym
 |---|---|
 | low_credit_threshold_minutes | implicit 120 |
 | step_minutes | implicit 15 |
+| reference_rate_slug | null = cel mai mic `rate_eur` activ; altfel slug-ul ales |
 | notify_email, notify_whatsapp | boolean |
 | updated_by_user_id, updated_at | |
 
@@ -76,17 +85,19 @@ de 15 minute (`hour_credit_settings.step_minutes`, implicit 15), afișare `Xh Ym
 |---|---|
 | id, tenant_id, client_id | `tenant_id` obligatoriu (review Gemini + opencode) |
 | delta_minutes | integer, semnat |
-| kind | `subscription` · `subscription_reversal` · `purchase` · `purchase_reversal` · `manual` · `task_consumption` · `task_reversal` · `overage_invoiced` |
+| kind | `invoice_credit` · `invoice_credit_reversal` · `purchase` · `purchase_reversal` · `manual` · `task_consumption` · `task_reversal` · `overage_invoiced` |
 | source_type | `invoice` · `hours_order` · `task` · `manual` |
 | source_id | id-ul sursei |
-| rate_slug, mode_slug, rate_eur_snapshot, multiplier_pct_snapshot | doar pe consum/depășire; îngheață valorizarea |
+| reference_rate_eur_snapshot | tariful de referință folosit la conversie (pe orice rând cu bani sau ponderare) |
+| net_cents_snapshot, currency_snapshot, fx_rate_snapshot | pe `invoice_credit`/`purchase`: suma netă, moneda și cursul BNR folosit |
+| rate_slug, mode_slug, rate_eur_snapshot, multiplier_pct_snapshot, real_minutes | pe consum/depășire: specializarea, regimul, tariful înghețat și minutele REALE lucrate (delta e ponderat) |
 | note | motiv manual sau notă automată |
 | created_by_user_id | null la evenimente automate |
 | created_at | |
 
 Indexuri: `(tenant_id, client_id, created_at)`; **unic parțial** pe
 `(tenant_id, kind, source_type, source_id)` doar pentru
-`kind IN ('subscription','subscription_reversal','purchase','purchase_reversal')`
+`kind IN ('invoice_credit','invoice_credit_reversal','purchase','purchase_reversal')`
 = idempotență la evenimente livrate de două ori. Rândurile de task
 (`task_consumption`, `task_reversal`, `overage_invoiced`) pot apărea de mai
 multe ori pentru același task (Done → reopen → Done); idempotența lor vine din
@@ -99,14 +110,15 @@ verificarea `task.credit_settled_at` în interiorul tranzacției de Done.
 | tabel | coloană | rol |
 |---|---|---|
 | `client` | `hour_credit_minutes` integer default 0 | **cache** al soldului; se scrie doar în aceeași tranzacție cu ledger-ul |
-| `recurring_invoice` | `included_minutes_per_period` integer null | orele abonamentului; null = abonamentul nu creditează |
-| `invoice` | `recurring_invoice_id` text null | legătura template → factură generată (azi lipsește; scheduler-ul o va popula) |
+| `client` | `hour_credit_from_invoices` boolean default false | bifa „facturile plătite alimentează creditul de ore" |
 | `task` | `estimated_minutes`, `actual_minutes`, `rate_slug`, `mode_slug`, `credit_settled_at`, `overage_invoice_id`, `continuation_of_task_id` | vezi §6 |
 
 Index nou: `task(client_id, status)` pentru calculul rezervărilor.
 
-**Rezervate** = `SUM(estimated_minutes)` pe task-urile clientului cu status
-diferit de `done` și `cancelled` și `credit_settled_at IS NULL`. Nu se scriu în
+**Rezervate** = `SUM(estimated_minutes × factor)` pe task-urile clientului cu
+status diferit de `done` și `cancelled` și `credit_settled_at IS NULL`, unde
+`factor = rate_eur × multiplier_pct / 100 / referință` (calculat din catalogul
+curent, cu tarifele inactive incluse). Nu se scriu în
 ledger (decizie: task-ul e sursa de adevăr pentru estimare, fără cron de
 curățare). **Disponibil** = sold − rezervate (poate fi negativ; e doar
 avertizare).
@@ -124,7 +136,10 @@ Ruta `settings/hourly-rates`, owner/admin, înregistrată în layout-ul Settings
   din `/servicii` și din formularul de task; task-urile deschise care o
   referă trec la Done normal (review Gemini).
 - **Regimuri**: multiplicator, plafon ore, text SLA, activ.
-- **Reguli credit**: prag „credit scăzut", pas minim, notificări on/off.
+- **Reguli credit**: tarif de referință (implicit „cel mai mic activ", cu
+  valoarea afișată), prag „credit scăzut", pas minim, notificări on/off.
+  Schimbarea referinței afectează doar alimentările și consumurile
+  ulterioare; soldul existent nu se recalculează (rândurile poartă snapshot).
 
 Un singur cititor: `getHourlyCatalog(tenantId)` în
 `$lib/server/hourly-catalog.ts` → `{ rates, modes, settings }`. Îl folosesc
@@ -137,7 +152,8 @@ backfill; un test verifică că seed-ul și tabelele nu divergă.
 
 Validări: `rate_eur` întreg 1..999; `multiplier_pct` 100..500; `max_hours`
 1..500; nu se poate dezactiva ultima specializare activă; nu se poate
-dezactiva regimul `standard`.
+dezactiva regimul `standard`; nu se poate dezactiva specializarea aleasă
+explicit ca referință.
 
 ## 5. Alimentarea creditului
 
@@ -147,29 +163,46 @@ Toate scrierile trec printr-o singură funcție server
 aceeași tranzacție (`withTursoBusyRetry`). Conflictul pe indexul unic e tratat
 ca „deja aplicat" (no-op, log info), nu ca eroare.
 
-### 5.1 Abonament
+### 5.1 Facturi plătite (abonamente ținute în Keez)
 
-Listener pe hook-ul existent `invoice.paid`: dacă factura are
-`recurring_invoice_id` și template-ul are `included_minutes_per_period > 0`,
-se aplică `subscription` cu `source_type='invoice'`, `source_id=invoice.id`,
-`delta = included_minutes_per_period` **citit la momentul plății**. O factură
-= o creditare, oricâte evenimente sosesc. Două abonamente ale aceluiași client
-creditează independent. Modificarea orelor incluse afectează doar facturile
-plătite ulterior. Facturile sincronizate din Keez fără abonament în CRM nu
-creditează nimic; Lucky Studio & co. trebuie configurați ca `recurring_invoice`.
+Listener pe hook-ul existent `invoice.paid`. Se aplică `invoice_credit` cu
+`source_type='invoice'`, `source_id=invoice.id` **doar dacă** toate condițiile
+de mai jos sunt adevărate:
 
-Scheduler-ul de facturi recurente populează `invoice.recurring_invoice_id` la
-generare. Factura de abonament rămâne proformă până la plată (regula hosting).
+1. `client.hour_credit_from_invoices = true`;
+2. `invoice.hosting_account_id IS NULL` (nu e hosting);
+3. `invoice.external_source` nu e sursă de ads (`meta-ads`, `google-ads`,
+   `tiktok-ads`) și nu e `hour-overage` (factura de depășire nu poate
+   re-credita orele pe care le-a facturat);
+4. factura nu e a unei comenzi de ore (`service_hours_order.invoice_id`);
+   comenzile creditează prin §5.2, nu de două ori;
+5. suma netă > 0.
+
+Conversie: `net = invoice.subtotal` (fără TVA) în moneda facturii; RON → EUR
+la cursul BNR al zilei plății (utilitarul BNR existent, `curs.bnr.ro`); EUR
+rămâne; alte monede → refuz cu log error și rând lipsă (adminul creditează
+manual). `minute = round_to_step(net_eur / referință × 60)`. Snapshot pe rând:
+sumă, monedă, curs, referință.
+
+O factură = o creditare, oricâte evenimente sosesc (index unic). Facturile
+plătite **înainte** de bifarea clientului nu se creditează retroactiv; există
+„Importă facturile plătite necreditate" în Bugete ore (owner/admin), cu
+selecție manuală, idempotent.
 
 Anularea unei facturi creditate (status → `cancelled`) aplică
-`subscription_reversal` cu aceeași sursă, dacă evenimentul există în hook-uri;
-altfel adminul ajustează manual din Bugete ore.
+`invoice_credit_reversal` cu aceeași sursă și același număr de minute, dacă
+evenimentul există în hook-uri; altfel adminul ajustează manual.
+
+Abonamentul Lucky Studio rămâne exact cum e în Keez; singura configurare e
+bifa pe client.
 
 ### 5.2 Ore cumpărate pe `/servicii`
 
 În branch-ul webhook `stripe/hours-purchase.ts`, după marcarea comenzii ca
 plătită și emiterea facturii Keez: `purchase` cu `source_type='hours_order'`,
-`source_id=order.id`, `delta = hours × 60`. Refund Stripe pe PaymentIntent-ul
+`source_id=order.id`, `delta = round_to_step(net_cents / 100 / referință × 60)`
+(deci 10 h Development la 65 € = 650 € = 11 h 49 min credit la referința 55 €,
+consumate apoi ponderat; în ore reale de Development revin exact 10 h). Refund Stripe pe PaymentIntent-ul
 comenzii → `purchase_reversal`, dacă webhook-ul de refund e tratat; altfel
 manual.
 
@@ -191,8 +224,9 @@ Din cardul clientului și din drill-down-ul Bugete ore: `delta` (± în pas de
 Când task-ul are `client_id`: „Ore estimate" (input în ore cu zecimale, salvat
 ca minute, multiplu de pas), „Specializare" (din catalog, active), „Regim"
 (implicit `standard`). Obligatorii dacă orele > 0; serverul respinge
-`estimated_minutes` fără `client_id` sau fără `rate_slug`. Sub câmp: „Sold:
-Xh · Rezervate: Yh · Disponibil: Zh"; galben dacă estimarea > disponibil.
+`estimated_minutes` fără `client_id` sau fără `rate_slug`. Sub câmp: „2 h
+Development = 2 h 22 min credit · Sold: Xh · Rezervate: Yh · Disponibil: Zh";
+galben dacă estimarea ponderată > disponibil.
 Nimic nu blochează crearea.
 
 ### 6.2 Trecerea în Done
@@ -202,17 +236,24 @@ client și `estimated_minutes > 0` cere confirmarea orelor efective. În UI:
 dialog precompletat cu estimarea. Prin WhatsApp: se folosește estimarea și se
 notează „ore efective = estimare (confirmare automată)".
 
+Se calculează `factor = rate_eur × multiplier_pct / 100 / referință` din
+catalogul curent și `ponderat = ceil(actual × factor)`.
+
 Într-o singură tranzacție:
 
-1. `consum = min(actual, sold)` obținut prin **UPDATE atomic condiționat**:
-   întâi `UPDATE client SET hour_credit_minutes = hour_credit_minutes - :actual
-   WHERE id = :id AND hour_credit_minutes >= :actual`; dacă 0 rânduri, se
+1. `consum = min(ponderat, sold)` obținut prin **UPDATE atomic condiționat**:
+   întâi `UPDATE client SET hour_credit_minutes = hour_credit_minutes - :ponderat
+   WHERE id = :id AND hour_credit_minutes >= :ponderat`; dacă 0 rânduri, se
    citește soldul curent `s` și se face `UPDATE … SET hour_credit_minutes = 0
    WHERE id = :id AND hour_credit_minutes = :s` (retry la 0 rânduri). Așa două
    Done simultane nu pot consuma același minut (review Gemini + opencode).
-2. Ledger `task_consumption` cu `delta = -consum`, snapshot tarif/regim.
-3. `depășire = actual - consum`. Dacă > 0: linie în draftul lunar (§6.3) și
-   ledger `overage_invoiced` (`delta 0`, `source_id = task.id`).
+2. Ledger `task_consumption` cu `delta = -consum`, `real_minutes = actual`,
+   snapshot tarif/regim/referință.
+3. `depășire_ponderată = ponderat - consum`; în ore reale:
+   `depășire_reală = actual - consum / factor` (minute, rotunjit la pas în
+   sus). Dacă > 0: linie în draftul lunar (§6.3) cu `depășire_reală` ore la
+   tariful efectiv și ledger `overage_invoiced` (`delta 0`,
+   `real_minutes = depășire_reală`, `source_id = task.id`).
 4. `task.actual_minutes`, `task.credit_settled_at = now`,
    `task.overage_invoice_id` (dacă e cazul).
 
@@ -264,13 +305,15 @@ luna calendaristică a datei Done, în `Europe/Bucharest`.
 
 ### 7.1 „Bugete ore" (meniu principal, `/hour-credits`)
 
-Tabel per client (doar clienții cu abonament creditant, cu sold ≠ 0, cu
-rezervări sau cu depășiri): sold, rezervate, disponibil, consum luna curentă,
-abonament (ore/perioadă, data ultimei creditări), depășiri nefacturate (ore),
+Tabel per client (doar clienții bifați pentru alimentare din facturi, cu sold
+≠ 0, cu rezervări sau cu depășiri): sold, rezervate, disponibil, consum luna
+curentă, alimentare din facturi (da/nu, data și suma ultimei creditări),
+depășiri nefacturate (ore reale),
 depășiri în draft (€), depășiri neplătite (€, badge roșu), badge „sub prag".
 Filtre: doar abonamente, sub prag, cu depășiri. Sortare pe sold/disponibil.
 Buton Refresh manual; fără polling. Acțiuni owner/admin: „Importă comenzile
-plătite necreditate", „Regenerează draftul".
+plătite necreditate", „Importă facturile plătite necreditate", „Regenerează
+draftul".
 
 Drill-down `/hour-credits/[clientId]`: sold + rezervate + disponibil, ledger
 paginat (dată, tip, delta, sursă cu link spre task/factură/comandă, cine,
@@ -311,7 +354,10 @@ sunt scoped pe `locals.tenant`.
 | Done simultan pe același client | UPDATE atomic condiționat; nici un minut consumat de două ori |
 | Specializare dezactivată pe task deschis | Done trece; catalogul se citește cu `includeInactive` la valorizare |
 | Task fără client dar cu ore | respins pe server |
-| Client fără abonament, factură Keez plătită | nimic; apare în Bugete ore doar dacă are ore din alte surse |
+| Client nebifat, factură plătită | nimic; apare în Bugete ore doar dacă are ore din alte surse |
+| Client bifat, factură de hosting / ads / depășire / comandă de ore plătită | exclusă explicit; log info cu motivul |
+| Factură în altă monedă decât RON/EUR | nu se creditează; log error; ajustare manuală |
+| Curs BNR indisponibil la plată | reîncercare prin scheduler (coadă `pending` în ledger nu există; se reia din lista „necreditate") |
 | Draft lunar confirmat în timp ce alt Done adaugă linie | linia merge pe luna următoare |
 | Reopen după emitere fiscală | refuzat; task de continuare |
 | Sold cache ≠ sumă ledger | endpoint de reconciliere; log error |
@@ -324,7 +370,10 @@ sunt scoped pe `locals.tenant`.
   manual cu `source_id` propriu.
 - Tranzacția Done: sold suficient, insuficient, zero, două Done concurente
   (simulare prin UPDATE condiționat).
-- Hook `invoice.paid`: cu/fără `recurring_invoice_id`, cu/fără ore incluse.
+- Hook `invoice.paid`: client bifat/nebifat, fiecare excludere (hosting, ads,
+  depășire, comandă de ore), RON cu curs, EUR, altă monedă.
+- Ponderare: factor per specializare/regim, rotunjiri, depășire reală vs
+  ponderată (golden).
 - Draft lunar: creare, reutilizare, „lună următoare" când e confirmat, ștergere
   linie la reopen.
 - Settings: validări, seed vs DB.
@@ -337,10 +386,10 @@ sunt scoped pe `locals.tenant`.
    `getHourlyCatalog`; `/servicii`, comanda de ore și emitentul Keez citesc
    din DB. Rezultat vizibil: aceleași prețuri, dar editabile.
 2. **F2 — Ledger și alimentări**: `client_hour_ledger`,
-   `client.hour_credit_minutes`, `recurring_invoice.included_minutes_per_period`,
-   `invoice.recurring_invoice_id`; listener `invoice.paid`; creditare la
-   `hours_purchase`; import comenzi vechi; ajustare manuală; pagina „Bugete
-   ore" (fără coloanele de task) + card „Credit timp".
+   `client.hour_credit_minutes`, `client.hour_credit_from_invoices`; listener
+   `invoice.paid` cu excluderi și conversie BNR; creditare la `hours_purchase`;
+   import facturi/comenzi vechi; ajustare manuală; pagina „Bugete ore" (fără
+   coloanele de task) + card „Credit timp" + bifa în editarea clientului.
 3. **F3 — Task-uri și depășire**: coloanele pe `task`; formular; dialog Done;
    tranzacția de consum; draft lunar; reopen/cancel/ștergere; coloanele de
    rezervări și depășiri în Bugete ore; garda de drift.
@@ -351,4 +400,5 @@ sunt scoped pe `locals.tenant`.
 
 Time tracking cu cronometru, pontaj pe zile, storno/notă de credit în Keez,
 bazine per specializare, expirarea orelor, discount pe pachete de ore,
-cumpărarea de ore din portal (rămâne pe `/servicii`).
+cumpărarea de ore din portal (rămâne pe `/servicii`), abonamente cu ore
+incluse definite în CRM (abonamentele rămân în Keez).
