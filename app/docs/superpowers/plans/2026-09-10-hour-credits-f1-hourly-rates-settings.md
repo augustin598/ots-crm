@@ -1346,37 +1346,23 @@ export const updateHourCreditRules = command(
 		const reason = referenceRateBlockReason(catalog.rates, referenceRateSlug);
 		if (reason) throw error(400, reason);
 
-		const [existing] = await db
-			.select({ id: table.hourCreditSettings.id })
-			.from(table.hourCreditSettings)
-			.where(eq(table.hourCreditSettings.tenantId, tenantId))
-			.limit(1);
-
+		// Upsert pe indexul unic (tenant_id): două salvări simultane la prima
+		// configurare nu pot produce nici rând dublu, nici 500 pe conflict.
+		const values = {
+			referenceRateSlug,
+			lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
+			stepMinutes: data.stepMinutes,
+			notifyEmail: data.notifyEmail,
+			notifyWhatsapp: data.notifyWhatsapp,
+			updatedByUserId: userId,
+			updatedAt: new Date()
+		};
 		await withTursoBusyRetry(
 			() =>
-				existing
-					? db
-							.update(table.hourCreditSettings)
-							.set({
-								referenceRateSlug,
-								lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
-								stepMinutes: data.stepMinutes,
-								notifyEmail: data.notifyEmail,
-								notifyWhatsapp: data.notifyWhatsapp,
-								updatedByUserId: userId,
-								updatedAt: new Date()
-							})
-							.where(eq(table.hourCreditSettings.id, existing.id))
-					: db.insert(table.hourCreditSettings).values({
-							id: generateId(),
-							tenantId,
-							referenceRateSlug,
-							lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
-							stepMinutes: data.stepMinutes,
-							notifyEmail: data.notifyEmail,
-							notifyWhatsapp: data.notifyWhatsapp,
-							updatedByUserId: userId
-						}),
+				db
+					.insert(table.hourCreditSettings)
+					.values({ id: generateId(), tenantId, ...values })
+					.onConflictDoUpdate({ target: table.hourCreditSettings.tenantId, set: values }),
 			{ tenantId, label: 'hourly-rates.updateRules' }
 		);
 		return { ok: true as const };
