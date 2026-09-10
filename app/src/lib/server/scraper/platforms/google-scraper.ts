@@ -23,7 +23,7 @@ interface SubAccount {
  * Extract account info from the current billing/documents page.
  * Gets customer ID from URL and account name from page header.
  */
-async function extractAccountInfo(page: Page): Promise<{ customerId: string; accountName: string }> {
+export async function extractAccountInfo(page: Page): Promise<{ customerId: string; accountName: string }> {
 	const currentUrl = page.url();
 
 	// Get customer ID from URL (?ocid=)
@@ -703,12 +703,32 @@ async function extractAccountsFromTableView(page: Page): Promise<Array<{ ocid: s
  * Fallback: uses Table view with pagination if Graph view fails.
  */
 async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Promise<SubAccount[]> {
-	// Primary strategy: Graph view (shows all accounts without pagination)
-	let rawAccounts = await extractAccountsFromGraphView(page);
+	// Primary strategy: Graph view. In practice it lazy-loads and stops at ~50
+	// cards on a 78-account MCC, so it is NOT a complete listing on its own.
+	let rawAccounts = (await extractAccountsFromGraphView(page)) ?? [];
 
-	// Fallback: Table view with pagination
-	if (!rawAccounts || rawAccounts.length === 0) {
-		rawAccounts = await extractAccountsFromTableView(page);
+	// Always complement with the paginated table view and merge by ocid: the
+	// table is slower but walks every page. (Wow Agency / Meduza were missed
+	// on 2026-09-09 because only the graph view was trusted.)
+	const graphOcids = new Set(rawAccounts.map((a) => a.ocid));
+	let needTable = rawAccounts.length === 0;
+	if (!needTable && allowedCustomerIds?.length) {
+		const graphIds = new Set(rawAccounts.map((a) => a.customerId.replace(/-/g, '')));
+		needTable = allowedCustomerIds.some((id) => !graphIds.has(id));
+	}
+	if (needTable) {
+		try {
+			const tableAccounts = await extractAccountsFromTableView(page);
+			for (const acc of tableAccounts) {
+				if (!graphOcids.has(acc.ocid)) {
+					rawAccounts.push(acc);
+					graphOcids.add(acc.ocid);
+				}
+			}
+			logInfo('google-scraper', `Table view added ${tableAccounts.length} entries (${rawAccounts.length} after merge)`);
+		} catch (err) {
+			logInfo('google-scraper', `Table view merge failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	logInfo('google-scraper', `Found ${rawAccounts.length} entries on accounts page`, {
@@ -744,33 +764,36 @@ async function extractSubAccounts(page: Page, allowedCustomerIds?: string[]): Pr
 					await new Promise((r) => setTimeout(r, 3000));
 
 					await page.waitForSelector('a.account-cell-link', { timeout: 10_000 }).catch(() => {});
-					await setPageSizeTo100(page);
+					// The table defaults to 10 rows/page; when the page-size dropdown is
+					// not found, walk every page instead of reading only the first 10.
+					const pageSizeChanged = await setPageSizeTo100(page);
+					const subAccounts = pageSizeChanged
+						? await page.evaluate(() => {
+							const results: Array<{ ocid: string; name: string; customerId: string }> = [];
+							const seen = new Set<string>();
 
-					const subAccounts = await page.evaluate(() => {
-						const results: Array<{ ocid: string; name: string; customerId: string }> = [];
-						const seen = new Set<string>();
+							document.querySelectorAll('a.account-cell-link').forEach((link) => {
+								const href = link.getAttribute('href') || '';
+								const ocidMatch = href.match(/[?&]ocid=(\d+)/);
+								if (!ocidMatch) return;
 
-						document.querySelectorAll('a.account-cell-link').forEach((link) => {
-							const href = link.getAttribute('href') || '';
-							const ocidMatch = href.match(/[?&]ocid=(\d+)/);
-							if (!ocidMatch) return;
+								const ocid = ocidMatch[1];
+								if (seen.has(ocid)) return;
+								seen.add(ocid);
 
-							const ocid = ocidMatch[1];
-							if (seen.has(ocid)) return;
-							seen.add(ocid);
+								const name = link.textContent?.trim() || '';
+								const cell = link.closest('ess-cell, td, [role="gridcell"]');
+								const parent = cell || link.parentElement;
+								const cidEl = parent?.querySelector('.customer-id, .external-customer-id');
+								const rawCid = cidEl?.textContent?.trim() || '';
+								const customerId = rawCid.replace(/\s*\(Manager\).*$/, '').trim();
 
-							const name = link.textContent?.trim() || '';
-							const cell = link.closest('ess-cell, td, [role="gridcell"]');
-							const parent = cell || link.parentElement;
-							const cidEl = parent?.querySelector('.customer-id, .external-customer-id');
-							const rawCid = cidEl?.textContent?.trim() || '';
-							const customerId = rawCid.replace(/\s*\(Manager\).*$/, '').trim();
+								results.push({ ocid, name, customerId });
+							});
 
-							results.push({ ocid, name, customerId });
-						});
-
-						return results;
-					});
+							return results;
+						})
+						: (await paginateAndExtractAll(page)).filter((a) => !a.isManager);
 
 					logInfo('google-scraper', `Sub-MCC ${mcc.name}: found ${subAccounts.length} accounts`, {
 						metadata: { accounts: subAccounts.map(a => `${a.name} (${a.customerId})`).slice(0, 10) }
@@ -936,7 +959,7 @@ async function setBillingPageSizeToMax(page: Page): Promise<void> {
 /**
  * Extract invoices from a single billing/documents page (for one sub-account).
  */
-async function extractInvoicesFromPage(page: Page): Promise<ScrapedInvoice[]> {
+export async function extractInvoicesFromPage(page: Page): Promise<ScrapedInvoice[]> {
 	const { customerId, accountName } = await extractAccountInfo(page);
 	logInfo('google-scraper', `Extracting invoices for: ${accountName} (${customerId})`);
 
