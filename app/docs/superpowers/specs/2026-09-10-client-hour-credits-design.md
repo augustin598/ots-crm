@@ -187,10 +187,20 @@ Bugete ore în lista „Necreditate" cu motivul „monedă neacceptată" (adminu
 creditează manual). `minute = round_to_step(net_eur / referință × 60)`. Snapshot pe rând:
 sumă, monedă, curs, referință.
 
-O factură = o creditare, oricâte evenimente sosesc (index unic). Facturile
-plătite **înainte** de bifarea clientului nu se creditează retroactiv; există
-„Importă facturile plătite necreditate" în Bugete ore (owner/admin), cu
-selecție manuală, idempotent.
+O factură = o creditare, oricâte evenimente sosesc (index unic). Lista
+„Necreditate" din Bugete ore **nu e un tabel**, ci interogarea: facturi
+`paid` ale clienților bifați, eligibile după regulile 2–5, fără rând
+`invoice_credit` în ledger; fiecare apare cu motivul (curs BNR indisponibil,
+monedă neacceptată, plătită înainte de bifare). Task-ul de scheduler (§9)
+reia automat doar cazul „curs indisponibil"; celelalte se creditează manual
+din aceeași listă, idempotent. Facturile plătite **înainte** de bifarea
+clientului nu se creditează retroactiv fără acțiunea adminului.
+
+Ordinea în listener: excluderile (2–4) sunt **primele verificări**, înaintea
+oricărei citiri de client sau curs, astfel încât plata unei facturi
+`hour-overage` nu poate ajunge niciodată la creditare. Plata unei facturi
+`hour-overage` are un singur efect în modul: stinge badge-ul „depășire
+neplătită" al clientului.
 
 Anularea unei facturi creditate (status → `cancelled`) aplică
 `invoice_credit_reversal` cu aceeași sursă și același număr de minute, dacă
@@ -225,8 +235,14 @@ Din cardul clientului și din drill-down-ul Bugete ore: `delta` (± în pas de
 ### 6.1 Formular
 
 Când task-ul are `client_id`: „Ore estimate" (input în ore cu zecimale, salvat
-ca minute, multiplu de pas), „Specializare" (din catalog, active), „Regim"
-(implicit `standard`). Obligatorii dacă orele > 0; serverul respinge
+ca minute, multiplu de pas, maxim 999 h ca limită de sănătate), „Specializare"
+(din catalog, active), „Regim" (implicit `standard`). `max_hours` al
+regimului plafonează **doar comenzile publice** de pe `/servicii` (limita
+unei singure plăți); pe task-uri nu se aplică, intenționat. Echivalentul
+ponderat afișat („2 h Development = 2 h 22 min credit") și rezervările se
+calculează **cu catalogul curent**, nu se îngheață la creare; dacă tariful se
+schimbă între creare și Done, consumul real e cel de la Done. Ledger-ul
+îngheață tariful doar la consum. Obligatorii dacă orele > 0; serverul respinge
 `estimated_minutes` fără `client_id` sau fără `rate_slug`. Sub câmp: „2 h
 Development = 2 h 22 min credit · Sold: Xh · Rezervate: Yh · Disponibil: Zh";
 galben dacă estimarea ponderată > disponibil.
@@ -278,6 +294,9 @@ luna calendaristică a datei Done, în `Europe/Bucharest`.
   euro întreg, ca `effectiveRateEur`), în cents, TVA după `resolveVatPercent`
   (regulile intracom existente). Conversia RON se face la emitere, cu cursul
   BNR al zilei, prin emitentul Keez existent (antet RON + linii EUR).
+  Cursul de la alimentare (ziua plății) și cel de la emiterea depășirii (ziua
+  confirmării) diferă; abaterea e acceptată explicit, fiecare document își
+  poartă propriul curs.
 - Dacă draftul lunii nu mai e `draft` sau are deja `keez_status` (a fost
   confirmat sau e în trimitere), depășirea deschide draftul **lunii următoare**
   (review Gemini). Nu se scrie niciodată pe o factură ieșită din `draft`.
@@ -297,7 +316,11 @@ luna calendaristică a datei Done, în `Europe/Bucharest`.
   `overage_invoice_id` e null sau factura e încă `draft`. Aplică
   `task_reversal` (`+consum`), șterge linia din draft (și draftul dacă rămâne
   gol), golește `actual_minutes`, `credit_settled_at`, `overage_invoice_id`.
-  Estimarea redevine rezervare.
+  Estimarea redevine rezervare. Rândurile `overage_invoiced` **nu se șterg
+  și nu se stornează**: ledger-ul e append-only, iar ele sunt doar urmă
+  (delta 0); un task poate avea mai multe, câte un Done. Starea „facturat /
+  nefacturat" se citește exclusiv din `task.overage_invoice_id` și din
+  `invoice_line_item.task_id`, niciodată din aceste rânduri.
 - **Reopen după emitere fiscală**: refuzat cu mesaj clar; butonul „Creează task
   de continuare" clonează titlul/clientul/specializarea într-un task nou cu
   `continuation_of_task_id`.
@@ -338,8 +361,9 @@ sunt scoped pe `locals.tenant`.
 
 ## 8. Portal client și notificări (faza 4)
 
-- Categorie nouă `hourCredits` în `ACCESS_CATEGORIES` și în toate cele 6 locuri
-  din checklist-ul de acces portal. Pagină în portal: sold/rezervate/disponibil
+- Categorie nouă `hourCredits` în `ACCESS_CATEGORIES` (`portal-access.ts`) și
+  în oglinda client-side din `team.ts`, plus restul celor 6 locuri din
+  checklist-ul de acces portal, în același commit. Pagină în portal: sold/rezervate/disponibil
   + istoric (fără ajustări, fără nume de useri interni).
 - **Email** (template + `demo-hour-credit-email.ts`): credit scăzut (o singură
   dată la trecerea sub prag; se reînarmează după ce soldul urcă peste prag),
