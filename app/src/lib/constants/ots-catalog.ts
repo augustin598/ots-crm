@@ -435,6 +435,65 @@ export const CATEGORIES: Category[] = [
 		]
 	},
 
+	{
+		slug: 'meta-ads-setup',
+		name: 'Facebook / Meta Ads Setup',
+		tagline: 'Implementare tehnică one-time (Business Manager, Pixel, CAPI)',
+		icon: 'settings',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 700 },
+		tierLabels: { bronze: 'Pachet Start' },
+		priceNote: 'Tarif unic 700 € + TVA, facturat separat de abonamentul lunar Meta Ads. Include crearea și legarea conturilor, Meta Pixel prin GTM, Conversions API server-side, verificarea domeniului, catalogul de produse și structurarea campaniilor.',
+		features: [
+			{ id: 'ms-0a', label: 'Creare Business Manager (sau preluare cont existent) și legare la partenerul agenției', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-0b', label: 'Acordare acces: utilizatori și roluri pentru client, agenție și contabilitate', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-0c', label: 'Configurare facturare: date fiscale, metodă de plată, plafon de cheltuieli', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-0d', label: 'Legare active: pagină Facebook, cont Instagram, WhatsApp Business, catalog', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-1', label: 'Instalare Meta Pixel prin GTM și configurare evenimente standard', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-2', label: 'Events Manager: testare evenimente și deduplicare', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-3', label: 'Conversions API (CAPI) server-side', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-4', label: 'Verificare domeniu și Aggregated Event Measurement (iOS)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-5', label: 'Catalog de produse și feed pentru anunțuri dinamice (DPA)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-6', label: 'Audiențe custom și lookalike de start', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-7', label: 'Structurare campanii (prospectare, retargeting, Advantage+)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-8', label: 'Grupuri de anunțuri, variante creative pentru testare A/B', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-9', label: 'Consimțământ cookie-uri conform GDPR, corelat cu pixelul', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ms-10', label: 'Durata implementare Pixel + CAPI', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
+			{ id: 'ms-11', label: 'Durata creare campanii', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
+			{ id: 'ms-12', label: 'Monitorizare post-lansare', values: { bronze: '30 zile', silver: '30 zile', gold: '30 zile', platinum: '30 zile' } },
+			{ id: 'ms-13', label: 'Sesiune de predare: explicarea contului, a raportării și a accesului', values: { bronze: '30 min', silver: '30 min', gold: '30 min', platinum: '30 min' } }
+		]
+	},
+
+	{
+		slug: 'tiktok-ads-setup',
+		name: 'TikTok Ads Setup',
+		tagline: 'Implementare tehnică one-time (Business Center, Pixel, Events API)',
+		icon: 'settings',
+		prices: { bronze: null, silver: null, gold: null, platinum: null },
+		setupFees: { bronze: 700 },
+		tierLabels: { bronze: 'Pachet Start' },
+		priceNote: 'Tarif unic 700 € + TVA, facturat separat de abonamentul lunar TikTok Ads. Include crearea și legarea conturilor, TikTok Pixel prin GTM, Events API server-side, catalogul de produse, Spark Ads și structurarea campaniilor.',
+		features: [
+			{ id: 'ts-0a', label: 'Creare cont TikTok Ads Manager (sau preluare cont existent) și legare în Business Center', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-0b', label: 'Acordare acces: utilizatori și roluri pentru client, agenție și contabilitate', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-0c', label: 'Configurare facturare: date fiscale, metodă de plată, plafon de cheltuieli', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-0d', label: 'Legare active: cont TikTok organic, catalog, domeniu verificat', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-1', label: 'Instalare TikTok Pixel prin GTM și configurare evenimente', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-2', label: 'Events API server-side și testare evenimente', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-3', label: 'Catalog de produse și feed pentru anunțuri dinamice', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-4', label: 'Audiențe custom și lookalike de start', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-5', label: 'Structurare campanii (prospectare, retargeting, Smart Performance)', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-6', label: 'Spark Ads: legare cont organic și autorizare postări', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-7', label: 'Grupuri de anunțuri, variante creative pentru testare A/B', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-8', label: 'Consimțământ cookie-uri conform GDPR, corelat cu pixelul', values: { bronze: true, silver: true, gold: true, platinum: true } },
+			{ id: 'ts-9', label: 'Durata implementare Pixel + Events API', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
+			{ id: 'ts-10', label: 'Durata creare campanii', values: { bronze: '5-7 zile', silver: '5-7 zile', gold: '5-7 zile', platinum: '5-7 zile' } },
+			{ id: 'ts-11', label: 'Monitorizare post-lansare', values: { bronze: '30 zile', silver: '30 zile', gold: '30 zile', platinum: '30 zile' } },
+			{ id: 'ts-12', label: 'Sesiune de predare: explicarea contului, a raportării și a accesului', values: { bronze: '30 min', silver: '30 min', gold: '30 min', platinum: '30 min' } }
+		]
+	},
+
 	// ============================================================
 	// DEZVOLTARE WEB & APPS (one-time, prețuri EUR fără TVA — RO 2026)
 	// ============================================================
@@ -623,9 +682,16 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
 		id: 'paid-ads',
 		label: 'Ads / Promovare plătită',
 		description: 'Campanii plătite pe platformele majore: trafic rapid și măsurabil.',
-		// google-ads-setup stă lângă google-ads (cerere 10 sep 2026): setup-ul
-		// tehnic one-time e pasul dinaintea campaniilor, nu o lucrare de site.
-		slugs: ['google-ads', 'google-ads-setup', 'meta-ads', 'tiktok-ads']
+		slugs: ['google-ads', 'meta-ads', 'tiktok-ads']
+	},
+	{
+		// Implementările one-time stau într-un tab propriu (cerere 10 sep 2026):
+		// același preț pe toate platformele, toate ca „Pachet Start".
+		id: 'ads-setup',
+		label: 'Setup & Implementare Ads',
+		description:
+			'Implementare tehnică one-time: cont, măsurare, campanii. Se plătește o singură dată, la start.',
+		slugs: ['google-ads-setup', 'meta-ads-setup', 'tiktok-ads-setup']
 	},
 	{
 		id: 'organic',

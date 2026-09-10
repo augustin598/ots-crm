@@ -25,9 +25,9 @@
 
 {#if slug === 'google-ads' || slug === 'google-ads-setup'}
 	<IconGoogleAds class={className} />
-{:else if slug === 'meta-ads'}
+{:else if slug === 'meta-ads' || slug === 'meta-ads-setup'}
 	<IconFacebook class={className} />
-{:else if slug === 'tiktok-ads'}
+{:else if slug === 'tiktok-ads' || slug === 'tiktok-ads-setup'}
 	<IconTiktok class={className} />
 {:else if slug === 'email-marketing'}
 	<IconGmail class={className} />
