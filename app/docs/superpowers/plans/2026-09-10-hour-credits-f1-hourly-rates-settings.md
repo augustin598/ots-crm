@@ -38,6 +38,7 @@
 | `src/lib/server/hourly-catalog.ts` (nou) | `getHourlyCatalog(tenantId, { includeInactive })` + seed lazy din constante |
 | `src/lib/server/__tests__/hourly-catalog.test.ts` (nou) | Seed lazy, filtrare, reguli implicite (DB mock-uit) |
 | `src/lib/remotes/hourly-rates.remote.ts` (nou) | `getHourlyCatalogView` (staff sau portal), `getHourlyRatesAdmin` (staff), `createHourlyRate`, `updateHourlyRate`, `updateRateMode`, `updateHourCreditRules` (owner/admin) |
+| `src/lib/remotes/__tests__/hourly-rates.remote.test.ts` (nou) | Testele remote-ului cu DB/catalog mock-uite (gărzi, slug unic, blocaje, upsert) |
 | `src/routes/[tenant]/settings/hourly-rates/+page.svelte` (nou) | Shell + boundary |
 | `src/routes/[tenant]/settings/hourly-rates/HourlyRatesSettings.svelte` (nou) | Cele trei carduri, formular „specializare nouă" |
 | `src/routes/[tenant]/settings/hourly-rates/RateRow.svelte` (nou) | Rând editabil specializare |
@@ -1139,6 +1140,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `src/lib/remotes/hourly-rates.remote.ts`
+- Test: `src/lib/remotes/__tests__/hourly-rates.remote.test.ts` — DB, catalog și `$app/server` mock-uite (după modelul `public-services.remote.test.ts`): view pentru staff/portal/anonim (401), admin (`canEdit` după rol, referința rezolvată), 403 pe mutații fără owner/admin, slug unic + `sortOrder` + timestamp-uri la creare, 404 pe id necunoscut, blocajele „ultima activă"/„referință"/„standard", referință inactivă → 400, upsert-ul regulilor cu `''` → `null`. Scris ÎNAINTE de modul (TDD); executat în implementare, vezi commit-ul `c716d944`.
 
 - [ ] **Step 1: Scrie remote-ul**
 
