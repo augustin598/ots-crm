@@ -1,4 +1,10 @@
 import nodemailer from 'nodemailer';
+import type { HourCreditEvent } from '$lib/server/hour-credit-notifications';
+import {
+	buildHourCreditEmailBody,
+	hourCreditEmailSubject,
+	hourCreditEmailTitle
+} from '$lib/server/hour-credit-email-body';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { db } from './db';
@@ -3890,7 +3896,77 @@ function getRetryLogId(): string | null {
 	return retryContext.getStore()?.logId ?? null;
 }
 
+/**
+ * Creditul de ore (spec §8): alimentare, consum la finalizarea unui task, credit
+ * scăzut. Corpul e în `hour-credit-email-body.ts` (pur), ca demo-ul să-l redea identic.
+ */
+export async function sendHourCreditEmail(params: {
+	tenantId: string;
+	clientId: string;
+	clientEmail: string;
+	clientName: string;
+	event: HourCreditEvent;
+	balanceMinutes: number;
+	portalUrl: string;
+}): Promise<void> {
+	const subject = hourCreditEmailSubject(params.clientName, params.event);
+	await sendWithPersistence(
+		{
+			tenantId: params.tenantId,
+			toEmail: params.clientEmail,
+			subject,
+			emailType: 'hour-credit',
+			metadata: { clientId: params.clientId, kind: params.event.kind },
+			htmlBody: '',
+			payload: { sendFn: 'sendHourCreditEmail', args: [params] }
+		},
+		async () => {
+			const [tenant] = await db
+				.select()
+				.from(table.tenant)
+				.where(eq(table.tenant.id, params.tenantId))
+				.limit(1);
+			const [emailSettings] = await db
+				.select()
+				.from(table.emailSettings)
+				.where(eq(table.emailSettings.tenantId, params.tenantId))
+				.limit(1);
+			const [invSettings] = await db
+				.select()
+				.from(table.invoiceSettings)
+				.where(eq(table.invoiceSettings.tenantId, params.tenantId))
+				.limit(1);
+			const { logoAttachment } = prepareLogoAttachment(invSettings?.invoiceLogo);
+			const themeColor = normalizeThemeColor(tenant?.themeColor);
+			const tenantName = tenant?.name || 'CRM';
+			const bodyHtml = buildHourCreditEmailBody({
+				clientName: params.clientName,
+				event: params.event,
+				balanceMinutes: params.balanceMinutes,
+				portalUrl: params.portalUrl,
+				servicesUrl: `${getAppBaseUrl()}/servicii`,
+				themeColor
+			});
+			return {
+				from: `"${tenantName}" <${resolveFromEmail(emailSettings)}>`,
+				to: params.clientEmail,
+				subject,
+				...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+				html: renderBrandedEmail({
+					themeColor,
+					headerLogoHtml: buildHeaderLogoHtml(logoAttachment),
+					title: hourCreditEmailTitle(params.event),
+					bodyHtml,
+					previewTitle: subject,
+					footerHtml: `Trimis automat de ${escapeHtml(tenantName)}.`
+				})
+			};
+		}
+	);
+}
+
 export const EMAIL_SEND_REGISTRY: Record<string, (...args: any[]) => Promise<void>> = {
+	sendHourCreditEmail,
 	sendInvitationEmail,
 	sendInvoiceEmail,
 	sendTaskAssignmentEmail,

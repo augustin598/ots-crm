@@ -31,6 +31,7 @@ import {
 	weightedMinutes
 } from '$lib/logic/hour-credits';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
+import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -256,6 +257,18 @@ export async function settleTaskCredit(params: {
 			metadata: { taskId, clientId: task.clientId, consumed, overageReal, overageInvoiceId }
 		}
 	);
+	await notifyHourCreditEvent({
+		tenantId,
+		clientId: task.clientId,
+		event: {
+			kind: 'consumed',
+			taskId,
+			taskTitle: task.title,
+			realMinutes: actual,
+			consumedMinutes: consumed,
+			overageRealMinutes: overageReal
+		}
+	});
 	return {
 		status: 'settled',
 		consumedMinutes: consumed,

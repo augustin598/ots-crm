@@ -44,7 +44,8 @@ export type OutboxKind =
 	| 'task.linked'
 	| 'task.command-ack'
 	| 'task.approved'
-	| 'task.rejected';
+	| 'task.rejected'
+	| 'hour-credit';
 
 export interface EnqueueInput {
 	tenantId: string;

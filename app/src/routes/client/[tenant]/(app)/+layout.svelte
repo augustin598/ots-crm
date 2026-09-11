@@ -243,6 +243,16 @@
 				id: 'account',
 				label: 'Cont',
 				items: [
+					...(access.hourCredits
+						? [
+								{
+									id: 'hour-credits',
+									label: 'Credit de ore',
+									icon: 'services' as const,
+									href: '/hour-credits'
+								}
+							]
+						: []),
 					...(access.hosting
 						? [
 								{

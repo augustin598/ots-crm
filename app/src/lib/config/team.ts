@@ -13,7 +13,8 @@ export const ACCESS_CATEGORIES = [
 	'hosting',
 	'content',
 	'interviuri',
-	'seo'
+	'seo',
+	'hourCredits'
 ] as const;
 
 export type AccessCategory = (typeof ACCESS_CATEGORIES)[number];
@@ -32,7 +33,8 @@ const ALL_ACCESS_TRUE: AccessFlags = {
 	hosting: true,
 	content: true,
 	interviuri: true,
-	seo: true
+	seo: true,
+	hourCredits: true
 };
 
 const NO_ACCESS: AccessFlags = {
@@ -48,7 +50,8 @@ const NO_ACCESS: AccessFlags = {
 	hosting: false,
 	content: false,
 	interviuri: false,
-	seo: false
+	seo: false,
+	hourCredits: false
 };
 
 /**
@@ -68,7 +71,8 @@ export const ACCESS_CATEGORY_LABELS: Record<AccessCategory, string> = {
 	hosting: 'Hosting',
 	content: 'Content',
 	interviuri: 'Interviuri',
-	seo: 'SEO, PageSpeed & Rank Tracker'
+	seo: 'SEO, PageSpeed & Rank Tracker',
+	hourCredits: 'Credit de ore'
 };
 
 /** Copie fresh a flag-urilor „totul oprit" — pt fallback-uri în UI. */
@@ -220,7 +224,8 @@ export const CLIENT_ROLE_PRESETS: ReadonlyArray<ClientRolePresetDef> = [
 			budgets: true,
 			content: true,
 			interviuri: true,
-			seo: true
+			seo: true,
+			hourCredits: true
 			// accessData rămâne false
 		})
 	},

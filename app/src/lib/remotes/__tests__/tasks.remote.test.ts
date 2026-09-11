@@ -147,6 +147,15 @@ mock.module('$lib/server/google-calendar/auth', () => ({
 	CalendarNotConnected: class extends Error {}
 }));
 
+// Creditul de ore (faza 3): efectele pe status sunt testate separat; aici doar no-op.
+mock.module('$lib/server/task-credit', () => ({
+	applyTaskStatusCreditEffects: async () => {},
+	assertTaskReopenAllowed: async () => {},
+	settleTaskCredit: async () => ({ status: 'skipped', reason: 'test' }),
+	reverseTaskCredit: async () => null,
+	computeReservedMinutes: async () => new Map()
+}));
+
 mock.module('$lib/server/recurring-tasks', () => ({
 	spawnNextRecurringTask: async () => {}
 }));

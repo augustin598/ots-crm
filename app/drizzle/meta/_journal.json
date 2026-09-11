@@ -3877,6 +3877,13 @@
       "when": 1788786476908024,
       "tag": "0556_task_client_status_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 557,
+      "version": "6",
+      "when": 1788786476908025,
+      "tag": "0557_client_low_credit_notified_at",
+      "breakpoints": true
     }
   ]
 }

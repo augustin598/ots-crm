@@ -194,6 +194,8 @@ export const client = sqliteTable('client', {
 	hourCreditMinutes: integer('hour_credit_minutes').notNull().default(0),
 	/** Bifa „facturile plătite alimentează creditul de ore" (abonamentele rămân în Keez). */
 	hourCreditFromInvoices: boolean('hour_credit_from_invoices').notNull().default(false),
+	/** Alerta „credit scăzut": setată la prima trecere sub prag, golită când soldul urcă peste prag. */
+	lowCreditNotifiedAt: timestamp('low_credit_notified_at', { withTimezone: true, mode: 'date' }),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),

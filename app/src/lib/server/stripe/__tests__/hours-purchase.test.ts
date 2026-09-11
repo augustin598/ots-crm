@@ -86,6 +86,11 @@ mock.module('$lib/server/stripe/post-payment/send-magic-link', () => ({
 
 let clientNotifyCalls: unknown[] = [];
 let adminNotifyCalls: unknown[] = [];
+// Creditul de ore (faza 2): creditarea comenzii e testată în hour-credits; aici no-op.
+mock.module('$lib/server/hour-credits', () => ({
+	creditPaidHoursOrder: async () => ({ status: 'credited', minutes: 600 })
+}));
+
 mock.module('$lib/server/stripe/notifications', () => ({
 	notifyPaymentSucceeded: async (tenantId: string, invoiceId: string) => {
 		clientNotifyCalls.push({ tenantId, invoiceId });

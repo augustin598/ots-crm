@@ -103,7 +103,8 @@ export const getClientSecondaryEmails = query(
 				hosting: false,
 				content: false,
 				interviuri: false,
-				seo: false
+				seo: false,
+				hourCredits: false
 			};
 			return {
 				...r,

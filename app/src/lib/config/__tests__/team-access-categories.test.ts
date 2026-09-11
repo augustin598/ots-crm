@@ -19,9 +19,10 @@ import {
 } from '$lib/access/catalog';
 
 describe('access categories: content + interviuri', () => {
-	it('mirror-ul client conține content și interviuri', () => {
+	it('mirror-ul client conține content, interviuri și hourCredits', () => {
 		expect(ACCESS_CATEGORIES).toContain('content');
 		expect(ACCESS_CATEGORIES).toContain('interviuri');
+		expect(ACCESS_CATEGORIES).toContain('hourCredits');
 	});
 
 	it('fiecare preset definește toate categoriile (fără chei lipsă)', () => {
@@ -45,6 +46,10 @@ describe('access categories: content + interviuri', () => {
 		expect(byId.marketing.interviuri).toBe(false);
 		expect(byId.viewer.content).toBe(false);
 		expect(byId.viewer.interviuri).toBe(false);
+		expect(byId.owner.hourCredits).toBe(true);
+		expect(byId.manager.hourCredits).toBe(true);
+		expect(byId.marketing.hourCredits).toBe(false);
+		expect(byId.viewer.hourCredits).toBe(false);
 	});
 
 	it('detectClientRolePreset rămâne stabil cu categoriile noi', () => {
@@ -56,6 +61,8 @@ describe('access categories: content + interviuri', () => {
 	it('catalogul are capabilitățile portal.content.view / portal.interviuri.view', () => {
 		expect(CAPABILITY_IDS).toContain('portal.content.view');
 		expect(CAPABILITY_IDS).toContain('portal.interviuri.view');
+		expect(CAPABILITY_IDS).toContain('portal.hourCredits.view');
+		expect(routeRequiresCapability('/client/ots/hour-credits', 'ots')).toBe('portal.hourCredits.view');
 	});
 
 	it('conversia legacy flags ↔ capabilities acoperă categoriile noi', () => {

@@ -25,6 +25,7 @@ import {
 	type LedgerSourceType
 } from '$lib/logic/hour-credits';
 import { formatExchangeRate } from '$lib/logic/hours-pricing';
+import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -240,6 +241,11 @@ export async function creditPaidInvoice(params: {
 			metadata: { clientId: invoice.clientId, invoiceId, trigger: params.trigger }
 		}
 	);
+	await notifyHourCreditEvent({
+		tenantId,
+		clientId: invoice.clientId,
+		event: { kind: 'credited', minutes, source: `factura ${invoice.invoiceNumber ?? invoiceId}` }
+	});
 	return { status: 'credited', minutes };
 }
 
@@ -291,6 +297,11 @@ export async function creditPaidHoursOrder(params: {
 	logInfo('server', `hour-credits: comanda ${orderId} → +${minutes} min`, {
 		tenantId,
 		metadata: { clientId: order.clientId, orderId }
+	});
+	await notifyHourCreditEvent({
+		tenantId,
+		clientId: order.clientId,
+		event: { kind: 'credited', minutes, source: `${order.hours} h ${order.rateLabel} cumpărate` }
 	});
 	return { status: 'credited', minutes };
 }

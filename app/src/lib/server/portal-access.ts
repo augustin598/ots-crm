@@ -32,7 +32,8 @@ export type AccessCategory =
 	| 'hosting'
 	| 'content'
 	| 'interviuri'
-	| 'seo';
+	| 'seo'
+	| 'hourCredits';
 
 export type AccessFlags = Record<AccessCategory, boolean>;
 
@@ -49,7 +50,8 @@ export const ACCESS_CATEGORIES: readonly AccessCategory[] = [
 	'hosting',
 	'content',
 	'interviuri',
-	'seo'
+	'seo',
+	'hourCredits'
 ] as const;
 
 export const ALL_ACCESS_TRUE: AccessFlags = {
@@ -65,7 +67,8 @@ export const ALL_ACCESS_TRUE: AccessFlags = {
 	hosting: true,
 	content: true,
 	interviuri: true,
-	seo: true
+	seo: true,
+	hourCredits: true
 };
 
 export const NO_ACCESS: AccessFlags = {
@@ -81,7 +84,8 @@ export const NO_ACCESS: AccessFlags = {
 	hosting: false,
 	content: false,
 	interviuri: false,
-	seo: false
+	seo: false,
+	hourCredits: false
 };
 
 type SecondaryEmailAccessRow = {
@@ -181,5 +185,6 @@ export function routeRequiresAccess(pathname: string, tenantSlug: string): Acces
 	if (rest.startsWith('/seo')) return 'seo';
 	if (rest.startsWith('/pagespeed')) return 'seo';
 	if (rest.startsWith('/rank-tracker')) return 'seo';
+	if (rest.startsWith('/hour-credits')) return 'hourCredits';
 	return null;
 }

@@ -264,7 +264,8 @@ export function mapAnafCompanyToClient(
 		tier: 'standard',
 		ltvCents: 0,
 		hourCreditMinutes: 0,
-		hourCreditFromInvoices: false
+		hourCreditFromInvoices: false,
+		lowCreditNotifiedAt: null
 	};
 }
 

@@ -37,8 +37,8 @@ describe('EMAIL_TYPES', () => {
 		expect(EMAIL_TYPES).toContain('notification_alert'); // underscore preserved
 	});
 
-	test('has exactly 36 types (34 + rank-report + rank-alert, Rank Tracker 2026-09-02)', () => {
-		expect(EMAIL_TYPES.length).toBe(36);
+	test('has exactly 37 types (36 + hour-credit, credit de ore 2026-09-11)', () => {
+		expect(EMAIL_TYPES.length).toBe(37);
 	});
 
 	test('includes the Rank Tracker email types', () => {

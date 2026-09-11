@@ -24,6 +24,7 @@ import {
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { computeReservedMinutes } from '$lib/server/task-credit';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
+import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -145,6 +146,13 @@ export const adjustHourCredit = command(
 			},
 			{ id }
 		);
+		if (data.deltaMinutes > 0) {
+			await notifyHourCreditEvent({
+				tenantId,
+				clientId: data.clientId,
+				event: { kind: 'credited', minutes: data.deltaMinutes, source: 'ajustare manuală' }
+			});
+		}
 		return { ok: true as const };
 	}
 );

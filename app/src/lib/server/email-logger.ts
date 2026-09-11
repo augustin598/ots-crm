@@ -13,6 +13,7 @@ export const EMAIL_TYPES = [
 	'password-reset',
 	'task-assignment',
 	'task-update',
+	'hour-credit',
 	'task-reminder',
 	'task-client-notification',
 	'daily-reminder',

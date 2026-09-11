@@ -388,6 +388,13 @@ export const CAPABILITY_CATALOG: ReadonlyArray<CapabilityDef> = [
 			'Vezi și gestionează interviurile programate ale companiei, inclusiv pagina KPI Performanță (cost pe interviu).'
 	},
 	{
+		id: 'portal.hourCredits.view',
+		domain: 'portal',
+		groupLabel: 'Cont companie',
+		label: 'Credit de ore',
+		description: 'Vezi soldul de ore al companiei și istoricul mișcărilor (alimentări, consum pe task-uri).'
+	},
+	{
 		id: 'portal.seo.view',
 		domain: 'portal',
 		groupLabel: 'Campanii & Marketing',
@@ -576,7 +583,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.hosting.view',
 		'portal.content.view',
 		'portal.interviuri.view',
-		'portal.seo.view'
+		'portal.seo.view',
+		'portal.hourCredits.view'
 	],
 	manager: [
 		'portal.invoices.view',
@@ -590,7 +598,8 @@ export const CLIENT_PRESET_CAPABILITIES: Readonly<
 		'portal.hosting.view',
 		'portal.content.view',
 		'portal.interviuri.view',
-		'portal.seo.view'
+		'portal.seo.view',
+		'portal.hourCredits.view'
 		// no accessData
 	],
 	marketing: [
@@ -621,7 +630,8 @@ const LEGACY_FLAG_TO_CAP: Record<string, Capability> = {
 	hosting: 'portal.hosting.view',
 	content: 'portal.content.view',
 	interviuri: 'portal.interviuri.view',
-	seo: 'portal.seo.view'
+	seo: 'portal.seo.view',
+	hourCredits: 'portal.hourCredits.view'
 };
 
 export function legacyFlagsToCapabilities(
@@ -670,6 +680,7 @@ export function routeRequiresCapability(
 	if (rest.startsWith('/seo')) return 'portal.seo.view';
 	if (rest.startsWith('/pagespeed')) return 'portal.seo.view';
 	if (rest.startsWith('/rank-tracker')) return 'portal.seo.view';
+	if (rest.startsWith('/hour-credits')) return 'portal.hourCredits.view';
 	if (rest.startsWith('/team')) return 'portal.team.manage';
 	return null;
 }
