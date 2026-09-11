@@ -1,0 +1,21 @@
+CREATE TABLE `client_hour_ledger` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
+	`client_id` text NOT NULL REFERENCES `client`(`id`),
+	`delta_minutes` integer NOT NULL,
+	`kind` text NOT NULL,
+	`source_type` text NOT NULL,
+	`source_id` text NOT NULL,
+	`reference_rate_eur_snapshot` integer,
+	`net_cents_snapshot` integer,
+	`currency_snapshot` text,
+	`fx_rate_snapshot` text,
+	`rate_slug` text,
+	`mode_slug` text,
+	`rate_eur_snapshot` integer,
+	`multiplier_pct_snapshot` integer,
+	`real_minutes` integer,
+	`note` text,
+	`created_by_user_id` text REFERENCES `user`(`id`),
+	`created_at` timestamp NOT NULL DEFAULT current_timestamp
+);

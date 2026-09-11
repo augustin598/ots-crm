@@ -3779,6 +3779,41 @@
       "when": 1788786476908010,
       "tag": "0542_hour_credit_settings_tenant_uidx",
       "breakpoints": true
+    },
+    {
+      "idx": 543,
+      "version": "6",
+      "when": 1788786476908011,
+      "tag": "0543_client_hour_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 544,
+      "version": "6",
+      "when": 1788786476908012,
+      "tag": "0544_client_hour_ledger_tenant_client_created_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 545,
+      "version": "6",
+      "when": 1788786476908013,
+      "tag": "0545_client_hour_ledger_source_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 546,
+      "version": "6",
+      "when": 1788786476908014,
+      "tag": "0546_client_hour_credit_minutes",
+      "breakpoints": true
+    },
+    {
+      "idx": 547,
+      "version": "6",
+      "when": 1788786476908015,
+      "tag": "0547_client_hour_credit_from_invoices",
+      "breakpoints": true
     }
   ]
 }

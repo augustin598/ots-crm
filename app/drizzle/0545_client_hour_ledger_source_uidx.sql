@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `client_hour_ledger_source_uidx` ON `client_hour_ledger` (`tenant_id`,`kind`,`source_type`,`source_id`) WHERE `kind` IN ('invoice_credit','invoice_credit_reversal','purchase','purchase_reversal');

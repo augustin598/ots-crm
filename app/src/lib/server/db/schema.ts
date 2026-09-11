@@ -189,6 +189,11 @@ export const client = sqliteTable('client', {
 	tier: text('tier').default('standard'),
 	/** Lifetime value in cents — sum of all paid invoices. Refreshed by recalcClientLTV(). */
 	ltvCents: integer('ltv_cents').notNull().default(0),
+	// === Credit de ore (hour credits) ===
+	/** Sold CACHE, în minute la tarif de referință; se scrie DOAR în aceeași tranzacție cu client_hour_ledger. */
+	hourCreditMinutes: integer('hour_credit_minutes').notNull().default(0),
+	/** Bifa „facturile plătite alimentează creditul de ore" (abonamentele rămân în Keez). */
+	hourCreditFromInvoices: boolean('hour_credit_from_invoices').notNull().default(false),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -2493,6 +2498,54 @@ export const hourCreditSettings = sqliteTable(
 			.default(sql`current_timestamp`)
 	},
 	(t) => [uniqueIndex('hour_credit_settings_tenant_uidx').on(t.tenantId)]
+);
+
+// ---- Ledger-ul creditului de ore (append-only) ----------------------------------
+//
+// Sursa de adevăr a soldului; `client.hour_credit_minutes` e doar cache, scris în
+// aceeași tranzacție. Minutele sunt la TARIFUL DE REFERINȚĂ (consumul task-urilor e
+// ponderat). Idempotență la evenimente duble prin indexul unic parțial pe
+// (tenant, kind, source_type, source_id) — doar pentru alimentări/stornări; rândurile
+// de task pot apărea de mai multe ori pentru același task (Done → reopen → Done).
+export const clientHourLedger = sqliteTable(
+	'client_hour_ledger',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => client.id),
+		deltaMinutes: integer('delta_minutes').notNull(),
+		// invoice_credit | invoice_credit_reversal | purchase | purchase_reversal | manual |
+		// task_consumption | task_reversal | overage_invoiced
+		kind: text('kind').notNull(),
+		sourceType: text('source_type').notNull(), // invoice | hours_order | task | manual
+		sourceId: text('source_id').notNull(),
+		referenceRateEurSnapshot: integer('reference_rate_eur_snapshot'),
+		netCentsSnapshot: integer('net_cents_snapshot'),
+		currencySnapshot: text('currency_snapshot'),
+		fxRateSnapshot: text('fx_rate_snapshot'),
+		rateSlug: text('rate_slug'),
+		modeSlug: text('mode_slug'),
+		rateEurSnapshot: integer('rate_eur_snapshot'),
+		multiplierPctSnapshot: integer('multiplier_pct_snapshot'),
+		realMinutes: integer('real_minutes'),
+		note: text('note'),
+		createdByUserId: text('created_by_user_id').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => [
+		index('client_hour_ledger_tenant_client_created_idx').on(t.tenantId, t.clientId, t.createdAt),
+		uniqueIndex('client_hour_ledger_source_uidx')
+			.on(t.tenantId, t.kind, t.sourceType, t.sourceId)
+			.where(
+				sql`${t.kind} IN ('invoice_credit','invoice_credit_reversal','purchase','purchase_reversal')`
+			)
+	]
 );
 
 // Acces cu parola pentru paginile publice (ex. catalogul de servicii de la /servicii).
