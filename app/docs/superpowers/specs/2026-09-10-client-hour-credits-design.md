@@ -1,8 +1,17 @@
 # Credit de ore per client — design
 
 **Data:** 2026-09-10
-**Stare:** aprobat verbal în brainstorming; revizuit 2026-09-10 (alimentare din
-facturi la tarif de referință + consum ponderat); așteaptă review pe document
+**Stare:** IMPLEMENTAT (fazele 1–4) pe branch-ul `feat/hour-credits-f1-hourly-rates`,
+11 sep 2026, nedeployat. Abateri față de spec, asumate pentru viteză: (1) la Done nu
+există dialog de confirmare a orelor — se folosesc `actual_minutes` (editabile în
+pagina de editare cât task-ul nu e decontat) sau, în lipsă, estimarea; (2) draftul de
+depășire e emis în EUR cu TVA-ul implicit al tenantului (fără regula intracom
+per client); (3) nu există task de scheduler pentru „curs BNR indisponibil" —
+facturile rămân în lista „Necreditate" și se creditează manual; (4) stornarea
+automată la anularea facturii / refund Stripe nu e legată (kind-urile `*_reversal`
+există, se folosesc prin ajustare manuală); (5) „task de continuare" = link din
+mesajul de refuz, fără buton dedicat; (6) în portal nu e afișat numele task-ului
+din notă decât cum apare în ledger.
 **Second opinion:** Gemini (flash) + opencode, pe întrebarea de credit insuficient,
 pe modelul de date și pe designul complet. Punctele lor sunt integrate mai jos.
 
