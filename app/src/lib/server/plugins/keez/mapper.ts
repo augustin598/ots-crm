@@ -1224,6 +1224,7 @@ export function mapKeezDetailsToLineItems(
 			note,
 			currency: null, // Currency is at invoice level
 			unitOfMeasure,
+			taskId: null,
 			keezItemExternalId: detail.itemExternalId || null
 		};
 	});

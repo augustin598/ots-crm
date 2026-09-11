@@ -130,3 +130,79 @@ export function invoiceCreditEligibility(
 export function startOfMonthUtc(now: Date): Date {
 	return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
+
+// ---- Consumul ponderat al task-urilor (spec §6) ----------------------------
+
+/** `tarif specializare × regim ÷ referință` — câte minute de credit costă un minut real. */
+export function weightFactor(
+	rateEur: number,
+	multiplierPct: number,
+	referenceRateEur: number
+): number {
+	if (!Number.isFinite(rateEur) || rateEur <= 0) throw new Error(`Tarif invalid: ${rateEur}`);
+	if (!Number.isFinite(multiplierPct) || multiplierPct < 100) {
+		throw new Error(`Multiplicator invalid: ${multiplierPct}`);
+	}
+	if (!Number.isFinite(referenceRateEur) || referenceRateEur <= 0) {
+		throw new Error(`Tarif de referință invalid: ${referenceRateEur}`);
+	}
+	return (rateEur * multiplierPct) / 100 / referenceRateEur;
+}
+
+/** Minute reale → minute de credit (ponderate), rotunjite în sus la minut întreg. */
+export function weightedMinutes(realMinutes: number, factor: number): number {
+	if (!Number.isInteger(realMinutes) || realMinutes < 0) {
+		throw new Error(`Minute reale invalide: ${realMinutes}`);
+	}
+	return Math.max(0, Math.ceil(realMinutes * factor - 1e-9));
+}
+
+export interface TaskSettlementSplit {
+	/** Minute de credit cerute de task. */
+	weightedMinutes: number;
+	/** Minute de credit scăzute efectiv (≤ sold, ≥ 0). */
+	consumedMinutes: number;
+	/** Minute REALE care depășesc creditul și se facturează. */
+	overageRealMinutes: number;
+}
+
+/**
+ * Împarte orele efective între credit și depășire (spec §6.2): se scade cât
+ * există; restul se convertește înapoi în ore reale, rotunjite în sus la pas.
+ */
+export function splitTaskSettlement(params: {
+	realMinutes: number;
+	factor: number;
+	balanceMinutes: number;
+	stepMinutes: number;
+}): TaskSettlementSplit {
+	const weighted = weightedMinutes(params.realMinutes, params.factor);
+	const available = Math.max(0, params.balanceMinutes);
+	const consumed = Math.min(weighted, available);
+	if (consumed >= weighted) {
+		return { weightedMinutes: weighted, consumedMinutes: consumed, overageRealMinutes: 0 };
+	}
+	const step =
+		Number.isInteger(params.stepMinutes) && params.stepMinutes > 0 ? params.stepMinutes : 1;
+	const coveredReal = consumed / params.factor;
+	const overageReal = Math.ceil((params.realMinutes - coveredReal - 1e-9) / step) * step;
+	return {
+		weightedMinutes: weighted,
+		consumedMinutes: consumed,
+		overageRealMinutes: Math.max(0, Math.min(params.realMinutes, overageReal))
+	};
+}
+
+/** Cheia lunii calendaristice (Europe/Bucharest) pentru draftul de depășire. */
+export function overageMonthKey(now: Date): string {
+	const parts = new Intl.DateTimeFormat('en-CA', {
+		timeZone: 'Europe/Bucharest',
+		year: 'numeric',
+		month: '2-digit'
+	}).formatToParts(now);
+	const y = parts.find((p) => p.type === 'year')?.value;
+	const m = parts.find((p) => p.type === 'month')?.value;
+	return `${y}-${m}`;
+}
+
+export const OVERAGE_NOTES_PREFIX = 'hour-overage:';

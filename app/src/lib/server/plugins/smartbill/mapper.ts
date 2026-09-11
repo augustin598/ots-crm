@@ -303,6 +303,7 @@ export function mapSmartBillProductsToLineItems(
 			note: product.productDescription || null,
 			currency: product.currency || null,
 			unitOfMeasure: product.measuringUnitName || null,
+			taskId: null,
 			keezItemExternalId: null
 		}));
 }

@@ -20,6 +20,7 @@ import {
 } from '$lib/server/google-calendar/task-meet-sync';
 import { toNaiveDateTime } from '$lib/server/google-calendar/time';
 import { requireStaff } from '$lib/server/get-actor';
+import { applyTaskStatusCreditEffects, assertTaskReopenAllowed } from '$lib/server/task-credit';
 import { getEligibleClientAssigneeIds, getTaskParticipantEmails } from '$lib/server/client-users';
 // import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
 // fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
@@ -364,10 +365,26 @@ const taskSchema = v.object({
 	type: v.optional(v.picklist(VALID_TASK_TYPES)),
 	meetTime: v.optional(v.string()),
 	meetDurationMinutes: v.optional(v.number()),
+	// Credit de ore (spec §6.1): doar cu client; validat în validateHourCreditPayload.
+	estimatedMinutes: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(999 * 60)))),
+	actualMinutes: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(999 * 60)))),
+	rateSlug: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(40)))),
+	modeSlug: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(40)))),
 	subtasks: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
 	tagNames: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
 	assigneeUserIds: v.optional(v.array(v.pipe(v.string(), v.minLength(1))))
 });
+
+function validateHourCreditPayload(data: {
+	clientId?: string | null;
+	estimatedMinutes?: number | null;
+	rateSlug?: string | null;
+}) {
+	if (data.estimatedMinutes && data.estimatedMinutes > 0) {
+		if (!data.clientId) throw new Error('Orele estimate se pot aloca doar pe un task cu client.');
+		if (!data.rateSlug) throw new Error('Alege specializarea pentru orele estimate.');
+	}
+}
 
 function validateRecurringPayload(data: {
 	isRecurring?: boolean;
@@ -1039,6 +1056,7 @@ export const createTask = command(taskSchema, async (data) => {
 		}
 	}
 
+	validateHourCreditPayload({ clientId: event.locals.isClientUser ? 'client' : data.clientId, estimatedMinutes: data.estimatedMinutes, rateSlug: data.rateSlug });
 	// If client user, set clientId from context
 	const clientId =
 		event.locals.isClientUser && event.locals.client
@@ -1146,6 +1164,10 @@ export const createTask = command(taskSchema, async (data) => {
 			title: data.title,
 			description: data.description || null,
 			status: status,
+			estimatedMinutes: data.estimatedMinutes ?? null,
+			actualMinutes: null,
+			rateSlug: data.estimatedMinutes ? (data.rateSlug ?? null) : null,
+			modeSlug: data.estimatedMinutes ? (data.modeSlug ?? 'standard') : null,
 			priority: data.priority || 'medium',
 			position: nextPosition,
 			dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -1476,6 +1498,14 @@ export const updateTask = command(
 		const oldStatus = existing.status;
 		const newStatus = updateData.status;
 		const transitionedToDone = newStatus === 'done' && oldStatus !== 'done';
+		validateHourCreditPayload({
+			clientId: updateData.clientId ?? existing.clientId,
+			estimatedMinutes: updateData.estimatedMinutes ?? existing.estimatedMinutes,
+			rateSlug: updateData.rateSlug ?? existing.rateSlug
+		});
+		if (oldStatus === 'done' && newStatus && newStatus !== 'done') {
+			await assertTaskReopenAllowed(existing.tenantId, taskId);
+		}
 
 		const recurringPatch: {
 			isRecurring?: boolean;
@@ -1782,6 +1812,23 @@ export const updateTask = command(
 			}
 		}
 
+		// Creditul de ore: consum la Done, stornare la reopen (spec §6).
+		if (newStatus && newStatus !== oldStatus) {
+			try {
+				await applyTaskStatusCreditEffects({
+					tenantId: existing.tenantId,
+					taskId,
+					oldStatus,
+					newStatus,
+					userId: event.locals.user.id
+				});
+			} catch (err) {
+				logError('server', `task-credit (updateTask ${taskId}): ${(err as Error).message}`, {
+					tenantId: existing.tenantId
+				});
+			}
+		}
+
 		// Emit task.completed hook when status transitions to 'done'
 		if (transitionedToDone) {
 			try {
@@ -2065,6 +2112,9 @@ export const updateTaskPosition = command(
 		}
 
 		// Use transaction to ensure data consistency
+		if (oldStatus === 'done' && newStatus !== 'done') {
+			await assertTaskReopenAllowed(event.locals.tenant.id, taskId);
+		}
 		await db.transaction(async (tx) => {
 			// If moving to a different status, shift positions in old status column
 			if (oldStatus && oldStatus !== newStatus && oldPosition !== undefined) {
@@ -2109,6 +2159,22 @@ export const updateTaskPosition = command(
 				})
 				.where(eq(table.task.id, taskId));
 		});
+
+		if (oldStatus && oldStatus !== newStatus) {
+			try {
+				await applyTaskStatusCreditEffects({
+					tenantId: event.locals.tenant.id,
+					taskId,
+					oldStatus,
+					newStatus,
+					userId: event.locals.user.id
+				});
+			} catch (err) {
+				logError('server', `task-credit (updateTaskPosition ${taskId}): ${(err as Error).message}`, {
+					tenantId: event.locals.tenant.id
+				});
+			}
+		}
 
 		// Record activity if status changed
 		if (oldStatus && oldStatus !== newStatus) {
@@ -2171,11 +2237,28 @@ export const updateTaskStatus = command(
 		if (oldStatus === newStatus) {
 			return { success: true, changed: false };
 		}
+		if (oldStatus === 'done' && newStatus !== 'done') {
+			await assertTaskReopenAllowed(event.locals.tenant.id, taskId);
+		}
 
 		await db
 			.update(table.task)
 			.set({ status: newStatus, updatedAt: new Date() })
 			.where(eq(table.task.id, taskId));
+
+		try {
+			await applyTaskStatusCreditEffects({
+				tenantId: event.locals.tenant.id,
+				taskId,
+				oldStatus,
+				newStatus,
+				userId: event.locals.user.id
+			});
+		} catch (err) {
+			logError('server', `task-credit (updateTaskStatus ${taskId}): ${(err as Error).message}`, {
+				tenantId: event.locals.tenant.id
+			});
+		}
 
 		await recordTaskActivity({
 			taskId,
@@ -2897,6 +2980,22 @@ export const approveTask = command(
 				updatedAt: new Date()
 			})
 			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, event.locals.tenant.id)));
+
+		if (status === 'done') {
+			try {
+				await applyTaskStatusCreditEffects({
+					tenantId: event.locals.tenant.id,
+					taskId,
+					oldStatus: 'pending-approval',
+					newStatus: status,
+					userId: event.locals.user.id
+				});
+			} catch (err) {
+				logError('server', `task-credit (approveTask ${taskId}): ${(err as Error).message}`, {
+					tenantId: event.locals.tenant.id
+				});
+			}
+		}
 
 		await recordTaskActivity({
 			taskId,

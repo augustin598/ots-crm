@@ -110,7 +110,9 @@
 			<p class="text-xs text-muted-foreground">
 				la referința {view.reference
 					? `${view.reference.label}, ${view.reference.rateEur} €/h`
-					: '—'}
+					: '—'} · rezervate {formatMinutes(view.reservedMinutes)} · disponibil {formatMinutes(
+					view.balanceMinutes - view.reservedMinutes
+				)}
 			</p>
 		</div>
 	</div>

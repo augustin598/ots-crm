@@ -342,6 +342,19 @@ export const task = sqliteTable('task', {
 	 * o retrimitere ar crea al doilea task identic.
 	 */
 	sourceWamId: text('source_wam_id'),
+	// === Credit de ore (spec §6) — doar pe task-uri cu client ===
+	/** Ore estimate la creare, în minute reale; apar ca REZERVATE cât task-ul e deschis. */
+	estimatedMinutes: integer('estimated_minutes'),
+	/** Ore efective confirmate la Done, în minute reale. */
+	actualMinutes: integer('actual_minutes'),
+	rateSlug: text('rate_slug'),
+	modeSlug: text('mode_slug'),
+	/** Setat la Done după scăderea din credit; golit la reopen. */
+	creditSettledAt: timestamp('credit_settled_at', { withTimezone: true, mode: 'date' }),
+	/** Draftul lunar de depășire în care a intrat linia task-ului. */
+	overageInvoiceId: text('overage_invoice_id'),
+	/** Task de continuare creat când originalul avea depășire deja emisă fiscal. */
+	continuationOfTaskId: text('continuation_of_task_id'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -350,6 +363,7 @@ export const task = sqliteTable('task', {
 		.default(sql`current_timestamp`)
 }, (t) => [
 	index('task_tenant_status_idx').on(t.tenantId, t.status),
+	index('task_client_status_idx').on(t.clientId, t.status),
 	index('task_tenant_client_idx').on(t.tenantId, t.clientId),
 	index('task_tenant_project_idx').on(t.tenantId, t.projectId),
 	index('task_tenant_created_idx').on(t.tenantId, t.createdAt),
@@ -740,6 +754,8 @@ export const invoiceLineItem = sqliteTable('invoice_line_item', {
 	currency: text('currency'), // Item currency (for multi-currency invoices)
 	unitOfMeasure: text('unit_of_measure'), // Unit of measure (e.g., "Pcs", "Hours", "Days")
 	keezItemExternalId: text('keez_item_external_id'), // Keez item external ID reference
+	/** Linia de depășire a orelor: task-ul din care vine (doar pe facturile hour-overage). */
+	taskId: text('task_id'),
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`)

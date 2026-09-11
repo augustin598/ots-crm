@@ -10,6 +10,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Label } from '$lib/components/ui/label';
+	import TaskHourCreditCard from '$lib/components/tasks/task-hour-credit-card.svelte';
 	import RichEditor from '$lib/components/RichEditor/RichEditor.svelte';
 	import TaskWhatsappGroupCard from '$lib/components/task-detail/task-whatsapp-group-card.svelte';
 	import TaskApproveDialog from '$lib/components/task-detail/task-approve-dialog.svelte';
@@ -441,6 +442,10 @@
 					</div>
 				</CardContent>
 			</Card>
+
+			{#if task.clientId && (task.estimatedMinutes || task.actualMinutes)}
+				<TaskHourCreditCard {task} tenantSlug={tenantSlug ?? ''} />
+			{/if}
 
 			<Card class="md:col-span-2">
 				<CardHeader>

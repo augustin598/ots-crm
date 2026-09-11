@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TaskHourCreditFields from '$lib/components/tasks/task-hour-credit-fields.svelte';
 	import { getTask, updateTask, getTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
@@ -6,7 +7,13 @@
 	import { getMilestones } from '$lib/remotes/milestones.remote';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import {
+		Card,
+		CardContent,
+		CardDescription,
+		CardHeader,
+		CardTitle
+	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -35,12 +42,7 @@
 	const usersQuery = getTenantUsers();
 	const users = $derived(usersQuery.current || []);
 	const userMap = $derived(
-		new Map(
-			users.map((u) => [
-				u.id,
-				`${u.firstName} ${u.lastName}`.trim() || u.email
-			])
-		)
+		new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim() || u.email]))
 	);
 
 	let title = $state('');
@@ -52,13 +54,15 @@
 	let priority = $state('medium');
 	let assignedToUserId = $state('');
 	let dueDate = $state('');
+	let estimatedHours = $state(0);
+	let actualHours = $state(0);
+	let rateSlug = $state('');
+	let modeSlug = $state('standard');
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
 	// Load milestones for selected project
-	const milestonesQuery = $derived(
-		projectId ? getMilestones(projectId) : null
-	);
+	const milestonesQuery = $derived(projectId ? getMilestones(projectId) : null);
 	const milestones = $derived(milestonesQuery?.current || []);
 	const milestoneMap = $derived(new Map(milestones.map((m) => [m.id, m.name])));
 
@@ -73,6 +77,10 @@
 			priority = task.priority || 'medium';
 			assignedToUserId = task.assignedToUserId || '';
 			dueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '';
+			estimatedHours = task.estimatedMinutes ? task.estimatedMinutes / 60 : 0;
+			actualHours = task.actualMinutes ? task.actualMinutes / 60 : 0;
+			rateSlug = task.rateSlug || '';
+			modeSlug = task.modeSlug || 'standard';
 		}
 	});
 
@@ -88,10 +96,24 @@
 				clientId: clientId || undefined,
 				projectId: projectId || undefined,
 				milestoneId: milestoneId || undefined,
-				status: (status || undefined) as 'done' | 'todo' | 'in-progress' | 'review' | 'cancelled' | 'pending-approval' | undefined,
+				status: (status || undefined) as
+					| 'done'
+					| 'todo'
+					| 'in-progress'
+					| 'review'
+					| 'cancelled'
+					| 'pending-approval'
+					| undefined,
 				priority: (priority || undefined) as 'medium' | 'low' | 'high' | 'urgent' | undefined,
 				assignedToUserId: assignedToUserId || undefined,
-				dueDate: dueDate || undefined
+				dueDate: dueDate || undefined,
+				estimatedMinutes: clientId ? Math.round(Number(estimatedHours) * 60) : null,
+				actualMinutes:
+					clientId && !task?.creditSettledAt && Number(actualHours) > 0
+						? Math.round(Number(actualHours) * 60)
+						: undefined,
+				rateSlug: clientId && Number(estimatedHours) > 0 ? rateSlug || null : null,
+				modeSlug: clientId && Number(estimatedHours) > 0 ? modeSlug || 'standard' : null
 			}).updates(taskQuery, getTask(taskId), getTasks({}));
 
 			goto(`/${tenantSlug}/tasks/${taskId}`);
@@ -253,6 +275,37 @@
 						</div>
 					</div>
 
+					<div class="grid grid-cols-2 gap-4">
+						<TaskHourCreditFields
+							{clientId}
+							bind:estimatedHours
+							bind:rateSlug
+							bind:modeSlug
+							disabled={!!task?.creditSettledAt}
+						/>
+						{#if clientId && !task?.creditSettledAt}
+							<div class="space-y-2">
+								<Label for="actualHours">Ore efective (confirmate la finalizare)</Label>
+								<Input
+									id="actualHours"
+									type="number"
+									min="0"
+									max="999"
+									step="0.25"
+									bind:value={actualHours}
+								/>
+								<p class="text-xs text-muted-foreground">
+									Dacă lipsesc, la trecerea în Done se folosesc orele estimate.
+								</p>
+							</div>
+						{:else if task?.creditSettledAt}
+							<p class="col-span-2 text-xs text-muted-foreground">
+								Orele au fost decontate din credit la finalizare. Pentru corecții redeschide task-ul
+								(dacă depășirea nu a fost facturată).
+							</p>
+						{/if}
+					</div>
+
 					{#if error}
 						<div class="rounded-md bg-red-50 p-3">
 							<p class="text-sm text-red-800">{error}</p>
@@ -260,7 +313,11 @@
 					{/if}
 
 					<div class="flex items-center justify-end gap-4">
-						<Button type="button" variant="outline" onclick={() => goto(`/${tenantSlug}/tasks/${taskId}`)}>
+						<Button
+							type="button"
+							variant="outline"
+							onclick={() => goto(`/${tenantSlug}/tasks/${taskId}`)}
+						>
 							Cancel
 						</Button>
 						<Button type="submit" disabled={saving}>

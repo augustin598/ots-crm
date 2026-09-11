@@ -53,6 +53,7 @@ export function mapUblInvoiceToCrm(
 			note: null,
 			currency: null,
 			unitOfMeasure: null,
+			taskId: null,
 			keezItemExternalId: null
 		};
 

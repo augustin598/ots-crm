@@ -96,7 +96,7 @@
 			<CardTitle>Clienți</CardTitle>
 			<CardDescription>
 				Apar clienții bifați pentru alimentare din facturi și cei cu sold sau mișcări în ledger.
-				Rezervările și consumul task-urilor vin în faza următoare.
+				Rezervate = estimările task-urilor deschise, ponderate; disponibil = sold − rezervate.
 			</CardDescription>
 		</CardHeader>
 		<CardContent>
@@ -112,6 +112,8 @@
 							<TableRow>
 								<TableHead>Client</TableHead>
 								<TableHead class="text-right">Sold</TableHead>
+								<TableHead class="text-right">Rezervate</TableHead>
+								<TableHead class="text-right">Disponibil</TableHead>
 								<TableHead class="text-right">Consum luna curentă</TableHead>
 								<TableHead>Ultima alimentare</TableHead>
 								<TableHead>Alimentare din facturi</TableHead>
@@ -139,6 +141,14 @@
 										{#if r.balanceMinutes < data.lowCreditThresholdMinutes}
 											<Badge variant="destructive" class="ml-2">sub prag</Badge>
 										{/if}
+									</TableCell>
+									<TableCell class="text-right">{formatMinutes(r.reservedMinutes)}</TableCell>
+									<TableCell
+										class="text-right {r.balanceMinutes - r.reservedMinutes < 0
+											? 'text-amber-600'
+											: ''}"
+									>
+										{formatMinutes(r.balanceMinutes - r.reservedMinutes)}
 									</TableCell>
 									<TableCell class="text-right"
 										>{formatMinutes(r.consumedThisMonthMinutes)}</TableCell

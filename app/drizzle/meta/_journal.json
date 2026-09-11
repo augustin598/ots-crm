@@ -3814,6 +3814,69 @@
       "when": 1788786476908015,
       "tag": "0547_client_hour_credit_from_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 548,
+      "version": "6",
+      "when": 1788786476908016,
+      "tag": "0548_task_estimated_minutes",
+      "breakpoints": true
+    },
+    {
+      "idx": 549,
+      "version": "6",
+      "when": 1788786476908017,
+      "tag": "0549_task_actual_minutes",
+      "breakpoints": true
+    },
+    {
+      "idx": 550,
+      "version": "6",
+      "when": 1788786476908018,
+      "tag": "0550_task_rate_slug",
+      "breakpoints": true
+    },
+    {
+      "idx": 551,
+      "version": "6",
+      "when": 1788786476908019,
+      "tag": "0551_task_mode_slug",
+      "breakpoints": true
+    },
+    {
+      "idx": 552,
+      "version": "6",
+      "when": 1788786476908020,
+      "tag": "0552_task_credit_settled_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 553,
+      "version": "6",
+      "when": 1788786476908021,
+      "tag": "0553_task_overage_invoice_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 554,
+      "version": "6",
+      "when": 1788786476908022,
+      "tag": "0554_task_continuation_of_task_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 555,
+      "version": "6",
+      "when": 1788786476908023,
+      "tag": "0555_invoice_line_item_task_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 556,
+      "version": "6",
+      "when": 1788786476908024,
+      "tag": "0556_task_client_status_idx",
+      "breakpoints": true
     }
   ]
 }

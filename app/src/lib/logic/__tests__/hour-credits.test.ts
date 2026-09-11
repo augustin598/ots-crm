@@ -5,6 +5,10 @@ import {
 	eurCentsToReferenceMinutes,
 	invoiceCreditEligibility,
 	startOfMonthUtc,
+	weightFactor,
+	weightedMinutes,
+	splitTaskSettlement,
+	overageMonthKey,
 	type InvoiceCreditCandidate
 } from '../hour-credits';
 
@@ -103,5 +107,75 @@ describe('startOfMonthUtc', () => {
 		expect(startOfMonthUtc(new Date('2026-09-11T10:00:00Z')).toISOString()).toBe(
 			'2026-09-01T00:00:00.000Z'
 		);
+	});
+});
+
+describe('weightFactor / weightedMinutes', () => {
+	test('Development 65 € la referința 55 € = 1,18; PM = 1; urgență ×1,5', () => {
+		expect(weightFactor(65, 100, 55)).toBeCloseTo(65 / 55, 6);
+		expect(weightFactor(55, 100, 55)).toBe(1);
+		expect(weightFactor(65, 150, 55)).toBeCloseTo(97.5 / 55, 6);
+	});
+
+	test('3 h Development consumă 3 h 33 min de credit (rotunjit în sus)', () => {
+		expect(weightedMinutes(180, weightFactor(65, 100, 55))).toBe(213); // 212,7 → 213
+		expect(weightedMinutes(120, 1)).toBe(120);
+		expect(weightedMinutes(0, 1.5)).toBe(0);
+	});
+});
+
+describe('splitTaskSettlement', () => {
+	const factor = weightFactor(65, 100, 55);
+
+	test('credit suficient: totul din credit, fără depășire', () => {
+		expect(
+			splitTaskSettlement({ realMinutes: 120, factor, balanceMinutes: 1000, stepMinutes: 15 })
+		).toEqual({
+			weightedMinutes: 142,
+			consumedMinutes: 142,
+			overageRealMinutes: 0
+		});
+	});
+
+	test('exemplul din spec: 1 h credit, task de 2 h → 1 h din credit, 1 h facturată', () => {
+		const r = splitTaskSettlement({
+			realMinutes: 120,
+			factor: 1,
+			balanceMinutes: 60,
+			stepMinutes: 15
+		});
+		expect(r).toEqual({ weightedMinutes: 120, consumedMinutes: 60, overageRealMinutes: 60 });
+	});
+
+	test('depășirea reală se rotunjește în sus la pas și nu depășește orele reale', () => {
+		const r = splitTaskSettlement({
+			realMinutes: 120,
+			factor,
+			balanceMinutes: 100,
+			stepMinutes: 15
+		});
+		expect(r.consumedMinutes).toBe(100);
+		expect(r.overageRealMinutes).toBe(45); // 120 − 100/1,18 = 35,4 → 45
+		const all = splitTaskSettlement({
+			realMinutes: 120,
+			factor,
+			balanceMinutes: 0,
+			stepMinutes: 15
+		});
+		expect(all).toEqual({ weightedMinutes: 142, consumedMinutes: 0, overageRealMinutes: 120 });
+	});
+
+	test('sold negativ tratat ca zero', () => {
+		expect(
+			splitTaskSettlement({ realMinutes: 60, factor: 1, balanceMinutes: -30, stepMinutes: 15 })
+				.consumedMinutes
+		).toBe(0);
+	});
+});
+
+describe('overageMonthKey', () => {
+	test('luna calendaristică în Europe/Bucharest', () => {
+		expect(overageMonthKey(new Date('2026-09-30T22:30:00Z'))).toBe('2026-10'); // 01:30 ora RO
+		expect(overageMonthKey(new Date('2026-09-11T10:00:00Z'))).toBe('2026-09');
 	});
 });

@@ -22,6 +22,7 @@ import {
 	listUncreditedInvoices
 } from '$lib/server/hour-credits';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
+import { computeReservedMinutes } from '$lib/server/task-credit';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
 
 function generateId(): string {
@@ -58,8 +59,12 @@ export const getHourCreditsPage = query(async () => {
 		getHourlyCatalog(tenantId)
 	]);
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
+	const reserved = await computeReservedMinutes(
+		tenantId,
+		rows.map((r) => r.clientId)
+	);
 	return {
-		rows,
+		rows: rows.map((r) => ({ ...r, reservedMinutes: reserved.get(r.clientId) ?? 0 })),
 		uncredited,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		lowCreditThresholdMinutes: catalog.rules.lowCreditThresholdMinutes,
@@ -75,8 +80,10 @@ export const getClientHourCreditView = query(clientIdSchema, async (clientId) =>
 	]);
 	if (!view) throw error(404, 'Clientul nu există.');
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
+	const reserved = await computeReservedMinutes(tenantId, [clientId]);
 	return {
 		...view,
+		reservedMinutes: reserved.get(clientId) ?? 0,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		stepMinutes: catalog.rules.stepMinutes,
 		lowCreditThresholdMinutes: catalog.rules.lowCreditThresholdMinutes,

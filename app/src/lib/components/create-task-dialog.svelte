@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TaskHourCreditFields from '$lib/components/tasks/task-hour-credit-fields.svelte';
 	import { createTask, getTasks } from '$lib/remotes/tasks.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { getProjects } from '$lib/remotes/projects.remote';
@@ -200,7 +201,10 @@
 		recurringInterval: 1,
 		recurringEndDate: '',
 		meetTime: '10:00',
-		meetDurationMinutes: 30
+		meetDurationMinutes: 30,
+		estimatedHours: 0,
+		rateSlug: '',
+		modeSlug: 'standard'
 	});
 
 	const selectedClientName = $derived(
@@ -463,6 +467,12 @@
 						? `${draft.dueDate || localTodayIso()}T${draft.meetTime}`
 						: undefined,
 				meetDurationMinutes: isMeet ? draft.meetDurationMinutes : undefined,
+				estimatedMinutes:
+					draft.clientId && Number(draft.estimatedHours) > 0
+						? Math.round(Number(draft.estimatedHours) * 60)
+						: undefined,
+				rateSlug: draft.clientId && Number(draft.estimatedHours) > 0 ? draft.rateSlug || undefined : undefined,
+				modeSlug: draft.clientId && Number(draft.estimatedHours) > 0 ? draft.modeSlug || 'standard' : undefined,
 				subtasks: draft.subtasks.length ? draft.subtasks : undefined,
 				tagNames: tagNames.length ? tagNames : undefined
 			}).updates(...listRefreshTargets(), ...additionalQueriesToUpdate);
@@ -737,6 +747,15 @@
 							{/each}
 						</div>
 					</div>
+
+					{#if !isClient}
+						<TaskHourCreditFields
+							clientId={draft.clientId}
+							bind:estimatedHours={draft.estimatedHours}
+							bind:rateSlug={draft.rateSlug}
+							bind:modeSlug={draft.modeSlug}
+						/>
+					{/if}
 				</div>
 			{:else if step === 2}
 				<div class="grid grid-cols-2 gap-4">
