@@ -9,6 +9,7 @@ import { startScheduler } from '$lib/server/scheduler';
 import { ensureBnrRatesSynced } from '$lib/server/bnr/client';
 import { registerEmailNotificationHooks } from '$lib/server/hooks/email-notifications';
 import { registerNotificationHooks } from '$lib/server/hooks/notification-hooks';
+import { registerHourCreditHooks } from '$lib/server/hooks/hour-credit-hooks';
 import { runMigrations } from '$lib/server/db/migrate';
 import { seedAccessCatalog } from '$lib/server/access-seed';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
@@ -52,6 +53,7 @@ function ensureAppHooksRegistered() {
 	if (!gt[HOOKS_INIT_SYMBOL]) {
 		registerEmailNotificationHooks();
 		registerNotificationHooks();
+		registerHourCreditHooks();
 		gt[HOOKS_INIT_SYMBOL] = true;
 	}
 }

@@ -16,6 +16,7 @@ import * as table from '$lib/server/db/schema';
 import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { emitKeezHoursInvoice } from '$lib/server/stripe/post-payment/emit-keez-hours-invoice';
+import { creditPaidHoursOrder } from '$lib/server/hour-credits';
 import { sendOnboardingMagicLink } from '$lib/server/stripe/post-payment/send-magic-link';
 import {
 	notifyPaymentSucceeded,
@@ -92,6 +93,23 @@ export async function handleHoursPurchaseSucceeded(intent: Stripe.PaymentIntent)
 			}),
 		{ tenantId, label: 'hours-purchase/markPaid' }
 	);
+
+	// Orele cumpărate intră în creditul de ore al clientului (spec §5.2). Idempotent
+	// pe (kind, comandă); dacă pică, comanda apare în lista „Necreditate".
+	try {
+		const credit = await creditPaidHoursOrder({ tenantId, orderId });
+		if (credit.status === 'failed' || credit.status === 'skipped') {
+			logWarning('packages', `hours_purchase: credit de ore ${credit.status} pentru comanda ${orderId}: ${credit.reason}`, {
+				tenantId,
+				metadata: { orderId }
+			});
+		}
+	} catch (err) {
+		logError('packages', `hours_purchase: creditarea orelor a picat — ${serializeError(err).message}`, {
+			tenantId,
+			metadata: { orderId }
+		});
+	}
 
 	// Pașii de mai jos sunt best-effort, fiecare cu catch propriu: factura
 	// nereușită NU blochează magic link-ul și invers; admin reia manual.

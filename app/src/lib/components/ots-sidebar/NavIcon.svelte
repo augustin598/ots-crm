@@ -19,6 +19,7 @@
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import HourglassIcon from '@lucide/svelte/icons/hourglass';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
@@ -46,6 +47,8 @@
 	<LayoutDashboardIcon class={className} />
 {:else if icon === 'tasks'}
 	<CheckSquareIcon class={className} />
+{:else if icon === 'hour-credits'}
+	<HourglassIcon class={className} />
 {:else if icon === 'my-plans'}
 	<CalendarIcon class={className} />
 {:else if icon === 'clients'}

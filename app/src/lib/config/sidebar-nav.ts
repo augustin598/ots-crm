@@ -43,7 +43,8 @@ export type IconKey =
 	| 'hosting-account'
 	| 'hosting-product'
 	| 'hosting-import'
-	| 'hosting-provisioning';
+	| 'hosting-provisioning'
+	| 'hour-credits';
 
 export type RoleRequirement = 'admin' | 'owner';
 
@@ -84,6 +85,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
 		label: 'Sales & Finance',
 		items: [
 			{ id: 'clients', label: 'Clients', icon: 'clients', href: '/clients' },
+			{ id: 'hour-credits', label: 'Bugete ore', icon: 'hour-credits', href: '/hour-credits' },
 			{ id: 'projects', label: 'Projects', icon: 'projects', href: '/projects' },
 			{ id: 'services', label: 'Services', icon: 'services', href: '/services' },
 			{ id: 'contracts', label: 'Contracte', icon: 'contracts', href: '/contracts' },

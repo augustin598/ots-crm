@@ -261,7 +261,9 @@ export function mapAnafCompanyToClient(
 		stripeCustomerId: null,
 		clientSince: null,
 		tier: 'standard',
-		ltvCents: 0
+		ltvCents: 0,
+		hourCreditMinutes: 0,
+		hourCreditFromInvoices: false
 	};
 }
 
