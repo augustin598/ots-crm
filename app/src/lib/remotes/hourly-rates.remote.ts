@@ -144,7 +144,7 @@ export const createHourlyRate = command(
 
 export const updateHourlyRate = command(
 	v.object({
-		id: v.pipe(v.string(), v.minLength(1)),
+		id: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
 		label: labelSchema,
 		rateEur: rateEurSchema,
 		sortOrder: sortOrderSchema,
@@ -199,8 +199,10 @@ export const updateRateMode = command(
 		const { tenantId } = await requireOwnerOrAdmin();
 		const reason = modeUpdateBlockReason(data.slug, data);
 		if (reason) throw error(400, reason);
-		// Asigură seed-ul înainte de update (tenant nou = rândurile pot lipsi).
-		await getHourlyCatalog(tenantId, { includeInactive: true });
+		// Catalogul e citit și pentru seed-ul lazy al unui tenant nou; un regim lipsă
+		// dintr-un set parțial dă 404, nu un update pe zero rânduri.
+		const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
+		if (!catalog.modes.some((m) => m.slug === data.slug)) throw error(404, 'Regimul nu există.');
 		await withTursoBusyRetry(
 			() =>
 				db
