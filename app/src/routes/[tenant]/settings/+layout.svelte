@@ -2,7 +2,17 @@
 	import type { PageData } from './$types';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { page } from '$app/state';
-	import { Settings, Receipt, Plug, CheckSquare, Mail, Calendar, UserCircle, Bell } from '@lucide/svelte';
+	import {
+		Settings,
+		Receipt,
+		Plug,
+		CheckSquare,
+		Mail,
+		Calendar,
+		UserCircle,
+		Bell,
+		Clock
+	} from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 
 	let { data, children }: { data: PageData; children: any } = $props();
@@ -17,18 +27,31 @@
 		{ id: 'account', label: 'Cont', href: `/${tenantSlug}/settings/account`, icon: UserCircle },
 		{ id: 'invoices', label: 'Invoices', href: `/${tenantSlug}/settings/invoices`, icon: Receipt },
 		{ id: 'tasks', label: 'Tasks', href: `/${tenantSlug}/settings/tasks`, icon: CheckSquare },
+		{
+			id: 'hourly-rates',
+			label: 'Tarife orare',
+			href: `/${tenantSlug}/settings/hourly-rates`,
+			icon: Clock
+		},
 		{ id: 'my-plans', label: 'My Plans', href: `/${tenantSlug}/settings/my-plans`, icon: Calendar },
 		{ id: 'banking', label: 'Banking', href: `/${tenantSlug}/settings/banking`, icon: CreditCard },
 		{ id: 'email', label: 'Email', href: `/${tenantSlug}/settings/email`, icon: Mail },
-		{ id: 'notifications', label: 'Notificări', href: `/${tenantSlug}/settings/notifications`, icon: Bell },
+		{
+			id: 'notifications',
+			label: 'Notificări',
+			href: `/${tenantSlug}/settings/notifications`,
+			icon: Bell
+		},
 		{ id: 'plugins', label: 'Plugins', href: `/${tenantSlug}/settings/plugins`, icon: Plug }
 	]);
 
 	const activeTab = $derived(() => {
-		if (currentPath === `/${tenantSlug}/settings` || currentPath === `/${tenantSlug}/settings/`) return 'general';
+		if (currentPath === `/${tenantSlug}/settings` || currentPath === `/${tenantSlug}/settings/`)
+			return 'general';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/account`)) return 'account';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/invoices`)) return 'invoices';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/tasks`)) return 'tasks';
+		if (currentPath.startsWith(`/${tenantSlug}/settings/hourly-rates`)) return 'hourly-rates';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/my-plans`)) return 'my-plans';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/banking`)) return 'banking';
 		if (currentPath.startsWith(`/${tenantSlug}/settings/email`)) return 'email';
@@ -58,7 +81,7 @@
 			{#each tabs as tab}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					{@const TabIcon = tab.icon}
-					<TabIcon class="h-4 w-4 mr-2" />
+					<TabIcon class="mr-2 h-4 w-4" />
 					{tab.label}
 				</TabsTrigger>
 			{/each}
