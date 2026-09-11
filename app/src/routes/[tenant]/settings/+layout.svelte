@@ -77,7 +77,7 @@
 	</div>
 
 	<Tabs value={activeTab()} class="w-full">
-		<TabsList class="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10">
+		<TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10">
 			{#each tabs as tab}
 				<TabsTrigger value={tab.id} onclick={() => goto(tab.href)}>
 					{@const TabIcon = tab.icon}
