@@ -64,7 +64,7 @@
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead>Denumire</TableHead>
+							<TableHead class="min-w-48">Denumire</TableHead>
 							<TableHead class="w-28">€/h</TableHead>
 							<TableHead class="w-24">Ordine</TableHead>
 							<TableHead class="w-44">Slug</TableHead>

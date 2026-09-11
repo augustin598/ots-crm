@@ -17,8 +17,22 @@
 
 	let { mode, canEdit }: { mode: CatalogMode; canEdit: boolean } = $props();
 
+	type ModeFields = {
+		label: string;
+		suffix: string;
+		description: string;
+		sla: string;
+		multiplierPct: number;
+		maxHours: number;
+	};
+
+	const SUFFIX_MAX_LENGTH = 40;
+	const TEXT_MAX_LENGTH = 300;
+
 	const isStandard = $derived(mode.slug === 'standard');
 
+	// Seeded o singură dată, intenționat: un refresh al query-ului (salvarea altui rând)
+	// nu trebuie să șteargă ce tastează userul.
 	let label = $state(untrack(() => mode.label));
 	let suffix = $state(untrack(() => mode.suffix));
 	let description = $state(untrack(() => mode.description));
@@ -28,12 +42,20 @@
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
-	// Switch-ul bits-ui își ține propriul `checked` la click. Fără oglinda asta locală,
-	// un refuz al serverului (regimul standard nu se dezactivează) lăsa butonul în
-	// poziția greșită până la reîncărcarea paginii.
-	let activeLocal = $state(untrack(() => mode.isActive));
-	$effect(() => {
-		activeLocal = mode.isActive;
+	// Switch-ul bits-ui își ține propriul `checked` la click. Derived scriibil: click-ul îl
+	// suprascrie optimist, `catch` îl dă înapoi la refuzul serverului, iar o salvare reușită
+	// îl resincronizează singură când se reîmprospătează `mode`.
+	let activeLocal = $derived(mode.isActive);
+
+	// Toggle-ul de „Activ” schimbă doar statusul: trimite valorile de pe server, nu
+	// bufferele de editare pe care userul nu le-a salvat încă.
+	const serverFields: ModeFields = $derived({
+		label: mode.label,
+		suffix: mode.suffix,
+		description: mode.description,
+		sla: mode.sla,
+		multiplierPct: mode.multiplierPct,
+		maxHours: mode.maxHours
 	});
 
 	const dirty = $derived(
@@ -47,20 +69,62 @@
 
 	const idBase = $derived(`mode-${mode.slug}`);
 
-	async function save(isActive: boolean = mode.isActive) {
+	// Regimul nu stă într-un <form>, deci browserul nu impune min/max/step de pe input-uri.
+	// Fără verificarea asta, o valoare greșită ajunge la valibot și userul vede „Bad Request”.
+	function validate(fields: ModeFields): string | null {
+		if (fields.label.length < 2 || fields.label.length > 60) {
+			return 'Denumirea trebuie să aibă între 2 și 60 de caractere.';
+		}
+		if (fields.suffix.length > SUFFIX_MAX_LENGTH) {
+			return `Sufixul de pe factură are maximum ${SUFFIX_MAX_LENGTH} de caractere.`;
+		}
+		if (
+			!Number.isInteger(fields.multiplierPct) ||
+			fields.multiplierPct < MULTIPLIER_PCT_MIN ||
+			fields.multiplierPct > MULTIPLIER_PCT_MAX
+		) {
+			return `Multiplicatorul trebuie să fie un procent întreg între ${MULTIPLIER_PCT_MIN} și ${MULTIPLIER_PCT_MAX}.`;
+		}
+		if (
+			!Number.isInteger(fields.maxHours) ||
+			fields.maxHours < MAX_HOURS_MIN ||
+			fields.maxHours > MAX_HOURS_MAX
+		) {
+			return `Plafonul de ore trebuie să fie un număr întreg între ${MAX_HOURS_MIN} și ${MAX_HOURS_MAX}.`;
+		}
+		if (fields.description.length > TEXT_MAX_LENGTH) {
+			return `Descrierea are maximum ${TEXT_MAX_LENGTH} de caractere.`;
+		}
+		if (fields.sla.length > TEXT_MAX_LENGTH) {
+			return `SLA-ul are maximum ${TEXT_MAX_LENGTH} de caractere.`;
+		}
+		return null;
+	}
+
+	async function save(
+		isActive: boolean = mode.isActive,
+		fields: ModeFields = {
+			label: label.trim(),
+			suffix: suffix.trim(),
+			description: description.trim(),
+			sla: sla.trim(),
+			multiplierPct: Number(multiplierPct),
+			maxHours: Number(maxHours)
+		}
+	) {
+		const problem = validate(fields);
+		if (problem) {
+			error = problem;
+			return;
+		}
 		saving = true;
 		error = null;
 		try {
-			await updateRateMode({
-				slug: mode.slug,
-				label: label.trim(),
-				suffix: suffix.trim(),
-				description: description.trim(),
-				sla: sla.trim(),
-				multiplierPct: Number(multiplierPct),
-				maxHours: Number(maxHours),
-				isActive
-			}).updates(getHourlyRatesAdmin());
+			await updateRateMode({ slug: mode.slug, ...fields, isActive }).updates(getHourlyRatesAdmin());
+			label = label.trim();
+			suffix = suffix.trim();
+			description = description.trim();
+			sla = sla.trim();
 		} catch (err) {
 			error = remoteErrorMessage(err, 'Nu am putut salva regimul.');
 			activeLocal = mode.isActive;
@@ -83,7 +147,7 @@
 			<Switch
 				id="{idBase}-active"
 				bind:checked={activeLocal}
-				onCheckedChange={(v) => save(v)}
+				onCheckedChange={(v) => save(v, serverFields)}
 				disabled={!canEdit || saving || isStandard}
 			/>
 		</div>
@@ -100,7 +164,7 @@
 				id="{idBase}-suffix"
 				bind:value={suffix}
 				disabled={!canEdit || saving || isStandard}
-				maxlength={40}
+				maxlength={SUFFIX_MAX_LENGTH}
 				placeholder="ex. Urgență 48h"
 			/>
 		</div>
@@ -134,7 +198,7 @@
 				id="{idBase}-desc"
 				bind:value={description}
 				disabled={!canEdit || saving}
-				maxlength={300}
+				maxlength={TEXT_MAX_LENGTH}
 				rows={2}
 			/>
 		</div>
@@ -144,7 +208,7 @@
 				id="{idBase}-sla"
 				bind:value={sla}
 				disabled={!canEdit || saving}
-				maxlength={300}
+				maxlength={TEXT_MAX_LENGTH}
 				rows={2}
 			/>
 		</div>

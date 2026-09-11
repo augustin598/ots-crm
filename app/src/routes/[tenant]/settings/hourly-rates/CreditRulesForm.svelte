@@ -11,7 +11,7 @@
 		type HourCreditRules
 	} from '$lib/logic/hourly-catalog';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 
 	let {
 		rules,
@@ -27,6 +27,8 @@
 
 	const AUTO = '__auto__';
 
+	// Seeded o singură dată, intenționat: un refresh al query-ului (salvarea altui rând)
+	// nu trebuie să șteargă ce tastează userul.
 	let referenceChoice = $state(untrack(() => rules.referenceRateSlug ?? AUTO));
 	let thresholdHours = $state(untrack(() => rules.lowCreditThresholdMinutes / 60));
 	let stepMinutes = $state<number>(untrack(() => rules.stepMinutes));
@@ -35,6 +37,9 @@
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 	let saved = $state(false);
+	let savedTimer: ReturnType<typeof setTimeout> | undefined;
+
+	onDestroy(() => clearTimeout(savedTimer));
 
 	const selectableRates = $derived(rates.filter((r) => r.isActive));
 	const resolved = $derived(rates.find((r) => r.slug === resolvedReferenceSlug) ?? null);
@@ -53,7 +58,10 @@
 				notifyWhatsapp
 			}).updates(getHourlyRatesAdmin());
 			saved = true;
-			setTimeout(() => {
+			// Două salvări la mai puțin de 3 s distanță: al doilea „Salvat.” trebuie să stea
+			// tot 3 s, nu să fie stins de timerul primei salvări.
+			clearTimeout(savedTimer);
+			savedTimer = setTimeout(() => {
 				saved = false;
 			}, 3000);
 		} catch (err) {
