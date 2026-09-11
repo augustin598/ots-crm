@@ -21,6 +21,14 @@
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
+	// Switch-ul bits-ui își ține propriul `checked` la click. Fără oglinda asta locală,
+	// un refuz al serverului (ultima specializare activă, tariful de referință) lăsa
+	// butonul în poziția greșită până la reîncărcarea paginii.
+	let activeLocal = $state(untrack(() => rate.isActive));
+	$effect(() => {
+		activeLocal = rate.isActive;
+	});
+
 	const dirty = $derived(
 		label.trim() !== rate.label ||
 			Number(rateEur) !== rate.rateEur ||
@@ -41,6 +49,7 @@
 			label = label.trim();
 		} catch (err) {
 			error = remoteErrorMessage(err, 'Nu am putut salva specializarea.');
+			activeLocal = rate.isActive;
 		} finally {
 			saving = false;
 		}
@@ -81,7 +90,7 @@
 	</TableCell>
 	<TableCell>
 		<Switch
-			checked={rate.isActive}
+			bind:checked={activeLocal}
 			onCheckedChange={(v) => save(v)}
 			disabled={!canEdit || saving}
 			aria-label="Activ"

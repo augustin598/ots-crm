@@ -53,6 +53,9 @@
 				notifyWhatsapp
 			}).updates(getHourlyRatesAdmin());
 			saved = true;
+			setTimeout(() => {
+				saved = false;
+			}, 3000);
 		} catch (err) {
 			error = remoteErrorMessage(err, 'Nu am putut salva regulile.');
 		} finally {

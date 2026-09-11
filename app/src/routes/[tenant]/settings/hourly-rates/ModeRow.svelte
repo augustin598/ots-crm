@@ -28,6 +28,14 @@
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
+	// Switch-ul bits-ui își ține propriul `checked` la click. Fără oglinda asta locală,
+	// un refuz al serverului (regimul standard nu se dezactivează) lăsa butonul în
+	// poziția greșită până la reîncărcarea paginii.
+	let activeLocal = $state(untrack(() => mode.isActive));
+	$effect(() => {
+		activeLocal = mode.isActive;
+	});
+
 	const dirty = $derived(
 		label.trim() !== mode.label ||
 			suffix.trim() !== mode.suffix ||
@@ -55,6 +63,7 @@
 			}).updates(getHourlyRatesAdmin());
 		} catch (err) {
 			error = remoteErrorMessage(err, 'Nu am putut salva regimul.');
+			activeLocal = mode.isActive;
 		} finally {
 			saving = false;
 		}
@@ -73,7 +82,7 @@
 			<Label for="{idBase}-active" class="text-sm">Activ</Label>
 			<Switch
 				id="{idBase}-active"
-				checked={mode.isActive}
+				bind:checked={activeLocal}
 				onCheckedChange={(v) => save(v)}
 				disabled={!canEdit || saving || isStandard}
 			/>
