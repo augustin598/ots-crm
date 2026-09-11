@@ -1363,7 +1363,8 @@ export const updateRateMode = command(
 
 export const updateHourCreditRules = command(
 	v.object({
-		referenceRateSlug: v.nullable(v.pipe(v.string(), v.minLength(1), v.maxLength(40))),
+		// Fără minLength(1): '' e valoarea „automat" trimisă de UI și se normalizează în null mai jos.
+		referenceRateSlug: v.nullable(v.pipe(v.string(), v.maxLength(40))),
 		lowCreditThresholdMinutes: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(100_000)),
 		stepMinutes: v.picklist(STEP_MINUTES_OPTIONS),
 		notifyEmail: v.boolean(),
@@ -1372,12 +1373,14 @@ export const updateHourCreditRules = command(
 	async (data) => {
 		const { tenantId, userId } = await requireOwnerOrAdmin();
 		const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
+		// '' din UI = „automat" — se persistă null, ca resolveReferenceRate să-l trateze la fel.
 		const referenceRateSlug = data.referenceRateSlug || null;
 		const reason = referenceRateBlockReason(catalog.rates, referenceRateSlug);
 		if (reason) throw error(400, reason);
 
 		// Upsert pe indexul unic (tenant_id): două salvări simultane la prima
 		// configurare nu pot produce nici rând dublu, nici 500 pe conflict.
+		const now = new Date();
 		const values = {
 			referenceRateSlug,
 			lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
@@ -1385,13 +1388,13 @@ export const updateHourCreditRules = command(
 			notifyEmail: data.notifyEmail,
 			notifyWhatsapp: data.notifyWhatsapp,
 			updatedByUserId: userId,
-			updatedAt: new Date()
+			updatedAt: now
 		};
 		await withTursoBusyRetry(
 			() =>
 				db
 					.insert(table.hourCreditSettings)
-					.values({ id: generateId(), tenantId, createdAt: values.updatedAt, ...values })
+					.values({ id: generateId(), tenantId, createdAt: now, ...values })
 					.onConflictDoUpdate({ target: table.hourCreditSettings.tenantId, set: values }),
 			{ tenantId, label: 'hourly-rates.updateRules' }
 		);
