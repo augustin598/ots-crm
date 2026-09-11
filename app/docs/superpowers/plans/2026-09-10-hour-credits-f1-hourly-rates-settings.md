@@ -10,6 +10,16 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-10-client-hour-credits-design.md` (secțiunile 3.1, 4, 11/F1).
 
+**Stare (2026-09-11):** Task 1–7 executate pe branch-ul `feat/hour-credits-f1-hourly-rates`
+(commit-uri `90245a04` … `5a515273`). Abateri față de blocurile de cod din Task 6, toate din
+review: `remoteErrorMessage` și în snippet-ul `failed`; bufferele de editare seed-uite cu
+`untrack` (intenționat, un refresh nu șterge ce tastează userul); switch-ul „Activ" e un
+`$derived` scriibil cu rollback în `catch`; validare client-side pe rânduri (mesaje în română);
+toggle-ul trimite valorile de pe server, nu bufferele; `aria-label` per rând; „Salvat." dispare
+după 3 s; bara de tab-uri `h-auto … lg:grid-cols-5 xl:grid-cols-10`; `min-w-48`/`min-w-44` pe
+„Denumire". În Task 7 `getHourlyRate`/`getRateMode` rămân în `ots-catalog.ts` (le folosește
+testul golden), doar apelanții din server au trecut pe `getHourlyCatalog`.
+
 ---
 
 ## Reguli ale proiectului care se aplică la FIECARE task

@@ -13,10 +13,16 @@ al doilea ax: **regimul de lucru**, cu multiplicator pe tariful de bază.
 | Weekend & sărbători legale | ×1.70 | 111 | 119 | 94 | 136 | 24 |
 | Noapte 20:00–08:00 | ×2.00 | 130 | 140 | 110 | 160 | 16 |
 
-Tarifele efective se calculează din `HOURLY_RATES × multiplicator`, rotunjite la
+Tarifele efective se calculează din `tarif de bază × multiplicator`, rotunjite la
 euro întreg. Rotunjirea urcă 65 și 55 cu ~50,8% la urgență (98, nu 97,5) — de
 aceea UI-ul **nu** afișează badge „+50%", ci numele regimului și tariful efectiv.
-Un test golden fixează cele 12 valori: orice schimbare de tarif de bază apare în
+Din 2026-09 tarifele de bază, multiplicatorii, plafoanele și textele SLA se
+editează din **Settings → Tarife orare** (tabelele `hourly_rate` și
+`hourly_rate_mode`, per tenant, citite prin `$lib/server/hourly-catalog.ts`).
+`HOURLY_RATES` / `RATE_MODES` din `ots-catalog.ts` sunt doar seed-ul inserat la
+prima citire a unui tenant.
+
+Un test golden fixează cele 12 valori ale seed-ului (nu valorile curente din DB): orice schimbare de tarif de bază apare în
 diff, nu direct pe factură.
 
 **Anti-cumul:** se aplică un singur regim, cel mai mare. Weekend noaptea = ×2.00,
