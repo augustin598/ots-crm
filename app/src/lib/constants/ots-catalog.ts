@@ -750,6 +750,9 @@ export interface HourlyRate {
 	rate: number;
 }
 
+// SEED, nu sursă de adevăr: din 2026-09 tarifele trăiesc în tabelul `hourly_rate`
+// (Settings → Tarife orare) și se citesc prin $lib/server/hourly-catalog.ts.
+// Lista de aici se inserează o singură dată, la prima citire a unui tenant.
 export const HOURLY_RATES: HourlyRate[] = [
 	{ slug: 'development', label: 'Development', rate: 65 },
 	{ slug: 'design-ui-ux', label: 'Design UI/UX', rate: 70 },
@@ -795,6 +798,7 @@ export interface RateMode {
 	maxHours: number;
 }
 
+// SEED, nu sursă de adevăr: tabelul `hourly_rate_mode`, citit prin hourly-catalog.ts.
 export const RATE_MODES: RateMode[] = [
 	{
 		slug: 'standard',
@@ -839,7 +843,7 @@ export function getRateMode(slug: string): RateMode | undefined {
 }
 
 /** Denumirea din `rate_label` / linia de factură: „Development (Urgență 48h)". */
-export function hourlyRateLabelFor(rate: HourlyRate, mode: RateMode): string {
+export function hourlyRateLabelFor(rate: { label: string }, mode: { suffix: string }): string {
 	return mode.suffix ? `${rate.label} (${mode.suffix})` : rate.label;
 }
 

@@ -32,7 +32,7 @@ import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { vatPercentToBps } from '$lib/utils/vat';
 import { eurCentsToRonCents, formatExchangeRate } from '$lib/logic/hours-pricing';
-import { getRateMode } from '$lib/constants/ots-catalog';
+import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
 /** Peste atât cursul e probabil vechi (weekend + sărbătoare = max ~4 zile); avertizăm, nu blocăm. */
@@ -166,10 +166,17 @@ export async function emitKeezHoursInvoice(params: {
 	// Regimul de lucru intră pe factură, nu doar în DB: SLA-ul înghețat la plată
 	// și intervalul cerut de client sunt singura probă scrisă într-o dispută pe
 	// „am plătit urgență, nu s-a lucrat în weekend".
-	const modeNote =
-		order.modeSlug && order.modeSlug !== 'standard'
-			? ` Regim ${getRateMode(order.modeSlug)?.label ?? order.modeSlug} (+${order.modeMultiplierPct - 100}% față de tariful standard de ${order.baseRateEur ?? order.rateEur} €/h)${order.requestedWindow ? `, interval cerut: ${order.requestedWindow}` : ''}.${order.modeSlaSnapshot ? ` ${order.modeSlaSnapshot}` : ''}`
-			: '';
+	// Eticheta regimului vine din DB (includeInactive: un regim dezactivat între plată
+	// și emitere trebuie totuși să apară cu numele lui pe factură).
+	const isPremiumMode = !!order.modeSlug && order.modeSlug !== 'standard';
+	const modeLabel = isPremiumMode
+		? ((await getHourlyCatalog(tenantId, { includeInactive: true })).modes.find(
+				(m) => m.slug === order.modeSlug
+			)?.label ?? order.modeSlug)
+		: null;
+	const modeNote = isPremiumMode
+		? ` Regim ${modeLabel} (+${order.modeMultiplierPct - 100}% față de tariful standard de ${order.baseRateEur ?? order.rateEur} €/h)${order.requestedWindow ? `, interval cerut: ${order.requestedWindow}` : ''}.${order.modeSlaSnapshot ? ` ${order.modeSlaSnapshot}` : ''}`
+		: '';
 	let cachedArticleId: string | null = null;
 	try {
 		const [cached] = await db

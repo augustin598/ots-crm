@@ -21,7 +21,6 @@ import {
 	TIERS,
 	TIER_LABELS,
 	TIER_COLORS,
-	HOURLY_RATES,
 	WEB_DEV_SLUGS,
 	SETUP_DEFAULT_DESCRIPTION,
 	BUNDLE_TIERS_RULE,
@@ -58,8 +57,6 @@ function clientIp(event: RequestEvent): string {
 		return event.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
 	}
 }
-
-
 
 export const load: PageServerLoad = async (event) => {
 	const tenantId = await resolvePublicTenantId();

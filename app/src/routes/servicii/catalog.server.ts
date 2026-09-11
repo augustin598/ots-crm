@@ -18,14 +18,14 @@ import {
 	TIERS,
 	TIER_LABELS,
 	TIER_COLORS,
-	HOURLY_RATES,
-	RATE_MODES,
 	WEB_DEV_SLUGS,
 	SETUP_DEFAULT_DESCRIPTION,
 	BUNDLE_TIERS_RULE,
 	BUNDLES
 } from '$lib/constants/ots-catalog';
 import { resolveVatPercent } from '$lib/server/vat/rate';
+import { getHourlyCatalog } from '$lib/server/hourly-catalog';
+import { toPublicHourlyRates, toPublicRateModes } from '$lib/logic/hourly-catalog';
 import type { PublicCatalog, PublicCompany } from './types';
 
 export async function buildPublicCatalog(tenantId: string): Promise<PublicCatalog> {
@@ -36,6 +36,9 @@ export async function buildPublicCatalog(tenantId: string): Promise<PublicCatalo
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
+
+	// Tarifele orare vin din DB (Settings → Tarife orare), nu din constante.
+	const hourly = await getHourlyCatalog(tenantId);
 
 	return {
 		categories: CATEGORIES,
@@ -50,8 +53,8 @@ export async function buildPublicCatalog(tenantId: string): Promise<PublicCatalo
 		tiers: TIERS,
 		tierLabels: TIER_LABELS,
 		tierColors: TIER_COLORS,
-		hourlyRates: HOURLY_RATES,
-		rateModes: RATE_MODES,
+		hourlyRates: toPublicHourlyRates(hourly.rates),
+		rateModes: toPublicRateModes(hourly.modes),
 		webDevSlugs: [...WEB_DEV_SLUGS],
 		setupDefaultDescription: SETUP_DEFAULT_DESCRIPTION,
 		discountRules: BUNDLE_TIERS_RULE,

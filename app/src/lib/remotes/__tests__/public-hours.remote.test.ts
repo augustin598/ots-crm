@@ -126,6 +126,40 @@ mock.module('$lib/server/stripe/customer', () => ({
 	}
 }));
 
+// ─── Catalogul de tarife (din DB în prod; aici seed-ul din constante) ───────
+const { HOURLY_RATES, RATE_MODES } = await import('$lib/constants/ots-catalog');
+mock.module('$lib/server/hourly-catalog', () => ({
+	getHourlyCatalog: async () => ({
+		rates: HOURLY_RATES.map((r, i) => ({
+			id: `rate-${i}`,
+			slug: r.slug,
+			label: r.label,
+			rateEur: r.rate,
+			sortOrder: i,
+			isActive: true
+		})),
+		modes: RATE_MODES.map((m, i) => ({
+			id: `mode-${i}`,
+			slug: m.slug,
+			label: m.label,
+			suffix: m.suffix,
+			description: m.description,
+			sla: m.sla,
+			multiplierPct: m.multiplierPct,
+			maxHours: m.maxHours,
+			sortOrder: i,
+			isActive: true
+		})),
+		rules: {
+			referenceRateSlug: null,
+			lowCreditThresholdMinutes: 120,
+			stepMinutes: 15,
+			notifyEmail: true,
+			notifyWhatsapp: true
+		}
+	})
+}));
+
 const { createHoursOrder } = await import('../public-hours.remote');
 
 const INPUT = {

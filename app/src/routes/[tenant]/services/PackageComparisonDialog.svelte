@@ -1,5 +1,6 @@
 <!--
-	Wrapper peste `PackageComparisonView` care injectează constantele din catalog.
+	Wrapper peste `PackageComparisonView` care injectează constantele din catalog și
+	tarifele orare din DB (Settings → Tarife orare).
 	Folosit de /[tenant]/services (admin) și de portalul clientului.
 
 	Markup-ul propriu-zis trăiește în $lib/components/services/PackageComparisonView.svelte,
@@ -13,12 +14,11 @@
 		TIER_LABELS,
 		TIER_COLORS,
 		SETUP_DEFAULT_DESCRIPTION,
-		HOURLY_RATES,
-		RATE_MODES,
 		WEB_DEV_SLUGS,
 		type Category,
 		type Tier
 	} from '$lib/constants/ots-catalog';
+	import { getHourlyCatalogView } from '$lib/remotes/hourly-rates.remote';
 
 	type Props = {
 		open: boolean;
@@ -29,6 +29,12 @@
 	let { open = $bindable(), category, onRequest }: Props = $props();
 
 	const isWebDev = $derived(category ? WEB_DEV_SLUGS.has(category.slug) : false);
+
+	// `.current` (nu `await`): dialogul e montat închis pe pagini fără boundary;
+	// până sosesc datele, secțiunea de tarife e pur și simplu goală.
+	const hourlyView = getHourlyCatalogView();
+	const hourlyRates = $derived(hourlyView.current?.hourlyRates ?? []);
+	const rateModes = $derived(hourlyView.current?.rateModes ?? []);
 </script>
 
 <PackageComparisonView
@@ -38,8 +44,8 @@
 	tierLabels={TIER_LABELS}
 	tierColors={TIER_COLORS}
 	setupDefaultDescription={SETUP_DEFAULT_DESCRIPTION}
-	hourlyRates={HOURLY_RATES}
-	rateModes={RATE_MODES}
+	{hourlyRates}
+	{rateModes}
 	{isWebDev}
 	{onRequest}
 />

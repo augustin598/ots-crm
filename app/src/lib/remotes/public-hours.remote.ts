@@ -21,7 +21,8 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { and, eq, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { getHourlyRate, getRateMode, hourlyRateLabelFor } from '$lib/constants/ots-catalog';
+import { hourlyRateLabelFor } from '$lib/constants/ots-catalog';
+import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import {
 	HOURS_MIN,
 	HOURS_MAX,
@@ -98,9 +99,10 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 
 	// Tariful și multiplicatorul vin din catalog, NU din payload — clientul nu-și
 	// alege prețul, doar specializarea și regimul.
-	const rate = getHourlyRate(data.rateSlug);
+	const catalog = await getHourlyCatalog(tenantId);
+	const rate = catalog.rates.find((r) => r.slug === data.rateSlug);
 	if (!rate) throw error(400, 'Specializarea selectată nu există.');
-	const mode = getRateMode(data.modeSlug ?? DEFAULT_RATE_MODE);
+	const mode = catalog.modes.find((m) => m.slug === (data.modeSlug ?? DEFAULT_RATE_MODE));
 	if (!mode) throw error(400, 'Regimul de lucru selectat nu există.');
 	if (data.hours > mode.maxHours) {
 		throw error(
@@ -108,7 +110,7 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 			`Pentru regimul „${mode.label}" vindem online maximum ${mode.maxHours} ore odată. Scrie-ne pentru un volum mai mare.`
 		);
 	}
-	const effectiveRate = effectiveRateEur(rate.rate, mode.multiplierPct);
+	const effectiveRate = effectiveRateEur(rate.rateEur, mode.multiplierPct);
 	const rateLabel = hourlyRateLabelFor(rate, mode);
 	const requestedWindow = data.requestedWindow?.trim() || null;
 	if (mode.slug !== DEFAULT_RATE_MODE && !requestedWindow) {
@@ -282,7 +284,7 @@ export const createHoursOrder = command(hoursOrderSchema, async (data) => {
 					rateEur: effectiveRate,
 					modeSlug: mode.slug,
 					modeMultiplierPct: mode.multiplierPct,
-					baseRateEur: rate.rate,
+					baseRateEur: rate.rateEur,
 					modeSlaSnapshot: mode.sla,
 					requestedWindow,
 					hours: data.hours,
