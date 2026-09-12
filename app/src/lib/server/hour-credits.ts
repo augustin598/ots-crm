@@ -51,9 +51,25 @@ export interface LedgerEntryInput {
 	realMinutes?: number | null;
 }
 
+/**
+ * Conflict pe indexul unic (parțial) = evenimentul a fost deja aplicat.
+ *
+ * Verificarea merge pe lanțul `cause`: drizzle împachetează eroarea libSQL într-un
+ * `DrizzleQueryError` al cărui mesaj e doar „Failed query: insert into …", deci un
+ * test pe mesajul de la vârf ar rata conflictul și ar arunca o eroare 500 la a doua
+ * livrare a aceluiași webhook. Prins de testul de integrare (hour-credits-integration).
+ */
 function isUniqueViolation(err: unknown): boolean {
-	const { message } = serializeError(err);
-	return /UNIQUE constraint failed|SQLITE_CONSTRAINT_UNIQUE|SQLITE_CONSTRAINT/i.test(message);
+	let current: unknown = err;
+	for (let depth = 0; current && depth < 6; depth++) {
+		const e = current as { message?: unknown; code?: unknown; rawCode?: unknown; cause?: unknown };
+		if (typeof e.code === 'string' && e.code.includes('SQLITE_CONSTRAINT')) return true;
+		// 2067 = SQLITE_CONSTRAINT_UNIQUE, 1555 = SQLITE_CONSTRAINT_PRIMARYKEY
+		if (e.rawCode === 2067 || e.rawCode === 1555) return true;
+		if (typeof e.message === 'string' && /UNIQUE constraint failed/i.test(e.message)) return true;
+		current = e.cause;
+	}
+	return false;
 }
 
 /**
