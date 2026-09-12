@@ -64,3 +64,15 @@ export function eurCentsToRonCents(eurCents: number, rate: number): number {
 export function formatExchangeRate(rate: number): string {
 	return rate.toFixed(4);
 }
+
+/**
+ * Descrierea liniei de factură pentru ore — nume generic, stabil, ca articolul
+ * Keez să fie refolosit între facturi.
+ *
+ * Stă aici, în modulul pur, nu lângă emitentul de facturi: e folosită și de
+ * fluxul „Adaugă ore" din admin, iar un import din `emit-keez-hours-invoice` ar
+ * trage tot lanțul Stripe (`$app/environment`) după o funcție de o linie.
+ */
+export function hoursLineDescription(rateLabel: string): string {
+	return `Extra work — ${rateLabel}`;
+}

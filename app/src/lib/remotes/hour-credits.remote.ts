@@ -273,7 +273,9 @@ export const getHourOrderOptions = query(async () => {
 const orderDraftSchema = v.object({
 	rateSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
 	modeSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
-	hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500))
+	hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500)),
+	/** Fără client nu putem ști dacă e operațiune cu TVA 0 (intracom/export). */
+	clientId: v.optional(v.string())
 });
 
 /**

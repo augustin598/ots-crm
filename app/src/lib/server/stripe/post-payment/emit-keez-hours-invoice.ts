@@ -31,7 +31,14 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { getStripeForTenant } from '$lib/server/plugins/stripe/factory';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { vatPercentToBps } from '$lib/utils/vat';
-import { eurCentsToRonCents, formatExchangeRate } from '$lib/logic/hours-pricing';
+import {
+	eurCentsToRonCents,
+	formatExchangeRate,
+	hoursLineDescription
+} from '$lib/logic/hours-pricing';
+
+// Re-export pentru consumatorii care o importau de aici.
+export { hoursLineDescription };
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 
@@ -40,11 +47,6 @@ const BNR_RATE_WARN_HOURS = 5 * 24;
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
-}
-
-/** Descrierea liniei — nume generic, stabil, ca articolul Keez să fie refolosit. */
-export function hoursLineDescription(rateLabel: string): string {
-	return `Extra work — ${rateLabel}`;
 }
 
 export async function emitKeezHoursInvoice(params: {

@@ -53,7 +53,7 @@
 	// Cotația serverului; se recalculează la orice schimbare de selecție.
 	const quote = $derived(
 		rateSlug && modeSlug && hours >= 1
-			? await quoteHourCredit({ rateSlug, modeSlug, hours })
+			? await quoteHourCredit({ rateSlug, modeSlug, hours, clientId: clientId || undefined })
 			: null
 	);
 
@@ -199,6 +199,9 @@
 						· TVA {quote.vatPercent}% <b>{fmtMoneyCents(quote.vatCents)}</b> · credit adăugat
 						<b>{fmtMinutes(quote.creditMinutes)}</b>
 					</div>
+					{#if quote.zeroVatNote}
+						<div class="hc-preview">{quote.zeroVatNote}</div>
+					{/if}
 				{:else if quote && !quote.ok}
 					<div class="hc-preview danger">{quote.reason}</div>
 				{/if}

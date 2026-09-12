@@ -29,6 +29,8 @@ import { getLatestBnrRateWithDate } from '$lib/server/bnr/client';
 import { pushInvoiceToKeez } from '$lib/server/plugins/keez/auto-push';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { resolveVatPercent } from '$lib/server/vat/rate';
+import { classifyClientVat, getZeroVatLegalNote } from '$lib/server/vat/classify-client';
+import { appendZeroVatNote } from '$lib/server/whmcs/zero-vat-detection';
 import { computeVatBreakdown, vatPercentToBps } from '$lib/utils/vat';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 import { applyLedgerEntry } from '$lib/server/hour-credits';
@@ -37,13 +39,13 @@ import {
 	effectiveRateEur,
 	eurCentsToRonCents,
 	formatExchangeRate,
+	hoursLineDescription,
 	hoursNetCents,
 	isValidHours
 } from '$lib/logic/hours-pricing';
 import { activeModes, activeRates, resolveReferenceRate } from '$lib/logic/hourly-catalog';
 import { HOUR_CREDIT_INVOICE_SOURCE } from '$lib/logic/hour-credits';
 import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
-import { hoursLineDescription } from '$lib/server/stripe/post-payment/emit-keez-hours-invoice';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -82,6 +84,8 @@ export async function quoteHourCreditOrder(params: {
 	rateSlug: string;
 	modeSlug: string;
 	hours: number;
+	/** Când e dat, cota de TVA ține cont de clasificarea fiscală a clientului. */
+	clientId?: string | null;
 }): Promise<
 	| { ok: false; reason: string }
 	| {
@@ -99,6 +103,8 @@ export async function quoteHourCreditOrder(params: {
 			grossCents: number;
 			vatPercent: number;
 			creditMinutes: number;
+			/** Mențiunea legală de pus pe factură când TVA-ul e 0. */
+			zeroVatNote: string | null;
 	  }
 > {
 	const { tenantId, rateSlug, modeSlug, hours } = params;
@@ -122,11 +128,33 @@ export async function quoteHourCreditOrder(params: {
 	const rateEur = effectiveRateEur(rate.rateEur, mode.multiplierPct);
 	const netCents = hoursNetCents(rateEur, hours);
 	const [settings] = await db
-		.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
+		.select({
+			defaultTaxRate: table.invoiceSettings.defaultTaxRate,
+			zeroVatAutoDetect: table.invoiceSettings.whmcsZeroVatAutoDetect
+		})
 		.from(table.invoiceSettings)
 		.where(eq(table.invoiceSettings.tenantId, tenantId))
 		.limit(1);
-	const vatPercent = resolveVatPercent(settings?.defaultTaxRate);
+
+	// Cota NU e hardcodată: vine din setările de facturare ale tenantului. În plus,
+	// un client intracomunitar sau din afara UE se facturează cu 0% și mențiunea
+	// legală — aceeași regulă ca la facturile create din /invoices.
+	let vatPercent = resolveVatPercent(settings?.defaultTaxRate);
+	let zeroVatNote: string | null = null;
+	if (params.clientId && (settings?.zeroVatAutoDetect ?? true)) {
+		const [vatClient] = await db
+			.select({ country: table.client.country, cui: table.client.cui })
+			.from(table.client)
+			.where(and(eq(table.client.id, params.clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (vatClient) {
+			const scenario = classifyClientVat({ country: vatClient.country, cui: vatClient.cui });
+			if (scenario === 'intracom' || scenario === 'export') {
+				vatPercent = 0;
+				zeroVatNote = getZeroVatLegalNote(scenario);
+			}
+		}
+	}
 	const { vatCents, grossCents } = computeVatBreakdown(netCents, vatPercent);
 
 	// Creditul se măsoară în minute la tariful de REFERINȚĂ: orele scumpe aduc
@@ -147,7 +175,8 @@ export async function quoteHourCreditOrder(params: {
 		vatCents,
 		grossCents,
 		vatPercent,
-		creditMinutes
+		creditMinutes,
+		zeroVatNote
 	};
 }
 
@@ -164,6 +193,7 @@ export async function createHourCreditOrder(
 
 	const quote = await quoteHourCreditOrder({
 		tenantId,
+		clientId,
 		rateSlug: input.rateSlug,
 		modeSlug: input.modeSlug,
 		hours: input.hours
@@ -303,16 +333,21 @@ export async function createHourCreditOrder(
 						currency: 'RON',
 						invoiceCurrency: null,
 						exchangeRate: formatExchangeRate(exchangeRate),
-						taxApplicationType: 'apply',
+						// 'none' la 0%: Keez nu trebuie să aplice cotă peste o operațiune
+						// scutită (intracomunitar / export).
+						taxApplicationType: quote.vatPercent === 0 ? 'none' : 'apply',
 						issueDate: now,
 						dueDate,
-						notes: `Ore extra work ${quote.rateLabel} × ${input.hours} h, adăugate în creditul clientului la ${now.toISOString().slice(0, 10)}.${
+						notes: appendZeroVatNote(
+							`Ore extra work ${quote.rateLabel} × ${input.hours} h, adăugate în creditul clientului la ${now.toISOString().slice(0, 10)}.${
 							input.modeSlug === 'standard'
 								? ''
 								: ` Regim ${quote.modeLabel} (+${quote.multiplierPct - 100}% față de tariful standard de ${quote.baseRateEur} €/h)${
 										input.requestedWindow ? `, interval cerut: ${input.requestedWindow}` : ''
 									}.${quote.modeSla ? ` ${quote.modeSla}` : ''}`
-						} Curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`
+						} Curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`,
+						quote.zeroVatNote
+					)
 					});
 					await tx.insert(table.invoiceLineItem).values({
 						id: generateId(),
@@ -348,16 +383,33 @@ export async function createHourCreditOrder(
 	}
 
 	// ── 3. Keez (nefatal) ─────────────────────────────────────────────────────
+	//
+	// ATENȚIE: `pushInvoiceToKeez` NU aruncă la eșec, întoarce
+	// `{ success: false, error }`. Fără verificarea rezultatului am raporta
+	// „trimis în Keez" pentru o factură care n-a plecat — exact ce s-a întâmplat
+	// la proba din 12 sep 2026 (Keez respinge factura când clientul are același
+	// CUI ca firma emitentă).
 	let keezPushed = false;
 	try {
-		await pushInvoiceToKeez(tenantId, invoiceId);
-		keezPushed = true;
+		const push = await pushInvoiceToKeez(tenantId, invoiceId);
+		keezPushed = push.success;
+		if (!push.success) {
+			logError('keez', `hour-credit-order: push Keez respins: ${push.error}`, {
+				tenantId,
+				metadata: { invoiceId, invoiceNumber }
+			});
+			warnings.push(
+				`Factura ${invoiceNumber} e în CRM, dar Keez a respins-o: ${push.error}. Retrimite din pagina facturii după ce rezolvi cauza.`
+			);
+		}
 	} catch (err) {
 		logError('keez', `hour-credit-order: push Keez eșuat: ${serializeError(err).message}`, {
 			tenantId,
 			metadata: { invoiceId, invoiceNumber }
 		});
-		warnings.push('Factura e în CRM, dar nu a ajuns în Keez. Retrimite din pagina facturii.');
+		warnings.push(
+			`Factura ${invoiceNumber} e în CRM, dar nu a ajuns în Keez. Retrimite din pagina facturii.`
+		);
 	}
 
 	// ── 4. Emailul cu linkul de plată (nefatal) ───────────────────────────────
