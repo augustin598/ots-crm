@@ -64,7 +64,7 @@
 			<span>{task.actualMinutes ? formatMinutes(task.actualMinutes) : '—'}</span>
 		</div>
 		<div class="flex items-center justify-between gap-2">
-			<span class="text-muted-foreground">Specializare · Regim</span>
+			<span class="text-muted-foreground">Specializare și regim</span>
 			<span class="flex flex-wrap items-center justify-end gap-1.5">
 				<HcRatePill slug={task.rateSlug} />
 				<HcRatePill slug={task.modeSlug ?? 'standard'} kind="mode" />
