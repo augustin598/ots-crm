@@ -7,6 +7,7 @@
 	import { page } from '$app/state';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import {
 		adjustHourCredit,
 		getClientHourCreditView,
@@ -17,6 +18,7 @@
 	import HcAvatar from '$lib/components/hour-credits/HcAvatar.svelte';
 	import HcGauge from '$lib/components/hour-credits/HcGauge.svelte';
 	import HcSwitch from '$lib/components/hour-credits/HcSwitch.svelte';
+	import HcRatePill from '$lib/components/hour-credits/HcRatePill.svelte';
 	import HcAddHoursModal from '$lib/components/hour-credits/HcAddHoursModal.svelte';
 	import {
 		creditToEur,
@@ -417,7 +419,10 @@
 									{@const over = est > 0 && used > est}
 									<tr>
 										<td>
-											<a class="hc-strong" href="/{tenantSlug}/tasks/{t.id}">{t.title}</a>
+											<a class="hc-tasklink" href="/{tenantSlug}/tasks/{t.id}">
+												{t.title}
+												<ExternalLinkIcon size={12} />
+											</a>
 											<div class="hc-muted">
 												{[
 													t.projectName,
@@ -428,6 +433,14 @@
 													.filter(Boolean)
 													.join(' · ')}
 											</div>
+											{#if t.rateSlug}
+												<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+													<HcRatePill slug={t.rateSlug} />
+													{#if t.modeSlug && t.modeSlug !== 'standard'}
+														<HcRatePill slug={t.modeSlug} kind="mode" />
+													{/if}
+												</div>
+											{/if}
 											{#if est > 0}
 												<div style="margin-top:7px;max-width:240px">
 													<div class="hc-bartrack">

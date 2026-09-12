@@ -1591,3 +1591,56 @@
 .hr-savebar .sp {
 	flex: 1;
 }
+
+/* ---- Pastila de specializare / regim ---- */
+/*
+ * Montabilă oriunde (cardul taskului, drawer, fișa clientului), deci NU se poate
+ * baza pe tokenii unui wrapper: valorile au fallback, iar dark-ul le suprascrie.
+ */
+.hc-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--cl-text, #0f172a);
+	background: var(--hc-chip-mut-bg, #f1f5f9);
+	border-radius: 99px;
+	padding: 3px 9px 3px 7px;
+	white-space: nowrap;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.hc-pill-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 99px;
+	flex: none;
+}
+.dark .hc-pill {
+	color: var(--cl-text, #e5e7eb);
+	background: var(--hc-chip-mut-bg, #1f2a3b);
+}
+
+/* Titlul taskului din „Consum pe taskuri": link explicit, nu doar text bold. */
+.hc-tasklink {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 700;
+	color: var(--cl-text);
+	text-decoration: none;
+}
+.hc-tasklink svg {
+	color: var(--hc-muted);
+	flex: none;
+}
+.hc-tasklink:hover {
+	color: var(--cl-accent);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.hc-tasklink:hover svg {
+	color: var(--cl-accent);
+}

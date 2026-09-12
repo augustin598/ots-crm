@@ -1,12 +1,9 @@
 <script lang="ts">
 	/** Tabul „Raport lunar": 4 KPI + consum pe specializare + alimentare vs consum. */
 	import { getMonthlyHourReport } from '$lib/remotes/hour-credits.remote';
-	import { fmtHoursShort, fmtMinutes } from './hour-credits-format';
+	import { fmtHoursShort, fmtMinutes, rateColor } from './hour-credits-format';
 
 	const report = $derived(await getMonthlyHourReport());
-
-	// Paleta barelor, în ordinea specializărilor (cea din handoff).
-	const BAR_COLORS = ['#1877F2', '#a855f7', '#f59e0b', '#10b981', '#0ea5e9', '#64748b'];
 
 	const maxRate = $derived(Math.max(...report.byRate.map((b) => b.minutes), 1));
 	const maxWeek = $derived(
@@ -51,14 +48,14 @@
 				<p class="hc-muted">Niciun consum înregistrat luna asta.</p>
 			{:else}
 				<div class="hc-bars">
-					{#each report.byRate as bar, i (bar.slug)}
+					{#each report.byRate as bar (bar.slug)}
 						<div class="hc-barrow">
 							<span>{bar.label}</span>
 							<div class="hc-bartrack">
 								<div
 									class="hc-barfill"
 									style:width="{(bar.minutes / maxRate) * 100}%"
-									style:background={BAR_COLORS[i % BAR_COLORS.length]}
+									style:background={rateColor(bar.slug)}
 								></div>
 							</div>
 							<span class="hc-num">{fmtHoursShort(bar.minutes)}</span>

@@ -5,7 +5,8 @@ import {
 	fmtHoursShort,
 	fmtMinutes,
 	fmtRelative,
-	initialsOf
+	initialsOf,
+	rateColor
 } from './hour-credits-format';
 
 describe('fmtMinutes', () => {
@@ -82,5 +83,30 @@ describe('fmtRelative', () => {
 
 	test('fără dată → „niciodată"', () => {
 		expect(fmtRelative(null)).toBe('niciodată');
+	});
+});
+
+describe('rateColor', () => {
+	test('deterministă: același slug → aceeași culoare', () => {
+		expect(rateColor('development')).toBe(rateColor('development'));
+		expect(rateColor('qa-testare')).toBe(rateColor('qa-testare'));
+	});
+
+	test('slug-urile din catalog au culorile din handoff', () => {
+		expect(rateColor('development')).toBe('#1877F2');
+		expect(rateColor('project-management')).toBe('#f59e0b');
+		expect(rateColor('seo')).toBe('#10b981');
+	});
+
+	test('specializare nouă → tot o culoare validă din paletă', () => {
+		expect(rateColor('qa-testare')).toMatch(/^#[0-9a-fA-F]{6}$/);
+		expect(rateColor(null)).toMatch(/^#[0-9a-fA-F]{6}$/);
+	});
+
+	test('culoarea NU depinde de poziția în listă', () => {
+		// Aceeași specializare, „mutată" în listă: culoarea rămâne.
+		const before = ['development', 'seo', 'design'].map(rateColor);
+		const after = ['seo', 'design', 'development'].map(rateColor);
+		expect(after).toEqual([before[1], before[2], before[0]]);
 	});
 });

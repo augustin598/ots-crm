@@ -99,3 +99,83 @@ export function avatarColor(id: string): string {
 	for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
 	return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
+
+/**
+ * Culoarea unei specializări — aceeași peste tot: barele din raportul lunar,
+ * chipul din cardul taskului, punctul din „Consum pe taskuri".
+ *
+ * Deterministă din slug, NU din poziția în listă: altfel Development ar fi
+ * albastru azi și verde mâine, doar pentru că s-a schimbat ordinea în Settings.
+ * Slug-urile cunoscute au culoarea din handoff; restul primesc una stabilă din
+ * aceeași paletă.
+ */
+const RATE_COLORS = [
+	'#1877F2',
+	'#a855f7',
+	'#f59e0b',
+	'#10b981',
+	'#0ea5e9',
+	'#ef4444',
+	'#64748b'
+] as const;
+
+const KNOWN_RATE_COLORS: Record<string, string> = {
+	development: '#1877F2',
+	'design-ui-ux': '#0ea5e9',
+	design: '#0ea5e9',
+	'project-management': '#f59e0b',
+	'devops-api': '#a855f7',
+	devops: '#a855f7',
+	seo: '#10b981',
+	ads: '#ef4444',
+	'ads-performance': '#ef4444'
+};
+
+export function rateColor(slug: string | null | undefined): string {
+	if (!slug) return '#64748b';
+	const known = KNOWN_RATE_COLORS[slug];
+	if (known) return known;
+	let hash = 0;
+	for (let i = 0; i < slug.length; i++) hash = (hash * 31 + slug.charCodeAt(i)) >>> 0;
+	return RATE_COLORS[hash % RATE_COLORS.length];
+}
+
+/** Acronime care rămân cu majuscule când formatăm un slug pentru afișare. */
+const ACRONYMS = new Set(['ui', 'ux', 'api', 'seo', 'qa', 'crm', 'ads', 'devops']);
+
+/** „design-ui-ux" → „Design UI/UX"; „development" → „Development". */
+export function prettyRateLabel(slug: string | null | undefined): string {
+	if (!slug) return '—';
+	const parts = slug.split('-').filter(Boolean);
+	const words = parts.map((p) =>
+		ACRONYMS.has(p) ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1)
+	);
+	// „ui ux" arată mai bine ca „UI/UX".
+	return words.join(' ').replace(/\bUI UX\b/, 'UI/UX');
+}
+
+/** Etichetele regimurilor — fixe (slug-urile sunt închise în `RATE_MODE_SLUGS`). */
+const MODE_LABELS: Record<string, string> = {
+	standard: 'Standard',
+	urgent: 'Urgență',
+	weekend: 'Weekend',
+	night: 'Noapte'
+};
+
+export function prettyModeLabel(slug: string | null | undefined): string {
+	if (!slug) return '—';
+	return MODE_LABELS[slug] ?? prettyRateLabel(slug);
+}
+
+/** Regimurile au propriul cod de culoare: neutru la standard, cald la urgență/noapte. */
+const MODE_COLORS: Record<string, string> = {
+	standard: '#64748b',
+	urgent: '#f59e0b',
+	weekend: '#a855f7',
+	night: '#6366f1'
+};
+
+export function modeColor(slug: string | null | undefined): string {
+	if (!slug) return '#64748b';
+	return MODE_COLORS[slug] ?? '#64748b';
+}

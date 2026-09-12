@@ -5,7 +5,10 @@
 <script lang="ts">
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import Info from '@lucide/svelte/icons/info';
 	import { formatMinutes } from '$lib/logic/hourly-catalog';
+	import HcRatePill from '$lib/components/hour-credits/HcRatePill.svelte';
+	import '$lib/components/hour-credits/hour-credits.css';
 
 	let {
 		task,
@@ -31,9 +34,23 @@
 		<CardTitle class="flex items-center gap-2">
 			Credit ore
 			{#if task.creditSettledAt}
-				<Badge variant="outline">decontat</Badge>
+				<Badge
+					variant="outline"
+					class="gap-1"
+					title="Orele au fost deja scăzute din creditul clientului, la trecerea taskului în Done. Soldul lui a scăzut cu orele efective, ponderate cu tariful specializării."
+				>
+					decontat
+					<Info class="h-3 w-3 opacity-70" />
+				</Badge>
 			{:else}
-				<Badge variant="secondary">rezervat</Badge>
+				<Badge
+					variant="secondary"
+					class="gap-1"
+					title="Estimarea blochează credit din soldul clientului, dar încă nu s-a scăzut nimic. Scăderea se face la trecerea în Done, pe orele efective."
+				>
+					rezervat
+					<Info class="h-3 w-3 opacity-70" />
+				</Badge>
 			{/if}
 		</CardTitle>
 	</CardHeader>
@@ -46,9 +63,12 @@
 			<span class="text-muted-foreground">Ore efective</span>
 			<span>{task.actualMinutes ? formatMinutes(task.actualMinutes) : '—'}</span>
 		</div>
-		<div class="flex justify-between">
-			<span class="text-muted-foreground">Specializare · regim</span>
-			<span>{task.rateSlug ?? '—'} · {task.modeSlug ?? 'standard'}</span>
+		<div class="flex items-center justify-between gap-2">
+			<span class="text-muted-foreground">Specializare · Regim</span>
+			<span class="flex flex-wrap items-center justify-end gap-1.5">
+				<HcRatePill slug={task.rateSlug} />
+				<HcRatePill slug={task.modeSlug ?? 'standard'} kind="mode" />
+			</span>
 		</div>
 		{#if task.creditSettledAt}
 			<p class="text-xs text-muted-foreground">
