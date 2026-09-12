@@ -27,7 +27,8 @@
 	import ClientActivityFeed from '$lib/components/client/ClientActivityFeed.svelte';
 	import ClientOnboardingControl from '$lib/components/client/client-onboarding-control.svelte';
 	import ClientAiAccessPanel from '$lib/components/client/client-ai-access-panel.svelte';
-	import ClientHourCreditCard from '$lib/components/client/client-hour-credit-card.svelte';
+	import HcClientWidget from '$lib/components/hour-credits/HcClientWidget.svelte';
+	import '$lib/components/hour-credits/hour-credits.css';
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const clientId = $derived(page.params.clientId as string);
@@ -90,8 +91,12 @@
 		
 
 		<!-- KPIs -->
+		<!-- Creditul de ore: card propriu, nu KPI înghesuit — are gauge și acțiuni. -->
+		<div class="mb-6">
+			<HcClientWidget {clientId} />
+		</div>
+
 		<div class="grid gap-4 md:grid-cols-3 lg:grid-cols-6 mb-6">
-			<ClientHourCreditCard {clientId} />
 			<Card class="p-4">
 				<div class="flex items-center gap-3">
 					<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500/10">

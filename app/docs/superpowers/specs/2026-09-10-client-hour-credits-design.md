@@ -444,6 +444,33 @@ sunt scoped pe `locals.tenant`.
 ## 12. În afara scopului
 
 Time tracking cu cronometru, pontaj pe zile, storno/notă de credit în Keez,
-bazine per specializare, expirarea orelor, discount pe pachete de ore,
+bazine per specializare, discount pe pachete de ore,
 cumpărarea de ore din portal (rămâne pe `/servicii`), abonamente cu ore
 incluse definite în CRM (abonamentele rămân în Keez).
+
+## 13. Revizuire 2026-09-12 — expirarea intră în scop
+
+Expirarea orelor era listată mai sus ca fiind în afara scopului. Handoff-ul de
+design `design_handoff_hour_credits/` o cere explicit (KPI „expiră luna asta",
+cardul „Expirare" din fișă, regula `credit_expiry_days`, tipul de ledger
+`expirare`), iar userul a confirmat pe 12 septembrie 2026:
+
+- **intră în scop**, cu alocare **FIFO pe expirare**: consumul mănâncă întâi
+  lotul cu termenul cel mai apropiat, iar creditul fără termen se consumă
+  ultimul, ca să piardă clientul cât mai puțin;
+- **fără retroactiv**: doar alimentările de după activare primesc `expires_at`;
+  creditul existent rămâne fără termen;
+- **oprită implicit** (`credit_expiry_days = 0`), din același motiv ca
+  notificările — nu dispare credit real fără ca owner-ul să fi cerut asta.
+
+Implementare: `$lib/logic/hour-credit-expiry.ts` (pur, testat),
+jobul zilnic `hour-credit-expiry` (04:30 Europe/Bucharest), migrările
+0558–0561. Idempotența: index unic parțial pe `(tenant_id, source_id)` pentru
+`kind = 'expire'`, plus faptul că rândul de expirare e el însuși consum în
+ledger.
+
+Tot atunci a intrat și fluxul **„Adaugă ore" din admin**: creditul intră în
+ledger la emitere, apoi se emite factura (Keez) și pleacă pe email cu link de
+plată. Factura poartă `external_source = 'hour-credit'`, iar
+`invoiceCreditEligibility` o respinge — altfel plata ei ar credita a doua oară
+aceleași ore.

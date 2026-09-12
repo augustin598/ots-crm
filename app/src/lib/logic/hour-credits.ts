@@ -15,9 +15,10 @@ export type LedgerKind =
 	| 'manual'
 	| 'task_consumption'
 	| 'task_reversal'
-	| 'overage_invoiced';
+	| 'overage_invoiced'
+	| 'expire';
 
-export type LedgerSourceType = 'invoice' | 'hours_order' | 'task' | 'manual';
+export type LedgerSourceType = 'invoice' | 'hours_order' | 'task' | 'manual' | 'ledger';
 
 export const LEDGER_KIND_LABELS: Record<LedgerKind, string> = {
 	invoice_credit: 'Factură plătită',
@@ -27,13 +28,20 @@ export const LEDGER_KIND_LABELS: Record<LedgerKind, string> = {
 	manual: 'Ajustare manuală',
 	task_consumption: 'Consum task',
 	task_reversal: 'Task redeschis',
-	overage_invoiced: 'Depășire facturată'
+	overage_invoiced: 'Depășire facturată',
+	expire: 'Expirare credit'
 };
 
 /** Sursele de facturi care NU alimentează creditul (media plătită, nu muncă). */
 export const ADS_INVOICE_SOURCES = ['meta-ads', 'google-ads', 'tiktok-ads'] as const;
 /** Factura de depășire a orelor nu poate re-credita orele pe care le-a facturat. */
 export const HOUR_OVERAGE_INVOICE_SOURCE = 'hour-overage';
+/**
+ * Factura emisă din „Adaugă ore" (admin): creditul a intrat în ledger la
+ * EMITERE, nu la plată. Fără marcajul ăsta, `invoice.paid` ar credita a doua
+ * oară aceleași ore.
+ */
+export const HOUR_CREDIT_INVOICE_SOURCE = 'hour-credit';
 export const CREDITABLE_CURRENCIES = ['RON', 'EUR'] as const;
 
 /** Rotunjire la cel mai apropiat pas (ex. 15 min); pasul invalid = minut întreg. */
@@ -104,6 +112,9 @@ export function invoiceCreditEligibility(
 ): InvoiceEligibility {
 	if (invoice.externalSource === HOUR_OVERAGE_INVOICE_SOURCE) {
 		return { eligible: false, reason: 'factură de depășire a orelor' };
+	}
+	if (invoice.externalSource === HOUR_CREDIT_INVOICE_SOURCE) {
+		return { eligible: false, reason: 'ore adăugate manual (creditate la emitere)' };
 	}
 	if (invoice.hostingAccountId) return { eligible: false, reason: 'factură de hosting' };
 	if (

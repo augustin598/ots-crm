@@ -264,6 +264,10 @@
 .dash-w-funnel {
 	grid-column: span 4;
 }
+/* Bugete ore — cine rămâne fără ore; aceeași lățime ca funnel-ul. */
+.dash-w-hours {
+	grid-column: span 4;
+}
 .dash-w-today {
 	grid-column: span 4;
 }

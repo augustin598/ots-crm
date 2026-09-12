@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import PortalHourCreditView from './PortalHourCreditView.svelte';
+	import '$lib/components/hour-credits/hour-credits.css';
 
 	const tenant = $derived(page.params.tenant as string);
 </script>

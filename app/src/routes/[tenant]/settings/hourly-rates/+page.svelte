@@ -2,13 +2,10 @@
 	import HourlyRatesSettings from './HourlyRatesSettings.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
+	import '$lib/components/hour-credits/hour-credits.css';
 </script>
 
-<p class="mb-6 text-muted-foreground">
-	Tarifele pe oră după specializare, regimurile de lucru (urgență, weekend, noapte) și regulile
-	creditului de ore. Aceleași valori apar pe pagina publică /servicii, în comanda de ore și pe
-	facturile Keez.
-</p>
+<!-- Titlul și descrierea stau în hero-ul componentei (layout edge-to-edge). -->
 
 <svelte:boundary>
 	{#snippet pending()}

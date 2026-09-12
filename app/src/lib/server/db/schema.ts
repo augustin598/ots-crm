@@ -2510,6 +2510,10 @@ export const hourCreditSettings = sqliteTable(
 		// omite coloanele, iar upsert-ul din hourly-rates.remote le trimite mereu.
 		notifyEmail: boolean('notify_email').notNull().default(true),
 		notifyWhatsapp: boolean('notify_whatsapp').notNull().default(true),
+		/** 0 = creditul nu expiră. Altfel, alimentările primesc `expires_at` la +N zile. */
+		creditExpiryDays: integer('credit_expiry_days').notNull().default(0),
+		/** Valoarea din care pornește `client.hour_credit_from_invoices` la clienții noi. */
+		feedFromInvoicesDefault: boolean('feed_from_invoices_default').notNull().default(false),
 		updatedByUserId: text('updated_by_user_id').references(() => user.id),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
@@ -2554,6 +2558,11 @@ export const clientHourLedger = sqliteTable(
 		multiplierPctSnapshot: integer('multiplier_pct_snapshot'),
 		realMinutes: integer('real_minutes'),
 		note: text('note'),
+		/**
+		 * Lotul de credit expiră la data asta (null = fără termen). Doar
+		 * alimentările primesc valoare; consumul și expirările au null.
+		 */
+		expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
 		createdByUserId: text('created_by_user_id').references(() => user.id),
 		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 			.notNull()
@@ -2565,7 +2574,12 @@ export const clientHourLedger = sqliteTable(
 			.on(t.tenantId, t.kind, t.sourceType, t.sourceId)
 			.where(
 				sql`${t.kind} IN ('invoice_credit','invoice_credit_reversal','purchase','purchase_reversal')`
-			)
+			),
+		// Un lot de credit expiră o singură dată: `source_id` = id-ul rândului de
+		// alimentare. Garanția că jobul zilnic nu scrie de două ori același minus.
+		uniqueIndex('client_hour_ledger_expire_uidx')
+			.on(t.tenantId, t.sourceId)
+			.where(sql`${t.kind} = 'expire'`)
 	]
 );
 

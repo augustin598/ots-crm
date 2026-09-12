@@ -30,6 +30,8 @@ import {
 	RATE_EUR_MAX,
 	RATE_EUR_MIN,
 	STEP_MINUTES_OPTIONS,
+	CREDIT_EXPIRY_DAYS_MIN,
+	CREDIT_EXPIRY_DAYS_MAX,
 	modeUpdateBlockReason,
 	rateDeactivationBlockReason,
 	referenceRateBlockReason,
@@ -237,7 +239,14 @@ export const updateHourCreditRules = command(
 		lowCreditThresholdMinutes: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(100_000)),
 		stepMinutes: v.picklist(STEP_MINUTES_OPTIONS),
 		notifyEmail: v.boolean(),
-		notifyWhatsapp: v.boolean()
+		notifyWhatsapp: v.boolean(),
+		creditExpiryDays: v.pipe(
+			v.number(),
+			v.integer(),
+			v.minValue(CREDIT_EXPIRY_DAYS_MIN),
+			v.maxValue(CREDIT_EXPIRY_DAYS_MAX)
+		),
+		feedFromInvoicesDefault: v.boolean()
 	}),
 	async (data) => {
 		const { tenantId, userId } = await requireOwnerOrAdmin();
@@ -256,6 +265,8 @@ export const updateHourCreditRules = command(
 			stepMinutes: data.stepMinutes,
 			notifyEmail: data.notifyEmail,
 			notifyWhatsapp: data.notifyWhatsapp,
+			creditExpiryDays: data.creditExpiryDays,
+			feedFromInvoicesDefault: data.feedFromInvoicesDefault,
 			updatedByUserId: userId,
 			updatedAt: now
 		};

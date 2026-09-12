@@ -1,114 +1,106 @@
 <script lang="ts">
+	/**
+	 * Creditul de ore, văzut de client. Același limbaj vizual ca modulul din
+	 * admin (gauge, chipuri, ledger), dar fără nimic intern: fără tarife pe
+	 * specializare, fără cine a făcut ajustarea, fără facturi necreditate.
+	 */
 	import { getMyHourCredit } from '$lib/remotes/portal-hour-credits.remote';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
-	import {
-		Table,
-		TableBody,
-		TableCell,
-		TableHead,
-		TableHeader,
-		TableRow
-	} from '$lib/components/ui/table';
-	import { formatMinutes } from '$lib/logic/hourly-catalog';
 	import { LEDGER_KIND_LABELS } from '$lib/logic/hour-credits';
+	import HcGauge from '$lib/components/hour-credits/HcGauge.svelte';
+	import HcLegend from '$lib/components/hour-credits/HcLegend.svelte';
+	import { fmtDate, fmtMinutes } from '$lib/components/hour-credits/hour-credits-format';
 
 	const view = $derived(await getMyHourCredit());
 	const available = $derived(view.balanceMinutes - view.reservedMinutes);
 	const low = $derived(view.balanceMinutes < view.lowCreditThresholdMinutes);
+	const consumed30 = $derived(
+		view.entries
+			.filter(
+				(e) =>
+					e.kind === 'task_consumption' &&
+					new Date(e.createdAt).getTime() > Date.now() - 30 * 86_400_000
+			)
+			.reduce((s, e) => s + Math.abs(e.deltaMinutes), 0)
+	);
 
-	function fmtDate(d: Date): string {
-		return new Date(d).toLocaleDateString('ro-RO');
+	function toneOf(kind: string, delta: number): string {
+		if (kind === 'expire') return 'var(--hc-chip-mut-bg)';
+		return delta > 0 ? 'var(--hc-ok-bg)' : 'var(--hc-err-bg)';
 	}
 </script>
 
-<div class="space-y-6">
-	<div class="grid gap-4 sm:grid-cols-3">
-		<Card class="p-4">
-			<p class="text-sm text-muted-foreground">Sold</p>
-			<p class="text-3xl font-bold {low ? 'text-red-600' : ''}">
-				{formatMinutes(view.balanceMinutes)}
-			</p>
-			{#if low}
-				<Badge variant="destructive" class="mt-1">credit scăzut</Badge>
-			{/if}
-		</Card>
-		<Card class="p-4">
-			<p class="text-sm text-muted-foreground">Rezervate pe task-uri deschise</p>
-			<p class="text-3xl font-bold">{formatMinutes(view.reservedMinutes)}</p>
-		</Card>
-		<Card class="p-4">
-			<p class="text-sm text-muted-foreground">Disponibil</p>
-			<p class="text-3xl font-bold {available < 0 ? 'text-amber-600' : ''}">
-				{formatMinutes(available)}
-			</p>
-			{#if view.reference}
-				<p class="mt-1 text-xs text-muted-foreground">
-					1 h de credit = 1 h de {view.reference.label}; specializările mai scumpe consumă
-					proporțional.
-				</p>
-			{/if}
-		</Card>
+<div class="hc-widget" style="margin-bottom:14px">
+	<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+		<div style="min-width:0">
+			<div class="hc-bal-l">Disponibil acum</div>
+			<div class="hc-widget-big" class:neg={available < 0}>{fmtMinutes(available)}</div>
+			<div class="hc-muted" style="margin-top:4px">
+				sold {fmtMinutes(view.balanceMinutes)} · rezervat pe taskuri deschise
+				{fmtMinutes(view.reservedMinutes)}
+			</div>
+		</div>
+		{#if low}
+			<span class="hc-chip hc-chip-err" style="margin-left:auto;flex:none">Credit scăzut</span>
+		{/if}
 	</div>
 
-	<Card>
-		<CardHeader>
-			<CardTitle>Istoric</CardTitle>
-			<CardDescription
-				>Alimentări (facturi plătite, ore cumpărate), consum pe task-uri și ajustări.</CardDescription
-			>
-		</CardHeader>
-		<CardContent>
-			{#if view.entries.length === 0}
-				<p class="text-sm text-muted-foreground">Nicio mișcare încă.</p>
-			{:else}
-				<div class="overflow-x-auto">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Data</TableHead>
-								<TableHead>Tip</TableHead>
-								<TableHead class="text-right">Ore</TableHead>
-								<TableHead>Detalii</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{#each view.entries as e (e.id)}
-								<TableRow>
-									<TableCell class="whitespace-nowrap">{fmtDate(e.createdAt)}</TableCell>
-									<TableCell
-										><Badge variant="outline">{LEDGER_KIND_LABELS[e.kind] ?? e.kind}</Badge
-										></TableCell
+	<HcGauge balance={view.balanceMinutes} reserved={view.reservedMinutes} spent={consumed30} lg />
+	<div style="margin-top:12px"><HcLegend /></div>
+
+	{#if view.reference}
+		<div class="hc-preview" style="margin-top:14px;margin-bottom:0">
+			1 h de credit = 1 h de <b>{view.reference.label}</b>; specializările mai scumpe consumă
+			proporțional mai mult.
+		</div>
+	{/if}
+</div>
+
+<div class="hc-tablecard hc-widget" style="padding:0">
+	<div class="hc-card-h tight">
+		<h3>Istoric</h3>
+		<p>Alimentări (facturi plătite, ore cumpărate), consum pe taskuri și ajustări.</p>
+	</div>
+
+	{#if view.entries.length === 0}
+		<div class="hc-empty"><b>Nicio mișcare încă</b>Creditul tău de ore e gol.</div>
+	{:else}
+		<div class="hc-tablescroll">
+			<table class="hc-table">
+				<thead>
+					<tr>
+						<th>Mișcare</th>
+						<th>Data</th>
+						<th class="r">Ore</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each view.entries as e (e.id)}
+						{@const plus = e.deltaMinutes > 0}
+						<tr>
+							<td>
+								<div class="hc-led-type">
+									<span
+										class="hc-led-ic"
+										style:background={toneOf(e.kind, e.deltaMinutes)}
+										style:color={plus ? 'var(--hc-ok-fg)' : 'var(--hc-err-fg)'}
+										aria-hidden="true"
 									>
-									<TableCell
-										class="text-right font-medium {e.deltaMinutes < 0
-											? 'text-red-600'
-											: e.deltaMinutes > 0
-												? 'text-green-700'
-												: ''}"
-									>
-										{e.deltaMinutes > 0 ? '+' : ''}{formatMinutes(e.deltaMinutes)}
-									</TableCell>
-									<TableCell class="text-sm">
-										{e.note ?? ''}
-										{#if e.realMinutes && e.kind !== 'purchase'}
-											<span class="text-xs text-muted-foreground"
-												>· {formatMinutes(e.realMinutes)} lucrate</span
-											>
-										{/if}
-									</TableCell>
-								</TableRow>
-							{/each}
-						</TableBody>
-					</Table>
-				</div>
-			{/if}
-		</CardContent>
-	</Card>
+										{plus ? '+' : '−'}
+									</span>
+									<span>{e.note || LEDGER_KIND_LABELS[e.kind] || e.kind}</span>
+								</div>
+								{#if e.realMinutes && e.kind !== 'purchase'}
+									<div class="hc-muted hc-led-sub">{fmtMinutes(e.realMinutes)} lucrate</div>
+								{/if}
+							</td>
+							<td class="hc-muted">{fmtDate(e.createdAt)}</td>
+							<td class="hc-num {plus ? 'hc-plus' : 'hc-minus'}">
+								{plus ? '+' : ''}{fmtMinutes(e.deltaMinutes)}
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
 </div>

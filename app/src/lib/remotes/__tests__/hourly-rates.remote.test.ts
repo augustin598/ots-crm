@@ -164,7 +164,9 @@ const RULES_INPUT = {
 	lowCreditThresholdMinutes: 60,
 	stepMinutes: 15 as const,
 	notifyEmail: true,
-	notifyWhatsapp: true
+	notifyWhatsapp: true,
+	creditExpiryDays: 0,
+	feedFromInvoicesDefault: false
 };
 
 beforeEach(() => {
@@ -446,7 +448,9 @@ describe('updateHourCreditRules', () => {
 				lowCreditThresholdMinutes: 60,
 				stepMinutes: 15,
 				notifyEmail: true,
-				notifyWhatsapp: true
+				notifyWhatsapp: true,
+				creditExpiryDays: 0,
+				feedFromInvoicesDefault: false
 			})
 		).rejects.toMatchObject({ status: 400, body: { message: expect.stringMatching(/activ/) } });
 		expect(writes).toHaveLength(0);
@@ -473,7 +477,9 @@ describe('updateHourCreditRules', () => {
 			lowCreditThresholdMinutes: 90,
 			stepMinutes: 30,
 			notifyEmail: false,
-			notifyWhatsapp: true
+			notifyWhatsapp: true,
+			creditExpiryDays: 0,
+			feedFromInvoicesDefault: false
 		});
 		expect(writes).toHaveLength(1);
 		expect(writes[0].kind).toBe('upsert');

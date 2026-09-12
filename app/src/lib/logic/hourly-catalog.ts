@@ -44,6 +44,10 @@ export interface HourCreditRules {
 	stepMinutes: number;
 	notifyEmail: boolean;
 	notifyWhatsapp: boolean;
+	/** 0 = creditul nu expiră. Altfel, alimentările primesc termen la +N zile. */
+	creditExpiryDays: number;
+	/** Din ce pornește alimentarea din facturi la clienții noi. */
+	feedFromInvoicesDefault: boolean;
 }
 
 export interface HourlyCatalog {
@@ -81,8 +85,16 @@ export const DEFAULT_HOUR_CREDIT_RULES: HourCreditRules = {
 	lowCreditThresholdMinutes: 120,
 	stepMinutes: 15,
 	notifyEmail: false,
-	notifyWhatsapp: false
+	notifyWhatsapp: false,
+	// Expirarea e OPRITĂ implicit, din același motiv ca notificările: un default
+	// „pornit" ar face să dispară credit real la primul deploy, fără ca owner-ul
+	// să fi cerut asta. Se activează explicit în Settings → Tarife orare.
+	creditExpiryDays: 0,
+	feedFromInvoicesDefault: false
 };
+
+export const CREDIT_EXPIRY_DAYS_MIN = 0;
+export const CREDIT_EXPIRY_DAYS_MAX = 3650;
 
 export const STEP_MINUTES_OPTIONS = [15, 30, 60] as const;
 export const RATE_EUR_MIN = 1;

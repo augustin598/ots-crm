@@ -3884,6 +3884,34 @@
       "when": 1788786476908025,
       "tag": "0557_client_low_credit_notified_at",
       "breakpoints": true
+    },
+    {
+      "idx": 558,
+      "version": "6",
+      "when": 1788786476909025,
+      "tag": "0558_client_hour_ledger_expires_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 559,
+      "version": "6",
+      "when": 1788786476910025,
+      "tag": "0559_hour_credit_settings_expiry_days",
+      "breakpoints": true
+    },
+    {
+      "idx": 560,
+      "version": "6",
+      "when": 1788786476911025,
+      "tag": "0560_hour_credit_settings_feed_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 561,
+      "version": "6",
+      "when": 1788786476912025,
+      "tag": "0561_client_hour_ledger_expire_uidx",
+      "breakpoints": true
     }
   ]
 }

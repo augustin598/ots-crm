@@ -94,7 +94,11 @@ describe('getHourlyCatalog — seed lazy', () => {
 			stepMinutes: 15,
 			// Oprite implicit: niciun email/WhatsApp spre client fără bifă explicită.
 			notifyEmail: false,
-			notifyWhatsapp: false
+			notifyWhatsapp: false,
+			// Expirarea e oprită implicit din același motiv: nu dispare credit real
+			// fără ca owner-ul să fi cerut asta.
+			creditExpiryDays: 0,
+			feedFromInvoicesDefault: false
 		});
 	});
 
@@ -168,7 +172,9 @@ describe('getHourlyCatalog — seed lazy', () => {
 			lowCreditThresholdMinutes: 60,
 			stepMinutes: 30,
 			notifyEmail: false,
-			notifyWhatsapp: true
+			notifyWhatsapp: true,
+			creditExpiryDays: 0,
+			feedFromInvoicesDefault: false
 		});
 		expect(logWarningMock).toHaveBeenCalledTimes(0);
 

@@ -19,11 +19,16 @@ import {
 	creditPaidInvoice,
 	getClientHourCredit,
 	getHourCreditsOverview,
+	getMonthlyReport,
+	listHoursOrders,
 	listUncreditedInvoices
 } from '$lib/server/hour-credits';
+import { createHourCreditOrder, quoteHourCreditOrder } from '$lib/server/hour-credit-orders';
+import { activeModes, activeRates } from '$lib/logic/hourly-catalog';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { computeReservedMinutes } from '$lib/server/task-credit';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
+import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
 
 function generateId(): string {
@@ -64,11 +69,39 @@ export const getHourCreditsPage = query(async () => {
 		tenantId,
 		rows.map((r) => r.clientId)
 	);
+	const withReserved = rows.map((r) => ({
+		...r,
+		reservedMinutes: reserved.get(r.clientId) ?? 0
+	}));
+
+	// KPI-urile din capul paginii. Le calculăm aici, nu în componentă: aceleași
+	// cifre ajung și în widgetul de Dashboard, iar „sub prag" e o regulă de
+	// business (disponibil = sold − rezervat), nu o decizie de afișare.
+	const threshold = catalog.rules.lowCreditThresholdMinutes;
+	const endOfMonth = new Date(
+		Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)
+	);
+	const lowRows = withReserved.filter((r) => r.balanceMinutes - r.reservedMinutes < threshold);
+	const kpis = {
+		totalBalanceMinutes: withReserved.reduce((s, r) => s + r.balanceMinutes, 0),
+		totalReservedMinutes: withReserved.reduce((s, r) => s + r.reservedMinutes, 0),
+		clientCount: withReserved.length,
+		lowCount: lowRows.length,
+		negativeCount: lowRows.filter((r) => r.balanceMinutes < 0).length,
+		expiringThisMonthMinutes: withReserved.reduce(
+			(s, r) => (r.expiring && r.expiring.on < endOfMonth ? s + r.expiring.minutes : s),
+			0
+		),
+		expiringClientCount: withReserved.filter((r) => r.expiring && r.expiring.on < endOfMonth)
+			.length
+	};
+
 	return {
-		rows: rows.map((r) => ({ ...r, reservedMinutes: reserved.get(r.clientId) ?? 0 })),
+		rows: withReserved,
 		uncredited,
+		kpis,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
-		lowCreditThresholdMinutes: catalog.rules.lowCreditThresholdMinutes,
+		lowCreditThresholdMinutes: threshold,
 		canEdit: role === 'owner' || role === 'admin'
 	};
 });
@@ -142,7 +175,12 @@ export const adjustHourCredit = command(
 				sourceId: id,
 				note: data.note,
 				createdByUserId: userId,
-				referenceRateEurSnapshot: reference?.rateEur ?? null
+				referenceRateEurSnapshot: reference?.rateEur ?? null,
+				// Doar alimentările au termen; o ajustare în minus e consum, nu lot.
+				expiresAt:
+					data.deltaMinutes > 0
+						? computeExpiryDate(new Date(), catalog.rules.creditExpiryDays)
+						: null
 			},
 			{ id }
 		);
@@ -183,5 +221,95 @@ export const creditHoursOrderNow = command(
 			throw error(400, `Nu s-a creditat: ${result.reason}.`);
 		}
 		return result;
+	}
+);
+
+// ── Taburile „Comenzi ore" și „Raport lunar" ─────────────────────────────────
+
+export const getHoursOrdersPage = query(async () => {
+	const { tenantId } = await requireStaffTenant();
+	const [orders, catalog] = await Promise.all([
+		listHoursOrders(tenantId),
+		getHourlyCatalog(tenantId, { includeInactive: true })
+	]);
+	// Eticheta regimului vine din catalog cu `includeInactive`: un regim dezactivat
+	// între comandă și afișare trebuie să apară tot cu numele lui.
+	const modeLabels = new Map(catalog.modes.map((m) => [m.slug as string, m.label]));
+	return {
+		orders: orders.map((o) => ({ ...o, modeLabel: modeLabels.get(o.modeSlug) ?? o.modeSlug }))
+	};
+});
+
+export const getMonthlyHourReport = query(async () => {
+	const { tenantId } = await requireStaffTenant();
+	const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
+	const labels = new Map(catalog.rates.map((r) => [r.slug, r.label]));
+	return getMonthlyReport(tenantId, labels);
+});
+
+// ── Modalul „Adaugă ore" ─────────────────────────────────────────────────────
+
+/** Catalogul pentru selectoarele din modal (doar ce e activ azi). */
+export const getHourOrderOptions = query(async () => {
+	const { tenantId } = await requireStaffTenant();
+	const catalog = await getHourlyCatalog(tenantId);
+	return {
+		rates: activeRates(catalog.rates).map((r) => ({
+			slug: r.slug,
+			label: r.label,
+			rateEur: r.rateEur
+		})),
+		modes: activeModes(catalog.modes).map((m) => ({
+			slug: m.slug,
+			label: m.label,
+			sla: m.sla,
+			description: m.description,
+			multiplierPct: m.multiplierPct,
+			maxHours: m.maxHours
+		}))
+	};
+});
+
+const orderDraftSchema = v.object({
+	rateSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
+	modeSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
+	hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500))
+});
+
+/**
+ * Previewul de preț al modalului. Rulează pe server cu ACELEAȘI reguli ca
+ * submitul, ca suma afișată să nu poată diverge de cea facturată.
+ */
+export const quoteHourCredit = query(orderDraftSchema, async (data) => {
+	const { tenantId } = await requireStaffTenant();
+	return quoteHourCreditOrder({ tenantId, ...data });
+});
+
+export const addHoursToClient = command(
+	v.object({
+		clientId: clientIdSchema,
+		rateSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
+		modeSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
+		hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500)),
+		requestedWindow: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(200))),
+		/** Nimic nu pleacă spre client fără bifă explicită. */
+		sendEmail: v.boolean()
+	}),
+	async (data) => {
+		const { tenantId, userId } = await requireOwnerOrAdmin();
+		try {
+			return await createHourCreditOrder({
+				tenantId,
+				userId,
+				clientId: data.clientId,
+				rateSlug: data.rateSlug,
+				modeSlug: data.modeSlug,
+				hours: data.hours,
+				requestedWindow: data.requestedWindow || null,
+				sendEmail: data.sendEmail
+			});
+		} catch (err) {
+			throw error(400, err instanceof Error ? err.message : 'Nu am putut adăuga orele.');
+		}
 	}
 );

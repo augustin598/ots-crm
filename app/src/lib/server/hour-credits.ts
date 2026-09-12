@@ -15,6 +15,11 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { loadBnrFxRates } from '$lib/server/bnr/client';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
+import {
+	computeExpiryDate,
+	remainingBatches,
+	type ExpiryLedgerRow
+} from '$lib/logic/hour-credit-expiry';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
 import {
 	eurCentsToReferenceMinutes,
@@ -49,6 +54,8 @@ export interface LedgerEntryInput {
 	rateEurSnapshot?: number | null;
 	multiplierPctSnapshot?: number | null;
 	realMinutes?: number | null;
+	/** Termenul lotului de credit; doar pe alimentări. */
+	expiresAt?: Date | null;
 }
 
 /**
@@ -108,6 +115,7 @@ export async function applyLedgerEntry(
 						rateEurSnapshot: entry.rateEurSnapshot ?? null,
 						multiplierPctSnapshot: entry.multiplierPctSnapshot ?? null,
 						realMinutes: entry.realMinutes ?? null,
+						expiresAt: entry.expiresAt ?? null,
 						createdAt: now
 					});
 					if (entry.deltaMinutes !== 0) {
@@ -144,14 +152,18 @@ export type CreditResult =
 	| { status: 'skipped'; reason: string }
 	| { status: 'failed'; reason: string };
 
-/** Tariful de referință + pasul curent al tenantului. */
+/** Tariful de referință, pasul și termenul de expirare curente ale tenantului. */
 async function loadReference(
 	tenantId: string
-): Promise<{ rateEur: number; stepMinutes: number } | null> {
+): Promise<{ rateEur: number; stepMinutes: number; expiryDays: number } | null> {
 	const catalog = await getHourlyCatalog(tenantId);
 	const ref = resolveReferenceRate(catalog.rates, catalog.rules);
 	if (!ref) return null;
-	return { rateEur: ref.rateEur, stepMinutes: catalog.rules.stepMinutes };
+	return {
+		rateEur: ref.rateEur,
+		stepMinutes: catalog.rules.stepMinutes,
+		expiryDays: catalog.rules.creditExpiryDays
+	};
 }
 
 /** Lei per euro la data dată (sau ultima cotație anterioară, max 15 zile). */
@@ -246,7 +258,8 @@ export async function creditPaidInvoice(params: {
 		referenceRateEurSnapshot: reference.rateEur,
 		netCentsSnapshot: invoice.amount!,
 		currencySnapshot: currency,
-		fxRateSnapshot: ronPerEur ? formatExchangeRate(ronPerEur) : null
+		fxRateSnapshot: ronPerEur ? formatExchangeRate(ronPerEur) : null,
+		expiresAt: computeExpiryDate(new Date(), reference.expiryDays)
 	});
 	if (!result.applied) return { status: 'already_credited' };
 	logInfo(
@@ -307,7 +320,8 @@ export async function creditPaidHoursOrder(params: {
 		modeSlug: order.modeSlug,
 		rateEurSnapshot: order.rateEur,
 		multiplierPctSnapshot: order.modeMultiplierPct,
-		realMinutes: order.hours * 60
+		realMinutes: order.hours * 60,
+		expiresAt: computeExpiryDate(new Date(), reference.expiryDays)
 	});
 	if (!result.applied) return { status: 'already_credited' };
 	logInfo('server', `hour-credits: comanda ${orderId} → +${minutes} min`, {
@@ -422,6 +436,17 @@ export interface ClientHourCreditOverviewRow {
 	consumedThisMonthMinutes: number;
 	lastCreditAt: Date | null;
 	lastCreditMinutes: number | null;
+	/** CUI-ul clientului, pentru meta rândului din listă. */
+	cui: string | null;
+	/**
+	 * Consumul din ultimele 30 de zile — segmentul gri al gauge-ului. E o
+	 * fereastră mobilă, diferită de `consumedThisMonthMinutes` (luna calendaristică).
+	 */
+	consumedLast30Minutes: number;
+	/** Orice mișcare, nu doar alimentare — „ultima mișcare" din listă. */
+	lastMovementAt: Date | null;
+	/** Creditul cu termen apropiat; null dacă nimic nu expiră. */
+	expiring: { minutes: number; on: Date } | null;
 }
 
 /** Tabelul „Bugete ore": clienții bifați sau cu sold/mișcări. */
@@ -432,6 +457,7 @@ export async function getHourCreditsOverview(
 		.select({
 			id: table.client.id,
 			name: table.client.name,
+			cui: table.client.cui,
 			optedIn: table.client.hourCreditFromInvoices,
 			balance: table.client.hourCreditMinutes
 		})
@@ -487,16 +513,86 @@ export async function getHourCreditsOverview(
 		}
 	}
 
+	// Consumul pe fereastra mobilă de 30 de zile (segmentul gri al gauge-ului) —
+	// altă mărime decât consumul lunii calendaristice de mai sus.
+	const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+	const consumed30 = await db
+		.select({
+			clientId: table.clientHourLedger.clientId,
+			minutes: sql<number>`coalesce(sum(${table.clientHourLedger.deltaMinutes}), 0)`
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				inArray(table.clientHourLedger.clientId, ids),
+				eq(table.clientHourLedger.kind, 'task_consumption'),
+				gte(table.clientHourLedger.createdAt, since30)
+			)
+		)
+		.groupBy(table.clientHourLedger.clientId);
+	const consumed30By = new Map(consumed30.map((r) => [r.clientId, Number(r.minutes)]));
+
+	// Ultima mișcare de orice fel + loturile cu termen, dintr-o singură citire a
+	// ledgerului: expirarea cere alocarea FIFO a consumului, deci avem oricum
+	// nevoie de toate rândurile clientului.
+	const allRows = await db
+		.select({
+			id: table.clientHourLedger.id,
+			clientId: table.clientHourLedger.clientId,
+			createdAt: table.clientHourLedger.createdAt,
+			deltaMinutes: table.clientHourLedger.deltaMinutes,
+			expiresAt: table.clientHourLedger.expiresAt
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				inArray(table.clientHourLedger.clientId, ids)
+			)
+		);
+	const rowsBy = new Map<string, ExpiryLedgerRow[]>();
+	const lastMovement = new Map<string, Date>();
+	for (const r of allRows) {
+		const list = rowsBy.get(r.clientId) ?? [];
+		list.push({
+			id: r.id,
+			createdAt: r.createdAt,
+			deltaMinutes: r.deltaMinutes,
+			expiresAt: r.expiresAt
+		});
+		rowsBy.set(r.clientId, list);
+		const prev = lastMovement.get(r.clientId);
+		if (!prev || r.createdAt > prev) lastMovement.set(r.clientId, r.createdAt);
+	}
+
 	return relevant
-		.map((c) => ({
-			clientId: c.id,
-			clientName: c.name,
-			optedIn: !!c.optedIn,
-			balanceMinutes: c.balance,
-			consumedThisMonthMinutes: -(consumedBy.get(c.id) ?? 0),
-			lastCreditAt: lastCredit.get(c.id)?.at ?? null,
-			lastCreditMinutes: lastCredit.get(c.id)?.minutes ?? null
-		}))
+		.map((c) => {
+			const batches = remainingBatches(rowsBy.get(c.id) ?? []).filter((b) => b.expiresAt);
+			const first = batches[0];
+			return {
+				clientId: c.id,
+				clientName: c.name,
+				cui: c.cui ?? null,
+				optedIn: !!c.optedIn,
+				balanceMinutes: c.balance,
+				consumedThisMonthMinutes: -(consumedBy.get(c.id) ?? 0),
+				consumedLast30Minutes: -(consumed30By.get(c.id) ?? 0),
+				lastCreditAt: lastCredit.get(c.id)?.at ?? null,
+				lastCreditMinutes: lastCredit.get(c.id)?.minutes ?? null,
+				lastMovementAt: lastMovement.get(c.id) ?? null,
+				expiring:
+					first && first.expiresAt
+						? {
+								// Tot creditul care expiră la acel prim termen.
+								minutes: batches
+									.filter((b) => b.expiresAt?.getTime() === first.expiresAt?.getTime())
+									.reduce((sum, b) => sum + b.remainingMinutes, 0),
+								on: first.expiresAt
+							}
+						: null
+			};
+		})
 		.sort((a, b) => a.clientName.localeCompare(b.clientName, 'ro'));
 }
 
@@ -506,6 +602,7 @@ export async function getClientHourCredit(tenantId: string, clientId: string, li
 		.select({
 			id: table.client.id,
 			name: table.client.name,
+			cui: table.client.cui,
 			optedIn: table.client.hourCreditFromInvoices,
 			balance: table.client.hourCreditMinutes
 		})
@@ -538,12 +635,43 @@ export async function getClientHourCredit(tenantId: string, clientId: string, li
 		)
 		.orderBy(desc(table.clientHourLedger.createdAt))
 		.limit(limit);
+	// Loturile cu termen, pentru cardul „Expirare" din fișă. Folosim TOATE
+	// rândurile, nu doar cele `limit` afișate: alocarea FIFO trebuie să vadă
+	// întreg consumul, altfel ar raporta mai mult credit expirabil decât există.
+	const forExpiry = await db
+		.select({
+			id: table.clientHourLedger.id,
+			createdAt: table.clientHourLedger.createdAt,
+			deltaMinutes: table.clientHourLedger.deltaMinutes,
+			expiresAt: table.clientHourLedger.expiresAt
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.clientId, clientId)
+			)
+		);
+	const batches = remainingBatches(forExpiry).filter((b) => b.expiresAt);
+	const firstExpiry = batches[0]?.expiresAt ?? null;
+
 	return {
 		clientId: client.id,
 		clientName: client.name,
+		cui: client.cui ?? null,
 		optedIn: !!client.optedIn,
 		balanceMinutes: client.balance,
-		entries: entries.map((e) => ({ ...e, kind: e.kind as LedgerKind }))
+		entries: entries.map((e) => ({ ...e, kind: e.kind as LedgerKind })),
+		expiring: firstExpiry
+			? {
+					minutes: batches
+						.filter((b) => b.expiresAt?.getTime() === firstExpiry.getTime())
+						.reduce((sum, b) => sum + b.remainingMinutes, 0),
+					on: firstExpiry
+				}
+			: null,
+		/** Tot creditul cu termen, indiferent de dată — pentru procentul din card. */
+		expiringTotalMinutes: batches.reduce((sum, b) => sum + b.remainingMinutes, 0)
 	};
 }
 
@@ -596,4 +724,158 @@ export async function reconcileHourCredit(tenantId: string, clientId: string, le
 		});
 		throw err;
 	}
+}
+
+// ── Comenzi de ore (tabul „Comenzi ore") ─────────────────────────────────────
+
+export interface HoursOrderRow {
+	id: string;
+	clientId: string | null;
+	clientName: string | null;
+	rateLabel: string;
+	rateSlug: string;
+	modeSlug: string;
+	modeMultiplierPct: number;
+	modeSla: string | null;
+	rateEur: number;
+	hours: number;
+	netCents: number;
+	vatCents: number;
+	grossCents: number;
+	currency: string;
+	status: string;
+	requestedWindow: string | null;
+	invoiceId: string | null;
+	invoiceNumber: string | null;
+	createdAt: Date;
+	/** Dacă orele au ajuns deja în ledger (creditare idempotentă pe comandă). */
+	credited: boolean;
+}
+
+/**
+ * Comenzile de ore ale tenantului, cu clientul, factura și starea creditării —
+ * o singură interogare cu join-uri, fără N+1.
+ */
+export async function listHoursOrders(tenantId: string, limit = 100): Promise<HoursOrderRow[]> {
+	const rows = await db
+		.select({
+			id: table.serviceHoursOrder.id,
+			clientId: table.serviceHoursOrder.clientId,
+			clientName: table.client.name,
+			rateLabel: table.serviceHoursOrder.rateLabel,
+			rateSlug: table.serviceHoursOrder.rateSlug,
+			modeSlug: table.serviceHoursOrder.modeSlug,
+			modeMultiplierPct: table.serviceHoursOrder.modeMultiplierPct,
+			modeSla: table.serviceHoursOrder.modeSlaSnapshot,
+			rateEur: table.serviceHoursOrder.rateEur,
+			hours: table.serviceHoursOrder.hours,
+			netCents: table.serviceHoursOrder.netCents,
+			vatCents: table.serviceHoursOrder.vatCents,
+			grossCents: table.serviceHoursOrder.grossCents,
+			currency: table.serviceHoursOrder.currency,
+			status: table.serviceHoursOrder.status,
+			requestedWindow: table.serviceHoursOrder.requestedWindow,
+			invoiceId: table.serviceHoursOrder.invoiceId,
+			invoiceNumber: table.invoice.invoiceNumber,
+			createdAt: table.serviceHoursOrder.createdAt
+		})
+		.from(table.serviceHoursOrder)
+		.leftJoin(table.client, eq(table.client.id, table.serviceHoursOrder.clientId))
+		.leftJoin(table.invoice, eq(table.invoice.id, table.serviceHoursOrder.invoiceId))
+		.where(eq(table.serviceHoursOrder.tenantId, tenantId))
+		.orderBy(desc(table.serviceHoursOrder.createdAt))
+		.limit(limit);
+	if (rows.length === 0) return [];
+
+	const credited = await creditedSourceIds(tenantId, 'purchase', 'hours_order');
+	return rows.map((r) => ({ ...r, credited: credited.has(r.id) }));
+}
+
+// ── Raport lunar ─────────────────────────────────────────────────────────────
+
+export interface MonthlyReport {
+	monthStart: Date;
+	creditedMinutes: number;
+	purchasedMinutes: number;
+	consumedMinutes: number;
+	expiredMinutes: number;
+	byRate: { slug: string; label: string; minutes: number }[];
+	weeks: { label: string; startsOn: Date; creditedMinutes: number; consumedMinutes: number }[];
+}
+
+/**
+ * Agregatele lunii: alimentat / cumpărat / consumat / expirat, consumul pe
+ * specializare și evoluția pe săptămâni. Totul dintr-o singură citire a
+ * mișcărilor lunii — sunt puține, iar gruparea în memorie evită 4 interogări.
+ */
+export async function getMonthlyReport(
+	tenantId: string,
+	rateLabels: ReadonlyMap<string, string> = new Map()
+): Promise<MonthlyReport> {
+	const monthStart = startOfMonthUtc(new Date());
+	const rows = await db
+		.select({
+			kind: table.clientHourLedger.kind,
+			deltaMinutes: table.clientHourLedger.deltaMinutes,
+			rateSlug: table.clientHourLedger.rateSlug,
+			createdAt: table.clientHourLedger.createdAt
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				gte(table.clientHourLedger.createdAt, monthStart)
+			)
+		);
+
+	let creditedMinutes = 0;
+	let purchasedMinutes = 0;
+	let consumedMinutes = 0;
+	let expiredMinutes = 0;
+	const byRate = new Map<string, number>();
+	// Săptămâni de câte 7 zile de la începutul lunii — cum arată graficul din design.
+	const weeks = [0, 1, 2, 3].map((i) => {
+		const startsOn = new Date(monthStart);
+		startsOn.setUTCDate(startsOn.getUTCDate() + i * 7);
+		return { startsOn, creditedMinutes: 0, consumedMinutes: 0 };
+	});
+
+	for (const r of rows) {
+		const weekIndex = Math.min(
+			3,
+			Math.floor((r.createdAt.getTime() - monthStart.getTime()) / (7 * 24 * 60 * 60 * 1000))
+		);
+		const week = weeks[Math.max(0, weekIndex)];
+		if (r.kind === 'invoice_credit') {
+			creditedMinutes += r.deltaMinutes;
+			week.creditedMinutes += r.deltaMinutes;
+		} else if (r.kind === 'purchase') {
+			purchasedMinutes += r.deltaMinutes;
+			week.creditedMinutes += r.deltaMinutes;
+		} else if (r.kind === 'task_consumption') {
+			const spent = Math.abs(r.deltaMinutes);
+			consumedMinutes += spent;
+			week.consumedMinutes += spent;
+			if (r.rateSlug) byRate.set(r.rateSlug, (byRate.get(r.rateSlug) ?? 0) + spent);
+		} else if (r.kind === 'expire') {
+			expiredMinutes += Math.abs(r.deltaMinutes);
+		}
+	}
+
+	return {
+		monthStart,
+		creditedMinutes,
+		purchasedMinutes,
+		consumedMinutes,
+		expiredMinutes,
+		byRate: [...byRate.entries()]
+			.map(([slug, minutes]) => ({ slug, label: rateLabels.get(slug) ?? slug, minutes }))
+			.sort((a, b) => b.minutes - a.minutes),
+		weeks: weeks.map((w, i) => ({
+			label: `săpt. ${i + 1}`,
+			startsOn: w.startsOn,
+			creditedMinutes: w.creditedMinutes,
+			consumedMinutes: w.consumedMinutes
+		}))
+	};
 }

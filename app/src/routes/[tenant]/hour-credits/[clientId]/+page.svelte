@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ClientHourCreditView from './ClientHourCreditView.svelte';
+	import '$lib/components/hour-credits/hour-credits.css';
 
 	const clientId = $derived(page.params.clientId as string);
 </script>

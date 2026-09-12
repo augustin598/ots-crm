@@ -11,6 +11,7 @@ whmcs-backup-*.sql
 
 # Local design exploration / mock-ups (not part of the app)
 new_design/
+design_handoff_hour_credits/
 
 # Plugin build artifacts (use ots-wp-connector/build.sh to produce)
 ots-wp-connector*.zip

@@ -46,6 +46,7 @@ import { processDirectAdminSyncAccounts } from './tasks/directadmin-sync-account
 import { processDirectAdminSyncPackages } from './tasks/directadmin-sync-packages';
 import { processHostingRenewalReminder } from './tasks/hosting-renewal-reminder';
 import { processHostingExpiryGuard } from './tasks/hosting-expiry-guard';
+import { processHourCreditExpiry } from './tasks/hour-credit-expiry';
 import { processContentAutoPublish } from './tasks/content-auto-publish';
 import { processContentAutoGenerate } from './tasks/content-auto-generate';
 import { processPagespeedWeeklyReport } from './tasks/pagespeed-weekly-report';
@@ -211,6 +212,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	directadmin_sync_packages: processDirectAdminSyncPackages,
 	hosting_renewal_reminder: processHostingRenewalReminder,
 	hosting_expiry_guard: processHostingExpiryGuard,
+	hour_credit_expiry: processHourCreditExpiry,
 	content_auto_publish: processContentAutoPublish,
 	content_auto_generate: processContentAutoGenerate,
 	pagespeed_weekly_report: () => processPagespeedWeeklyReport(),
@@ -391,6 +393,7 @@ export const startScheduler = async () => {
 		'personalops-heartbeat-monitor', 'meta-token-expiration-monitor',
 		'directadmin-sync-accounts', 'directadmin-sync-packages',
 		'hosting-renewal-reminder', 'hosting-expiry-guard',
+		'hour-credit-expiry',
 		'content-auto-publish', 'content-auto-generate',
 		'pagespeed-weekly-report',
 		'rank-daily-check', 'rank-weekly-report', 'rank-volume-refresh',
@@ -1153,6 +1156,20 @@ export const startScheduler = async () => {
 		}
 	);
 	logInfo('scheduler', '[scheduler] hosting-expiry-guard registered (0 9 * * * Europe/Bucharest, LIVE)');
+
+	// Expirarea creditului de ore — zilnic 04:30 Europe/Bucharest, înainte de
+	// rapoartele de dimineață, ca soldurile afișate peste zi să fie deja curate.
+	// Rulează doar pentru tenanții cu `credit_expiry_days > 0`; expirarea e
+	// idempotentă (index unic pe lot), deci o rulare dublă nu dublează minusul.
+	await schedulerQueue.add(
+		'hour-credit-expiry',
+		{ type: 'hour_credit_expiry', params: { dryRun: false } },
+		{
+			repeat: { pattern: '30 4 * * *', tz: 'Europe/Bucharest' },
+			jobId: 'hour-credit-expiry'
+		}
+	);
+	logInfo('scheduler', '[scheduler] hour-credit-expiry registered (30 4 * * * Europe/Bucharest, LIVE)');
 
 	// Content auto-generate — zilnic 06:30. Umple calendarul website-urilor 'auto' pe cadență.
 	await schedulerQueue.add(

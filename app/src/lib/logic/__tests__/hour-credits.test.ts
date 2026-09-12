@@ -84,6 +84,14 @@ describe('invoiceCreditEligibility', () => {
 		expect(invoiceCreditEligibility(paid({ hostingAccountId: 'h1' }), noOptIn).reason).toMatch(
 			/hosting/
 		);
+		// Factura din „Adaugă ore": creditul a intrat deja la emitere, deci plata ei
+		// NU mai creditează — altfel clientul ar primi orele de două ori.
+		expect(
+			invoiceCreditEligibility(paid({ externalSource: 'hour-credit' }), { ...noOptIn }).eligible
+		).toBe(false);
+		expect(
+			invoiceCreditEligibility(paid({ externalSource: 'hour-credit' }), { ...noOptIn }).reason
+		).toMatch(/emitere/);
 		expect(invoiceCreditEligibility(paid({ externalSource: 'meta-ads' }), noOptIn).reason).toMatch(
 			/ads/
 		);

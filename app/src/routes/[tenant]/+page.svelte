@@ -15,6 +15,8 @@
 	import TasksWidget from '$lib/components/dashboard/tasks-widget.svelte';
 	import TeamActivity from '$lib/components/dashboard/team-activity.svelte';
 	import TopbarActions from '$lib/components/ots-sidebar/TopbarActions.svelte';
+	import HcDashboardWidget from '$lib/components/hour-credits/HcDashboardWidget.svelte';
+	import '$lib/components/hour-credits/hour-credits.css';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-question-mark';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -69,6 +71,19 @@
 		<div class="dash-w-cash"><CashFlowWidget data={d.cashflow} /></div>
 		<div class="dash-w-clients"><TopClients clients={d.topClients} allHref={`${base}/clients`} /></div>
 		<div class="dash-w-funnel"><FunnelWidget stages={d.funnel} /></div>
+		<div class="dash-w-hours">
+			<!-- Widgetul își aduce singur datele, deci are boundary propriu: dacă
+			     bugetele de ore pică, restul dashboardului rămâne în picioare. -->
+			<svelte:boundary>
+				{#snippet pending()}
+					<div class="hc-widget"><p class="hc-muted">Se încarcă bugetele de ore…</p></div>
+				{/snippet}
+				{#snippet failed()}
+					<div class="hc-widget"><p class="hc-muted">Bugetele de ore nu s-au putut încărca.</p></div>
+				{/snippet}
+				<HcDashboardWidget tenantSlug={page.params.tenant ?? ''} />
+			</svelte:boundary>
+		</div>
 		<div class="dash-w-today"><TodayWidget events={d.todayEvents} /></div>
 		<div class="dash-w-quick"><QuickActions {base} /></div>
 		<div class="dash-w-activity"><ActivityFeed activity={d.activity} allHref={`${base}/admin/logs`} /></div>

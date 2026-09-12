@@ -77,7 +77,9 @@ function rowToRules(r: RulesRow | undefined): HourCreditRules {
 		lowCreditThresholdMinutes: r.lowCreditThresholdMinutes,
 		stepMinutes: r.stepMinutes,
 		notifyEmail: !!r.notifyEmail,
-		notifyWhatsapp: !!r.notifyWhatsapp
+		notifyWhatsapp: !!r.notifyWhatsapp,
+		creditExpiryDays: r.creditExpiryDays ?? 0,
+		feedFromInvoicesDefault: !!r.feedFromInvoicesDefault
 	};
 }
 

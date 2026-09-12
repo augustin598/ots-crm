@@ -1,56 +1,68 @@
 <script lang="ts">
+	/**
+	 * „Bugete ore" — lista clienților + taburile de comenzi, facturi necreditate
+	 * și raport lunar.
+	 *
+	 * Fără breadcrumb propriu: layout-ul [tenant] afișează deja breadcrumb-ul
+	 * paginii, iar unul în plus l-ar dubla.
+	 */
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { creditInvoiceNow, getHourCreditsPage } from '$lib/remotes/hour-credits.remote';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import {
+		creditInvoiceNow,
+		getHourCreditsPage,
+		getHoursOrdersPage
+	} from '$lib/remotes/hour-credits.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Label } from '$lib/components/ui/label';
-	import {
-		Table,
-		TableBody,
-		TableCell,
-		TableHead,
-		TableHeader,
-		TableRow
-	} from '$lib/components/ui/table';
-	import { formatMinutes } from '$lib/logic/hourly-catalog';
-	import { formatAmount, type Currency } from '$lib/utils/currency';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
+	import HcClientRow from '$lib/components/hour-credits/HcClientRow.svelte';
+	import HcLegend from '$lib/components/hour-credits/HcLegend.svelte';
+	import HcOrderDrawer from '$lib/components/hour-credits/HcOrderDrawer.svelte';
+	import HcAddHoursModal from '$lib/components/hour-credits/HcAddHoursModal.svelte';
+	import HcMonthlyReport from '$lib/components/hour-credits/HcMonthlyReport.svelte';
+	import {
+		creditToEur,
+		fmtDate,
+		fmtHoursShort,
+		fmtMinutes,
+		fmtMoneyCents
+	} from '$lib/components/hour-credits/hour-credits-format';
+	import { formatAmount, type Currency } from '$lib/utils/currency';
 
-	const tenantSlug = $derived(page.params.tenant);
+	const tenantSlug = $derived(page.params.tenant ?? '');
 	const data = $derived(await getHourCreditsPage());
 
-	let filter = $state<'all' | 'opted' | 'low'>('all');
-	const rows = $derived(
-		data.rows.filter((r) =>
-			filter === 'opted'
-				? r.optedIn
-				: filter === 'low'
-					? r.balanceMinutes < data.lowCreditThresholdMinutes
-					: true
-		)
+	type Tab = 'clients' | 'orders' | 'uncredited' | 'report';
+	let tab = $state<Tab>('clients');
+	let q = $state('');
+	let filter = $state<'all' | 'invoices' | 'low'>('all');
+	let selectedOrderId = $state<string | null>(null);
+	let addOpen = $state(false);
+
+	// Comenzile se încarcă doar când tabul lor e deschis — lista e pagina care se
+	// deschide implicit, n-are rost s-o încetinim cu date pe care nimeni nu le vede.
+	const ordersData = $derived(tab === 'orders' ? await getHoursOrdersPage() : null);
+	const selectedOrder = $derived(
+		ordersData?.orders.find((o) => o.id === selectedOrderId) ?? null
 	);
 
-	// Selectorul „deschide creditul unui client": din pagina asta trebuie să poți
-	// ajunge la ORICE client, nu doar la cei care au deja mișcări în ledger.
 	const clientsQuery = getClients();
-	const clients = $derived(
+	const allClients = $derived(
 		[...(clientsQuery.current ?? [])]
 			.map((c) => ({ id: c.id as string, name: (c.name as string) ?? '' }))
 			.sort((a, b) => a.name.localeCompare(b.name, 'ro'))
 	);
-	let pickedClientId = $state('');
-	function openPicked() {
-		if (pickedClientId) goto(`/${tenantSlug}/hour-credits/${pickedClientId}`);
-	}
+
+	const rows = $derived(
+		data.rows.filter((r) => {
+			if (q && !r.clientName.toLowerCase().includes(q.toLowerCase())) return false;
+			if (filter === 'invoices') return r.optedIn;
+			if (filter === 'low')
+				return r.balanceMinutes - r.reservedMinutes < data.lowCreditThresholdMinutes;
+			return true;
+		})
+	);
 
 	let creditingId = $state<string | null>(null);
 	let creditError = $state<string | null>(null);
@@ -67,217 +79,350 @@
 		}
 	}
 
-	async function refresh() {
-		await getHourCreditsPage().refresh();
-	}
-
-	function fmtDate(d: Date | null): string {
-		return d ? new Date(d).toLocaleDateString('ro-RO') : '—';
+	/** Export CSV al listei filtrate — ce vede account managerul pe ecran. */
+	function exportCsv() {
+		const head = ['Client', 'CUI', 'Sold (min)', 'Rezervat (min)', 'Disponibil (min)', 'Consum 30z (min)', 'Alimentare din facturi'];
+		const lines = rows.map((r) =>
+			[
+				r.clientName,
+				r.cui ?? '',
+				r.balanceMinutes,
+				r.reservedMinutes,
+				r.balanceMinutes - r.reservedMinutes,
+				r.consumedLast30Minutes,
+				r.optedIn ? 'da' : 'nu'
+			]
+				.map((v) => `"${String(v).replace(/"/g, '""')}"`)
+				.join(',')
+		);
+		const blob = new Blob([[head.join(','), ...lines].join('\n')], {
+			type: 'text/csv;charset=utf-8'
+		});
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `bugete-ore-${new Date().toISOString().slice(0, 10)}.csv`;
+		a.click();
+		URL.revokeObjectURL(url);
 	}
 </script>
 
-<div class="space-y-6">
-	<div class="flex flex-wrap items-center justify-between gap-3">
-		<div class="text-sm text-muted-foreground">
-			Tarif de referință:
-			{#if data.reference}
-				<strong>{data.reference.label}, {data.reference.rateEur} €/h</strong>
-			{:else}
-				<strong>nicio specializare activă</strong>
-			{/if}
-			· prag credit scăzut: <strong>{formatMinutes(data.lowCreditThresholdMinutes)}</strong>
-		</div>
-		<div class="flex items-center gap-2">
-			<Button
-				size="sm"
-				variant={filter === 'all' ? 'default' : 'outline'}
-				onclick={() => (filter = 'all')}>Toți</Button
-			>
-			<Button
-				size="sm"
-				variant={filter === 'opted' ? 'default' : 'outline'}
-				onclick={() => (filter = 'opted')}>Cu alimentare din facturi</Button
-			>
-			<Button
-				size="sm"
-				variant={filter === 'low' ? 'default' : 'outline'}
-				onclick={() => (filter = 'low')}>Sub prag</Button
-			>
-			<Button size="sm" variant="ghost" onclick={refresh}>Refresh</Button>
-		</div>
-	</div>
-
-	<div class="flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
-		<div class="min-w-64 flex-1 space-y-1">
-			<Label for="pickClient">Deschide creditul unui client</Label>
-			<select
-				id="pickClient"
-				bind:value={pickedClientId}
-				class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-			>
-				<option value="">Alege un client…</option>
-				{#each clients as c (c.id)}
-					<option value={c.id}>{c.name}</option>
-				{/each}
-			</select>
-		</div>
-		<Button onclick={openPicked} disabled={!pickedClientId}>Deschide</Button>
-		<p class="basis-full text-xs text-muted-foreground">
-			În pagina clientului bifezi „Facturile plătite alimentează creditul" și poți adăuga ore
-			manual, cu motiv.
-		</p>
-	</div>
-
-	<Card>
-		<CardHeader>
-			<CardTitle>Clienți</CardTitle>
-			<CardDescription>
-				Apar clienții bifați pentru alimentare din facturi și cei cu sold sau mișcări în ledger.
-				Rezervate = estimările task-urilor deschise, ponderate; disponibil = sold − rezervate.
-			</CardDescription>
-		</CardHeader>
-		<CardContent>
-			{#if rows.length === 0}
-				<p class="text-sm text-muted-foreground">
-					Niciun client cu credit de ore încă. Alege un client în selectorul de mai sus, apoi
-					bifează „Facturile plătite alimentează creditul" sau adaugă ore manual.
+<div class="hc-wrap">
+	<div class="hc-hero">
+		<div class="hc-in">
+			<div class="hc-hero-main">
+				<h1>Bugete ore</h1>
+				<p class="hc-hero-sub">
+					Creditul de ore al fiecărui client: alimentat din facturile plătite, din orele cumpărate
+					pe /servicii și din ajustări manuale.
 				</p>
-			{:else}
-				<div class="overflow-x-auto">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Client</TableHead>
-								<TableHead class="text-right">Sold</TableHead>
-								<TableHead class="text-right">Rezervate</TableHead>
-								<TableHead class="text-right">Disponibil</TableHead>
-								<TableHead class="text-right">Consum luna curentă</TableHead>
-								<TableHead>Ultima alimentare</TableHead>
-								<TableHead>Alimentare din facturi</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{#each rows as r (r.clientId)}
-								<TableRow>
-									<TableCell>
-										<a
-											class="font-medium underline-offset-2 hover:underline"
-											href="/{tenantSlug}/hour-credits/{r.clientId}"
-										>
-											{r.clientName}
-										</a>
-									</TableCell>
-									<TableCell class="text-right">
-										<span
-											class={r.balanceMinutes < data.lowCreditThresholdMinutes
-												? 'font-semibold text-red-600'
-												: 'font-semibold'}
-										>
-											{formatMinutes(r.balanceMinutes)}
-										</span>
-										{#if r.balanceMinutes < data.lowCreditThresholdMinutes}
-											<Badge variant="destructive" class="ml-2">sub prag</Badge>
-										{/if}
-									</TableCell>
-									<TableCell class="text-right">{formatMinutes(r.reservedMinutes)}</TableCell>
-									<TableCell
-										class="text-right {r.balanceMinutes - r.reservedMinutes < 0
-											? 'text-amber-600'
-											: ''}"
-									>
-										{formatMinutes(r.balanceMinutes - r.reservedMinutes)}
-									</TableCell>
-									<TableCell class="text-right"
-										>{formatMinutes(r.consumedThisMonthMinutes)}</TableCell
-									>
-									<TableCell>
-										{fmtDate(r.lastCreditAt)}
-										{#if r.lastCreditMinutes !== null}
-											<span class="text-xs text-muted-foreground"
-												>(+{formatMinutes(r.lastCreditMinutes)})</span
-											>
-										{/if}
-									</TableCell>
-									<TableCell>
-										{#if r.optedIn}
-											<Badge variant="outline">da</Badge>
-										{:else}
-											<span class="text-xs text-muted-foreground">nu</span>
-										{/if}
-									</TableCell>
-								</TableRow>
-							{/each}
-						</TableBody>
-					</Table>
+				<div class="hc-ref">
+					Tarif de referință
+					{#if data.reference}
+						<b>{data.reference.label}, {data.reference.rateEur} €/h</b>
+					{:else}
+						<b>nicio specializare activă</b>
+					{/if}
+					· prag credit scăzut <b>{fmtMinutes(data.lowCreditThresholdMinutes)}</b> · se schimbă din
+					<a href="/{tenantSlug}/settings/hourly-rates">Settings → Tarife orare</a>
 				</div>
-			{/if}
-		</CardContent>
-	</Card>
+			</div>
+			<div class="hc-hero-actions">
+				<button type="button" class="hc-btn hc-btn-ghost" onclick={exportCsv}>Export CSV</button>
+				{#if data.canEdit}
+					<button type="button" class="hc-btn hc-btn-primary" onclick={() => (addOpen = true)}>
+						<PlusIcon size={15} /> Adaugă ore unui client
+					</button>
+				{/if}
+			</div>
+		</div>
+	</div>
 
-	<Card>
-		<CardHeader>
-			<CardTitle>Facturi plătite necreditate</CardTitle>
-			<CardDescription>
-				Facturi plătite ale clienților bifați care nu au încă rând în ledger (plătite înainte de
-				bifare, curs BNR indisponibil sau monedă neacceptată). Creditarea e idempotentă.
-			</CardDescription>
-		</CardHeader>
-		<CardContent>
-			{#if creditError}
-				<p class="mb-3 text-sm text-red-600">{creditError}</p>
-			{/if}
-			{#if data.uncredited.length === 0}
-				<p class="text-sm text-muted-foreground">Nimic de creditat.</p>
+	<div class="hc-in">
+		<div class="hc-kpis">
+			<div class="hc-kpi">
+				<div class="hc-kpi-label">Credit în circulație</div>
+				<div class="hc-kpi-value">{fmtMinutes(data.kpis.totalBalanceMinutes)}</div>
+				<div class="hc-kpi-sub">
+					pe <b>{data.kpis.clientCount} clienți</b>
+					{#if data.reference}
+						· ≈ {creditToEur(data.kpis.totalBalanceMinutes, data.reference.rateEur)} la referință
+					{/if}
+				</div>
+			</div>
+			<div class="hc-kpi">
+				<div class="hc-kpi-label">Rezervat de taskuri</div>
+				<div class="hc-kpi-value">{fmtMinutes(data.kpis.totalReservedMinutes)}</div>
+				<div class="hc-kpi-sub">estimări ponderate ale taskurilor deschise</div>
+			</div>
+			<div class="hc-kpi">
+				<div class="hc-kpi-label">Sub prag</div>
+				<div class="hc-kpi-value" class:warn={data.kpis.lowCount > 0}>{data.kpis.lowCount}</div>
+				<div class="hc-kpi-sub">
+					disponibil sub <b>{fmtMinutes(data.lowCreditThresholdMinutes)}</b> ·
+					{data.kpis.negativeCount} pe minus
+				</div>
+			</div>
+			<div class="hc-kpi">
+				<div class="hc-kpi-label">Expiră luna asta</div>
+				<div class="hc-kpi-value">{fmtMinutes(data.kpis.expiringThisMonthMinutes)}</div>
+				<div class="hc-kpi-sub">
+					la <b>{data.kpis.expiringClientCount} clienți</b>
+					{data.kpis.expiringClientCount > 0 ? '· anunță-i din timp' : ''}
+				</div>
+			</div>
+		</div>
+
+		<div class="hc-tabs" role="tablist" aria-label="Secțiuni bugete ore">
+			<button
+				type="button"
+				role="tab"
+				aria-selected={tab === 'clients'}
+				class="hc-tab"
+				class:active={tab === 'clients'}
+				onclick={() => (tab = 'clients')}
+			>
+				Clienți <span class="hc-tab-count">{data.rows.length}</span>
+			</button>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={tab === 'orders'}
+				class="hc-tab"
+				class:active={tab === 'orders'}
+				onclick={() => (tab = 'orders')}
+			>
+				Comenzi ore
+			</button>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={tab === 'uncredited'}
+				class="hc-tab"
+				class:active={tab === 'uncredited'}
+				onclick={() => (tab = 'uncredited')}
+			>
+				Facturi necreditate <span class="hc-tab-count">{data.uncredited.length}</span>
+			</button>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={tab === 'report'}
+				class="hc-tab"
+				class:active={tab === 'report'}
+				onclick={() => (tab = 'report')}
+			>
+				Raport lunar
+			</button>
+		</div>
+
+		{#if tab === 'clients'}
+			<div class="hc-toolbar">
+				<div class="hc-search">
+					<SearchIcon size={15} />
+					<input placeholder="Caută client…" bind:value={q} aria-label="Caută client" />
+				</div>
+				<div class="hc-seg" role="group" aria-label="Filtrează clienții">
+					<button
+						type="button"
+						class:active={filter === 'all'}
+						aria-pressed={filter === 'all'}
+						onclick={() => (filter = 'all')}>Toți</button
+					>
+					<button
+						type="button"
+						class:active={filter === 'invoices'}
+						aria-pressed={filter === 'invoices'}
+						onclick={() => (filter = 'invoices')}>Cu alimentare din facturi</button
+					>
+					<button
+						type="button"
+						class:active={filter === 'low'}
+						aria-pressed={filter === 'low'}
+						onclick={() => (filter = 'low')}>Sub prag</button
+					>
+				</div>
+				<div class="hc-spacer"></div>
+				<HcLegend />
+			</div>
+
+			{#if rows.length === 0}
+				<div class="hc-tablecard">
+					<div class="hc-empty">
+						<b>Niciun client pe acest filtru</b>
+						{#if data.rows.length === 0}
+							Bifează „Facturile plătite alimentează creditul" în fișa unui client sau adaugă ore
+							manual.
+						{:else}
+							Schimbă filtrul sau caută alt nume.
+						{/if}
+					</div>
+				</div>
 			{:else}
-				<div class="overflow-x-auto">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Factură</TableHead>
-								<TableHead>Client</TableHead>
-								<TableHead class="text-right">Net</TableHead>
-								<TableHead>Plătită la</TableHead>
-								<TableHead>Motiv</TableHead>
-								<TableHead class="text-right">Acțiune</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{#each data.uncredited as inv (inv.invoiceId)}
-								<TableRow>
-									<TableCell>
-										<a
-											class="underline-offset-2 hover:underline"
-											href="/{tenantSlug}/invoices/{inv.invoiceId}"
-										>
-											{inv.invoiceNumber ?? inv.invoiceId}
-										</a>
-									</TableCell>
-									<TableCell>{inv.clientName}</TableCell>
-									<TableCell class="text-right"
-										>{formatAmount(inv.amount, inv.currency as Currency)}</TableCell
-									>
-									<TableCell>{fmtDate(inv.paidDate)}</TableCell>
-									<TableCell class="text-xs text-muted-foreground"
-										>{inv.reason ?? 'plătită înainte de bifare'}</TableCell
-									>
-									<TableCell class="text-right">
-										{#if data.canEdit && !inv.reason}
-											<Button
-												size="sm"
-												variant="outline"
-												disabled={creditingId === inv.invoiceId}
-												onclick={() => creditNow(inv.invoiceId)}
-											>
-												{creditingId === inv.invoiceId ? '…' : 'Creditează'}
-											</Button>
-										{/if}
-									</TableCell>
-								</TableRow>
-							{/each}
-						</TableBody>
-					</Table>
+				<div class="hc-rows">
+					{#each rows as row (row.clientId)}
+						<HcClientRow
+							{row}
+							thresholdMinutes={data.lowCreditThresholdMinutes}
+							referenceLabel={data.reference?.label ?? null}
+							href="/{tenantSlug}/hour-credits/{row.clientId}"
+						/>
+					{/each}
 				</div>
 			{/if}
-		</CardContent>
-	</Card>
+		{:else if tab === 'orders'}
+			<div class="hc-tablecard">
+				{#if !ordersData || ordersData.orders.length === 0}
+					<div class="hc-empty">
+						<b>Nicio comandă de ore</b>
+						Comenzile plătite pe /servicii și orele adăugate din admin apar aici.
+					</div>
+				{:else}
+					<div class="hc-tablescroll">
+						<table class="hc-table">
+							<thead>
+								<tr>
+									<th>Comandă</th>
+									<th>Client</th>
+									<th>Specializare / regim</th>
+									<th class="r">Ore</th>
+									<th class="r">Total</th>
+									<th>Status</th>
+									<th>Factură</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each ordersData.orders as o (o.id)}
+									<tr
+										class="clickable"
+										onclick={() => (selectedOrderId = o.id)}
+										onkeydown={(e) => e.key === 'Enter' && (selectedOrderId = o.id)}
+										tabindex="0"
+									>
+										<td>
+											<span class="hc-strong">{o.id.slice(0, 8)}</span>
+											<div class="hc-muted">{fmtDate(o.createdAt)}</div>
+										</td>
+										<td>{o.clientName ?? '—'}</td>
+										<td>
+											{o.rateLabel}
+											<div class="hc-muted">
+												{o.modeLabel} · ×{(o.modeMultiplierPct / 100)
+													.toFixed(2)
+													.replace('.', ',')} → {o.rateEur} €/h
+											</div>
+										</td>
+										<td class="hc-num">{fmtHoursShort(o.hours * 60)}</td>
+										<td class="hc-num">{fmtMoneyCents(o.grossCents, o.currency)}</td>
+										<td>
+											<span
+												class="hc-chip {o.status === 'paid'
+													? 'hc-chip-ok'
+													: o.status === 'failed'
+														? 'hc-chip-err'
+														: 'hc-chip-warn'}"
+											>
+												{o.status === 'paid'
+													? 'Plătită'
+													: o.status === 'failed'
+														? 'Plată eșuată'
+														: 'Așteaptă plata'}
+											</span>
+										</td>
+										<td>
+											{#if o.invoiceId}
+												<!-- Clicul pe factură nu deschide drawerul. -->
+												<a
+													href="/{tenantSlug}/invoices/{o.invoiceId}"
+													onclick={(e) => e.stopPropagation()}
+												>
+													{o.invoiceNumber ?? 'factură'}
+												</a>
+											{:else}
+												<span class="hc-muted">—</span>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+		{:else if tab === 'uncredited'}
+			<div class="hc-tablecard">
+				<div class="hc-card-h tight">
+					<h3>Facturi plătite care nu au ajuns în ledger</h3>
+					<p>
+						Plătite înainte de bifarea alimentării, curs BNR indisponibil sau monedă neacceptată.
+						Creditarea e idempotentă — poți reîncerca fără riscul dublării.
+					</p>
+				</div>
+				{#if creditError}
+					<div style="padding:0 18px"><div class="hc-error">{creditError}</div></div>
+				{/if}
+				{#if data.uncredited.length === 0}
+					<div class="hc-empty"><b>Nimic de creditat</b>Toate facturile eligibile sunt în ledger.</div>
+				{:else}
+					<div class="hc-tablescroll">
+						<table class="hc-table">
+							<thead>
+								<tr>
+									<th>Factură</th>
+									<th>Client</th>
+									<th class="r">Valoare</th>
+									<th>Plătită</th>
+									<th>De ce nu s-a creditat</th>
+									<th class="r"></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each data.uncredited as inv (inv.invoiceId)}
+									<tr>
+										<td>
+											<a href="/{tenantSlug}/invoices/{inv.invoiceId}" class="hc-strong">
+												{inv.invoiceNumber ?? inv.invoiceId.slice(0, 8)}
+											</a>
+										</td>
+										<td>{inv.clientName}</td>
+										<td class="hc-num">{formatAmount(inv.amount, inv.currency as Currency)}</td>
+										<td>{fmtDate(inv.paidDate)}</td>
+										<td class="hc-muted">{inv.reason ?? 'plătită înainte de bifare'}</td>
+										<td class="r">
+											{#if data.canEdit}
+												{#if inv.reason?.includes('bifa')}
+													<a class="hc-btn hc-btn-light" href="/{tenantSlug}/hour-credits/{inv.clientId}">
+														Bifează alimentarea
+													</a>
+												{:else}
+													<button
+														type="button"
+														class="hc-btn hc-btn-light"
+														disabled={creditingId === inv.invoiceId}
+														onclick={() => creditNow(inv.invoiceId)}
+													>
+														{creditingId === inv.invoiceId ? '…' : 'Reîncearcă creditarea'}
+													</button>
+												{/if}
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+		{:else}
+			<HcMonthlyReport />
+		{/if}
+	</div>
 </div>
+
+{#if selectedOrder}
+	<HcOrderDrawer order={selectedOrder} {tenantSlug} onclose={() => (selectedOrderId = null)} />
+{/if}
+
+{#if addOpen}
+	<HcAddHoursModal clients={allClients} onclose={() => (addOpen = false)} />
+{/if}
