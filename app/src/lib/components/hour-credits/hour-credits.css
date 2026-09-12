@@ -1644,3 +1644,35 @@
 .hc-tasklink:hover svg {
 	color: var(--cl-accent);
 }
+
+/* ---- Starea creditului pe task: rezervat (activ) vs. decontat (consumat) ----
+ * Verdele spune „taskul încă ține orele"; decontatul e neutru, e o stare
+ * încheiată. Tokenii au fallback: cardul taskului nu stă sub un wrapper hc-.
+ */
+.hc-state {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 3px 9px;
+	border-radius: 99px;
+	white-space: nowrap;
+	cursor: help;
+}
+.hc-state-held {
+	background: var(--hc-ok-bg, #dcfce7);
+	color: var(--hc-ok-fg, #15803d);
+}
+.hc-state-done {
+	background: var(--hc-chip-mut-bg, #f1f5f9);
+	color: var(--hc-chip-mut-fg, #64748b);
+}
+.dark .hc-state-held {
+	background: var(--hc-ok-bg, rgba(16, 185, 129, 0.16));
+	color: var(--hc-ok-fg, #34d399);
+}
+.dark .hc-state-done {
+	background: var(--hc-chip-mut-bg, #1f2a3b);
+	color: var(--hc-chip-mut-fg, #a3b1c6);
+}

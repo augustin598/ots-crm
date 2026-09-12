@@ -4,8 +4,13 @@
 -->
 <script lang="ts">
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import Info from '@lucide/svelte/icons/info';
+	import {
+		Tooltip,
+		TooltipContent,
+		TooltipProvider,
+		TooltipTrigger
+	} from '$lib/components/ui/tooltip';
 	import { formatMinutes } from '$lib/logic/hourly-catalog';
 	import HcRatePill from '$lib/components/hour-credits/HcRatePill.svelte';
 	import '$lib/components/hour-credits/hour-credits.css';
@@ -33,25 +38,32 @@
 	<CardHeader>
 		<CardTitle class="flex items-center gap-2">
 			Credit ore
-			{#if task.creditSettledAt}
-				<Badge
-					variant="outline"
-					class="gap-1"
-					title="Orele au fost deja scăzute din creditul clientului, la trecerea taskului în Done. Soldul lui a scăzut cu orele efective, ponderate cu tariful specializării."
-				>
-					decontat
-					<Info class="h-3 w-3 opacity-70" />
-				</Badge>
-			{:else}
-				<Badge
-					variant="secondary"
-					class="gap-1"
-					title="Estimarea blochează credit din soldul clientului, dar încă nu s-a scăzut nimic. Scăderea se face la trecerea în Done, pe orele efective."
-				>
-					rezervat
-					<Info class="h-3 w-3 opacity-70" />
-				</Badge>
-			{/if}
+			<TooltipProvider delayDuration={150}>
+				<Tooltip>
+					<TooltipTrigger>
+						{#if task.creditSettledAt}
+							<span class="hc-state hc-state-done">
+								decontat
+								<Info class="h-3 w-3 opacity-80" />
+							</span>
+						{:else}
+							<span class="hc-state hc-state-held">
+								rezervat
+								<Info class="h-3 w-3 opacity-80" />
+							</span>
+						{/if}
+					</TooltipTrigger>
+					<TooltipContent class="max-w-xs text-xs">
+						{#if task.creditSettledAt}
+							Orele au fost deja scăzute din creditul clientului, la trecerea taskului în Done —
+							ponderate cu tariful specializării.
+						{:else}
+							Estimarea blochează credit din soldul clientului, dar încă nu s-a scăzut nimic.
+							Scăderea se face la trecerea în Done, pe orele efective.
+						{/if}
+					</TooltipContent>
+				</Tooltip>
+			</TooltipProvider>
 		</CardTitle>
 	</CardHeader>
 	<CardContent class="space-y-2 text-sm">
