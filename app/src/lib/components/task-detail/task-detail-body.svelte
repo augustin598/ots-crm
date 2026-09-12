@@ -84,6 +84,7 @@
 	import TaskActivityTimeline from './task-activity-timeline.svelte';
 	import TaskEmailSection from './task-email-section.svelte';
 	import TaskWhatsappGroupCard from './task-whatsapp-group-card.svelte';
+	import TaskHourCreditCard from '$lib/components/tasks/task-hour-credit-card.svelte';
 	import TaskApproveDialog from './task-approve-dialog.svelte';
 
 	interface Props {
@@ -1053,6 +1054,15 @@
 									<TaskWhatsappGroupCard taskId={currentTask.id} {tenantSlug} />
 								</div>
 							</details>
+						{/if}
+
+						<!-- CREDIT DE ORE card — doar echipa, doar pe taskuri cu client și ore.
+						     Pagina completă a taskului îl avea deja; lipsea din drawer, unde
+						     ajunge de fapt lumea din board. -->
+						{#if !isClient && currentTask.clientId && (currentTask.estimatedMinutes || currentTask.actualMinutes)}
+							<div class="overflow-hidden rounded-xl border border-[#e5e9f0] bg-white dark:border-zinc-700 dark:bg-zinc-900">
+								<TaskHourCreditCard task={currentTask} tenantSlug={tenantSlug ?? ''} />
+							</div>
 						{/if}
 
 						<!-- MATERIALE card — lazy (loads on open) -->
