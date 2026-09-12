@@ -70,12 +70,18 @@ export interface PublicRateMode {
 	maxHours: number;
 }
 
+/**
+ * Notificările către client sunt OPRITE implicit, intenționat: nimic nu pleacă
+ * spre client (email sau WhatsApp) până când owner-ul le bifează explicit în
+ * Settings → Tarife orare → Reguli credit. Baza de dev = baza de producție, deci
+ * un default „pornit" ar trimite emailuri reale la primul test.
+ */
 export const DEFAULT_HOUR_CREDIT_RULES: HourCreditRules = {
 	referenceRateSlug: null,
 	lowCreditThresholdMinutes: 120,
 	stepMinutes: 15,
-	notifyEmail: true,
-	notifyWhatsapp: true
+	notifyEmail: false,
+	notifyWhatsapp: false
 };
 
 export const STEP_MINUTES_OPTIONS = [15, 30, 60] as const;

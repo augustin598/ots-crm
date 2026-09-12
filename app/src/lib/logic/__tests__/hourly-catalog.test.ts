@@ -90,6 +90,11 @@ describe('activeRates / activeModes', () => {
 });
 
 describe('resolveReferenceRate', () => {
+	test('notificările sunt oprite implicit (nimic spre client fără bifă)', () => {
+		expect(DEFAULT_HOUR_CREDIT_RULES.notifyEmail).toBe(false);
+		expect(DEFAULT_HOUR_CREDIT_RULES.notifyWhatsapp).toBe(false);
+	});
+
 	test('fără setare explicită = cel mai mic tarif ACTIV', () => {
 		expect(resolveReferenceRate(RATES, DEFAULT_HOUR_CREDIT_RULES)?.slug).toBe('project-management');
 	});

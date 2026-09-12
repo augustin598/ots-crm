@@ -2505,6 +2505,9 @@ export const hourCreditSettings = sqliteTable(
 		referenceRateSlug: text('reference_rate_slug'),
 		lowCreditThresholdMinutes: integer('low_credit_threshold_minutes').notNull().default(120),
 		stepMinutes: integer('step_minutes').notNull().default(15),
+		// ATENTIE: default-ul care conteaza in aplicatie e DEFAULT_HOUR_CREDIT_RULES
+		// (notificari OPRITE); default-ul SQL de aici se aplica doar unui INSERT care
+		// omite coloanele, iar upsert-ul din hourly-rates.remote le trimite mereu.
 		notifyEmail: boolean('notify_email').notNull().default(true),
 		notifyWhatsapp: boolean('notify_whatsapp').notNull().default(true),
 		updatedByUserId: text('updated_by_user_id').references(() => user.id),

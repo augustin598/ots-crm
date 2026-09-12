@@ -92,8 +92,9 @@ describe('getHourlyCatalog — seed lazy', () => {
 			referenceRateSlug: null,
 			lowCreditThresholdMinutes: 120,
 			stepMinutes: 15,
-			notifyEmail: true,
-			notifyWhatsapp: true
+			// Oprite implicit: niciun email/WhatsApp spre client fără bifă explicită.
+			notifyEmail: false,
+			notifyWhatsapp: false
 		});
 	});
 

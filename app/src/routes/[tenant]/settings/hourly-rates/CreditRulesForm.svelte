@@ -128,7 +128,7 @@
 			<div>
 				<Label for="notifyEmail">Notificări email către client</Label>
 				<p class="text-xs text-muted-foreground">
-					Credit scăzut, consum la finalizare, alimentări.
+					Oprite implicit. Credit scăzut, consum la finalizare, alimentări.
 				</p>
 			</div>
 			<Switch id="notifyEmail" bind:checked={notifyEmail} disabled={!canEdit || saving} />
@@ -137,7 +137,7 @@
 			<div>
 				<Label for="notifyWhatsapp">Notificări WhatsApp în grupul task-ului</Label>
 				<p class="text-xs text-muted-foreground">
-					Aceleași evenimente, doar dacă există grup legat.
+					Oprite implicit. Aceleași evenimente, doar dacă există grup legat.
 				</p>
 			</div>
 			<Switch id="notifyWhatsapp" bind:checked={notifyWhatsapp} disabled={!canEdit || saving} />

@@ -114,6 +114,9 @@ export async function notifyHourCreditEvent(params: {
 		]);
 		if (!client) return;
 		const rules = catalog.rules;
+		// Poarta: fără nicio bifă activă nu pleacă NIMIC spre client și nu se
+		// consumă starea alertei „credit scăzut" (ca la activare să notifice corect).
+		if (!rules.notifyEmail && !rules.notifyWhatsapp) return;
 		const portalUrl = `${getAppBaseUrl()}/client/${tenant[0]?.slug ?? tenantId}/hour-credits`;
 
 		const events: HourCreditEvent[] = [params.event];

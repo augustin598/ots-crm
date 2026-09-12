@@ -39,7 +39,7 @@ dovedi orele lucrate.
 | Prețuri pe oră | Modul **separat în Settings**, per tenant. `/servicii` citește din DB, nu din constante. |
 | Pagina de evidență | Intrare **în meniul principal**: „Bugete ore". Plus card „Credit timp" în panoul clientului. |
 | Portal client | Sold + istoric complet, categorie nouă de acces. Fără ajustări din portal. |
-| Notificări | Email **și** WhatsApp (grupul task-ului, ca la statusuri): credit scăzut (o dată la trecerea sub prag), consum la Done, alimentări. |
+| Notificări | Email **și** WhatsApp (grupul task-ului, ca la statusuri): credit scăzut (o dată la trecerea sub prag), consum la Done, alimentări.  **OPRITE implicit** (decizie 12 sep 2026): nimic nu pleaca spre client pana cand owner-ul bifeaza in Settings -> Tarife orare. Baza de dev = baza de productie, deci un default "pornit" ar trimite emailuri reale la primul test. |
 | Permisiuni | Ajustare manuală doar owner/admin. Staff vede soldul și alocă ore pe task. |
 | Task: câmpuri | „Ore estimate", „Specializare", „Regim" apar doar când task-ul are client; obligatorii dacă orele > 0. Task-urile interne rămân neatinse. |
 
