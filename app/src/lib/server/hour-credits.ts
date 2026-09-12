@@ -879,3 +879,68 @@ export async function getMonthlyReport(
 		}))
 	};
 }
+
+// ── Taskurile care ating creditul unui client ────────────────────────────────
+
+export interface ClientTaskRow {
+	id: string;
+	title: string;
+	status: string;
+	projectName: string | null;
+	ownerName: string | null;
+	/** Estimarea, în minute reale (rezervă credit cât timp taskul e deschis). */
+	estimatedMinutes: number | null;
+	/** Orele confirmate la Done, în minute reale. */
+	actualMinutes: number | null;
+	/** Setat după scăderea din credit; null = încă rezervă. */
+	creditSettledAt: Date | null;
+	rateSlug: string | null;
+	modeSlug: string | null;
+}
+
+/**
+ * Taskurile clientului care au de-a face cu creditul: cele deschise (rezervă) și
+ * cele decontate recent (consum). Un singur query cu join-uri, fără N+1.
+ */
+export async function listClientCreditTasks(
+	tenantId: string,
+	clientId: string,
+	limit = 50
+): Promise<ClientTaskRow[]> {
+	const rows = await db
+		.select({
+			id: table.task.id,
+			title: table.task.title,
+			status: table.task.status,
+			projectName: table.project.name,
+			ownerFirst: table.user.firstName,
+			ownerLast: table.user.lastName,
+			estimatedMinutes: table.task.estimatedMinutes,
+			actualMinutes: table.task.actualMinutes,
+			creditSettledAt: table.task.creditSettledAt,
+			rateSlug: table.task.rateSlug,
+			modeSlug: table.task.modeSlug,
+			updatedAt: table.task.updatedAt
+		})
+		.from(table.task)
+		.leftJoin(table.project, eq(table.project.id, table.task.projectId))
+		.leftJoin(table.user, eq(table.user.id, table.task.assignedToUserId))
+		.where(and(eq(table.task.tenantId, tenantId), eq(table.task.clientId, clientId)))
+		.orderBy(desc(table.task.updatedAt))
+		.limit(limit);
+
+	return rows
+		.filter((r) => r.estimatedMinutes || r.actualMinutes)
+		.map((r) => ({
+			id: r.id,
+			title: r.title,
+			status: r.status,
+			projectName: r.projectName,
+			ownerName: [r.ownerFirst, r.ownerLast].filter(Boolean).join(' ') || null,
+			estimatedMinutes: r.estimatedMinutes,
+			actualMinutes: r.actualMinutes,
+			creditSettledAt: r.creditSettledAt,
+			rateSlug: r.rateSlug,
+			modeSlug: r.modeSlug
+		}));
+}

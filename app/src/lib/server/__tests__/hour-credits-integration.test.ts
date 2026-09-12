@@ -55,7 +55,13 @@ mock.module('$lib/server/invoice-utils', () => ({
 }));
 
 const table = await import('$lib/server/db/schema');
-const { creditPaidInvoice, getClientHourCredit, listUncreditedInvoices, applyLedgerEntry } =
+const {
+	creditPaidInvoice,
+	getClientHourCredit,
+	listUncreditedInvoices,
+	listClientCreditTasks,
+	applyLedgerEntry
+} =
 	await import('../hour-credits');
 const { settleTaskCredit, reverseTaskCredit, computeReservedMinutes, assertTaskReopenAllowed } =
 	await import('../task-credit');
@@ -401,6 +407,39 @@ describe('rezervări și sold', () => {
 		const sum = view!.entries.reduce((s, e) => s + e.deltaMinutes, 0);
 		expect(sum).toBe(view!.balanceMinutes);
 		expect(view!.balanceMinutes).toBe(240);
+	});
+});
+
+describe('listClientCreditTasks — tabelul „Consum pe taskuri"', () => {
+	test('arată estimatul și pontatul, marcând ce e decontat', async () => {
+		await insertTask('task-list-1', {
+			title: 'Configurare GA4',
+			estimatedMinutes: 90,
+			actualMinutes: 150,
+			rateSlug: 'development'
+		});
+		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-list-1', userId: USER });
+		await insertTask('task-list-2', { title: 'Optimizare viteză', estimatedMinutes: 120 });
+
+		const rows = await listClientCreditTasks(TENANT, CLIENT);
+		const settled = rows.find((r) => r.id === 'task-list-1')!;
+		const open = rows.find((r) => r.id === 'task-list-2')!;
+
+		expect(settled.estimatedMinutes).toBe(90);
+		expect(settled.actualMinutes).toBe(150);
+		// Depășirea (pontat > estimat) e ce colorează bara în roșu în UI.
+		expect(settled.actualMinutes!).toBeGreaterThan(settled.estimatedMinutes!);
+		expect(settled.creditSettledAt).not.toBeNull();
+
+		// Taskul deschis încă rezervă: nu e decontat.
+		expect(open.creditSettledAt).toBeNull();
+		expect(open.estimatedMinutes).toBe(120);
+	});
+
+	test('taskurile fără ore nu apar', async () => {
+		await insertTask('task-no-hours', { estimatedMinutes: null });
+		const rows = await listClientCreditTasks(TENANT, CLIENT);
+		expect(rows.find((r) => r.id === 'task-no-hours')).toBeUndefined();
 	});
 });
 

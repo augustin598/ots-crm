@@ -20,6 +20,7 @@ import {
 	getClientHourCredit,
 	getHourCreditsOverview,
 	getMonthlyReport,
+	listClientCreditTasks,
 	listHoursOrders,
 	listUncreditedInvoices
 } from '$lib/server/hour-credits';
@@ -108,15 +109,17 @@ export const getHourCreditsPage = query(async () => {
 
 export const getClientHourCreditView = query(clientIdSchema, async (clientId) => {
 	const { tenantId, role } = await requireStaffTenant();
-	const [view, catalog] = await Promise.all([
+	const [view, catalog, tasks] = await Promise.all([
 		getClientHourCredit(tenantId, clientId),
-		getHourlyCatalog(tenantId)
+		getHourlyCatalog(tenantId),
+		listClientCreditTasks(tenantId, clientId)
 	]);
 	if (!view) throw error(404, 'Clientul nu există.');
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
 	const reserved = await computeReservedMinutes(tenantId, [clientId]);
 	return {
 		...view,
+		tasks,
 		reservedMinutes: reserved.get(clientId) ?? 0,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		stepMinutes: catalog.rules.stepMinutes,

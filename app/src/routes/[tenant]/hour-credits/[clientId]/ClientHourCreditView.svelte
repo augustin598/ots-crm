@@ -22,9 +22,21 @@
 		creditToEur,
 		fmtDate,
 		fmtDateShort,
+		fmtHoursShort,
 		fmtMinutes,
 		fmtRelative
 	} from '$lib/components/hour-credits/hour-credits-format';
+
+	/** Etichetele de status ale taskurilor, ca în board. */
+	const TASK_STATUS_LABELS: Record<string, string> = {
+		todo: 'de făcut',
+		'in-progress': 'în lucru',
+		review: 'în review',
+		'pending-approval': 'așteaptă aprobare',
+		blocked: 'blocat',
+		done: 'finalizat',
+		cancelled: 'anulat'
+	};
 
 	let { clientId }: { clientId: string } = $props();
 
@@ -378,29 +390,65 @@
 
 			<div class="hc-tablecard">
 				<div class="hc-card-h tight">
-					<h3>Rezervat de taskuri</h3>
+					<h3>Consum pe taskuri</h3>
 					<p>
 						Rezervatul de mai sus e suma estimărilor taskurilor deschise, ponderate cu tariful
-						specializării.
+						specializării. Bara arată pontatul față de estimat.
 					</p>
 				</div>
-				<div class="hc-card-b">
-					{#if view.reservedMinutes === 0}
-						<p class="hc-muted">Niciun task deschis nu rezervă credit.</p>
-					{:else}
-						<div class="hc-preview" style="margin-bottom:0">
-							Taskurile deschise rezervă <b>{fmtMinutes(view.reservedMinutes)}</b> din sold.
-							Rezervarea nu scade soldul — scade doar disponibilul.
-						</div>
-						<a
-							class="hc-btn hc-btn-light"
-							style="margin-top:12px"
-							href="/{tenantSlug}/tasks?clientId={clientId}"
-						>
-							Vezi taskurile clientului
-						</a>
-					{/if}
-				</div>
+				{#if view.tasks.length === 0}
+					<div class="hc-empty">
+						<b>Niciun task cu ore</b>
+						Taskurile clientului care au estimare sau pontaj apar aici.
+					</div>
+				{:else}
+					<div class="hc-tablescroll">
+						<table class="hc-table">
+							<thead>
+								<tr>
+									<th>Task</th>
+									<th class="r">Estimat / pontat</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each view.tasks as t (t.id)}
+									{@const est = t.estimatedMinutes ?? 0}
+									{@const used = t.actualMinutes ?? 0}
+									{@const over = est > 0 && used > est}
+									<tr>
+										<td>
+											<a class="hc-strong" href="/{tenantSlug}/tasks/{t.id}">{t.title}</a>
+											<div class="hc-muted">
+												{[
+													t.projectName,
+													t.ownerName,
+													TASK_STATUS_LABELS[t.status] ?? t.status,
+													t.creditSettledAt ? 'decontat' : 'rezervă credit'
+												]
+													.filter(Boolean)
+													.join(' · ')}
+											</div>
+											{#if est > 0}
+												<div style="margin-top:7px;max-width:240px">
+													<div class="hc-bartrack">
+														<div
+															class="hc-barfill"
+															style:width="{Math.min((used / est) * 100, 100)}%"
+															style:background={over ? 'var(--hc-err)' : 'var(--cl-accent)'}
+														></div>
+													</div>
+												</div>
+											{/if}
+										</td>
+										<td class="hc-num" class:hc-minus={over}>
+											{fmtHoursShort(est)} / {fmtHoursShort(used)}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
