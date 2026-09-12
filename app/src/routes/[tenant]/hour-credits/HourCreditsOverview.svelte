@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { creditInvoiceNow, getHourCreditsPage } from '$lib/remotes/hour-credits.remote';
+	import { getClients } from '$lib/remotes/clients.remote';
 	import {
 		Card,
 		CardContent,
@@ -10,6 +12,7 @@
 	} from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Label } from '$lib/components/ui/label';
 	import {
 		Table,
 		TableBody,
@@ -35,6 +38,19 @@
 					: true
 		)
 	);
+
+	// Selectorul „deschide creditul unui client": din pagina asta trebuie să poți
+	// ajunge la ORICE client, nu doar la cei care au deja mișcări în ledger.
+	const clientsQuery = getClients();
+	const clients = $derived(
+		[...(clientsQuery.current ?? [])]
+			.map((c) => ({ id: c.id as string, name: (c.name as string) ?? '' }))
+			.sort((a, b) => a.name.localeCompare(b.name, 'ro'))
+	);
+	let pickedClientId = $state('');
+	function openPicked() {
+		if (pickedClientId) goto(`/${tenantSlug}/hour-credits/${pickedClientId}`);
+	}
 
 	let creditingId = $state<string | null>(null);
 	let creditError = $state<string | null>(null);
@@ -91,6 +107,27 @@
 		</div>
 	</div>
 
+	<div class="flex flex-wrap items-end gap-2 rounded-lg border border-dashed p-3">
+		<div class="min-w-64 flex-1 space-y-1">
+			<Label for="pickClient">Deschide creditul unui client</Label>
+			<select
+				id="pickClient"
+				bind:value={pickedClientId}
+				class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+			>
+				<option value="">Alege un client…</option>
+				{#each clients as c (c.id)}
+					<option value={c.id}>{c.name}</option>
+				{/each}
+			</select>
+		</div>
+		<Button onclick={openPicked} disabled={!pickedClientId}>Deschide</Button>
+		<p class="basis-full text-xs text-muted-foreground">
+			În pagina clientului bifezi „Facturile plătite alimentează creditul" și poți adăuga ore
+			manual, cu motiv.
+		</p>
+	</div>
+
 	<Card>
 		<CardHeader>
 			<CardTitle>Clienți</CardTitle>
@@ -102,8 +139,8 @@
 		<CardContent>
 			{#if rows.length === 0}
 				<p class="text-sm text-muted-foreground">
-					Niciun client. Bifează „Facturile plătite alimentează creditul" din panoul unui client sau
-					adaugă ore manual.
+					Niciun client cu credit de ore încă. Alege un client în selectorul de mai sus, apoi
+					bifează „Facturile plătite alimentează creditul" sau adaugă ore manual.
 				</p>
 			{:else}
 				<div class="overflow-x-auto">
