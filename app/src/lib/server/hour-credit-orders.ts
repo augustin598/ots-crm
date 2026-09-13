@@ -44,7 +44,10 @@ import {
 	isValidHours
 } from '$lib/logic/hours-pricing';
 import { activeModes, activeRates, resolveReferenceRate } from '$lib/logic/hourly-catalog';
-import { HOUR_CREDIT_INVOICE_SOURCE } from '$lib/logic/hour-credits';
+import {
+	HOUR_CREDIT_INVOICE_SOURCE,
+	eurCentsToReferenceMinutes
+} from '$lib/logic/hour-credits';
 import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
 
 function generateId(): string {
@@ -158,8 +161,15 @@ export async function quoteHourCreditOrder(params: {
 	const { vatCents, grossCents } = computeVatBreakdown(netCents, vatPercent);
 
 	// Creditul se măsoară în minute la tariful de REFERINȚĂ: orele scumpe aduc
-	// proporțional mai mult credit, exact ca la conversia facturilor plătite.
-	const creditMinutes = Math.round((netCents / 100 / reference.rateEur) * 60);
+	// proporțional mai mult credit. Folosim ACEEAȘI funcție ca la creditarea
+	// facturilor plătite, ca să se aplice și rotunjirea la pasul configurat —
+	// altfel fluxul ăsta ar produce solduri care nu sunt multiplu de pas, spre
+	// deosebire de toate celelalte alimentări.
+	const creditMinutes = eurCentsToReferenceMinutes(
+		netCents,
+		reference.rateEur,
+		catalog.rules.stepMinutes
+	);
 
 	return {
 		ok: true,

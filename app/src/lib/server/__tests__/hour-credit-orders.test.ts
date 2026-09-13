@@ -161,6 +161,21 @@ describe('quoteHourCreditOrder', () => {
 		expect(q.vatPercent).toBe(21);
 	});
 
+	test('creditul se rotunjește la pasul configurat, ca la creditarea din facturi', async () => {
+		const q = await quoteHourCreditOrder({
+			tenantId: TENANT,
+			rateSlug: 'development',
+			modeSlug: 'urgent',
+			hours: 3
+		});
+		expect(q.ok).toBe(true);
+		if (!q.ok) return;
+		// stepMinutes implicit = 15. Fără rotunjire ar ieși 320,7 → 321, care ar face
+		// soldul clientului să nu mai fie multiplu de pas (spre deosebire de toate
+		// celelalte alimentări).
+		expect(q.creditMinutes % 15).toBe(0);
+	});
+
 	test('cota de TVA vine din setările tenantului, nu hardcodată', async () => {
 		const q = await quoteHourCreditOrder({
 			tenantId: TENANT,
