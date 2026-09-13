@@ -57,6 +57,7 @@ import { processRankWeeklyReport } from './tasks/rank-weekly-report';
 import { processRankVolumeRefresh } from './tasks/rank-volume-refresh';
 import { processGscDailyPull } from './tasks/gsc-daily-pull';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
+import { isProductionInstance } from '$lib/server/runtime-env';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { sql } from 'drizzle-orm';
@@ -280,6 +281,13 @@ export function registerTask(type: string, handler: TaskHandler) {
  * Start the scheduler - sets up recurring jobs and starts the worker
  */
 export const startScheduler = async () => {
+	// Staging are baza clonată din prod, localhost lucrează pe baza de prod: oricare
+	// dintre ele cu joburile pornite emite facturi reale în Keez. Vezi runtime-env.ts.
+	if (!isProductionInstance()) {
+		console.warn(`[scheduler] NU pornește: APP_ENV=${env.APP_ENV ?? '(nesetat)'} — joburile programate rulează doar în producție`);
+		return;
+	}
+
 	logInfo('scheduler', 'Starting scheduler...', { metadata: { taskTypes: Object.keys(taskHandlers).length, redisUrl: REDIS_URL.replace(/\/\/.*@/, '//***@') } });
 
 	// DB health check

@@ -19,8 +19,9 @@ const dbMock = {
 };
 
 const generateCalls: string[] = [];
+const envMock: Record<string, string | undefined> = { APP_ENV: 'production' };
 
-mock.module('$env/dynamic/private', () => ({ env: {} }));
+mock.module('$env/dynamic/private', () => ({ env: envMock }));
 mock.module('$env/static/private', () => ({}));
 mock.module('$env/dynamic/public', () => ({ env: {} }));
 mock.module('$env/static/public', () => ({}));
@@ -57,10 +58,46 @@ function pastIso(): Date {
 	return d;
 }
 
+describe('processRecurringInvoices — doar producția emite facturi', () => {
+	beforeEach(() => {
+		queue.length = 0;
+		generateCalls.length = 0;
+		envMock.APP_ENV = 'production';
+	});
+
+	// Incident 2026-09-12 (OTS 559 + OTS 560, Wow Agency): staging are baza clonată
+	// din prod, cu integrarea Keez și șabloanele recurente copiate. Scheduler-ul de
+	// acolo a găsit șablonul „scadent" și a emis în Keez-ul real o a doua factură.
+	for (const appEnv of ['staging', undefined]) {
+		test(`APP_ENV=${appEnv}: nu generează nimic, nici nu citește șabloanele`, async () => {
+			envMock.APP_ENV = appEnv;
+			queue.push([
+				{
+					id: 'ri-due',
+					tenantId: 't-1',
+					clientId: 'c-1',
+					isActive: true,
+					nextRunDate: pastIso(),
+					endDate: null,
+					notes: null
+				}
+			]);
+			queue.push([]);
+
+			const result = await processRecurringInvoices();
+
+			expect(generateCalls).toEqual([]);
+			expect(result.invoicesGenerated).toBe(0);
+			expect(queue).toHaveLength(2);
+		});
+	}
+});
+
 describe('processRecurringInvoices — Stripe-subscription templates are skipped', () => {
 	beforeEach(() => {
 		queue.length = 0;
 		generateCalls.length = 0;
+		envMock.APP_ENV = 'production';
 	});
 
 	test('does NOT generate an invoice for a template owned by a Stripe subscription', async () => {

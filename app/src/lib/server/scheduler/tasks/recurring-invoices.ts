@@ -4,12 +4,18 @@ import { eq, and, sql } from 'drizzle-orm';
 import { generateInvoiceFromRecurringTemplate } from '../../invoice-utils';
 import { sendInvoiceEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
+import { isProductionInstance } from '$lib/server/runtime-env';
 
 /**
  * Process recurring invoices - finds active recurring invoices that are due
  * and generates invoices for them
  */
 export async function processRecurringInvoices(params: Record<string, any> = {}) {
+	// A doua barieră după startScheduler: facturile programate pleacă DOAR din producție.
+	if (!isProductionInstance()) {
+		console.warn('[scheduler] Recurring invoices: sărit — instanța nu e producție (APP_ENV≠production)');
+		return { success: true, invoicesGenerated: 0 };
+	}
 	try {
 		const now = new Date();
 		logInfo('scheduler', `Recurring invoices: checking at ${now.toISOString()}`, { action: 'recurring_start' });
