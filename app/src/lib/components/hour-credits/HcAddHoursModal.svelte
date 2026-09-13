@@ -42,6 +42,11 @@
 	let requestedWindow = $state('');
 	let sendEmail = $state(true);
 	let saving = $state(false);
+	/**
+	 * Cheia de idempotență a trimiterii: un dublu click sau un retry cu aceeași cheie
+	 * nu creditează și nu facturează a doua oară. Se reînnoiește după un succes.
+	 */
+	let requestId = $state(crypto.randomUUID());
 	let error = $state<string | null>(null);
 	let result = $state<{ warnings: string[]; invoiceNumber: string | null } | null>(null);
 
@@ -68,9 +73,11 @@
 				modeSlug,
 				hours,
 				requestedWindow: modeSlug === 'standard' ? undefined : requestedWindow || undefined,
-				sendEmail
+				sendEmail,
+				requestId
 			}).updates(getHourCreditsPage());
 			result = { warnings: res.warnings, invoiceNumber: res.invoiceNumber };
+			requestId = crypto.randomUUID();
 			ondone?.();
 		} catch (err) {
 			error = remoteErrorMessage(err, 'Nu am putut adăuga orele.');
@@ -115,8 +122,9 @@
 		<div class="hc-modal-b">
 			{#if result}
 				<div class="hc-preview">
-					Am adăugat <b>{fmtMinutes(quote?.ok ? quote.creditMinutes : 0)}</b> în creditul
-					clientului{result.invoiceNumber ? `, factura ${result.invoiceNumber}` : ''}.
+					Am adăugat <b>{fmtMinutes(quote?.ok ? quote.creditMinutes : 0)}</b> în creditul clientului{result.invoiceNumber
+						? `, factura ${result.invoiceNumber}`
+						: ''}.
 				</div>
 				{#each result.warnings as w (w)}
 					<div class="hc-error">{w}</div>
@@ -214,8 +222,8 @@
 
 				{#if modeSlug !== 'standard'}
 					<div class="hc-preview">
-						Regim cu start imediat: la persoane fizice e nevoie de acordul expres privind
-						începerea lucrării (OUG 34/2014).
+						Regim cu start imediat: la persoane fizice e nevoie de acordul expres privind începerea
+						lucrării (OUG 34/2014).
 					</div>
 				{/if}
 

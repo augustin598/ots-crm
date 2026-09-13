@@ -98,6 +98,7 @@ describe('getHourlyCatalog — seed lazy', () => {
 			// Expirarea e oprită implicit din același motiv: nu dispare credit real
 			// fără ca owner-ul să fi cerut asta.
 			creditExpiryDays: 0,
+			creditExpiryEnabledAt: null,
 			feedFromInvoicesDefault: false
 		});
 	});
@@ -174,6 +175,7 @@ describe('getHourlyCatalog — seed lazy', () => {
 			notifyEmail: false,
 			notifyWhatsapp: true,
 			creditExpiryDays: 0,
+			creditExpiryEnabledAt: null,
 			feedFromInvoicesDefault: false
 		});
 		expect(logWarningMock).toHaveBeenCalledTimes(0);

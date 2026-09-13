@@ -40,13 +40,21 @@ export function effectiveRateEur(baseRateEur: number, multiplierPct: number): nu
 	return Math.round((baseRateEur * multiplierPct) / 100);
 }
 
-export function isValidHours(hours: number): boolean {
-	return Number.isInteger(hours) && hours >= HOURS_MIN && hours <= HOURS_MAX;
+/**
+ * `maxHours` implicit = limita comenzii publice. Adminul („Adaugă ore") trece
+ * plafonul regimului, care poate urca până la `MAX_HOURS_MAX` din Settings.
+ */
+export function isValidHours(hours: number, maxHours: number = HOURS_MAX): boolean {
+	return Number.isInteger(hours) && hours >= HOURS_MIN && hours <= maxHours;
 }
 
 /** Net în cenți EUR: ore × tarif (EUR întregi) × 100. Aruncă pe input invalid. */
-export function hoursNetCents(rateEur: number, hours: number): number {
-	if (!isValidHours(hours)) throw new Error(`Număr de ore invalid: ${hours}`);
+export function hoursNetCents(
+	rateEur: number,
+	hours: number,
+	maxHours: number = HOURS_MAX
+): number {
+	if (!isValidHours(hours, maxHours)) throw new Error(`Număr de ore invalid: ${hours}`);
 	if (!Number.isInteger(rateEur) || rateEur <= 0) throw new Error(`Tarif invalid: ${rateEur}`);
 	return rateEur * hours * 100;
 }

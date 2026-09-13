@@ -83,7 +83,12 @@ mock.module('$lib/server/bnr/client', () => ({
 }));
 
 const table = await import('$lib/server/db/schema');
-const { createHourCreditOrder, quoteHourCreditOrder } = await import('../hour-credit-orders');
+const {
+	createHourCreditOrder,
+	quoteHourCreditOrder,
+	listUninvoicedHourCredits,
+	reissueHourCreditInvoice
+} = await import('../hour-credit-orders');
 const { invoiceCreditEligibility } = await import('$lib/logic/hour-credits');
 
 const TENANT = 't-ord';
@@ -278,6 +283,45 @@ describe('createHourCreditOrder', () => {
 		expect(eligibility.eligible).toBe(false);
 	});
 
+	test('creditul e „ore cumpărate" legat de factură, nu ajustare manuală', async () => {
+		const res = await createHourCreditOrder(baseInput);
+		const rows = await testDb.select().from(table.clientHourLedger);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].kind).toBe('purchase');
+		expect(rows[0].sourceType).toBe('invoice');
+		expect(rows[0].sourceId).toBe(res.invoiceId!);
+	});
+
+	test('aceeași cerere trimisă de două ori (dublu click, retry) creditează și facturează o dată', async () => {
+		const input = { ...baseInput, requestId: 'req-abc123def456' };
+		const first = await createHourCreditOrder(input);
+		const second = await createHourCreditOrder(input);
+
+		expect(second.duplicate).toBe(true);
+		expect(second.invoiceId).toBe(first.invoiceId);
+		expect(await balance()).toBe(first.creditMinutes);
+		expect(await testDb.select().from(table.invoice)).toHaveLength(1);
+		expect(keezCalls).toBe(1);
+		expect(emails).toHaveLength(1);
+	});
+
+	test('admin: plafonul regimului ridicat peste 100 h e respectat (nu limita publică de 100 h)', async () => {
+		const { getHourlyCatalog } = await import('$lib/server/hourly-catalog');
+		await getHourlyCatalog(TENANT); // seed lazy
+		await testDb
+			.update(table.hourlyRateMode)
+			.set({ maxHours: 200 })
+			.where(eq(table.hourlyRateMode.slug, 'standard'));
+		const q = await quoteHourCreditOrder({
+			tenantId: TENANT,
+			rateSlug: 'development',
+			modeSlug: 'standard',
+			hours: 150
+		});
+		expect(q.ok).toBe(true);
+		if (q.ok) expect(q.netCents).toBe(150 * 65 * 100);
+	});
+
 	test('antetul e în RON la cursul BNR, linia rămâne în EUR', async () => {
 		const res = await createHourCreditOrder(baseInput);
 		const [inv] = await testDb
@@ -371,6 +415,51 @@ describe('createHourCreditOrder', () => {
 		expect(res.warnings.join(' ')).toMatch(/email/i);
 		expect(res.invoiceId).not.toBeNull();
 		expect(await balance()).toBe(res.creditMinutes);
+	});
+
+	test('fără curs BNR: creditul apare ca „fără factură" și se emite ulterior, o singură dată', async () => {
+		bnrRate = null;
+		const res = await createHourCreditOrder({ ...baseInput, sendEmail: false });
+		expect(res.invoiceId).toBeNull();
+
+		const pending = await listUninvoicedHourCredits(TENANT);
+		expect(pending).toHaveLength(1);
+		expect(pending[0]).toMatchObject({
+			clientId: CLIENT,
+			hours: 3,
+			creditMinutes: res.creditMinutes
+		});
+
+		bnrRate = { rate: 5, rateDate: new Date() };
+		const again = await reissueHourCreditInvoice({
+			tenantId: TENANT,
+			ledgerEntryId: pending[0].ledgerEntryId,
+			userId: USER,
+			sendEmail: false
+		});
+		expect(again.invoiceId).not.toBeNull();
+		const [inv] = await testDb
+			.select()
+			.from(table.invoice)
+			.where(eq(table.invoice.id, again.invoiceId!));
+		// Prețul e cel înghețat la acordarea creditului (3 h × 98 €), la cursul de acum.
+		expect(inv.externalSource).toBe('hour-credit');
+		expect(inv.amount).toBe(29400 * 5);
+		const [row] = await testDb.select().from(table.clientHourLedger);
+		expect(row.sourceId).toBe(again.invoiceId!);
+		// Creditul NU se acordă a doua oară.
+		expect(await balance()).toBe(res.creditMinutes);
+		expect(await listUninvoicedHourCredits(TENANT)).toEqual([]);
+
+		await expect(
+			reissueHourCreditInvoice({
+				tenantId: TENANT,
+				ledgerEntryId: pending[0].ledgerEntryId,
+				userId: USER,
+				sendEmail: false
+			})
+		).rejects.toThrow(/există deja/);
+		expect(await testDb.select().from(table.invoice)).toHaveLength(1);
 	});
 
 	test('fără curs BNR: creditul se acordă, factura NU se emite', async () => {

@@ -7,6 +7,8 @@
  * (faza 3) va folosi același tarif de referință ca numitor.
  */
 
+import { effectiveRateEur } from './hours-pricing';
+
 export type LedgerKind =
 	| 'invoice_credit'
 	| 'invoice_credit_reversal'
@@ -99,6 +101,12 @@ export interface InvoiceEligibility {
 	eligible: boolean;
 	/** Motivul refuzului, în română; null când e eligibilă. */
 	reason: string | null;
+	/**
+	 * `true` = factura nu alimentează creditul niciodată (hosting, ads, depășire,
+	 * comandă de ore, „Adaugă ore"), deci nu are ce căuta în lista „Necreditate".
+	 * Lipsă = eligibilă sau refuzată dintr-un motiv pe care adminul îl poate rezolva.
+	 */
+	structural?: true;
 }
 
 /**
@@ -110,21 +118,26 @@ export function invoiceCreditEligibility(
 	invoice: InvoiceCreditCandidate,
 	ctx: { clientOptedIn: boolean; isHoursOrderInvoice: boolean }
 ): InvoiceEligibility {
+	const excluded = (reason: string): InvoiceEligibility => ({
+		eligible: false,
+		reason,
+		structural: true
+	});
 	if (invoice.externalSource === HOUR_OVERAGE_INVOICE_SOURCE) {
-		return { eligible: false, reason: 'factură de depășire a orelor' };
+		return excluded('factură de depășire a orelor');
 	}
 	if (invoice.externalSource === HOUR_CREDIT_INVOICE_SOURCE) {
-		return { eligible: false, reason: 'ore adăugate manual (creditate la emitere)' };
+		return excluded('ore adăugate manual (creditate la emitere)');
 	}
-	if (invoice.hostingAccountId) return { eligible: false, reason: 'factură de hosting' };
+	if (invoice.hostingAccountId) return excluded('factură de hosting');
 	if (
 		invoice.externalSource &&
 		(ADS_INVOICE_SOURCES as readonly string[]).includes(invoice.externalSource)
 	) {
-		return { eligible: false, reason: `factură din sursă ads (${invoice.externalSource})` };
+		return excluded(`factură din sursă ads (${invoice.externalSource})`);
 	}
 	if (ctx.isHoursOrderInvoice) {
-		return { eligible: false, reason: 'factura unei comenzi de ore (creditată prin comandă)' };
+		return excluded('factura unei comenzi de ore (creditată prin comandă)');
 	}
 	if (invoice.status !== 'paid') return { eligible: false, reason: 'factura nu e plătită' };
 	if (!ctx.clientOptedIn) {
@@ -217,3 +230,104 @@ export function overageMonthKey(now: Date): string {
 }
 
 export const OVERAGE_NOTES_PREFIX = 'hour-overage:';
+
+export interface OverageDraftHeader {
+	externalSource: string | null;
+	notes: string | null;
+	/** Cenți. */
+	amount: number | null;
+	/** Puncte de bază (21% = 2100). */
+	taxRate: number | null;
+	currency: string;
+	clientId: string | null;
+}
+
+/**
+ * De ce nu se poate salva editarea antetului unui draft de depășire (spec §6.3);
+ * null = permis. Suma, cota și moneda se recalculează din liniile generate de
+ * sistem, clientul e al taskurilor, iar nota poartă marcajul lunii după care
+ * decontarea găsește draftul — șters, Done-ul următor ar deschide un draft dublu.
+ *
+ * Formularul din /invoices retrimite toate câmpurile, deci comparăm valorile,
+ * nu prezența lor. `amount` și `taxRate` vin din formular în unități (lei, %).
+ */
+export function overageDraftEditBlockReason(
+	existing: OverageDraftHeader,
+	update: {
+		amount?: number;
+		taxRate?: number;
+		currency?: string;
+		clientId?: string;
+		notes?: string;
+	}
+): string | null {
+	if (existing.externalSource !== HOUR_OVERAGE_INVOICE_SOURCE) return null;
+	const locked =
+		'Draftul de depășire a orelor e generat din taskuri: suma, cota, moneda și clientul nu se editează din antet.';
+	if (update.amount !== undefined && Math.round(update.amount * 100) !== (existing.amount ?? 0)) {
+		return locked;
+	}
+	if (
+		update.taxRate !== undefined &&
+		Math.round(update.taxRate * 100) !== (existing.taxRate ?? 0)
+	) {
+		return locked;
+	}
+	if (update.currency !== undefined && update.currency !== existing.currency) return locked;
+	if (update.clientId && update.clientId !== existing.clientId) return locked;
+	if (update.notes !== undefined) {
+		const marker = (existing.notes ?? '').match(/^hour-overage:\d{4}-\d{2}/)?.[0];
+		if (marker && !update.notes.startsWith(marker)) {
+			return `Nota draftului trebuie să înceapă cu „${marker}" — după acest marcaj se adaugă depășirile lunii.`;
+		}
+	}
+	return null;
+}
+
+/**
+ * Starea alertei „credit scăzut" (spec §8), pe DISPONIBIL = sold − rezervat — aceeași
+ * regulă ca badge-ul „sub prag" din Bugete ore (decizie 13 sep 2026). O singură
+ * alertă la trecerea sub prag; se reînarmează când disponibilul urcă peste prag.
+ */
+export function lowCreditTransition(params: {
+	balanceMinutes: number;
+	reservedMinutes: number;
+	thresholdMinutes: number;
+	notified: boolean;
+}): { action: 'notify' | 'rearm' | 'none'; availableMinutes: number } {
+	const availableMinutes = params.balanceMinutes - params.reservedMinutes;
+	const below = availableMinutes < params.thresholdMinutes;
+	if (below && !params.notified) return { action: 'notify', availableMinutes };
+	if (!below && params.notified) return { action: 'rearm', availableMinutes };
+	return { action: 'none', availableMinutes };
+}
+
+/**
+ * Creditul disponibil pentru estimarea unui task (spec §6.1: avertizare galbenă
+ * când estimarea ponderată depășește DISPONIBILUL, nu soldul). La editare, taskul
+ * rezervă deja o parte din `reservedMinutes`; fără scăderea ei s-ar număra de două ori.
+ */
+export function availableForTask(params: {
+	balanceMinutes: number;
+	reservedMinutes: number;
+	ownReservedMinutes: number;
+}): number {
+	const others = Math.max(0, params.reservedMinutes - params.ownReservedMinutes);
+	return params.balanceMinutes - others;
+}
+
+/**
+ * Eticheta orelor lucrate din notificările de consum (email + WhatsApp): specializarea
+ * cu tariful ei efectiv, ex. „Development (65 €/h)". Soldul rămâne în ore la tariful de
+ * referință; decizie 13 sep 2026: fără explicații despre conversie în mesaj.
+ */
+export function consumptionWorkedLabel(params: {
+	rateLabel: string;
+	rateEur: number;
+	multiplierPct: number;
+	modeLabel: string;
+}): string {
+	const effective = effectiveRateEur(params.rateEur, params.multiplierPct);
+	const mode = params.multiplierPct > 100 ? `, ${params.modeLabel}` : '';
+	return `${params.rateLabel}${mode} (${effective} €/h)`;
+}

@@ -278,6 +278,7 @@
 					<div class="grid grid-cols-2 gap-4">
 						<TaskHourCreditFields
 							{clientId}
+							taskId={task?.id ?? null}
 							bind:estimatedHours
 							bind:rateSlug
 							bind:modeSlug

@@ -48,7 +48,11 @@ cod:
 2. **Comenzi de ore de pe `/servicii`** — orele intră după confirmarea plății.
 3. **„Adaugă ore" din admin** — creditul intră **la emitere**, apoi se emite
    factura și pleacă pe email cu link de plată
-   (`$lib/server/hour-credit-orders.ts`).
+   (`$lib/server/hour-credit-orders.ts`). Rândul din ledger e `purchase` cu
+   `source_type = 'invoice'` și `source_id` = id-ul facturii: intră în raportul
+   lunar și se poate retrage dacă factura e anulată. Modalul trimite o cheie de
+   idempotență (`requestId`), deci dublul click sau retry-ul nu dublează nimic;
+   două taburi separate rămân două comenzi.
 4. **Ajustare manuală** — owner/admin, cu motiv obligatoriu care rămâne în ledger.
 
 ### De ce factura din „Adaugă ore" nu mai creditează la plată
@@ -66,7 +70,43 @@ explicit. Fără marcajul ăsta, `invoice.paid` ar adăuga a doua oară aceleaș
 disponibil = sold − rezervat
 ```
 
-„Sub prag" se calculează pe *disponibil*, nu pe sold.
+„Sub prag" se calculează pe *disponibil*, nu pe sold — și în listă, și în
+alerta de „credit scăzut" (`lowCreditTransition`). Formularul de task avertizează
+când estimarea ponderată trece de disponibil, fără să numere de două ori
+rezervarea taskului editat (`availableForTask`).
+
+## Decontarea taskurilor (concurență)
+
+`settleTaskCredit` și `reverseTaskCredit` revendică taskul ca **primă scriere**
+din tranzacție (`credit_settled_at IS NULL` la Done, `= valoarea citită` la
+reopen). O verificare făcută înainte de tranzacție nu ajunge: două Done simultane
+sau o tranzacție reluată de `withTursoBusyRetry` după `SQLITE_BUSY` consumau de
+două ori. Reopen-ul stornează doar consumul ciclului curent
+(`created_at >= credit_settled_at`).
+
+Depășirea: rândul `overage_invoiced` intră în aceeași tranzacție cu consumul;
+linia din draft și legarea ei de task vin după. Dacă taskul s-a schimbat între
+timp, linia se retrage. Liniile se caută după `invoice_line_item.task_id`, nu doar
+după `task.overage_invoice_id`.
+
+## Tabul „De rezolvat"
+
+- **Depășiri fără factură** — urma `overage_invoiced` a decontării curente, fără
+  linie pe niciun draft (draft picat, legare picată, draft șters). „Regenerează"
+  relegă linia existentă sau o recreează la tariful înghețat.
+- **Taskuri Done nedecontate** — decontarea n-a rulat (ex. tarif de referință
+  lipsă). „Decontează" rulează logica reală.
+- **Ore adăugate fără factură** — „Adaugă ore" cu curs BNR lipsă sau INSERT eșuat.
+  „Emite factura" folosește prețul înghețat în ledger, cursul și TVA-ul de azi, și
+  id-ul facturii referit de rândul din ledger (a doua emitere e refuzată); creditul
+  nu se acordă din nou (`reissueHourCreditInvoice`).
+- **Facturi anulate care au dat ore** — „Retrage orele" scrie
+  `invoice_credit_reversal` / `purchase_reversal`, idempotent prin indexul unic.
+
+Draftul de depășire nu se editează din antet (sumă, cotă, monedă, client), iar
+nota trebuie să păstreze marcajul `hour-overage:YYYY-MM`
+(`overageDraftEditBlockReason`). Ștergerea draftului desprinde taskurile
+(`detachOverageInvoiceTasks`).
 
 ## Expirarea
 
@@ -78,6 +118,21 @@ Alocarea consumului pe loturi e **FIFO pe expirare**: se consumă întâi lotul 
 termenul cel mai apropiat, iar creditul fără termen ultimul — ca să piardă
 clientul cât mai puțin. Logica e pură și testată în
 `$lib/logic/hour-credit-expiry.ts`.
+
+Stornările nu sunt loturi: `task_reversal` se scade din consum (minutele
+restituite rămân în lotul lor și, dacă termenul a trecut, expiră la rularea
+următoare), iar `invoice_credit_reversal` / `purchase_reversal` retrag exact
+alimentarea cu aceeași sursă. Un lot care expiră a doua oară primește cheia
+`id#2` (indexul unic ar bloca altfel a doua expirare).
+
+Oprirea expirării (0 zile) ascunde „expiră la…" din UI și oprește jobul. La
+repornire se fixează `hour_credit_settings.credit_expiry_enabled_at` (migrarea
+0562): termenele trecute cât expirarea a fost oprită **nu expiră retroactiv**
+(`nextExpiryEnabledAt`, `expiringBatches`).
+
+Jobul citește ledgerul și scrie expirarea în aceeași tranzacție per client. Altfel
+un Done strecurat între citire și scriere consuma din lot, expirarea scădea apoi lotul
+întreg, iar la sold insuficient soldul ajungea negativ și depășirea nu se factura.
 
 Jobul zilnic `hour-credit-expiry` (04:30 Europe/Bucharest) scrie rândurile
 `expire`. E idempotent de două ori: prin indexul unic, și prin faptul că rândul
@@ -124,6 +179,8 @@ simplu se scrie `.dark .x`, nu `:global(.dark)`).
 - Paleta light a handoff-ului folosește `#94a3b8` pentru textele „mut", ceea ce
   dă ~2,5:1 pe alb — sub pragul WCAG AA de 4,5:1 pentru text mic. Varianta dark
   (derivată) e la ~5,5:1. De discutat dacă se întunecă tokenul în light.
+- Portalul verifică flag-ul `hourCredits` și în remote, nu doar în layout; notele
+  ajustărilor manuale nu ajung la client.
 - Salvarea din Settings trimite mai multe comenzi (una per rând modificat), nu o
   singură tranzacție: dacă una pică, restul rămân salvate, formularul rămâne
   dirty și mesajul de eroare cere reluarea.

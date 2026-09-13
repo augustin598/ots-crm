@@ -21,13 +21,26 @@ import {
 	getHourCreditsOverview,
 	getMonthlyReport,
 	listClientCreditTasks,
+	listCancelledCreditedInvoices,
 	listHoursOrders,
-	listUncreditedInvoices
+	listUncreditedInvoices,
+	reverseCancelledInvoiceCredit
 } from '$lib/server/hour-credits';
-import { createHourCreditOrder, quoteHourCreditOrder } from '$lib/server/hour-credit-orders';
-import { activeModes, activeRates } from '$lib/logic/hourly-catalog';
+import {
+	createHourCreditOrder,
+	listUninvoicedHourCredits,
+	quoteHourCreditOrder,
+	reissueHourCreditInvoice
+} from '$lib/server/hour-credit-orders';
+import { MAX_HOURS_MAX, activeModes, activeRates } from '$lib/logic/hourly-catalog';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
-import { computeReservedMinutes } from '$lib/server/task-credit';
+import {
+	computeReservedMinutes,
+	listUnbilledOverages,
+	listUnsettledDoneTasks,
+	regenerateOverageDraft,
+	settleTaskCredit
+} from '$lib/server/task-credit';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
 import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
@@ -60,10 +73,22 @@ const clientIdSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(64));
 
 export const getHourCreditsPage = query(async () => {
 	const { tenantId, role } = await requireStaffTenant();
-	const [rows, uncredited, catalog] = await Promise.all([
+	const [
+		rows,
+		uncredited,
+		catalog,
+		unbilledOverages,
+		unsettledDone,
+		cancelledCredited,
+		uninvoicedCredits
+	] = await Promise.all([
 		getHourCreditsOverview(tenantId),
 		listUncreditedInvoices(tenantId),
-		getHourlyCatalog(tenantId)
+		getHourlyCatalog(tenantId),
+		listUnbilledOverages(tenantId),
+		listUnsettledDoneTasks(tenantId),
+		listCancelledCreditedInvoices(tenantId),
+		listUninvoicedHourCredits(tenantId)
 	]);
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
 	const reserved = await computeReservedMinutes(
@@ -93,13 +118,14 @@ export const getHourCreditsPage = query(async () => {
 			(s, r) => (r.expiring && r.expiring.on < endOfMonth ? s + r.expiring.minutes : s),
 			0
 		),
-		expiringClientCount: withReserved.filter((r) => r.expiring && r.expiring.on < endOfMonth)
-			.length
+		expiringClientCount: withReserved.filter((r) => r.expiring && r.expiring.on < endOfMonth).length
 	};
 
 	return {
 		rows: withReserved,
 		uncredited,
+		// Tabul „De rezolvat": bani care altfel s-ar pierde fără urmă.
+		issues: { unbilledOverages, unsettledDone, cancelledCredited, uninvoicedCredits },
 		kpis,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		lowCreditThresholdMinutes: threshold,
@@ -276,7 +302,7 @@ export const getHourOrderOptions = query(async () => {
 const orderDraftSchema = v.object({
 	rateSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
 	modeSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
-	hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500)),
+	hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(MAX_HOURS_MAX)),
 	/** Fără client nu putem ști dacă e operațiune cu TVA 0 (intracom/export). */
 	clientId: v.optional(v.string())
 });
@@ -295,10 +321,12 @@ export const addHoursToClient = command(
 		clientId: clientIdSchema,
 		rateSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
 		modeSlug: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
-		hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(500)),
+		hours: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(MAX_HOURS_MAX)),
 		requestedWindow: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(200))),
 		/** Nimic nu pleacă spre client fără bifă explicită. */
-		sendEmail: v.boolean()
+		sendEmail: v.boolean(),
+		/** Cheia de idempotență generată de modal (dublu click / retry). */
+		requestId: v.optional(v.pipe(v.string(), v.minLength(8), v.maxLength(64)))
 	}),
 	async (data) => {
 		const { tenantId, userId } = await requireOwnerOrAdmin();
@@ -311,10 +339,66 @@ export const addHoursToClient = command(
 				modeSlug: data.modeSlug,
 				hours: data.hours,
 				requestedWindow: data.requestedWindow || null,
-				sendEmail: data.sendEmail
+				sendEmail: data.sendEmail,
+				requestId: data.requestId ?? null
 			});
 		} catch (err) {
 			throw error(400, err instanceof Error ? err.message : 'Nu am putut adăuga orele.');
+		}
+	}
+);
+
+// ── Tabul „De rezolvat" (owner/admin) ────────────────────────────────────────
+
+const taskIdSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(64));
+
+/** Recreează (sau relegă) linia de depășire a unui task decontat fără factură. */
+export const regenerateTaskOverage = command(taskIdSchema, async (taskId) => {
+	const { tenantId } = await requireOwnerOrAdmin();
+	const result = await regenerateOverageDraft({ tenantId, taskId });
+	if (result.status === 'skipped') throw error(400, `Nu s-a regenerat: ${result.reason}.`);
+	return result;
+});
+
+/** Decontează un task rămas Done fără decontare (ex. lipsea tariful de referință). */
+export const settleDoneTaskNow = command(taskIdSchema, async (taskId) => {
+	const { tenantId, userId } = await requireOwnerOrAdmin();
+	const [task] = await db
+		.select({ status: table.task.status })
+		.from(table.task)
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
+		.limit(1);
+	if (!task) throw error(404, 'Taskul nu există.');
+	if (task.status !== 'done') throw error(400, 'Doar taskurile Done se decontează de aici.');
+	const result = await settleTaskCredit({ tenantId, taskId, userId });
+	if (result.status !== 'settled') throw error(400, `Nu s-a decontat: ${result.reason}.`);
+	return result;
+});
+
+/** Retrage orele date de o factură anulată. */
+export const reverseCancelledInvoiceHours = command(
+	v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
+	async (invoiceId) => {
+		const { tenantId, userId } = await requireOwnerOrAdmin();
+		const result = await reverseCancelledInvoiceCredit({ tenantId, invoiceId, userId });
+		if (result.status === 'skipped') throw error(400, `Nu s-a stornat: ${result.reason}.`);
+		return result;
+	}
+);
+
+/** Emite factura unor ore adăugate din admin fără factură (curs BNR lipsă, INSERT eșuat). */
+export const issueHourCreditInvoiceNow = command(
+	v.object({
+		ledgerEntryId: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
+		/** Nimic nu pleacă spre client fără bifă explicită. */
+		sendEmail: v.boolean()
+	}),
+	async (data) => {
+		const { tenantId, userId } = await requireOwnerOrAdmin();
+		try {
+			return await reissueHourCreditInvoice({ tenantId, userId, ...data });
+		} catch (err) {
+			throw error(400, err instanceof Error ? err.message : 'Nu am putut emite factura.');
 		}
 	}
 );

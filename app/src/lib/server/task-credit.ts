@@ -7,7 +7,7 @@
  * depășire e o factură CRM obișnuită (`external_source = 'hour-overage'`), una
  * per client per lună calendaristică, cu liniile gestionate DOAR de aici.
  */
-import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -37,7 +37,11 @@ function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 }
 
-const OPEN_TASK_STATUSES_EXCLUDED = ['done', 'cancelled'] as const;
+/**
+ * Altă cerere a decontat (sau a redeschis) task-ul între citire și tranzacție.
+ * Aruncată DIN tranzacție ca s-o anuleze; prinsă imediat în afara ei.
+ */
+class TaskCreditClaimLost extends Error {}
 
 interface CreditContext {
 	rate: CatalogRate;
@@ -113,6 +117,23 @@ export async function settleTaskCredit(params: {
 		await withTursoBusyRetry(
 			() =>
 				db.transaction(async (tx) => {
+					consumed = 0;
+					// Revendicarea task-ului e PRIMA scriere și e condiționată: verificarea
+					// `creditSettledAt` de mai sus e o citire în afara tranzacției, deci două
+					// Done simultane (sau o tranzacție reluată după SQLITE_BUSY) ar trece
+					// amândouă de ea și ar consuma de două ori.
+					const claim = await tx
+						.update(table.task)
+						.set({ actualMinutes: actual, creditSettledAt: now, updatedAt: now })
+						.where(
+							and(
+								eq(table.task.id, taskId),
+								eq(table.task.tenantId, tenantId),
+								isNull(table.task.creditSettledAt)
+							)
+						);
+					if (claim.rowsAffected !== 1) throw new TaskCreditClaimLost();
+
 					// Încercarea 1: tot din credit.
 					const full = await tx
 						.update(table.client)
@@ -174,14 +195,40 @@ export async function settleTaskCredit(params: {
 							createdAt: now
 						});
 					}
-					await tx
-						.update(table.task)
-						.set({ actualMinutes: actual, creditSettledAt: now, updatedAt: now })
-						.where(eq(table.task.id, taskId));
+					// Urma depășirii intră în ACEEAȘI tranzacție cu consumul: dacă draftul
+					// pică după commit, depășirea rămâne vizibilă („nefacturată") și se poate
+					// regenera. Scrisă după draft, s-ar fi pierdut fără urmă.
+					const inTx = splitTaskSettlement({
+						realMinutes: actual,
+						factor: ctx.factor,
+						balanceMinutes: consumed,
+						stepMinutes: ctx.stepMinutes
+					});
+					if (inTx.overageRealMinutes > 0) {
+						await tx.insert(table.clientHourLedger).values({
+							id: generateId(),
+							tenantId,
+							clientId: task.clientId!,
+							deltaMinutes: 0,
+							kind: 'overage_invoiced',
+							sourceType: 'task',
+							sourceId: taskId,
+							note: `${task.title} — ${inTx.overageRealMinutes} min peste credit`,
+							createdByUserId: params.userId ?? null,
+							referenceRateEurSnapshot: ctx.referenceRateEur,
+							rateSlug: ctx.rate.slug,
+							modeSlug: ctx.mode.slug,
+							rateEurSnapshot: ctx.rate.rateEur,
+							multiplierPctSnapshot: ctx.mode.multiplierPct,
+							realMinutes: inTx.overageRealMinutes,
+							createdAt: now
+						});
+					}
 				}),
 			{ tenantId, label: 'task-credit.settle' }
 		);
 	} catch (err) {
+		if (err instanceof TaskCreditClaimLost) return { status: 'skipped', reason: 'deja decontat' };
 		logError(
 			'server',
 			`task-credit: decontarea task-ului ${taskId} a picat — ${serializeError(err).message}`,
@@ -205,39 +252,18 @@ export async function settleTaskCredit(params: {
 	let overageInvoiceId: string | null = null;
 	if (overageReal > 0) {
 		try {
-			overageInvoiceId = await addOverageLine({
+			overageInvoiceId = await billOverage({
 				tenantId,
 				clientId: task.clientId,
 				task: { id: taskId, title: task.title },
+				settledAt: now,
 				overageRealMinutes: overageReal,
-				ctx,
+				pricing: ctx,
 				now
 			});
-			await db
-				.update(table.task)
-				.set({ overageInvoiceId, updatedAt: new Date() })
-				.where(eq(table.task.id, taskId));
-			await db.insert(table.clientHourLedger).values({
-				id: generateId(),
-				tenantId,
-				clientId: task.clientId,
-				deltaMinutes: 0,
-				kind: 'overage_invoiced',
-				sourceType: 'task',
-				sourceId: taskId,
-				note: `${task.title} — ${overageReal} min peste credit, în draftul lunii`,
-				createdByUserId: params.userId ?? null,
-				referenceRateEurSnapshot: ctx.referenceRateEur,
-				rateSlug: ctx.rate.slug,
-				modeSlug: ctx.mode.slug,
-				rateEurSnapshot: ctx.rate.rateEur,
-				multiplierPctSnapshot: ctx.mode.multiplierPct,
-				realMinutes: overageReal,
-				createdAt: new Date()
-			});
 		} catch (err) {
-			// Consumul e deja în ledger; depășirea rămâne „nefacturată" (Bugete ore →
-			// Regenerează draftul). Nu ascundem eroarea în log.
+			// Consumul și urma depășirii sunt deja în ledger; taskul apare în Bugete ore
+			// ca „depășire nefacturată" (Regenerează). Nu ascundem eroarea în log.
 			logError(
 				'server',
 				`task-credit: draftul de depășire pentru ${taskId} a picat — ${serializeError(err).message}`,
@@ -266,7 +292,13 @@ export async function settleTaskCredit(params: {
 			taskTitle: task.title,
 			realMinutes: actual,
 			consumedMinutes: consumed,
-			overageRealMinutes: overageReal
+			overageRealMinutes: overageReal,
+			pricing: {
+				rateLabel: ctx.rate.label,
+				rateEur: ctx.rate.rateEur,
+				multiplierPct: ctx.mode.multiplierPct,
+				modeLabel: ctx.mode.label
+			}
 		}
 	});
 	return {
@@ -277,16 +309,70 @@ export async function settleTaskCredit(params: {
 	};
 }
 
+/** Ce trebuie știut ca să prețuiești o linie de depășire (din catalog sau din snapshot). */
+interface OveragePricing {
+	rate: { label: string; rateEur: number };
+	mode: { slug: string; label: string; multiplierPct: number };
+}
+
+/**
+ * Linia de depășire + legarea ei de task, doar dacă taskul e ÎNCĂ în decontarea
+ * `settledAt`. Între commit-ul consumului și linie poate intra un reopen (sau reopen
+ * + Done nou); atunci linia nu mai aparține nimănui și se scoate imediat — altfel
+ * Done-ul următor ar factura aceeași depășire a doua oară.
+ */
+async function billOverage(params: {
+	tenantId: string;
+	clientId: string;
+	task: { id: string; title: string };
+	settledAt: Date;
+	overageRealMinutes: number;
+	pricing: OveragePricing;
+	now: Date;
+}): Promise<string | null> {
+	const { tenantId, task } = params;
+	const { invoiceId, lineId } = await addOverageLine(params);
+	const attached = await withTursoBusyRetry(
+		() =>
+			db
+				.update(table.task)
+				.set({ overageInvoiceId: invoiceId, updatedAt: new Date() })
+				.where(
+					and(
+						eq(table.task.id, task.id),
+						eq(table.task.tenantId, tenantId),
+						eq(table.task.creditSettledAt, params.settledAt),
+						isNull(table.task.overageInvoiceId)
+					)
+				),
+		{ tenantId, label: 'task-credit.attachOverage' }
+	);
+	if (attached.rowsAffected === 1) return invoiceId;
+
+	logWarning(
+		'server',
+		`task-credit: task ${task.id} s-a schimbat în timpul facturării depășirii — linia a fost retrasă`,
+		{ tenantId, metadata: { taskId: task.id, invoiceId } }
+	);
+	await withTursoBusyRetry(
+		() =>
+			db.transaction((tx) => removeTaskOverageLines(tx, tenantId, task.id, { lineIds: [lineId] })),
+		{ tenantId, label: 'task-credit.retractOverage' }
+	);
+	return null;
+}
+
 /** Draftul lunii (sau următoarea, dacă e deja confirmat/în trimitere) + linia task-ului. */
 async function addOverageLine(params: {
 	tenantId: string;
 	clientId: string;
 	task: { id: string; title: string };
 	overageRealMinutes: number;
-	ctx: CreditContext;
+	pricing: OveragePricing;
 	now: Date;
-}): Promise<string> {
-	const { tenantId, clientId, task, ctx, now } = params;
+}): Promise<{ invoiceId: string; lineId: string }> {
+	const { tenantId, clientId, task, now } = params;
+	const ctx = params.pricing;
 	const [settings] = await db
 		.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
 		.from(table.invoiceSettings)
@@ -298,11 +384,12 @@ async function addOverageLine(params: {
 	const lineAmount = Math.round(hours * unitRateEur * 100);
 
 	const invoiceId = await findOrCreateOverageDraft({ tenantId, clientId, now, vatBps });
+	const lineId = generateId();
 	await withTursoBusyRetry(
 		() =>
 			db.transaction(async (tx) => {
 				await tx.insert(table.invoiceLineItem).values({
-					id: generateId(),
+					id: lineId,
 					invoiceId,
 					description: `Depășire ore — ${task.title} (${ctx.rate.label}${ctx.mode.slug !== 'standard' ? `, ${ctx.mode.label}` : ''})`,
 					note: `${hours} h × ${unitRateEur} € · task ${task.id}`,
@@ -318,10 +405,280 @@ async function addOverageLine(params: {
 			}),
 		{ tenantId, label: 'task-credit.addOverageLine' }
 	);
-	return invoiceId;
+	return { invoiceId, lineId };
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Scoate liniile de depășire ale unui task de pe drafturile încă editabile (după
+ * `invoice_line_item.task_id`, nu după `task.overage_invoice_id`, care poate lipsi
+ * dacă legarea a picat). Draftul rămas gol se șterge; restul își recalculează totalul.
+ */
+async function removeTaskOverageLines(
+	tx: Tx,
+	tenantId: string,
+	taskId: string,
+	opts: { lineIds?: string[] } = {}
+): Promise<void> {
+	const lines = await tx
+		.select({ id: table.invoiceLineItem.id, invoiceId: table.invoiceLineItem.invoiceId })
+		.from(table.invoiceLineItem)
+		.innerJoin(table.invoice, eq(table.invoice.id, table.invoiceLineItem.invoiceId))
+		.where(
+			and(
+				eq(table.invoice.tenantId, tenantId),
+				eq(table.invoice.externalSource, HOUR_OVERAGE_INVOICE_SOURCE),
+				eq(table.invoice.status, 'draft'),
+				isNull(table.invoice.keezStatus),
+				eq(table.invoiceLineItem.taskId, taskId),
+				...(opts.lineIds ? [inArray(table.invoiceLineItem.id, opts.lineIds)] : [])
+			)
+		);
+	if (lines.length === 0) return;
+	await tx.delete(table.invoiceLineItem).where(
+		inArray(
+			table.invoiceLineItem.id,
+			lines.map((l) => l.id)
+		)
+	);
+	for (const invoiceId of new Set(lines.map((l) => l.invoiceId))) {
+		const remaining = await tx
+			.select({ id: table.invoiceLineItem.id })
+			.from(table.invoiceLineItem)
+			.where(eq(table.invoiceLineItem.invoiceId, invoiceId))
+			.limit(1);
+		if (remaining.length === 0) {
+			await tx.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
+		} else {
+			await recomputeDraftTotals(tx, invoiceId);
+		}
+	}
+}
+
+/**
+ * Chemată din `deleteInvoice` înainte de ștergerea unui draft `hour-overage`, în
+ * aceeași tranzacție: taskurile legate își pierd legătura și apar în Bugete ore ca
+ * „depășire nefacturată" (urma din ledger rămâne), în loc să arate spre o factură
+ * care nu mai există.
+ */
+export async function detachOverageInvoiceTasks(
+	tx: Tx,
+	tenantId: string,
+	invoiceId: string
+): Promise<void> {
+	await tx
+		.update(table.task)
+		.set({ overageInvoiceId: null, updatedAt: new Date() })
+		.where(and(eq(table.task.tenantId, tenantId), eq(table.task.overageInvoiceId, invoiceId)));
+}
+
+export interface UnbilledOverage {
+	taskId: string;
+	taskTitle: string;
+	clientId: string;
+	clientName: string;
+	/** Minute REALE peste credit, din urma decontării curente. */
+	overageRealMinutes: number;
+	settledAt: Date;
+}
+
+/** Urma depășirii din decontarea CURENTĂ a taskului (rândul `overage_invoiced` al ciclului). */
+async function currentOverageTrace(tenantId: string, taskId: string, settledAt: Date) {
+	const [row] = await db
+		.select()
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'overage_invoiced'),
+				eq(table.clientHourLedger.sourceType, 'task'),
+				eq(table.clientHourLedger.sourceId, taskId),
+				gte(table.clientHourLedger.createdAt, settledAt)
+			)
+		)
+		.orderBy(desc(table.clientHourLedger.createdAt))
+		.limit(1);
+	return row ?? null;
+}
+
+/**
+ * Taskuri decontate cu depășire care nu stă pe nicio factură: draftul a picat,
+ * legarea a picat sau draftul a fost șters. Sursa e urma din ledger a decontării
+ * curente, nu o coloană care se poate pierde.
+ */
+export async function listUnbilledOverages(tenantId: string): Promise<UnbilledOverage[]> {
+	const rows = await db
+		.select({
+			taskId: table.task.id,
+			taskTitle: table.task.title,
+			clientId: table.task.clientId,
+			clientName: table.client.name,
+			settledAt: table.task.creditSettledAt,
+			traceMinutes: table.clientHourLedger.realMinutes,
+			traceAt: table.clientHourLedger.createdAt
+		})
+		.from(table.task)
+		.innerJoin(table.client, eq(table.client.id, table.task.clientId))
+		.innerJoin(
+			table.clientHourLedger,
+			and(
+				eq(table.clientHourLedger.tenantId, table.task.tenantId),
+				eq(table.clientHourLedger.sourceId, table.task.id),
+				eq(table.clientHourLedger.kind, 'overage_invoiced')
+			)
+		)
+		.where(
+			and(
+				eq(table.task.tenantId, tenantId),
+				isNull(table.task.overageInvoiceId),
+				sql`${table.task.creditSettledAt} IS NOT NULL`,
+				sql`${table.clientHourLedger.createdAt} >= ${table.task.creditSettledAt}`
+			)
+		);
+	return rows
+		.filter((r) => r.clientId && r.settledAt && (r.traceMinutes ?? 0) > 0)
+		.map((r) => ({
+			taskId: r.taskId,
+			taskTitle: r.taskTitle,
+			clientId: r.clientId!,
+			clientName: r.clientName,
+			overageRealMinutes: r.traceMinutes!,
+			settledAt: r.settledAt!
+		}));
+}
+
+export type RegenerateOverageResult =
+	| { status: 'billed'; invoiceId: string }
+	| { status: 'already_billed' }
+	| { status: 'skipped'; reason: string };
+
+/**
+ * „Regenerează draftul" pentru un task din `listUnbilledOverages`. Dacă linia există
+ * deja pe un draft (s-a pierdut doar legătura), o relegăm; altfel o recreăm din
+ * snapshot-ul de preț al decontării (tariful înghețat atunci, nu cel de azi).
+ */
+export async function regenerateOverageDraft(params: {
+	tenantId: string;
+	taskId: string;
+}): Promise<RegenerateOverageResult> {
+	const { tenantId, taskId } = params;
+	const [task] = await db
+		.select()
+		.from(table.task)
+		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
+		.limit(1);
+	if (!task || !task.clientId)
+		return { status: 'skipped', reason: 'task inexistent sau fără client' };
+	if (!task.creditSettledAt) return { status: 'skipped', reason: 'taskul nu e decontat' };
+	if (task.overageInvoiceId) return { status: 'already_billed' };
+	const settledAt = task.creditSettledAt;
+	const trace = await currentOverageTrace(tenantId, taskId, settledAt);
+	if (!trace?.realMinutes) return { status: 'skipped', reason: 'decontarea nu are depășire' };
+
+	const [existingLine] = await db
+		.select({ invoiceId: table.invoiceLineItem.invoiceId })
+		.from(table.invoiceLineItem)
+		.innerJoin(table.invoice, eq(table.invoice.id, table.invoiceLineItem.invoiceId))
+		.where(
+			and(
+				eq(table.invoice.tenantId, tenantId),
+				eq(table.invoice.externalSource, HOUR_OVERAGE_INVOICE_SOURCE),
+				eq(table.invoiceLineItem.taskId, taskId)
+			)
+		)
+		.limit(1);
+
+	let invoiceId: string | null;
+	if (existingLine) {
+		const relinked = await withTursoBusyRetry(
+			() =>
+				db
+					.update(table.task)
+					.set({ overageInvoiceId: existingLine.invoiceId, updatedAt: new Date() })
+					.where(
+						and(
+							eq(table.task.id, taskId),
+							eq(table.task.tenantId, tenantId),
+							eq(table.task.creditSettledAt, settledAt),
+							isNull(table.task.overageInvoiceId)
+						)
+					),
+			{ tenantId, label: 'task-credit.relinkOverage' }
+		);
+		invoiceId = relinked.rowsAffected === 1 ? existingLine.invoiceId : null;
+	} else {
+		const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
+		const modeSlug = trace.modeSlug ?? 'standard';
+		invoiceId = await billOverage({
+			tenantId,
+			clientId: task.clientId,
+			task: { id: taskId, title: task.title },
+			settledAt,
+			overageRealMinutes: trace.realMinutes,
+			pricing: {
+				rate: {
+					label:
+						catalog.rates.find((r) => r.slug === trace.rateSlug)?.label ?? trace.rateSlug ?? '',
+					rateEur: trace.rateEurSnapshot!
+				},
+				mode: {
+					slug: modeSlug,
+					label: catalog.modes.find((m) => m.slug === modeSlug)?.label ?? modeSlug,
+					multiplierPct: trace.multiplierPctSnapshot ?? 100
+				}
+			},
+			now: new Date()
+		});
+	}
+	if (!invoiceId)
+		return { status: 'skipped', reason: 'taskul s-a schimbat între timp; reîncearcă' };
+	logInfo('server', `task-credit: depășirea task-ului ${taskId} regenerată pe ${invoiceId}`, {
+		tenantId,
+		metadata: { taskId, invoiceId }
+	});
+	return { status: 'billed', invoiceId };
+}
+
+export interface UnsettledDoneTask {
+	taskId: string;
+	taskTitle: string;
+	clientId: string;
+	clientName: string;
+	estimatedMinutes: number | null;
+	actualMinutes: number | null;
+	updatedAt: Date;
+}
+
+/**
+ * Taskuri trecute în Done cu ore, dar fără decontare (ex. decontarea a întors
+ * `failed` — tarif de referință lipsă — iar apelantul doar a logat). Nu mai rezervă
+ * (sunt Done) și nici n-au consumat: fără lista asta, munca ar fi gratuită și invizibilă.
+ */
+export async function listUnsettledDoneTasks(tenantId: string): Promise<UnsettledDoneTask[]> {
+	const rows = await db
+		.select({
+			taskId: table.task.id,
+			taskTitle: table.task.title,
+			clientId: table.task.clientId,
+			clientName: table.client.name,
+			estimatedMinutes: table.task.estimatedMinutes,
+			actualMinutes: table.task.actualMinutes,
+			updatedAt: table.task.updatedAt
+		})
+		.from(table.task)
+		.innerJoin(table.client, eq(table.client.id, table.task.clientId))
+		.where(
+			and(
+				eq(table.task.tenantId, tenantId),
+				eq(table.task.status, 'done'),
+				isNull(table.task.creditSettledAt),
+				or(gt(table.task.estimatedMinutes, 0), gt(table.task.actualMinutes, 0))
+			)
+		)
+		.orderBy(desc(table.task.updatedAt));
+	return rows.map((r) => ({ ...r, clientId: r.clientId! }));
+}
 
 async function recomputeDraftTotals(tx: Tx, invoiceId: string) {
 	const lines = await tx
@@ -424,13 +781,35 @@ export async function assertTaskReopenAllowed(tenantId: string, taskId: string):
 		.from(table.task)
 		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
 		.limit(1);
-	if (!task?.overageInvoiceId) return;
-	const [inv] = await db
-		.select({ status: table.invoice.status, keezStatus: table.invoice.keezStatus })
-		.from(table.invoice)
-		.where(eq(table.invoice.id, task.overageInvoiceId))
-		.limit(1);
-	if (inv && (inv.status !== 'draft' || inv.keezStatus)) {
+	if (!task?.creditSettledAt) return;
+	const blocked = (inv: { status: string; keezStatus: string | null } | undefined) =>
+		!!inv && (inv.status !== 'draft' || !!inv.keezStatus);
+	let emitted = false;
+	if (task.overageInvoiceId) {
+		const [inv] = await db
+			.select({ status: table.invoice.status, keezStatus: table.invoice.keezStatus })
+			.from(table.invoice)
+			.where(eq(table.invoice.id, task.overageInvoiceId))
+			.limit(1);
+		emitted = blocked(inv);
+	}
+	if (!emitted) {
+		// Legătura de pe task se poate pierde; linia cu `task_id` pe o factură ieșită
+		// din draft blochează la fel.
+		const lines = await db
+			.select({ status: table.invoice.status, keezStatus: table.invoice.keezStatus })
+			.from(table.invoiceLineItem)
+			.innerJoin(table.invoice, eq(table.invoice.id, table.invoiceLineItem.invoiceId))
+			.where(
+				and(
+					eq(table.invoice.tenantId, tenantId),
+					eq(table.invoice.externalSource, HOUR_OVERAGE_INVOICE_SOURCE),
+					eq(table.invoiceLineItem.taskId, taskId)
+				)
+			);
+		emitted = lines.some(blocked);
+	}
+	if (emitted) {
 		throw new Error(
 			'Task-ul are o depășire de ore deja facturată; nu mai poate fi redeschis. Creează un task de continuare.'
 		);
@@ -452,78 +831,84 @@ export async function reverseTaskCredit(params: {
 	if (!task || !task.creditSettledAt || !task.clientId) return null;
 	await assertTaskReopenAllowed(tenantId, taskId);
 
-	const [consumption] = await db
-		.select({ deltaMinutes: table.clientHourLedger.deltaMinutes })
-		.from(table.clientHourLedger)
-		.where(
-			and(
-				eq(table.clientHourLedger.tenantId, tenantId),
-				eq(table.clientHourLedger.sourceType, 'task'),
-				eq(table.clientHourLedger.sourceId, taskId),
-				eq(table.clientHourLedger.kind, 'task_consumption')
-			)
-		)
-		.orderBy(desc(table.clientHourLedger.createdAt))
-		.limit(1);
-	const reversed = consumption ? -consumption.deltaMinutes : 0;
+	const settledAt = task.creditSettledAt;
 	const now = new Date();
+	let reversed = 0;
 
-	await withTursoBusyRetry(
-		() =>
-			db.transaction(async (tx) => {
-				if (reversed > 0) {
-					await tx.insert(table.clientHourLedger).values({
-						id: generateId(),
-						tenantId,
-						clientId: task.clientId!,
-						deltaMinutes: reversed,
-						kind: 'task_reversal',
-						sourceType: 'task',
-						sourceId: taskId,
-						note: `${task.title} — redeschis`,
-						createdByUserId: params.userId ?? null,
-						createdAt: now
-					});
-					await tx
-						.update(table.client)
+	try {
+		await withTursoBusyRetry(
+			() =>
+				db.transaction(async (tx) => {
+					// Revendicarea ciclului de Done, condiționată pe exact decontarea citită:
+					// două reopen simultane (sau o reluare după SQLITE_BUSY) ar storna altfel
+					// de două ori.
+					const claim = await tx
+						.update(table.task)
 						.set({
-							hourCreditMinutes: sql`${table.client.hourCreditMinutes} + ${reversed}`,
+							actualMinutes: null,
+							creditSettledAt: null,
+							overageInvoiceId: null,
 							updatedAt: now
 						})
-						.where(and(eq(table.client.id, task.clientId!), eq(table.client.tenantId, tenantId)));
-				}
-				if (task.overageInvoiceId) {
-					await tx
-						.delete(table.invoiceLineItem)
 						.where(
 							and(
-								eq(table.invoiceLineItem.invoiceId, task.overageInvoiceId),
-								eq(table.invoiceLineItem.taskId, taskId)
+								eq(table.task.id, taskId),
+								eq(table.task.tenantId, tenantId),
+								eq(table.task.creditSettledAt, settledAt)
 							)
 						);
-					const remaining = await tx
-						.select({ id: table.invoiceLineItem.id })
-						.from(table.invoiceLineItem)
-						.where(eq(table.invoiceLineItem.invoiceId, task.overageInvoiceId))
+					if (claim.rowsAffected !== 1) throw new TaskCreditClaimLost();
+
+					// Doar consumul ACESTUI ciclu. Un Done fără credit nu scrie rând de consum,
+					// iar „ultimul consum al task-ului" ar fi fost cel dintr-un ciclu anterior,
+					// deja stornat — restituit a doua oară, din nimic.
+					const [consumption] = await tx
+						.select({ deltaMinutes: table.clientHourLedger.deltaMinutes })
+						.from(table.clientHourLedger)
+						.where(
+							and(
+								eq(table.clientHourLedger.tenantId, tenantId),
+								eq(table.clientHourLedger.sourceType, 'task'),
+								eq(table.clientHourLedger.sourceId, taskId),
+								eq(table.clientHourLedger.kind, 'task_consumption'),
+								gte(table.clientHourLedger.createdAt, settledAt)
+							)
+						)
+						.orderBy(desc(table.clientHourLedger.createdAt))
 						.limit(1);
-					if (remaining.length === 0) {
-						await tx.delete(table.invoice).where(eq(table.invoice.id, task.overageInvoiceId));
-					} else {
-						await recomputeDraftTotals(tx, task.overageInvoiceId);
+					reversed = consumption ? -consumption.deltaMinutes : 0;
+
+					if (reversed > 0) {
+						await tx.insert(table.clientHourLedger).values({
+							id: generateId(),
+							tenantId,
+							clientId: task.clientId!,
+							deltaMinutes: reversed,
+							kind: 'task_reversal',
+							sourceType: 'task',
+							sourceId: taskId,
+							note: `${task.title} — redeschis`,
+							createdByUserId: params.userId ?? null,
+							createdAt: now
+						});
+						await tx
+							.update(table.client)
+							.set({
+								hourCreditMinutes: sql`${table.client.hourCreditMinutes} + ${reversed}`,
+								updatedAt: now
+							})
+							.where(and(eq(table.client.id, task.clientId!), eq(table.client.tenantId, tenantId)));
 					}
-				}
-				await tx
-					.update(table.task)
-					.set({
-						actualMinutes: null,
-						creditSettledAt: null,
-						overageInvoiceId: null,
-						updatedAt: now
-					})
-					.where(eq(table.task.id, taskId));
-			}),
-		{ tenantId, label: 'task-credit.reverse' }
-	);
+					// După `task_id`, nu după `task.overage_invoice_id`: legătura poate lipsi
+					// (legare picată, reopen intrat înainte de legare).
+					await removeTaskOverageLines(tx, tenantId, taskId);
+				}),
+			{ tenantId, label: 'task-credit.reverse' }
+		);
+	} catch (err) {
+		if (err instanceof TaskCreditClaimLost) return null;
+		throw err;
+	}
 	logInfo('server', `task-credit: task ${taskId} redeschis, +${reversed} min înapoi în credit`, {
 		tenantId,
 		metadata: { taskId, clientId: task.clientId }
@@ -555,53 +940,6 @@ export async function applyTaskStatusCreditEffects(params: {
 	}
 }
 
-/** Rezervările (spec §3.2): estimările task-urilor deschise, ponderate cu catalogul curent. */
-export async function computeReservedMinutes(
-	tenantId: string,
-	clientIds: string[]
-): Promise<Map<string, number>> {
-	const out = new Map<string, number>();
-	if (clientIds.length === 0) return out;
-	const rows = await db
-		.select({
-			clientId: table.task.clientId,
-			estimatedMinutes: table.task.estimatedMinutes,
-			rateSlug: table.task.rateSlug,
-			modeSlug: table.task.modeSlug
-		})
-		.from(table.task)
-		.where(
-			and(
-				eq(table.task.tenantId, tenantId),
-				inArray(table.task.clientId, clientIds),
-				notInArray(table.task.status, [...OPEN_TASK_STATUSES_EXCLUDED]),
-				isNull(table.task.creditSettledAt),
-				sql`${table.task.estimatedMinutes} > 0`
-			)
-		);
-	if (rows.length === 0) return out;
-	const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
-	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
-	for (const r of rows) {
-		if (!r.clientId || !r.estimatedMinutes) continue;
-		let minutes = r.estimatedMinutes;
-		if (reference) {
-			const rate = catalog.rates.find((x) => x.slug === r.rateSlug) ?? reference;
-			const mode = catalog.modes.find((m) => m.slug === (r.modeSlug ?? 'standard'));
-			try {
-				minutes = weightedMinutes(
-					r.estimatedMinutes,
-					weightFactor(rate.rateEur, mode?.multiplierPct ?? 100, reference.rateEur)
-				);
-			} catch (err) {
-				logWarning(
-					'server',
-					`task-credit: rezervare neponderată — ${serializeError(err).message}`,
-					{ tenantId }
-				);
-			}
-		}
-		out.set(r.clientId, (out.get(r.clientId) ?? 0) + minutes);
-	}
-	return out;
-}
+// Rezervările stau în modul propriu: le folosesc și notificările (pragul pe
+// disponibil), care nu pot importa din `task-credit` fără import circular.
+export { computeReservedMinutes } from '$lib/server/hour-credit-reserved';

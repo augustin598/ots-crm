@@ -79,6 +79,7 @@ function rowToRules(r: RulesRow | undefined): HourCreditRules {
 		notifyEmail: !!r.notifyEmail,
 		notifyWhatsapp: !!r.notifyWhatsapp,
 		creditExpiryDays: r.creditExpiryDays ?? 0,
+		creditExpiryEnabledAt: r.creditExpiryEnabledAt ?? null,
 		feedFromInvoicesDefault: !!r.feedFromInvoicesDefault
 	};
 }

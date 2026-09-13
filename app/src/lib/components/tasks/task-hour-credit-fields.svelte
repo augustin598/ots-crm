@@ -7,18 +7,26 @@
 	import { getHourlyCatalogView } from '$lib/remotes/hourly-rates.remote';
 	import { getClientHourCreditView } from '$lib/remotes/hour-credits.remote';
 	import { formatMinutes } from '$lib/logic/hourly-catalog';
-	import { weightFactor, weightedMinutes } from '$lib/logic/hour-credits';
+	import {
+		availableForTask,
+		roundToStep,
+		weightFactor,
+		weightedMinutes
+	} from '$lib/logic/hour-credits';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 
 	let {
 		clientId,
+		taskId = null,
 		estimatedHours = $bindable(0),
 		rateSlug = $bindable(''),
 		modeSlug = $bindable('standard'),
 		disabled = false
 	}: {
 		clientId: string | null | undefined;
+		/** La editare: rezervarea taskului însuși nu se scade de două ori din disponibil. */
+		taskId?: string | null;
 		estimatedHours: number;
 		rateSlug: string;
 		modeSlug: string;
@@ -44,9 +52,44 @@
 			return null;
 		}
 	});
-	const overReserve = $derived(
-		weighted !== null && credit !== null && weighted > credit.balanceMinutes
+	const stepMinutes = $derived(credit?.stepMinutes ?? 15);
+
+	/** Ce rezervă deja taskul editat (dacă e deschis), ponderat ca pe server. */
+	const ownReserved = $derived.by(() => {
+		if (!taskId || !credit?.reference) return 0;
+		const own = credit.tasks.find((t) => t.id === taskId);
+		if (!own?.estimatedMinutes || own.creditSettledAt) return 0;
+		if (own.status === 'done' || own.status === 'cancelled') return 0;
+		const ownRate = catalog?.hourlyRates.find((r) => r.slug === own.rateSlug);
+		const ownMode = catalog?.rateModes.find((m) => m.slug === (own.modeSlug ?? 'standard'));
+		if (!ownRate) return 0;
+		try {
+			return weightedMinutes(
+				own.estimatedMinutes,
+				weightFactor(ownRate.rate, ownMode?.multiplierPct ?? 100, credit.reference.rateEur)
+			);
+		} catch {
+			return 0;
+		}
+	});
+	const available = $derived(
+		credit
+			? availableForTask({
+					balanceMinutes: credit.balanceMinutes,
+					reservedMinutes: credit.reservedMinutes,
+					ownReservedMinutes: ownReserved
+				})
+			: null
 	);
+	// Spec §6.1: galben când estimarea ponderată trece de DISPONIBIL, nu de sold.
+	const overReserve = $derived(weighted !== null && available !== null && weighted > available);
+
+	/** Estimarea se păstrează în multipli de pas (spec §6.1). */
+	function snapToStep() {
+		const minutes = Math.max(0, Number(estimatedHours) * 60);
+		if (!Number.isFinite(minutes)) return;
+		estimatedHours = roundToStep(minutes, stepMinutes) / 60;
+	}
 </script>
 
 {#if clientId}
@@ -58,8 +101,9 @@
 				type="number"
 				min="0"
 				max="999"
-				step="0.25"
+				step={stepMinutes / 60}
 				bind:value={estimatedHours}
+				onblur={snapToStep}
 				{disabled}
 			/>
 		</div>
@@ -99,7 +143,9 @@
 				{formatMinutes(estimatedMinutes)}
 				{rate?.label} = {formatMinutes(weighted)} credit · Sold: {formatMinutes(
 					credit.balanceMinutes
-				)}{overReserve ? ' — peste sold, diferența se va factura la finalizare' : ''}
+				)} · Disponibil: {formatMinutes(available ?? credit.balanceMinutes)}{overReserve
+					? ' — peste disponibil, diferența se va factura la finalizare'
+					: ''}
 			{:else if credit}
 				Sold client: {formatMinutes(credit.balanceMinutes)}
 			{/if}

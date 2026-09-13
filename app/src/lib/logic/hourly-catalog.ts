@@ -46,6 +46,8 @@ export interface HourCreditRules {
 	notifyWhatsapp: boolean;
 	/** 0 = creditul nu expiră. Altfel, alimentările primesc termen la +N zile. */
 	creditExpiryDays: number;
+	/** Momentul (re)pornirii expirării; termenele de dinainte nu expiră retroactiv. */
+	creditExpiryEnabledAt: Date | null;
 	/** Din ce pornește alimentarea din facturi la clienții noi. */
 	feedFromInvoicesDefault: boolean;
 }
@@ -90,6 +92,7 @@ export const DEFAULT_HOUR_CREDIT_RULES: HourCreditRules = {
 	// „pornit" ar face să dispară credit real la primul deploy, fără ca owner-ul
 	// să fi cerut asta. Se activează explicit în Settings → Tarife orare.
 	creditExpiryDays: 0,
+	creditExpiryEnabledAt: null,
 	feedFromInvoicesDefault: false
 };
 

@@ -28,9 +28,15 @@ const events = [
 		taskTitle: 'Landing page campanie toamnă',
 		realMinutes: 180,
 		consumedMinutes: 213,
-		overageRealMinutes: 0
+		overageRealMinutes: 0,
+		pricing: {
+			rateLabel: 'Development',
+			rateEur: 65,
+			multiplierPct: 100,
+			modeLabel: 'Standard'
+		}
 	},
-	{ kind: 'low' as const, balanceMinutes: 90, thresholdMinutes: 120 }
+	{ kind: 'low' as const, balanceMinutes: 90, availableMinutes: 60, thresholdMinutes: 120 }
 ];
 
 const sections = events

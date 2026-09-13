@@ -18,7 +18,7 @@
  * pe rând (Keez refuză facturi EUR pentru clienți din România), iar linia rămâne
  * în EUR. Fără curs BNR nu emitem factura — dar creditul rămâne acordat.
  */
-import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -43,11 +43,13 @@ import {
 	hoursNetCents,
 	isValidHours
 } from '$lib/logic/hours-pricing';
-import { activeModes, activeRates, resolveReferenceRate } from '$lib/logic/hourly-catalog';
 import {
-	HOUR_CREDIT_INVOICE_SOURCE,
-	eurCentsToReferenceMinutes
-} from '$lib/logic/hour-credits';
+	MAX_HOURS_MAX,
+	activeModes,
+	activeRates,
+	resolveReferenceRate
+} from '$lib/logic/hourly-catalog';
+import { HOUR_CREDIT_INVOICE_SOURCE, eurCentsToReferenceMinutes } from '$lib/logic/hour-credits';
 import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
 
 function generateId(): string {
@@ -65,6 +67,12 @@ export interface CreateHourCreditOrderInput {
 	requestedWindow?: string | null;
 	/** Fără bifă nu pleacă niciun email spre client. */
 	sendEmail: boolean;
+	/**
+	 * Cheia de idempotență a cererii, generată la deschiderea modalului. Două
+	 * trimiteri cu aceeași cheie (dublu click, al doilea tab, retry) creditează și
+	 * facturează o singură dată. Lipsă = cerere nouă de fiecare dată.
+	 */
+	requestId?: string | null;
 }
 
 export interface CreateHourCreditOrderResult {
@@ -76,6 +84,53 @@ export interface CreateHourCreditOrderResult {
 	emailSent: boolean;
 	/** Ce nu a mers, fără să fi blocat creditarea (factură sau email). */
 	warnings: string[];
+	/** Cererea fusese deja procesată: nimic nou nu s-a creditat, emis sau trimis. */
+	duplicate?: boolean;
+}
+
+/** Id-ul facturii derivat din cheia cererii — același format ca `generateId`. */
+async function invoiceIdForRequest(tenantId: string, requestId: string): Promise<string> {
+	const digest = await crypto.subtle.digest(
+		'SHA-256',
+		new TextEncoder().encode(`hour-credit-order:${tenantId}:${requestId}`)
+	);
+	return encodeBase32LowerCase(new Uint8Array(digest).slice(0, 15));
+}
+
+/**
+ * Cota de TVA a unei facturi de ore. NU e hardcodată: vine din setările de facturare
+ * ale tenantului; un client intracomunitar sau din afara UE se facturează cu 0% și
+ * mențiunea legală — aceeași regulă ca la facturile create din /invoices.
+ */
+async function resolveHourOrderVat(
+	tenantId: string,
+	clientId: string | null | undefined
+): Promise<{ vatPercent: number; zeroVatNote: string | null }> {
+	const [settings] = await db
+		.select({
+			defaultTaxRate: table.invoiceSettings.defaultTaxRate,
+			zeroVatAutoDetect: table.invoiceSettings.whmcsZeroVatAutoDetect
+		})
+		.from(table.invoiceSettings)
+		.where(eq(table.invoiceSettings.tenantId, tenantId))
+		.limit(1);
+	let vatPercent = resolveVatPercent(settings?.defaultTaxRate);
+	let zeroVatNote: string | null = null;
+	if (clientId && (settings?.zeroVatAutoDetect ?? true)) {
+		const [vatClient] = await db
+			.select({ country: table.client.country, cui: table.client.cui })
+			.from(table.client)
+			.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+			.limit(1);
+		if (vatClient) {
+			const scenario = classifyClientVat({ country: vatClient.country, cui: vatClient.cui });
+			if (scenario === 'intracom' || scenario === 'export') {
+				vatPercent = 0;
+				zeroVatNote = getZeroVatLegalNote(scenario);
+			}
+		}
+	}
+	return { vatPercent, zeroVatNote };
 }
 
 /**
@@ -111,7 +166,8 @@ export async function quoteHourCreditOrder(params: {
 	  }
 > {
 	const { tenantId, rateSlug, modeSlug, hours } = params;
-	if (!isValidHours(hours)) return { ok: false, reason: 'Număr de ore invalid.' };
+	// Limita publică (100 h) nu se aplică aici; plafonul real e al regimului, mai jos.
+	if (!isValidHours(hours, MAX_HOURS_MAX)) return { ok: false, reason: 'Număr de ore invalid.' };
 
 	const catalog = await getHourlyCatalog(tenantId);
 	const rate = activeRates(catalog.rates).find((r) => r.slug === rateSlug);
@@ -126,38 +182,12 @@ export async function quoteHourCreditOrder(params: {
 	}
 
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
-	if (!reference) return { ok: false, reason: 'Nicio specializare activă (tarif de referință lipsă).' };
+	if (!reference)
+		return { ok: false, reason: 'Nicio specializare activă (tarif de referință lipsă).' };
 
 	const rateEur = effectiveRateEur(rate.rateEur, mode.multiplierPct);
-	const netCents = hoursNetCents(rateEur, hours);
-	const [settings] = await db
-		.select({
-			defaultTaxRate: table.invoiceSettings.defaultTaxRate,
-			zeroVatAutoDetect: table.invoiceSettings.whmcsZeroVatAutoDetect
-		})
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, tenantId))
-		.limit(1);
-
-	// Cota NU e hardcodată: vine din setările de facturare ale tenantului. În plus,
-	// un client intracomunitar sau din afara UE se facturează cu 0% și mențiunea
-	// legală — aceeași regulă ca la facturile create din /invoices.
-	let vatPercent = resolveVatPercent(settings?.defaultTaxRate);
-	let zeroVatNote: string | null = null;
-	if (params.clientId && (settings?.zeroVatAutoDetect ?? true)) {
-		const [vatClient] = await db
-			.select({ country: table.client.country, cui: table.client.cui })
-			.from(table.client)
-			.where(and(eq(table.client.id, params.clientId), eq(table.client.tenantId, tenantId)))
-			.limit(1);
-		if (vatClient) {
-			const scenario = classifyClientVat({ country: vatClient.country, cui: vatClient.cui });
-			if (scenario === 'intracom' || scenario === 'export') {
-				vatPercent = 0;
-				zeroVatNote = getZeroVatLegalNote(scenario);
-			}
-		}
-	}
+	const netCents = hoursNetCents(rateEur, hours, mode.maxHours);
+	const { vatPercent, zeroVatNote } = await resolveHourOrderVat(tenantId, params.clientId);
 	const { vatCents, grossCents } = computeVatBreakdown(netCents, vatPercent);
 
 	// Creditul se măsoară în minute la tariful de REFERINȚĂ: orele scumpe aduc
@@ -220,20 +250,28 @@ export async function createHourCreditOrder(
 	const catalog = await getHourlyCatalog(tenantId);
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
 
+	// Id-ul facturii se fixează ÎNAINTE de credit: rândul din ledger o referă, iar
+	// indexul unic pe (purchase, invoice, id) oprește a doua trimitere a aceleiași cereri.
+	const invoiceId = input.requestId
+		? await invoiceIdForRequest(tenantId, input.requestId)
+		: generateId();
+
 	// ── 1. Creditul, întâi ────────────────────────────────────────────────────
 	const ledgerEntryId = generateId();
 	const modeNote =
 		input.modeSlug === 'standard'
 			? ''
 			: ` · regim ${quote.modeLabel}${input.requestedWindow ? `, interval cerut: ${input.requestedWindow}` : ''}`;
-	await applyLedgerEntry(
+	const credit = await applyLedgerEntry(
 		{
 			tenantId,
 			clientId,
 			deltaMinutes: quote.creditMinutes,
-			kind: 'manual',
-			sourceType: 'manual',
-			sourceId: ledgerEntryId,
+			// Ore cumpărate, legate de factura lor: intră în raportul lunar, iar
+			// anularea facturii se poate detecta (și storna) după sursă.
+			kind: 'purchase',
+			sourceType: 'invoice',
+			sourceId: invoiceId,
 			note: `${input.hours} h ${quote.rateLabel} adăugate din admin${modeNote}`,
 			createdByUserId: userId,
 			referenceRateEurSnapshot: reference?.rateEur ?? null,
@@ -248,32 +286,124 @@ export async function createHourCreditOrder(
 		},
 		{ id: ledgerEntryId }
 	);
-
-	// ── 2. Factura ────────────────────────────────────────────────────────────
-	const bnr = await getLatestBnrRateWithDate('EUR');
-	if (!bnr || !(bnr.rate > 0)) {
-		warnings.push(
-			'Creditul a fost adăugat, dar factura NU s-a emis: lipsește cursul BNR EUR. Reia emiterea după sync-ul BNR.'
-		);
-		logWarning('server', 'hour-credit-order: lipsește cursul BNR — factura nu s-a emis', {
+	if (!credit.applied) {
+		const [existing] = await db
+			.select({ invoiceNumber: table.invoice.invoiceNumber })
+			.from(table.invoice)
+			.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, tenantId)))
+			.limit(1);
+		logInfo('server', `hour-credit-order: cererea ${input.requestId} fusese deja procesată`, {
 			tenantId,
-			metadata: { clientId, ledgerEntryId }
+			metadata: { clientId, invoiceId }
 		});
 		return {
 			creditMinutes: quote.creditMinutes,
 			ledgerEntryId,
-			invoiceId: null,
-			invoiceNumber: null,
+			invoiceId: existing ? invoiceId : null,
+			invoiceNumber: existing?.invoiceNumber ?? null,
 			keezPushed: false,
 			emailSent: false,
-			warnings
+			warnings: [
+				'Cererea fusese deja trimisă — orele și factura există deja, nu s-a dublat nimic.'
+			],
+			duplicate: true
 		};
 	}
 
+	// ── 2–4. Factura, Keez, email ─────────────────────────────────────────────
+	const issued = await issueHourCreditInvoice({
+		tenantId,
+		clientId,
+		userId,
+		invoiceId,
+		hours: input.hours,
+		sendEmail: input.sendEmail,
+		requestedWindow: input.requestedWindow ?? null,
+		pricing: quote
+	});
+	warnings.push(...issued.warnings);
+	const { invoiceNumber, keezPushed, emailSent } = issued;
+
+	logInfo(
+		'server',
+		`hour-credit-order: +${quote.creditMinutes} min pentru ${client.name}, factura ${invoiceNumber ?? 'neemisă'}`,
+		{ tenantId, metadata: { clientId, invoiceId, ledgerEntryId, emailSent, keezPushed } }
+	);
+
+	return {
+		creditMinutes: quote.creditMinutes,
+		ledgerEntryId,
+		invoiceId: issued.invoiceId,
+		invoiceNumber,
+		keezPushed,
+		emailSent,
+		warnings
+	};
+}
+
+/** Prețul facturii de ore — din cotația de acum sau din snapshot-ul ledgerului. */
+export interface HourInvoicePricing {
+	rateLabel: string;
+	modeLabel: string;
+	modeSla: string;
+	baseRateEur: number;
+	multiplierPct: number;
+	effectiveRateEur: number;
+	netCents: number;
+	vatCents: number;
+	vatPercent: number;
+	zeroVatNote: string | null;
+}
+
+/**
+ * Factura unui credit de ore deja acordat: INSERT (id-ul fixat de rândul din ledger),
+ * push Keez și email — ultimele două nefatale. `invoiceId: null` = factura nu s-a
+ * creat (curs BNR lipsă sau INSERT eșuat); creditul rămâne și apare în „De rezolvat".
+ */
+async function issueHourCreditInvoice(params: {
+	tenantId: string;
+	clientId: string;
+	userId: string;
+	invoiceId: string;
+	hours: number;
+	sendEmail: boolean;
+	requestedWindow: string | null;
+	pricing: HourInvoicePricing;
+	/** Ziua în care orele au intrat în credit (implicit azi). */
+	creditedOn?: Date;
+}): Promise<{
+	invoiceId: string | null;
+	invoiceNumber: string | null;
+	keezPushed: boolean;
+	emailSent: boolean;
+	warnings: string[];
+}> {
+	const { tenantId, clientId, userId, invoiceId, pricing } = params;
+	const warnings: string[] = [];
+	const notIssued = { invoiceId: null, invoiceNumber: null, keezPushed: false, emailSent: false };
+
+	const bnr = await getLatestBnrRateWithDate('EUR');
+	if (!bnr || !(bnr.rate > 0)) {
+		warnings.push(
+			'Creditul a fost adăugat, dar factura NU s-a emis: lipsește cursul BNR EUR. Emite-o din Bugete ore → De rezolvat după sync-ul BNR.'
+		);
+		logWarning('server', 'hour-credit-order: lipsește cursul BNR — factura nu s-a emis', {
+			tenantId,
+			metadata: { clientId, invoiceId }
+		});
+		return { ...notIssued, warnings };
+	}
+
+	const [client] = await db
+		.select({ email: table.client.email })
+		.from(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
+		.limit(1);
+
 	const exchangeRate = bnr.rate;
-	const netRon = eurCentsToRonCents(quote.netCents, exchangeRate);
-	const taxRon = eurCentsToRonCents(quote.vatCents, exchangeRate);
-	const lineTaxRate = vatPercentToBps(quote.vatPercent);
+	const netRon = eurCentsToRonCents(pricing.netCents, exchangeRate);
+	const taxRon = eurCentsToRonCents(pricing.vatCents, exchangeRate);
+	const lineTaxRate = vatPercentToBps(pricing.vatPercent);
 
 	let invoiceNumber: string;
 	let invoiceSeries: string | null = null;
@@ -295,7 +425,7 @@ export async function createHourCreditOrder(
 	}
 
 	// Refolosim articolul Keez al liniilor identice, ca să nu umplem nomenclatorul.
-	const lineDescription = hoursLineDescription(quote.rateLabel);
+	const lineDescription = hoursLineDescription(pricing.rateLabel);
 	let cachedArticleId: string | null = null;
 	try {
 		const [cached] = await db
@@ -317,9 +447,10 @@ export async function createHourCreditOrder(
 		// Doar optimizare.
 	}
 
-	const invoiceId = generateId();
 	const now = new Date();
+	const creditedOn = params.creditedOn ?? now;
 	const dueDate = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000);
+	const premium = pricing.multiplierPct > 100;
 	try {
 		await withTursoBusyRetry(
 			() =>
@@ -345,28 +476,28 @@ export async function createHourCreditOrder(
 						exchangeRate: formatExchangeRate(exchangeRate),
 						// 'none' la 0%: Keez nu trebuie să aplice cotă peste o operațiune
 						// scutită (intracomunitar / export).
-						taxApplicationType: quote.vatPercent === 0 ? 'none' : 'apply',
+						taxApplicationType: pricing.vatPercent === 0 ? 'none' : 'apply',
 						issueDate: now,
 						dueDate,
 						notes: appendZeroVatNote(
-							`Ore extra work ${quote.rateLabel} × ${input.hours} h, adăugate în creditul clientului la ${now.toISOString().slice(0, 10)}.${
-							input.modeSlug === 'standard'
-								? ''
-								: ` Regim ${quote.modeLabel} (+${quote.multiplierPct - 100}% față de tariful standard de ${quote.baseRateEur} €/h)${
-										input.requestedWindow ? `, interval cerut: ${input.requestedWindow}` : ''
-									}.${quote.modeSla ? ` ${quote.modeSla}` : ''}`
-						} Curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`,
-						quote.zeroVatNote
-					)
+							`Ore extra work ${pricing.rateLabel} × ${params.hours} h, adăugate în creditul clientului la ${creditedOn.toISOString().slice(0, 10)}.${
+								premium
+									? ` Regim ${pricing.modeLabel} (+${pricing.multiplierPct - 100}% față de tariful standard de ${pricing.baseRateEur} €/h)${
+											params.requestedWindow ? `, interval cerut: ${params.requestedWindow}` : ''
+										}.${pricing.modeSla ? ` ${pricing.modeSla}` : ''}`
+									: ''
+							} Curs BNR ${formatExchangeRate(exchangeRate)} din ${bnr.rateDate.toISOString().slice(0, 10)}.`,
+							pricing.zeroVatNote
+						)
 					});
 					await tx.insert(table.invoiceLineItem).values({
 						id: generateId(),
 						invoiceId,
 						description: lineDescription,
-						note: `${input.hours} h × ${quote.effectiveRateEur} €`,
-						quantity: input.hours,
-						rate: quote.effectiveRateEur * 100,
-						amount: quote.netCents,
+						note: `${params.hours} h × ${pricing.effectiveRateEur} €`,
+						quantity: params.hours,
+						rate: pricing.effectiveRateEur * 100,
+						amount: pricing.netCents,
 						taxRate: lineTaxRate,
 						currency: 'EUR',
 						unitOfMeasure: KEEZ_UNIT.HOUR,
@@ -378,27 +509,18 @@ export async function createHourCreditOrder(
 	} catch (err) {
 		logError('server', `hour-credit-order: INSERT factură eșuat: ${serializeError(err).message}`, {
 			tenantId,
-			metadata: { clientId, invoiceId, ledgerEntryId }
+			metadata: { clientId, invoiceId }
 		});
-		warnings.push('Creditul a fost adăugat, dar factura nu s-a putut crea.');
-		return {
-			creditMinutes: quote.creditMinutes,
-			ledgerEntryId,
-			invoiceId: null,
-			invoiceNumber: null,
-			keezPushed: false,
-			emailSent: false,
-			warnings
-		};
+		warnings.push(
+			'Creditul a fost adăugat, dar factura nu s-a putut crea. Emite-o din Bugete ore → De rezolvat.'
+		);
+		return { ...notIssued, warnings };
 	}
 
-	// ── 3. Keez (nefatal) ─────────────────────────────────────────────────────
-	//
-	// ATENȚIE: `pushInvoiceToKeez` NU aruncă la eșec, întoarce
-	// `{ success: false, error }`. Fără verificarea rezultatului am raporta
-	// „trimis în Keez" pentru o factură care n-a plecat — exact ce s-a întâmplat
-	// la proba din 12 sep 2026 (Keez respinge factura când clientul are același
-	// CUI ca firma emitentă).
+	// ATENȚIE: `pushInvoiceToKeez` NU aruncă la eșec, întoarce `{ success: false, error }`.
+	// Fără verificarea rezultatului am raporta „trimis în Keez" pentru o factură care n-a
+	// plecat — exact ce s-a întâmplat la proba din 12 sep 2026 (Keez respinge factura
+	// când clientul are același CUI ca firma emitentă).
 	let keezPushed = false;
 	try {
 		const push = await pushInvoiceToKeez(tenantId, invoiceId);
@@ -422,10 +544,9 @@ export async function createHourCreditOrder(
 		);
 	}
 
-	// ── 4. Emailul cu linkul de plată (nefatal) ───────────────────────────────
 	let emailSent = false;
-	if (input.sendEmail) {
-		if (!client.email) {
+	if (params.sendEmail) {
+		if (!client?.email) {
 			warnings.push('Clientul nu are email — factura nu s-a trimis.');
 		} else {
 			try {
@@ -441,19 +562,159 @@ export async function createHourCreditOrder(
 		}
 	}
 
-	logInfo(
-		'server',
-		`hour-credit-order: +${quote.creditMinutes} min pentru ${client.name}, factura ${invoiceNumber}`,
-		{ tenantId, metadata: { clientId, invoiceId, ledgerEntryId, emailSent, keezPushed } }
-	);
+	return { invoiceId, invoiceNumber, keezPushed, emailSent, warnings };
+}
 
+export interface UninvoicedHourCredit {
+	ledgerEntryId: string;
+	clientId: string;
+	clientName: string;
+	hours: number;
+	rateSlug: string | null;
+	creditMinutes: number;
+	netCents: number;
+	createdAt: Date;
+}
+
+/**
+ * Ore adăugate din admin a căror factură nu există (curs BNR lipsă, INSERT eșuat).
+ * Sursa e rândul din ledger (`purchase` pe `invoice`) fără factură cu acel id și
+ * fără stornare.
+ */
+export async function listUninvoicedHourCredits(tenantId: string): Promise<UninvoicedHourCredit[]> {
+	const rows = await db
+		.select({
+			ledgerEntryId: table.clientHourLedger.id,
+			sourceId: table.clientHourLedger.sourceId,
+			clientId: table.clientHourLedger.clientId,
+			clientName: table.client.name,
+			realMinutes: table.clientHourLedger.realMinutes,
+			rateSlug: table.clientHourLedger.rateSlug,
+			deltaMinutes: table.clientHourLedger.deltaMinutes,
+			netCents: table.clientHourLedger.netCentsSnapshot,
+			createdAt: table.clientHourLedger.createdAt,
+			invoiceId: table.invoice.id
+		})
+		.from(table.clientHourLedger)
+		.innerJoin(table.client, eq(table.client.id, table.clientHourLedger.clientId))
+		.leftJoin(
+			table.invoice,
+			and(
+				eq(table.invoice.id, table.clientHourLedger.sourceId),
+				eq(table.invoice.tenantId, table.clientHourLedger.tenantId)
+			)
+		)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'purchase'),
+				eq(table.clientHourLedger.sourceType, 'invoice'),
+				isNull(table.invoice.id)
+			)
+		)
+		.orderBy(desc(table.clientHourLedger.createdAt));
+	if (rows.length === 0) return [];
+
+	const reversed = await db
+		.select({ sourceId: table.clientHourLedger.sourceId })
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'purchase_reversal'),
+				eq(table.clientHourLedger.sourceType, 'invoice')
+			)
+		);
+	const reversedIds = new Set(reversed.map((r) => r.sourceId));
+
+	return rows
+		.filter((r) => !reversedIds.has(r.sourceId) && r.realMinutes && r.netCents)
+		.map((r) => ({
+			ledgerEntryId: r.ledgerEntryId,
+			clientId: r.clientId,
+			clientName: r.clientName,
+			hours: r.realMinutes! / 60,
+			rateSlug: r.rateSlug,
+			creditMinutes: r.deltaMinutes,
+			netCents: r.netCents!,
+			createdAt: r.createdAt
+		}));
+}
+
+/**
+ * Emite factura unui credit de ore acordat fără factură. Prețul e cel înghețat în
+ * ledger la acordare (NU catalogul de azi); cursul BNR și TVA-ul sunt cele de acum.
+ * Creditul NU se acordă din nou. Id-ul facturii e cel referit de rândul din ledger,
+ * deci o a doua emitere dă conflict pe cheia primară, nu o factură dublă.
+ */
+export async function reissueHourCreditInvoice(params: {
+	tenantId: string;
+	ledgerEntryId: string;
+	userId: string;
+	sendEmail: boolean;
+}): Promise<CreateHourCreditOrderResult> {
+	const { tenantId, userId } = params;
+	const [entry] = await db
+		.select()
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.id, params.ledgerEntryId),
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'purchase'),
+				eq(table.clientHourLedger.sourceType, 'invoice')
+			)
+		)
+		.limit(1);
+	if (!entry) throw new Error('Creditul nu există sau nu provine din „Adaugă ore".');
+	const [existing] = await db
+		.select({ id: table.invoice.id })
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, entry.sourceId), eq(table.invoice.tenantId, tenantId)))
+		.limit(1);
+	if (existing) throw new Error('Factura acestui credit există deja.');
+	if (!entry.realMinutes || !entry.netCentsSnapshot || !entry.rateEurSnapshot) {
+		throw new Error('Rândul din ledger nu are prețul înghețat — emite factura manual.');
+	}
+
+	const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
+	const multiplierPct = entry.multiplierPctSnapshot ?? 100;
+	const mode = catalog.modes.find((m) => m.slug === (entry.modeSlug ?? 'standard'));
+	const { vatPercent, zeroVatNote } = await resolveHourOrderVat(tenantId, entry.clientId);
+	const { vatCents } = computeVatBreakdown(entry.netCentsSnapshot, vatPercent);
+	const hours = entry.realMinutes / 60;
+
+	const issued = await issueHourCreditInvoice({
+		tenantId,
+		clientId: entry.clientId,
+		userId,
+		invoiceId: entry.sourceId,
+		hours,
+		sendEmail: params.sendEmail,
+		requestedWindow: null,
+		creditedOn: entry.createdAt,
+		pricing: {
+			rateLabel:
+				catalog.rates.find((r) => r.slug === entry.rateSlug)?.label ?? entry.rateSlug ?? 'Ore',
+			modeLabel: mode?.label ?? entry.modeSlug ?? 'standard',
+			modeSla: mode?.sla ?? '',
+			// Tariful de bază derivat din cel efectiv înghețat — doar pentru nota facturii.
+			baseRateEur: Math.round((entry.rateEurSnapshot * 100) / multiplierPct),
+			multiplierPct,
+			effectiveRateEur: entry.rateEurSnapshot,
+			netCents: entry.netCentsSnapshot,
+			vatCents,
+			vatPercent,
+			zeroVatNote
+		}
+	});
+	logInfo('server', `hour-credit-order: factura creditului ${entry.id} emisă ulterior`, {
+		tenantId,
+		metadata: { invoiceId: issued.invoiceId, clientId: entry.clientId }
+	});
 	return {
-		creditMinutes: quote.creditMinutes,
-		ledgerEntryId,
-		invoiceId,
-		invoiceNumber,
-		keezPushed,
-		emailSent,
-		warnings
+		creditMinutes: entry.deltaMinutes,
+		ledgerEntryId: entry.id,
+		...issued
 	};
 }

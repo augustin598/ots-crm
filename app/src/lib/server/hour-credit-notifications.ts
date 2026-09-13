@@ -3,8 +3,8 @@
  * grupul task-ului/clientului. Toate pleacă DUPĂ commit-ul din ledger, best-effort,
  * și respectă bifele din Settings → Tarife orare → Reguli credit.
  *
- * „Credit scăzut" se trimite o singură dată la trecerea sub prag
- * (`client.low_credit_notified_at`) și se reînarmează când soldul urcă peste prag.
+ * „Credit scăzut" se trimite o singură dată la trecerea DISPONIBILULUI (sold − rezervat)
+ * sub prag (`client.low_credit_notified_at`) și se reînarmează când urcă peste prag.
  */
 import { and, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
@@ -12,9 +12,18 @@ import * as table from '$lib/server/db/schema';
 import { logError, logWarning, serializeError } from '$lib/server/logger';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { formatMinutes } from '$lib/logic/hourly-catalog';
+import { consumptionWorkedLabel, lowCreditTransition } from '$lib/logic/hour-credits';
+import { computeReservedMinutes } from '$lib/server/hour-credit-reserved';
 import { getAppBaseUrl } from '$lib/server/app-url';
 import { enqueueGroupMessage } from '$lib/server/whatsapp/outbox';
 import { sendHourCreditEmail } from '$lib/server/email';
+
+export interface ConsumptionPricing {
+	rateLabel: string;
+	rateEur: number;
+	multiplierPct: number;
+	modeLabel: string;
+}
 
 export type HourCreditEvent =
 	| { kind: 'credited'; minutes: number; source: string }
@@ -25,8 +34,16 @@ export type HourCreditEvent =
 			realMinutes: number;
 			consumedMinutes: number;
 			overageRealMinutes: number;
+			/** Specializarea și tariful, pentru „3 h Development (65 €/h)"; lipsă = doar orele. */
+			pricing?: ConsumptionPricing;
 	  }
-	| { kind: 'low'; balanceMinutes: number; thresholdMinutes: number };
+	| {
+			kind: 'low';
+			balanceMinutes: number;
+			/** Sold − rezervat: pragul se judecă pe el. */
+			availableMinutes: number;
+			thresholdMinutes: number;
+	  };
 
 async function loadClient(tenantId: string, clientId: string) {
 	const [client] = await db
@@ -87,9 +104,12 @@ function buildWhatsappBody(
 			ev.overageRealMinutes > 0
 				? `\n⚠️ ${formatMinutes(ev.overageRealMinutes)} peste credit — se facturează separat.`
 				: '';
-		return `⏱️ *Task finalizat: ${ev.taskTitle}*\n${formatMinutes(ev.realMinutes)} lucrate, −${formatMinutes(ev.consumedMinutes)} din credit.${overage}\n${sold}\n${portalUrl}`;
+		const worked = ev.pricing
+			? `${formatMinutes(ev.realMinutes)} ${consumptionWorkedLabel(ev.pricing)}`
+			: formatMinutes(ev.realMinutes);
+		return `⏱️ *Task finalizat: ${ev.taskTitle}*\n${worked} lucrate.${overage}\n${sold}\n${portalUrl}`;
 	}
-	return `⚠️ *Credit de ore scăzut — ${clientName}*\n${sold} (sub pragul de ${formatMinutes(ev.thresholdMinutes)}).\nPoți cumpăra ore: ${getAppBaseUrl()}/servicii`;
+	return `⚠️ *Credit de ore scăzut — ${clientName}*\n${sold} · disponibil *${formatMinutes(ev.availableMinutes)}* după taskurile în lucru (sub pragul de ${formatMinutes(ev.thresholdMinutes)}).\nPoți cumpăra ore: ${getAppBaseUrl()}/servicii`;
 }
 
 /**
@@ -121,19 +141,26 @@ export async function notifyHourCreditEvent(params: {
 
 		const events: HourCreditEvent[] = [params.event];
 
-		// Pragul „credit scăzut": o singură dată la trecerea sub prag; reînarmare peste prag.
-		const below = client.balance < rules.lowCreditThresholdMinutes;
-		if (below && !client.lowCreditNotifiedAt) {
+		// Pragul „credit scăzut", pe disponibil — aceeași regulă ca badge-ul din Bugete ore.
+		const reserved = await computeReservedMinutes(tenantId, [clientId]);
+		const low = lowCreditTransition({
+			balanceMinutes: client.balance,
+			reservedMinutes: reserved.get(clientId) ?? 0,
+			thresholdMinutes: rules.lowCreditThresholdMinutes,
+			notified: !!client.lowCreditNotifiedAt
+		});
+		if (low.action === 'notify') {
 			events.push({
 				kind: 'low',
 				balanceMinutes: client.balance,
+				availableMinutes: low.availableMinutes,
 				thresholdMinutes: rules.lowCreditThresholdMinutes
 			});
 			await db
 				.update(table.client)
 				.set({ lowCreditNotifiedAt: new Date() })
 				.where(eq(table.client.id, clientId));
-		} else if (!below && client.lowCreditNotifiedAt) {
+		} else if (low.action === 'rearm') {
 			await db
 				.update(table.client)
 				.set({ lowCreditNotifiedAt: null })

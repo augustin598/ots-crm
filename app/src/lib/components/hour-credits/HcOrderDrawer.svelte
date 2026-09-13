@@ -27,13 +27,12 @@
 		invoiceNumber: string | null;
 		createdAt: Date | string;
 		credited: boolean;
+		/** Minute la tariful de referință (din ledger sau estimate), NU `hours × 60`. */
+		creditMinutes: number | null;
 	}
 
-	let {
-		order,
-		tenantSlug,
-		onclose
-	}: { order: Order; tenantSlug: string; onclose: () => void } = $props();
+	let { order, tenantSlug, onclose }: { order: Order; tenantSlug: string; onclose: () => void } =
+		$props();
 
 	const STATUS: Record<string, [string, string]> = {
 		paid: ['hc-chip-ok', 'Plătită'],
@@ -42,7 +41,9 @@
 		cancelled: ['hc-chip-mut', 'Anulată']
 	};
 	const chip = $derived(STATUS[order.status] ?? ['hc-chip-mut', order.status]);
-	const creditMinutes = $derived(order.hours * 60);
+	// Orele REALE comandate. Creditul din sold e altă mărime (`order.creditMinutes`):
+	// o oră de specializare scumpă aduce mai mult de o oră la tariful de referință.
+	const orderedMinutes = $derived(order.hours * 60);
 
 	function onkeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') onclose();
@@ -82,14 +83,10 @@
 		<div class="hc-drawer-b">
 			<div class="hc-card">
 				<div class="hc-card-b">
-					<div
-						style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap"
-					>
+					<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
 						<span class="hc-chip {chip[0]}">{chip[1]}</span>
 						<span class="hc-chip hc-chip-info">
-							{order.modeLabel} · ×{(order.modeMultiplierPct / 100)
-								.toFixed(2)
-								.replace('.', ',')}
+							{order.modeLabel} · ×{(order.modeMultiplierPct / 100).toFixed(2).replace('.', ',')}
 						</span>
 						<div class="hc-total">
 							<div class="hc-total-l">Total</div>
@@ -101,7 +98,7 @@
 						<dt>Specializare</dt>
 						<dd>{order.rateLabel}</dd>
 						<dt>Ore cumpărate</dt>
-						<dd>{fmtHoursShort(creditMinutes)} → {fmtMinutes(creditMinutes)} lucrate</dd>
+						<dd>{fmtHoursShort(orderedMinutes)} → {fmtMinutes(orderedMinutes)} lucrate</dd>
 						<dt>Tarif efectiv</dt>
 						<dd>
 							{order.rateEur} €/h
@@ -136,17 +133,19 @@
 				<div class="hc-card-h">
 					<h3>Efect asupra creditului</h3>
 					<p>
-						Orele intră în ledger doar după confirmarea plății. Creditarea e idempotentă — o
-						reluare nu dublează soldul.
+						Orele intră în ledger doar după confirmarea plății. Creditarea e idempotentă — o reluare
+						nu dublează soldul.
 					</p>
 				</div>
 				<div class="hc-card-b">
 					<div class="hc-preview">
 						{#if order.credited}
-							Creditat: <b>+{fmtMinutes(creditMinutes)}</b> în soldul clientului.
+							Creditat: <b>+{fmtMinutes(order.creditMinutes ?? 0)}</b> în soldul clientului.
+						{:else if order.creditMinutes !== null}
+							În așteptare: <b>~{fmtMinutes(order.creditMinutes)}</b> se adaugă automat când plata e confirmată
+							(la tariful de referință din acel moment).
 						{:else}
-							În așteptare: <b>+{fmtMinutes(creditMinutes)}</b> se adaugă automat când plata e
-							confirmată.
+							În așteptare: creditul se calculează la confirmarea plății.
 						{/if}
 					</div>
 					{#if order.clientId}

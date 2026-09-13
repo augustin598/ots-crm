@@ -9,6 +9,8 @@ import { sendInvoiceEmail, getNotificationRecipients } from '$lib/server/email';
 import { generateInvoiceNumber, getNextInvoiceNumberFromPlugin } from '$lib/server/invoice-utils';
 import { logInfo, logError } from '$lib/server/logger';
 import { canRollbackCreatedInvoice } from '$lib/server/plugins/keez/rollback-policy';
+import { overageDraftEditBlockReason } from '$lib/logic/hour-credits';
+import { detachOverageInvoiceTasks } from '$lib/server/task-credit';
 import { requireStaff } from '$lib/server/get-actor';
 import { checkPortalCardPaymentEligibility } from '$lib/server/stripe/invoice-payable';
 import { isStripeConfiguredForTenant } from '$lib/server/plugins/stripe/factory';
@@ -714,6 +716,10 @@ export const updateInvoice = command(
 			throw new Error('Invoice not found');
 		}
 
+		// Draftul de depășire a orelor: antetul derivă din liniile generate de taskuri.
+		const overageBlock = overageDraftEditBlockReason(existing, updateData);
+		if (overageBlock) throw new Error(overageBlock);
+
 		// Recalculate amounts if amount or taxRate changed
 		let amount = existing.amount || 0;
 		// `||` here silently flipped a genuine 0% invoice (reverse charge / export) to
@@ -879,6 +885,10 @@ export const deleteInvoice = command(v.pipe(v.string(), v.minLength(1)), async (
 		await tx
 			.delete(table.whmcsInvoiceSync)
 			.where(eq(table.whmcsInvoiceSync.invoiceId, invoiceId));
+
+		// Draft de depășire: taskurile legate trec la „depășire nefacturată" în Bugete ore,
+		// în loc să arate spre o factură ștearsă.
+		await detachOverageInvoiceTasks(tx, event.locals.tenant!.id, invoiceId);
 
 		await tx.delete(table.invoice).where(eq(table.invoice.id, invoiceId));
 	});

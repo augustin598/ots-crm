@@ -47,11 +47,20 @@ const EVENTS: Record<'credited' | 'consumed' | 'low', { event: HourCreditEvent; 
 				taskTitle: 'Landing page campanie toamnă (TEST)',
 				realMinutes: 180,
 				consumedMinutes: 213,
-				overageRealMinutes: 45
+				overageRealMinutes: 45,
+				pricing: {
+					rateLabel: 'Development',
+					rateEur: 65,
+					multiplierPct: 100,
+					modeLabel: 'Standard'
+				}
 			},
 			balance: 1017
 		},
-		low: { event: { kind: 'low', balanceMinutes: 90, thresholdMinutes: 120 }, balance: 90 }
+		low: {
+			event: { kind: 'low', balanceMinutes: 90, availableMinutes: 60, thresholdMinutes: 120 },
+			balance: 90
+		}
 	};
 
 function whatsappBody(clientName: string, ev: HourCreditEvent, balance: number, portalUrl: string) {

@@ -42,7 +42,9 @@ let rules = {
 	lowCreditThresholdMinutes: 120,
 	stepMinutes: 15,
 	notifyEmail: true,
-	notifyWhatsapp: true
+	notifyWhatsapp: true,
+	creditExpiryDays: 0,
+	creditExpiryEnabledAt: null as Date | null
 };
 const modes = [
 	{
@@ -194,7 +196,9 @@ beforeEach(() => {
 		lowCreditThresholdMinutes: 120,
 		stepMinutes: 15,
 		notifyEmail: true,
-		notifyWhatsapp: true
+		notifyWhatsapp: true,
+		creditExpiryDays: 0,
+		creditExpiryEnabledAt: null
 	};
 	asStaff('owner');
 });
@@ -462,6 +466,19 @@ describe('updateHourCreditRules', () => {
 		expect(writes[0].kind).toBe('upsert');
 		expect(writes[0].values!.referenceRateSlug).toBe('development');
 		expect(writes[0].set!.referenceRateSlug).toBe('development');
+	});
+
+	test('pornirea expirării fixează momentul; oprirea îl golește (fără expirare retroactivă)', async () => {
+		const before = Date.now();
+		await updateHourCreditRules({ ...RULES_INPUT, creditExpiryDays: 90 });
+		const enabledAt = writes[0].values!.creditExpiryEnabledAt as Date;
+		expect(enabledAt).toBeInstanceOf(Date);
+		expect(enabledAt.getTime()).toBeGreaterThanOrEqual(before);
+		expect(writes[0].set!.creditExpiryEnabledAt).toEqual(enabledAt);
+
+		writes = [];
+		await updateHourCreditRules({ ...RULES_INPUT, creditExpiryDays: 0 });
+		expect(writes[0].set!.creditExpiryEnabledAt).toBeNull();
 	});
 
 	test('referință inexistentă → 400', async () => {

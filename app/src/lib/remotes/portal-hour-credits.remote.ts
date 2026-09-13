@@ -4,6 +4,7 @@
  */
 import { getRequestEvent, query } from '$app/server';
 import { error } from '@sveltejs/kit';
+import { getRequestAccessFlags } from '$lib/server/portal-access';
 import { getClientHourCredit } from '$lib/server/hour-credits';
 import { computeReservedMinutes } from '$lib/server/task-credit';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
@@ -15,6 +16,15 @@ export const getMyHourCredit = query(async () => {
 		throw error(401, 'Unauthorized');
 	}
 	const client = event.locals.client;
+	// Layout-ul portalului gate-uiește doar navigarea; remote-ul se poate chema direct,
+	// deci flag-ul per contact trebuie verificat și aici (ca la interviuri).
+	const flags = await getRequestAccessFlags({
+		tenantId: client.tenantId,
+		clientId: client.id,
+		userEmail: event.locals.user.email,
+		isPrimary: event.locals.clientUser?.isPrimary ?? false
+	});
+	if (!flags.hourCredits) throw error(403, 'Nu ai acces la creditul de ore.');
 	const [view, catalog, reserved] = await Promise.all([
 		getClientHourCredit(client.tenantId, client.id),
 		getHourlyCatalog(client.tenantId),
@@ -27,13 +37,14 @@ export const getMyHourCredit = query(async () => {
 		reservedMinutes: reserved.get(client.id) ?? 0,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		lowCreditThresholdMinutes: catalog.rules.lowCreditThresholdMinutes,
-		// Fără numele userilor interni (spec §8): doar ce vede clientul.
+		// Fără numele userilor interni (spec §8): doar ce vede clientul. Nota unei
+		// ajustări manuale e motivul intern al staff-ului — clientul vede eticheta tipului.
 		entries: view.entries.map((e) => ({
 			id: e.id,
 			deltaMinutes: e.deltaMinutes,
 			kind: e.kind,
-			note: e.note,
-			realMinutes: e.realMinutes,
+			note: e.kind === 'manual' ? null : e.note,
+			realMinutes: e.kind === 'manual' ? null : e.realMinutes,
 			createdAt: e.createdAt
 		}))
 	};

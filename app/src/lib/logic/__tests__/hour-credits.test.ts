@@ -4,6 +4,10 @@ import {
 	netToEurCents,
 	eurCentsToReferenceMinutes,
 	invoiceCreditEligibility,
+	overageDraftEditBlockReason,
+	lowCreditTransition,
+	availableForTask,
+	consumptionWorkedLabel,
 	startOfMonthUtc,
 	weightFactor,
 	weightedMinutes,
@@ -108,6 +112,21 @@ describe('invoiceCreditEligibility', () => {
 		expect(invoiceCreditEligibility(paid({ amount: 0 }), ok).reason).toMatch(/zero/);
 		expect(invoiceCreditEligibility(paid({ currency: 'USD' }), ok).reason).toMatch(/USD/);
 	});
+
+	test('`structural` separă „nu se creditează niciodată" de „adminul poate rezolva"', () => {
+		const structural = (over: Partial<InvoiceCreditCandidate>, ctx = ok) =>
+			invoiceCreditEligibility(paid(over), ctx).structural === true;
+		// Nu au ce căuta în lista „Necreditate".
+		expect(structural({ externalSource: 'hour-overage' })).toBe(true);
+		expect(structural({ externalSource: 'hour-credit' })).toBe(true);
+		expect(structural({ hostingAccountId: 'h1' })).toBe(true);
+		expect(structural({ externalSource: 'google-ads' })).toBe(true);
+		expect(structural({}, { clientOptedIn: true, isHoursOrderInvoice: true })).toBe(true);
+		// Rezolvabile: apar în listă cu motivul.
+		expect(structural({ currency: 'USD' })).toBe(false);
+		expect(structural({ amount: 0 })).toBe(false);
+		expect(structural({}, { ...ok, clientOptedIn: false })).toBe(false);
+	});
 });
 
 describe('startOfMonthUtc', () => {
@@ -185,5 +204,119 @@ describe('overageMonthKey', () => {
 	test('luna calendaristică în Europe/Bucharest', () => {
 		expect(overageMonthKey(new Date('2026-09-30T22:30:00Z'))).toBe('2026-10'); // 01:30 ora RO
 		expect(overageMonthKey(new Date('2026-09-11T10:00:00Z'))).toBe('2026-09');
+	});
+});
+
+describe('overageDraftEditBlockReason', () => {
+	const draft = {
+		externalSource: 'hour-overage',
+		notes: 'hour-overage:2026-09 — ore peste creditul clientului',
+		amount: 14625,
+		taxRate: 2100,
+		currency: 'EUR',
+		clientId: 'c1'
+	};
+
+	test('facturile obișnuite nu sunt atinse', () => {
+		expect(
+			overageDraftEditBlockReason({ ...draft, externalSource: null }, { amount: 1, clientId: 'x' })
+		).toBeNull();
+	});
+
+	test('formularul care retrimite aceleași valori trece', () => {
+		// Formularul trimite și câmpuri pe care garda nu le privește (ex. scadența).
+		const formPayload = {
+			amount: 146.25,
+			taxRate: 21,
+			currency: 'EUR',
+			clientId: 'c1',
+			notes: draft.notes + ' — verificat',
+			dueDate: '2026-10-01'
+		};
+		expect(overageDraftEditBlockReason(draft, formPayload)).toBeNull();
+	});
+
+	test('suma, cota, moneda și clientul vin din linii — nu se editează din antet', () => {
+		expect(overageDraftEditBlockReason(draft, { amount: 200 })).toMatch(/depășire/);
+		expect(overageDraftEditBlockReason(draft, { taxRate: 19 })).toMatch(/depășire/);
+		expect(overageDraftEditBlockReason(draft, { currency: 'RON' })).toMatch(/depășire/);
+		expect(overageDraftEditBlockReason(draft, { clientId: 'c2' })).toMatch(/depășire/);
+	});
+
+	test('nota trebuie să păstreze marcajul lunii (după el se găsește draftul)', () => {
+		expect(overageDraftEditBlockReason(draft, { notes: 'altă notă' })).toMatch(
+			/hour-overage:2026-09/
+		);
+		expect(overageDraftEditBlockReason(draft, { notes: '' })).toMatch(/hour-overage:2026-09/);
+	});
+});
+
+describe('lowCreditTransition — alerta „credit scăzut" pe DISPONIBIL', () => {
+	const base = { balanceMinutes: 600, reservedMinutes: 0, thresholdMinutes: 120, notified: false };
+
+	test('soldul e peste prag, dar rezervările îl duc sub → alertă (sold 600, rezervat 500)', () => {
+		expect(lowCreditTransition({ ...base, reservedMinutes: 500 })).toEqual({
+			action: 'notify',
+			availableMinutes: 100
+		});
+	});
+
+	test('deja notificat → nu se repetă', () => {
+		expect(lowCreditTransition({ ...base, reservedMinutes: 500, notified: true }).action).toBe(
+			'none'
+		);
+	});
+
+	test('disponibilul urcă înapoi peste prag → se reînarmează', () => {
+		expect(lowCreditTransition({ ...base, notified: true }).action).toBe('rearm');
+	});
+
+	test('peste prag și nenotificat → nimic', () => {
+		expect(lowCreditTransition(base).action).toBe('none');
+	});
+});
+
+describe('availableForTask — avertizarea din formularul de task', () => {
+	test('task nou: disponibil = sold − rezervat', () => {
+		expect(
+			availableForTask({ balanceMinutes: 600, reservedMinutes: 400, ownReservedMinutes: 0 })
+		).toBe(200);
+	});
+
+	test('task existent: propria rezervare nu se scade de două ori', () => {
+		// Taskul editat rezervă deja 300 din cele 400.
+		expect(
+			availableForTask({ balanceMinutes: 600, reservedMinutes: 400, ownReservedMinutes: 300 })
+		).toBe(500);
+	});
+
+	test('rezervarea proprie mai mare decât totalul (catalog schimbat) nu umflă disponibilul', () => {
+		expect(
+			availableForTask({ balanceMinutes: 600, reservedMinutes: 100, ownReservedMinutes: 300 })
+		).toBe(600);
+	});
+});
+
+describe('consumptionWorkedLabel — orele lucrate cu prețul specializării', () => {
+	test('specializarea cu tariful ei, fără explicații despre referință', () => {
+		expect(
+			consumptionWorkedLabel({
+				rateLabel: 'Development',
+				rateEur: 65,
+				multiplierPct: 100,
+				modeLabel: 'Standard'
+			})
+		).toBe('Development (65 €/h)');
+	});
+
+	test('regim cu majorare: tariful efectiv și numele regimului', () => {
+		expect(
+			consumptionWorkedLabel({
+				rateLabel: 'Development',
+				rateEur: 65,
+				multiplierPct: 150,
+				modeLabel: 'Urgență'
+			})
+		).toBe('Development, Urgență (98 €/h)');
 	});
 });

@@ -7,7 +7,7 @@
  * scrieri simultane nu pot pierde minute. Conflictul pe indexul unic parțial
  * (evenimente livrate de două ori) e tratat ca „deja aplicat", nu ca eroare.
  */
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, or, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -17,7 +17,7 @@ import { loadBnrFxRates } from '$lib/server/bnr/client';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import {
 	computeExpiryDate,
-	remainingBatches,
+	expiringBatches,
 	type ExpiryLedgerRow
 } from '$lib/logic/hour-credit-expiry';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
@@ -66,7 +66,7 @@ export interface LedgerEntryInput {
  * test pe mesajul de la vârf ar rata conflictul și ar arunca o eroare 500 la a doua
  * livrare a aceluiași webhook. Prins de testul de integrare (hour-credits-integration).
  */
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
 	let current: unknown = err;
 	for (let depth = 0; current && depth < 6; depth++) {
 		const e = current as { message?: unknown; code?: unknown; rawCode?: unknown; cause?: unknown };
@@ -410,10 +410,10 @@ export async function listUncreditedInvoices(tenantId: string): Promise<Uncredit
 			},
 			{ clientOptedIn: true, isHoursOrderInvoice: orderInvoiceIds.has(invoice.id) }
 		);
-		// Excluderile structurale (hosting, ads, comenzi) nu sunt „necreditate", sunt
-		// ne-eligibile de-a binelea; apar doar cazurile pe care adminul le poate rezolva.
-		const structural = /hosting|ads|depășire|comenzi/.test(e.reason ?? '');
-		if (!e.eligible && structural) continue;
+		// Excluderile structurale (hosting, ads, depășire, comenzi, „Adaugă ore") nu sunt
+		// „necreditate", sunt ne-eligibile de-a binelea; apar doar cazurile pe care
+		// adminul le poate rezolva.
+		if (e.structural) continue;
 		out.push({
 			invoiceId: invoice.id,
 			invoiceNumber: invoice.invoiceNumber ?? null,
@@ -542,7 +542,10 @@ export async function getHourCreditsOverview(
 			clientId: table.clientHourLedger.clientId,
 			createdAt: table.clientHourLedger.createdAt,
 			deltaMinutes: table.clientHourLedger.deltaMinutes,
-			expiresAt: table.clientHourLedger.expiresAt
+			expiresAt: table.clientHourLedger.expiresAt,
+			// Stornările nu sunt loturi: FIFO-ul are nevoie de tip și sursă.
+			kind: table.clientHourLedger.kind,
+			sourceId: table.clientHourLedger.sourceId
 		})
 		.from(table.clientHourLedger)
 		.where(
@@ -559,16 +562,20 @@ export async function getHourCreditsOverview(
 			id: r.id,
 			createdAt: r.createdAt,
 			deltaMinutes: r.deltaMinutes,
-			expiresAt: r.expiresAt
+			expiresAt: r.expiresAt,
+			kind: r.kind,
+			sourceId: r.sourceId
 		});
 		rowsBy.set(r.clientId, list);
 		const prev = lastMovement.get(r.clientId);
 		if (!prev || r.createdAt > prev) lastMovement.set(r.clientId, r.createdAt);
 	}
 
+	// Cu expirarea oprită (sau pentru termene de dinainte de repornire) nimic nu „expiră".
+	const { rules } = await getHourlyCatalog(tenantId);
 	return relevant
 		.map((c) => {
-			const batches = remainingBatches(rowsBy.get(c.id) ?? []).filter((b) => b.expiresAt);
+			const batches = expiringBatches(rowsBy.get(c.id) ?? [], rules);
 			const first = batches[0];
 			return {
 				clientId: c.id,
@@ -643,7 +650,10 @@ export async function getClientHourCredit(tenantId: string, clientId: string, li
 			id: table.clientHourLedger.id,
 			createdAt: table.clientHourLedger.createdAt,
 			deltaMinutes: table.clientHourLedger.deltaMinutes,
-			expiresAt: table.clientHourLedger.expiresAt
+			expiresAt: table.clientHourLedger.expiresAt,
+			// Stornările nu sunt loturi: FIFO-ul are nevoie de tip și sursă.
+			kind: table.clientHourLedger.kind,
+			sourceId: table.clientHourLedger.sourceId
 		})
 		.from(table.clientHourLedger)
 		.where(
@@ -652,7 +662,8 @@ export async function getClientHourCredit(tenantId: string, clientId: string, li
 				eq(table.clientHourLedger.clientId, clientId)
 			)
 		);
-	const batches = remainingBatches(forExpiry).filter((b) => b.expiresAt);
+	const { rules } = await getHourlyCatalog(tenantId);
+	const batches = expiringBatches(forExpiry, rules);
 	const firstExpiry = batches[0]?.expiresAt ?? null;
 
 	return {
@@ -750,6 +761,12 @@ export interface HoursOrderRow {
 	createdAt: Date;
 	/** Dacă orele au ajuns deja în ledger (creditare idempotentă pe comandă). */
 	credited: boolean;
+	/**
+	 * Creditul comenzii, în minute la tariful de REFERINȚĂ: cel scris în ledger dacă
+	 * e creditată, altfel estimarea cu aceeași conversie ca la plată. NU e `hours × 60`
+	 * — 10 h Development la referința PM înseamnă 11 h 45 min de credit.
+	 */
+	creditMinutes: number | null;
 }
 
 /**
@@ -787,8 +804,34 @@ export async function listHoursOrders(tenantId: string, limit = 100): Promise<Ho
 		.limit(limit);
 	if (rows.length === 0) return [];
 
-	const credited = await creditedSourceIds(tenantId, 'purchase', 'hours_order');
-	return rows.map((r) => ({ ...r, credited: credited.has(r.id) }));
+	const purchases = await db
+		.select({
+			sourceId: table.clientHourLedger.sourceId,
+			deltaMinutes: table.clientHourLedger.deltaMinutes
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'purchase'),
+				eq(table.clientHourLedger.sourceType, 'hours_order')
+			)
+		);
+	const creditedMinutes = new Map(purchases.map((p) => [p.sourceId, p.deltaMinutes]));
+	const reference = await loadReference(tenantId);
+
+	return rows.map((r) => {
+		const ledgerMinutes = creditedMinutes.get(r.id);
+		let creditMinutes: number | null = ledgerMinutes ?? null;
+		if (ledgerMinutes === undefined && reference && r.currency === 'EUR' && r.netCents > 0) {
+			creditMinutes = eurCentsToReferenceMinutes(
+				r.netCents,
+				reference.rateEur,
+				reference.stepMinutes
+			);
+		}
+		return { ...r, credited: ledgerMinutes !== undefined, creditMinutes };
+	});
 }
 
 // ── Raport lunar ─────────────────────────────────────────────────────────────
@@ -925,22 +968,171 @@ export async function listClientCreditTasks(
 		.from(table.task)
 		.leftJoin(table.project, eq(table.project.id, table.task.projectId))
 		.leftJoin(table.user, eq(table.user.id, table.task.assignedToUserId))
-		.where(and(eq(table.task.tenantId, tenantId), eq(table.task.clientId, clientId)))
+		.where(
+			and(
+				eq(table.task.tenantId, tenantId),
+				eq(table.task.clientId, clientId),
+				// Filtrul stă în SQL, ÎNAINTEA limitei: filtrat în memorie după `limit`,
+				// taskurile fără ore mai recente împingeau afară taskurile cu ore.
+				or(gt(table.task.estimatedMinutes, 0), gt(table.task.actualMinutes, 0))
+			)
+		)
 		.orderBy(desc(table.task.updatedAt))
 		.limit(limit);
 
+	return rows.map((r) => ({
+		id: r.id,
+		title: r.title,
+		status: r.status,
+		projectName: r.projectName,
+		ownerName: [r.ownerFirst, r.ownerLast].filter(Boolean).join(' ') || null,
+		estimatedMinutes: r.estimatedMinutes,
+		actualMinutes: r.actualMinutes,
+		creditSettledAt: r.creditSettledAt,
+		rateSlug: r.rateSlug,
+		modeSlug: r.modeSlug
+	}));
+}
+
+// ── Facturi anulate care au dat ore ─────────────────────────────────────────
+
+export interface CancelledCreditedInvoice {
+	invoiceId: string;
+	invoiceNumber: string | null;
+	clientId: string;
+	clientName: string;
+	/** Minutele intrate în ledger din factura asta (factură plătită sau „Adaugă ore"). */
+	creditedMinutes: number;
+	kind: 'invoice_credit' | 'purchase';
+}
+
+const REVERSAL_KIND = {
+	invoice_credit: 'invoice_credit_reversal',
+	purchase: 'purchase_reversal'
+} as const;
+
+/**
+ * Facturi anulate care au alimentat creditul și nu au fost încă stornate. Anularea
+ * nu stornează automat (spec, abaterea 4): lista e locul în care adminul decide.
+ */
+export async function listCancelledCreditedInvoices(
+	tenantId: string
+): Promise<CancelledCreditedInvoice[]> {
+	const rows = await db
+		.select({
+			invoiceId: table.invoice.id,
+			invoiceNumber: table.invoice.invoiceNumber,
+			clientId: table.clientHourLedger.clientId,
+			clientName: table.client.name,
+			kind: table.clientHourLedger.kind,
+			deltaMinutes: table.clientHourLedger.deltaMinutes
+		})
+		.from(table.clientHourLedger)
+		.innerJoin(
+			table.invoice,
+			and(
+				eq(table.invoice.id, table.clientHourLedger.sourceId),
+				eq(table.invoice.tenantId, table.clientHourLedger.tenantId)
+			)
+		)
+		.innerJoin(table.client, eq(table.client.id, table.clientHourLedger.clientId))
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.sourceType, 'invoice'),
+				inArray(table.clientHourLedger.kind, ['invoice_credit', 'purchase']),
+				eq(table.invoice.status, 'cancelled')
+			)
+		);
+	if (rows.length === 0) return [];
+
+	const reversals = await db
+		.select({ sourceId: table.clientHourLedger.sourceId, kind: table.clientHourLedger.kind })
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.sourceType, 'invoice'),
+				inArray(table.clientHourLedger.kind, Object.values(REVERSAL_KIND)),
+				inArray(
+					table.clientHourLedger.sourceId,
+					rows.map((r) => r.invoiceId)
+				)
+			)
+		);
+	const reversed = new Set(reversals.map((r) => `${r.kind}:${r.sourceId}`));
+
 	return rows
-		.filter((r) => r.estimatedMinutes || r.actualMinutes)
+		.filter((r) => {
+			const kind = r.kind as keyof typeof REVERSAL_KIND;
+			return !reversed.has(`${REVERSAL_KIND[kind]}:${r.invoiceId}`);
+		})
 		.map((r) => ({
-			id: r.id,
-			title: r.title,
-			status: r.status,
-			projectName: r.projectName,
-			ownerName: [r.ownerFirst, r.ownerLast].filter(Boolean).join(' ') || null,
-			estimatedMinutes: r.estimatedMinutes,
-			actualMinutes: r.actualMinutes,
-			creditSettledAt: r.creditSettledAt,
-			rateSlug: r.rateSlug,
-			modeSlug: r.modeSlug
+			invoiceId: r.invoiceId,
+			invoiceNumber: r.invoiceNumber ?? null,
+			clientId: r.clientId,
+			clientName: r.clientName,
+			creditedMinutes: r.deltaMinutes,
+			kind: r.kind as 'invoice_credit' | 'purchase'
 		}));
+}
+
+export type ReverseInvoiceCreditResult =
+	| { status: 'reversed'; minutes: number }
+	| { status: 'already_reversed' }
+	| { status: 'skipped'; reason: string };
+
+/**
+ * Stornează creditul dat de o factură ANULATĂ: exact minutele intrate, cu tipul
+ * de stornare al sursei. Idempotent prin indexul unic parțial (kind, invoice, id).
+ */
+export async function reverseCancelledInvoiceCredit(params: {
+	tenantId: string;
+	invoiceId: string;
+	userId: string | null;
+}): Promise<ReverseInvoiceCreditResult> {
+	const { tenantId, invoiceId } = params;
+	const [invoice] = await db
+		.select({ status: table.invoice.status, invoiceNumber: table.invoice.invoiceNumber })
+		.from(table.invoice)
+		.where(and(eq(table.invoice.id, invoiceId), eq(table.invoice.tenantId, tenantId)))
+		.limit(1);
+	if (!invoice) return { status: 'skipped', reason: 'factura nu există' };
+	if (invoice.status !== 'cancelled') {
+		return { status: 'skipped', reason: 'factura nu e anulată' };
+	}
+	const [credit] = await db
+		.select()
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.sourceType, 'invoice'),
+				eq(table.clientHourLedger.sourceId, invoiceId),
+				inArray(table.clientHourLedger.kind, ['invoice_credit', 'purchase'])
+			)
+		)
+		.limit(1);
+	if (!credit) return { status: 'skipped', reason: 'factura n-a dat ore' };
+
+	const kind = REVERSAL_KIND[credit.kind as keyof typeof REVERSAL_KIND];
+	const result = await applyLedgerEntry({
+		tenantId,
+		clientId: credit.clientId,
+		deltaMinutes: -credit.deltaMinutes,
+		kind,
+		sourceType: 'invoice',
+		sourceId: invoiceId,
+		note: `Factura ${invoice.invoiceNumber ?? invoiceId} anulată — orele ei se retrag`,
+		createdByUserId: params.userId,
+		referenceRateEurSnapshot: credit.referenceRateEurSnapshot,
+		netCentsSnapshot: credit.netCentsSnapshot,
+		currencySnapshot: credit.currencySnapshot
+	});
+	if (!result.applied) return { status: 'already_reversed' };
+	logInfo('server', `hour-credits: factura ${invoiceId} anulată → −${credit.deltaMinutes} min`, {
+		tenantId,
+		metadata: { clientId: credit.clientId, invoiceId }
+	});
+	return { status: 'reversed', minutes: credit.deltaMinutes };
 }

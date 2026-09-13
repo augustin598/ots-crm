@@ -22,6 +22,7 @@ import { requireStaff } from '$lib/server/get-actor';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { RATE_MODE_SLUGS } from '$lib/logic/hours-pricing';
+import { nextExpiryEnabledAt } from '$lib/logic/hour-credit-expiry';
 import {
 	MAX_HOURS_MAX,
 	MAX_HOURS_MIN,
@@ -260,6 +261,13 @@ export const updateHourCreditRules = command(
 		// configurare nu pot produce nici rând dublu, nici 500 pe conflict.
 		const now = new Date();
 		const values = {
+			// Repornirea expirării fixează momentul; termenele de dinainte nu expiră retroactiv.
+			creditExpiryEnabledAt: nextExpiryEnabledAt({
+				prevDays: catalog.rules.creditExpiryDays,
+				prevEnabledAt: catalog.rules.creditExpiryEnabledAt,
+				nextDays: data.creditExpiryDays,
+				now
+			}),
 			referenceRateSlug,
 			lowCreditThresholdMinutes: data.lowCreditThresholdMinutes,
 			stepMinutes: data.stepMinutes,

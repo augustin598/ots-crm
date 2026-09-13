@@ -2512,6 +2512,14 @@ export const hourCreditSettings = sqliteTable(
 		notifyWhatsapp: boolean('notify_whatsapp').notNull().default(true),
 		/** 0 = creditul nu expiră. Altfel, alimentările primesc `expires_at` la +N zile. */
 		creditExpiryDays: integer('credit_expiry_days').notNull().default(0),
+		/**
+		 * Momentul (re)pornirii expirării; null = oprită sau pornită înainte de coloană.
+		 * Termenele de dinainte nu expiră retroactiv (migrarea 0562).
+		 */
+		creditExpiryEnabledAt: timestamp('credit_expiry_enabled_at', {
+			withTimezone: true,
+			mode: 'date'
+		}),
 		/** Valoarea din care pornește `client.hour_credit_from_invoices` la clienții noi. */
 		feedFromInvoicesDefault: boolean('feed_from_invoices_default').notNull().default(false),
 		updatedByUserId: text('updated_by_user_id').references(() => user.id),

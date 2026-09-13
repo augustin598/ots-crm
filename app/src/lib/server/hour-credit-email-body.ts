@@ -3,6 +3,7 @@
  * `scripts/demo-hour-credit-email.ts` să randeze exact ce trimite serverul.
  */
 import { formatMinutes } from '$lib/logic/hourly-catalog';
+import { consumptionWorkedLabel } from '$lib/logic/hour-credits';
 import type { HourCreditEvent } from './hour-credit-notifications';
 
 function escapeHtml(s: string): string {
@@ -53,6 +54,7 @@ export function buildHourCreditEmailBody(params: {
 		`;
 	}
 	if (event.kind === 'consumed') {
+		const workedLabel = event.pricing ? consumptionWorkedLabel(event.pricing) : null;
 		const overage =
 			event.overageRealMinutes > 0
 				? `<div style="margin-top: 8px; color: #b45309;">${formatMinutes(event.overageRealMinutes)} depășesc creditul și se facturează separat, la tariful specializării.</div>`
@@ -61,8 +63,7 @@ export function buildHourCreditEmailBody(params: {
 			<p style="${P}">Bună ziua,</p>
 			<p style="${P}">Task-ul <strong>${escapeHtml(event.taskTitle)}</strong> a fost finalizat.</p>
 			<table role="presentation" cellpadding="0" cellspacing="0" style="${BOX}"><tr><td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
-				<div><span style="color: #6b7280;">Ore lucrate</span> &nbsp;·&nbsp; <strong>${formatMinutes(event.realMinutes)}</strong></div>
-				<div style="margin-top: 8px;"><span style="color: #6b7280;">Scăzut din credit</span> &nbsp;·&nbsp; <strong>${formatMinutes(event.consumedMinutes)}</strong></div>
+				<div><span style="color: #6b7280;">Ore lucrate</span> &nbsp;·&nbsp; <strong>${formatMinutes(event.realMinutes)}${workedLabel ? ` ${escapeHtml(workedLabel)}` : ''}</strong></div>
 				${overage}
 				${balanceRow}
 			</td></tr></table>
@@ -71,8 +72,10 @@ export function buildHourCreditEmailBody(params: {
 	}
 	return `
 		<p style="${P}">Bună ziua,</p>
-		<p style="${P}">Creditul de ore al companiei <strong>${clientName}</strong> a scăzut sub pragul de <strong>${formatMinutes(event.thresholdMinutes)}</strong>.</p>
-		<table role="presentation" cellpadding="0" cellspacing="0" style="${BOX}"><tr><td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">${balanceRow}</td></tr></table>
+		<p style="${P}">Creditul de ore disponibil al companiei <strong>${clientName}</strong> a scăzut sub pragul de <strong>${formatMinutes(event.thresholdMinutes)}</strong>, ținând cont de taskurile aflate în lucru.</p>
+		<table role="presentation" cellpadding="0" cellspacing="0" style="${BOX}"><tr><td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">${balanceRow}
+			<div style="margin-top: 8px;"><span style="color: #6b7280;">Disponibil după taskurile în lucru</span> &nbsp;·&nbsp; <strong>${formatMinutes(event.availableMinutes)}</strong></div>
+		</td></tr></table>
 		<p style="${P}">Poți cumpăra ore direct online, iar ele intră imediat în credit.</p>
 		${button(params.servicesUrl, 'Cumpără ore')}
 		<p style="color: #6b7280; font-size: 13px; margin: 16px 0 0 0;"><a href="${params.portalUrl}" style="color: #6b7280;">Vezi creditul de ore</a></p>

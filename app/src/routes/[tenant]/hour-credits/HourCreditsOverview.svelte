@@ -21,6 +21,7 @@
 	import HcOrderDrawer from '$lib/components/hour-credits/HcOrderDrawer.svelte';
 	import HcAddHoursModal from '$lib/components/hour-credits/HcAddHoursModal.svelte';
 	import HcMonthlyReport from '$lib/components/hour-credits/HcMonthlyReport.svelte';
+	import HcIssuesPanel from '$lib/components/hour-credits/HcIssuesPanel.svelte';
 	import {
 		creditToEur,
 		fmtDate,
@@ -33,7 +34,7 @@
 	const tenantSlug = $derived(page.params.tenant ?? '');
 	const data = $derived(await getHourCreditsPage());
 
-	type Tab = 'clients' | 'orders' | 'uncredited' | 'report';
+	type Tab = 'clients' | 'orders' | 'uncredited' | 'issues' | 'report';
 	let tab = $state<Tab>('clients');
 	let q = $state('');
 	let filter = $state<'all' | 'invoices' | 'low'>('all');
@@ -43,9 +44,7 @@
 	// Comenzile se încarcă doar când tabul lor e deschis — lista e pagina care se
 	// deschide implicit, n-are rost s-o încetinim cu date pe care nimeni nu le vede.
 	const ordersData = $derived(tab === 'orders' ? await getHoursOrdersPage() : null);
-	const selectedOrder = $derived(
-		ordersData?.orders.find((o) => o.id === selectedOrderId) ?? null
-	);
+	const selectedOrder = $derived(ordersData?.orders.find((o) => o.id === selectedOrderId) ?? null);
 
 	const clientsQuery = getClients();
 	const allClients = $derived(
@@ -62,6 +61,13 @@
 				return r.balanceMinutes - r.reservedMinutes < data.lowCreditThresholdMinutes;
 			return true;
 		})
+	);
+
+	const issuesCount = $derived(
+		data.issues.unbilledOverages.length +
+			data.issues.unsettledDone.length +
+			data.issues.cancelledCredited.length +
+			data.issues.uninvoicedCredits.length
 	);
 
 	let creditingId = $state<string | null>(null);
@@ -81,7 +87,15 @@
 
 	/** Export CSV al listei filtrate — ce vede account managerul pe ecran. */
 	function exportCsv() {
-		const head = ['Client', 'CUI', 'Sold (min)', 'Rezervat (min)', 'Disponibil (min)', 'Consum 30z (min)', 'Alimentare din facturi'];
+		const head = [
+			'Client',
+			'CUI',
+			'Sold (min)',
+			'Rezervat (min)',
+			'Disponibil (min)',
+			'Consum 30z (min)',
+			'Alimentare din facturi'
+		];
 		const lines = rows.map((r) =>
 			[
 				r.clientName,
@@ -207,6 +221,16 @@
 			<button
 				type="button"
 				role="tab"
+				aria-selected={tab === 'issues'}
+				class="hc-tab"
+				class:active={tab === 'issues'}
+				onclick={() => (tab = 'issues')}
+			>
+				De rezolvat <span class="hc-tab-count">{issuesCount}</span>
+			</button>
+			<button
+				type="button"
+				role="tab"
 				aria-selected={tab === 'report'}
 				class="hc-tab"
 				class:active={tab === 'report'}
@@ -307,9 +331,8 @@
 										<td>
 											{o.rateLabel}
 											<div class="hc-muted">
-												{o.modeLabel} · ×{(o.modeMultiplierPct / 100)
-													.toFixed(2)
-													.replace('.', ',')} → {o.rateEur} €/h
+												{o.modeLabel} · ×{(o.modeMultiplierPct / 100).toFixed(2).replace('.', ',')} →
+												{o.rateEur} €/h
 											</div>
 										</td>
 										<td class="hc-num">{fmtHoursShort(o.hours * 60)}</td>
@@ -362,7 +385,9 @@
 					<div style="padding:0 18px"><div class="hc-error">{creditError}</div></div>
 				{/if}
 				{#if data.uncredited.length === 0}
-					<div class="hc-empty"><b>Nimic de creditat</b>Toate facturile eligibile sunt în ledger.</div>
+					<div class="hc-empty">
+						<b>Nimic de creditat</b>Toate facturile eligibile sunt în ledger.
+					</div>
 				{:else}
 					<div class="hc-tablescroll">
 						<table class="hc-table">
@@ -391,7 +416,10 @@
 										<td class="r">
 											{#if data.canEdit}
 												{#if inv.reason?.includes('bifa')}
-													<a class="hc-btn hc-btn-light" href="/{tenantSlug}/hour-credits/{inv.clientId}">
+													<a
+														class="hc-btn hc-btn-light"
+														href="/{tenantSlug}/hour-credits/{inv.clientId}"
+													>
 														Bifează alimentarea
 													</a>
 												{:else}
@@ -413,6 +441,8 @@
 					</div>
 				{/if}
 			</div>
+		{:else if tab === 'issues'}
+			<HcIssuesPanel issues={data.issues} {tenantSlug} canEdit={data.canEdit} />
 		{:else}
 			<HcMonthlyReport />
 		{/if}
