@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "hosted": {
+      "command": "hosted-cli",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

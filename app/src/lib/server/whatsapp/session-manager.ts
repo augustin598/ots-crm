@@ -39,6 +39,15 @@ const starting: Map<string, Promise<ActiveSession>> =
 	(GT[STARTING_SYMBOL] = new Map<string, Promise<ActiveSession>>());
 
 /**
+ * Setat de `shutdownAllSessions`. Închiderea voluntară a socketului ajunge în
+ * handler-ul de `close` fără cod, exact ca o cădere de rețea: fără steag, instanța
+ * care se oprește se reconecta după 3 s și bătea socketul pod-ului nou (sau al
+ * prod-ului, când se oprea localhost-ul), iar statusul `disconnected` scris în
+ * bază oprea gardianul să mai preia sesiunea.
+ */
+const SHUTTING_DOWN_SYMBOL = Symbol.for('ots_crm_whatsapp_shutting_down');
+
+/**
  * Bătaia de inimă a instanței care ține socketul. Fără ea, o sesiune moartă
  * arată în bază exact ca una vie (vezi `session-health.ts`).
  */
@@ -225,6 +234,9 @@ async function createSocket(tenantId: string, sessionId: string): Promise<Active
 				stopHeartbeat(tenantId);
 				void clearHeartbeat(tenantId).catch(() => {});
 				dropTenant(tenantId);
+
+				// Oprire voluntară: statusul rămâne `connected`, ca altă instanță să preia.
+				if (GT[SHUTTING_DOWN_SYMBOL]) return;
 
 				if (code === DisconnectReason.loggedOut) {
 					await auth.clear().catch(() => {});
@@ -588,6 +600,7 @@ export async function sendMediaToJid(
 }
 
 export async function shutdownAllSessions(): Promise<void> {
+	GT[SHUTTING_DOWN_SYMBOL] = true;
 	const all = Array.from(sessions.entries());
 	await Promise.all(
 		all.map(async ([tenantId, active]) => {

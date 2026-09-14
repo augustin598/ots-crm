@@ -15,6 +15,8 @@ import { seedAccessCatalog } from '$lib/server/access-seed';
 import { shutdownBrowser } from '$lib/server/scraper/cloudflare-bypass';
 import { flushLogBuffer } from '$lib/server/logger';
 import { restoreAllSessions as restoreWhatsappSessions, shutdownAllSessions as shutdownWhatsappSessions } from '$lib/server/whatsapp/session-manager';
+import { isProductionInstance, shouldRestoreWhatsappSessions } from '$lib/server/runtime-env';
+import { env } from '$env/dynamic/private';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
@@ -179,7 +181,11 @@ export const init = async () => {
 	// Sync BNR rates if not already synced today (works even without Redis scheduler)
 	await ensureBnrRatesSynced();
 	// Restore WhatsApp sessions (Baileys) — guarded against HMR re-runs
-	if (!gt[WHATSAPP_INIT_SYMBOL]) {
+	if (!shouldRestoreWhatsappSessions()) {
+		console.warn(
+			`[whatsapp] NU restaurez sesiunile: APP_ENV=${env.APP_ENV ?? '(nesetat)'} — socketul rămâne pe prod (WHATSAPP_LOCAL_SESSION=1 ca să-l preiei local)`
+		);
+	} else if (!gt[WHATSAPP_INIT_SYMBOL]) {
 		gt[WHATSAPP_INIT_SYMBOL] = true;
 		restoreWhatsappSessions().catch((e) => {
 			gt[WHATSAPP_INIT_SYMBOL] = false;
@@ -192,17 +198,18 @@ export const init = async () => {
 // and error pages emitted inside handleAuth).
 export const handle: Handle = sequence(handleSecurityHeaders, handleAuth);
 
-// Graceful shutdown: flush logs + close Puppeteer browser + WhatsApp sockets
-process.on('SIGTERM', async () => {
+// Graceful shutdown: flush logs + close Puppeteer browser + WhatsApp sockets.
+// Un listener pe semnal anulează ieșirea implicită a lui Node: pe prod oprirea o
+// face adapter-node / Kubernetes, dar pe localhost procesul rămânea viu la Ctrl+C
+// (și ținea socketul WhatsApp). În afara producției ieșim explicit.
+async function gracefulShutdown() {
 	await shutdownWhatsappSessions();
 	await flushLogBuffer();
 	await shutdownBrowser();
-});
-process.on('SIGINT', async () => {
-	await shutdownWhatsappSessions();
-	await flushLogBuffer();
-	await shutdownBrowser();
-});
+	if (!isProductionInstance()) process.exit(0);
+}
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 export const handleError: import('@sveltejs/kit').HandleServerError = async ({ error, event, status }) => {
 	const { logError, serializeError } = await import('$lib/server/logger');

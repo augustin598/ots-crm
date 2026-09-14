@@ -16,3 +16,14 @@ import { env } from '$env/dynamic/private';
 export function isProductionInstance(): boolean {
 	return env.APP_ENV === 'production';
 }
+
+/**
+ * WhatsApp acceptă un singur socket pe număr. Un localhost care restaurează
+ * sesiunea la pornire o fură de pe prod (conflict 440, incident 2026-09-13:
+ * `bun run dev` a ținut WhatsApp-ul firmei pe laptop). Trimiterile de pe local
+ * trec oricum prin `whatsapp_outbox`, golit de instanța cu socketul; socket local
+ * trebuie doar la testarea mesajelor primite → `WHATSAPP_LOCAL_SESSION=1 bun run dev`.
+ */
+export function shouldRestoreWhatsappSessions(): boolean {
+	return isProductionInstance() || env.WHATSAPP_LOCAL_SESSION === '1';
+}
