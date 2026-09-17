@@ -640,6 +640,46 @@ describe('consumul task-urilor', () => {
 		expect(r.consumedMinutes).toBe(100);
 		expect(r.overageRealMinutes).toBe(50);
 		expect(await balance()).toBe(0);
+		const rows = await testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(eq(table.clientHourLedger.sourceId, 't-round'));
+		const consumption = rows.find((x) => x.kind === 'task_consumption');
+		expect(consumption?.deltaMinutes).toBe(-100);
+		expect(consumption?.realMinutes).toBe(142);
+		const overage = rows.find((x) => x.kind === 'overage_invoiced');
+		expect(overage?.deltaMinutes).toBe(0);
+		expect(overage?.realMinutes).toBe(50);
+	});
+
+	test('sold 0: 7 min lucrate → nimic din credit, 15 min depășire, soldul rămâne 0', async () => {
+		await insertTask('t-zero', { actualMinutes: 7 });
+		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-zero', userId: USER });
+		expect(r.status).toBe('settled');
+		if (r.status !== 'settled') return;
+		expect(r.consumedMinutes).toBe(0);
+		expect(r.overageRealMinutes).toBe(15);
+		expect(await balance()).toBe(0);
+	});
+
+	test('sold negativ (−20): 60 min lucrate → nimic din credit, 60 min depășire, soldul rămâne −20', async () => {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -20,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'seed-negative',
+			note: 'seed test'
+		});
+		expect(await balance()).toBe(-20);
+		await insertTask('t-neg', { actualMinutes: 60 });
+		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-neg', userId: USER });
+		expect(r.status).toBe('settled');
+		if (r.status !== 'settled') return;
+		expect(r.consumedMinutes).toBe(0);
+		expect(r.overageRealMinutes).toBe(60);
+		expect(await balance()).toBe(-20);
 	});
 
 	test('credit suficient: 142 min lucrate scad 150 din credit', async () => {

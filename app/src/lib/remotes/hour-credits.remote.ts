@@ -375,13 +375,23 @@ export const settleDoneTaskNow = command(
 	async ({ taskId, actualMinutes }) => {
 		const { tenantId, userId } = await requireOwnerOrAdmin();
 		const [task] = await db
-			.select({ status: table.task.status })
+			.select({ status: table.task.status, actualMinutes: table.task.actualMinutes })
 			.from(table.task)
 			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
 			.limit(1);
 		if (!task) throw error(404, 'Taskul nu există.');
 		if (task.status !== 'done') throw error(400, 'Doar taskurile Done se decontează de aici.');
-		const result = await settleTaskCredit({ tenantId, taskId, userId, actualMinutes });
+		// Orele salvate pe task au prioritate; valoarea din client contează doar când lipsesc.
+		const hasSaved = (task.actualMinutes ?? 0) > 0;
+		if (!hasSaved && !actualMinutes) {
+			throw error(400, 'Completează orele efective ale taskului.');
+		}
+		const result = await settleTaskCredit({
+			tenantId,
+			taskId,
+			userId,
+			actualMinutes: hasSaved ? undefined : actualMinutes
+		});
 		if (result.status !== 'settled') throw error(400, `Nu s-a decontat: ${result.reason}.`);
 		return result;
 	}

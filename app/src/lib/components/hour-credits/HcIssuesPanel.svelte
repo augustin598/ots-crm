@@ -227,7 +227,8 @@
 										type="button"
 										class="hc-btn hc-btn-light"
 										disabled={busyId === t.taskId ||
-											(!t.actualMinutes && !(hoursByTask[t.taskId] > 0))}
+											(!t.actualMinutes &&
+												!(Math.round(Number(hoursByTask[t.taskId]) * 60) >= 1))}
 										onclick={() =>
 											run(
 												t.taskId,

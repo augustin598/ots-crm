@@ -171,9 +171,12 @@ export async function settleTaskCredit(params: {
 								break;
 							}
 							sawCredit = true;
+							// Plafonat la timpul taxat: dacă soldul a crescut între UPDATE-ul eșuat
+							// și citire (ex. o alimentare), nu consumăm mai mult decât `billed`.
+							const take = Math.min(billed, available);
 							const partial = await tx
 								.update(table.client)
-								.set({ hourCreditMinutes: 0, updatedAt: now })
+								.set({ hourCreditMinutes: available - take, updatedAt: now })
 								.where(
 									and(
 										eq(table.client.id, task.clientId!),
@@ -181,7 +184,7 @@ export async function settleTaskCredit(params: {
 										eq(table.client.hourCreditMinutes, available)
 									)
 								);
-							if (partial.rowsAffected === 1) consumed = available;
+							if (partial.rowsAffected === 1) consumed = take;
 						}
 						// Credit existent pe care nu l-am putut revendica: NU îl transformăm în
 						// depășire. Anulăm tot; taskul rămâne nedecontat și se poate relua.
