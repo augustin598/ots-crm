@@ -12,7 +12,7 @@ import { mock } from 'bun:test';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
@@ -491,7 +491,7 @@ describe('consumul task-urilor', () => {
 		expect(await testDb.select().from(table.invoiceLineItem)).toHaveLength(0);
 		const [task] = await testDb.select().from(table.task).where(eq(table.task.id, 'task-5'));
 		expect(task.creditSettledAt).toBeNull();
-		expect(task.actualMinutes).toBeNull();
+		expect(task.actualMinutes).toBe(180); // orele efective se păstrează la reopen
 		expect(task.overageInvoiceId).toBeNull();
 	});
 
@@ -521,13 +521,8 @@ describe('consumul task-urilor', () => {
 			sourceId: 'drain-cycle',
 			note: 'golire test'
 		});
-		// Reopen-ul golește (deocamdată) orele efective, deci ciclul 2 le primește explicit.
-		const second = await settleTaskCredit({
-			tenantId: TENANT,
-			taskId: 'task-cycle',
-			userId: USER,
-			actualMinutes: 180
-		});
+		// Reopen-ul păstrează orele efective: ciclul 2 pornește de la ele.
+		const second = await settleTaskCredit({ tenantId: TENANT, taskId: 'task-cycle', userId: USER });
 		expect(second.status === 'settled' && second.consumedMinutes).toBe(0);
 
 		// Reopen-ul ciclului 2 nu are ce storna: nimic nu s-a scăzut.
@@ -696,6 +691,70 @@ describe('consumul task-urilor', () => {
 		await settleTaskCredit({ tenantId: TENANT, taskId: 't-round2', userId: USER });
 		expect(await balance()).toBe(450);
 	});
+
+	test('reopen restituie consumul net de corecții', async () => {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 600,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'seed-corr'
+		});
+		await insertTask('t-corr', { actualMinutes: 150 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-corr', userId: USER });
+		const [cons] = await testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(
+				and(
+					eq(table.clientHourLedger.sourceId, 't-corr'),
+					eq(table.clientHourLedger.kind, 'task_consumption')
+				)
+			);
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 28,
+			kind: 'correction',
+			sourceType: 'ledger',
+			sourceId: cons.id,
+			note: 'test'
+		});
+		expect(await balance()).toBe(478);
+		await testDb
+			.update(table.task)
+			.set({ status: 'in-progress' })
+			.where(eq(table.task.id, 't-corr'));
+		const r = await reverseTaskCredit({ tenantId: TENANT, taskId: 't-corr', userId: USER });
+		expect(r?.reversedMinutes).toBe(122);
+		expect(await balance()).toBe(600);
+		const [t] = await testDb.select().from(table.task).where(eq(table.task.id, 't-corr'));
+		expect(t.actualMinutes).toBe(150); // se păstrează la reopen
+	});
+
+	test('a doua corecție pe același rând e no-op', async () => {
+		const a = await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -5,
+			kind: 'correction',
+			sourceType: 'ledger',
+			sourceId: 'row-x',
+			note: 'unu'
+		});
+		const b = await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -5,
+			kind: 'correction',
+			sourceType: 'ledger',
+			sourceId: 'row-x',
+			note: 'doi'
+		});
+		expect(a.applied).toBe(true);
+		expect(b.applied).toBe(false);
+	});
 });
 
 describe('depășirea: ferestre dintre consum și draft', () => {
@@ -723,13 +782,8 @@ describe('depășirea: ferestre dintre consum și draft', () => {
 		// Fără linie rămasă: altfel Done-ul următor ar factura depășirea a doua oară.
 		expect(await overageLines('task-gap')).toHaveLength(0);
 
-		// Reopen-ul golește (deocamdată) orele efective, deci Done-ul următor le primește explicit.
-		await settleTaskCredit({
-			tenantId: TENANT,
-			taskId: 'task-gap',
-			userId: USER,
-			actualMinutes: 180
-		});
+		// Reopen-ul păstrează orele efective: Done-ul următor pornește de la ele.
+		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-gap', userId: USER });
 		expect(await overageLines('task-gap')).toHaveLength(1);
 	});
 

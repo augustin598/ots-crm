@@ -828,7 +828,10 @@ export async function assertTaskReopenAllowed(tenantId: string, taskId: string):
 	}
 }
 
-/** Reopen din Done: stornează consumul, scoate linia din draft, golește câmpurile. */
+/**
+ * Reopen din Done: stornează consumul (net de corecții), scoate linia din draft și
+ * golește decontarea. Păstrează orele efective — Done-ul următor pornește de la ele.
+ */
 export async function reverseTaskCredit(params: {
 	tenantId: string;
 	taskId: string;
@@ -857,7 +860,6 @@ export async function reverseTaskCredit(params: {
 					const claim = await tx
 						.update(table.task)
 						.set({
-							actualMinutes: null,
 							creditSettledAt: null,
 							overageInvoiceId: null,
 							updatedAt: now
@@ -875,7 +877,10 @@ export async function reverseTaskCredit(params: {
 					// iar „ultimul consum al task-ului" ar fi fost cel dintr-un ciclu anterior,
 					// deja stornat — restituit a doua oară, din nimic.
 					const [consumption] = await tx
-						.select({ deltaMinutes: table.clientHourLedger.deltaMinutes })
+						.select({
+							id: table.clientHourLedger.id,
+							deltaMinutes: table.clientHourLedger.deltaMinutes
+						})
 						.from(table.clientHourLedger)
 						.where(
 							and(
@@ -888,7 +893,23 @@ export async function reverseTaskCredit(params: {
 						)
 						.orderBy(desc(table.clientHourLedger.createdAt))
 						.limit(1);
-					reversed = consumption ? -consumption.deltaMinutes : 0;
+					// Corecțiile legate de rândul de consum îl ajustează: se restituie doar netul.
+					let corrections = 0;
+					if (consumption) {
+						const rows = await tx
+							.select({ deltaMinutes: table.clientHourLedger.deltaMinutes })
+							.from(table.clientHourLedger)
+							.where(
+								and(
+									eq(table.clientHourLedger.tenantId, tenantId),
+									eq(table.clientHourLedger.kind, 'correction'),
+									eq(table.clientHourLedger.sourceType, 'ledger'),
+									eq(table.clientHourLedger.sourceId, consumption.id)
+								)
+							);
+						corrections = rows.reduce((s, r) => s + r.deltaMinutes, 0);
+					}
+					reversed = consumption ? -(consumption.deltaMinutes + corrections) : 0;
 
 					if (reversed > 0) {
 						await tx.insert(table.clientHourLedger).values({

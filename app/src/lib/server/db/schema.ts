@@ -2587,7 +2587,12 @@ export const clientHourLedger = sqliteTable(
 		// alimentare. Garanția că jobul zilnic nu scrie de două ori același minus.
 		uniqueIndex('client_hour_ledger_expire_uidx')
 			.on(t.tenantId, t.sourceId)
-			.where(sql`${t.kind} = 'expire'`)
+			.where(sql`${t.kind} = 'expire'`),
+		// Un rând de ledger se corectează o singură dată: `source_id` = id-ul rândului
+		// corectat (`source_type='ledger'`). A doua corecție e no-op.
+		uniqueIndex('client_hour_ledger_correction_uidx')
+			.on(t.tenantId, t.sourceId)
+			.where(sql`${t.kind} = 'correction'`)
 	]
 );
 

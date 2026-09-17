@@ -239,3 +239,45 @@ describe('oprire și repornire (decizie 13 sep 2026: fără expirare retroactiv�
 		).toEqual([]);
 	});
 });
+
+describe('remainingBatches — corecții', () => {
+	test('correction nu e lot: minusul scade lotul corectat, plusul scade consumul', () => {
+		const at = (s: string) => new Date(s);
+		const rows: ExpiryLedgerRow[] = [
+			{
+				id: 'b1',
+				createdAt: at('2026-09-12T10:00:00Z'),
+				deltaMinutes: 321,
+				expiresAt: at('2027-09-12T00:00:00Z'),
+				kind: 'manual',
+				sourceId: 'b1'
+			},
+			{
+				id: 'c1',
+				createdAt: at('2026-09-12T11:00:00Z'),
+				deltaMinutes: -178,
+				expiresAt: null,
+				kind: 'task_consumption',
+				sourceId: 't1'
+			},
+			{
+				id: 'k1',
+				createdAt: at('2026-09-17T10:00:00Z'),
+				deltaMinutes: -141,
+				expiresAt: null,
+				kind: 'correction',
+				sourceId: 'b1'
+			},
+			{
+				id: 'k2',
+				createdAt: at('2026-09-17T10:00:01Z'),
+				deltaMinutes: 28,
+				expiresAt: null,
+				kind: 'correction',
+				sourceId: 'c1'
+			}
+		];
+		const left = remainingBatches(rows);
+		expect(left.map((b) => [b.id, b.remainingMinutes])).toEqual([['b1', 30]]);
+	});
+});

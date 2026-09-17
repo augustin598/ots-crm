@@ -3919,6 +3919,13 @@
       "when": 1788786476913025,
       "tag": "0562_hour_credit_settings_expiry_enabled_at",
       "breakpoints": true
+    },
+    {
+      "idx": 563,
+      "version": "6",
+      "when": 1788786476913026,
+      "tag": "0563_client_hour_ledger_correction_uidx",
+      "breakpoints": true
     }
   ]
 }

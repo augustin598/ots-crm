@@ -1160,11 +1160,26 @@ export async function reverseCancelledInvoiceCredit(params: {
 		.limit(1);
 	if (!credit) return { status: 'skipped', reason: 'factura n-a dat ore' };
 
+	// Corecțiile legate de rândul de alimentare îl ajustează: se retrage doar netul.
+	const correctionRows = await db
+		.select({ deltaMinutes: table.clientHourLedger.deltaMinutes })
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'correction'),
+				eq(table.clientHourLedger.sourceType, 'ledger'),
+				eq(table.clientHourLedger.sourceId, credit.id)
+			)
+		);
+	const corrections = correctionRows.reduce((s, r) => s + r.deltaMinutes, 0);
+	const toReverse = credit.deltaMinutes + corrections;
+
 	const kind = REVERSAL_KIND[credit.kind as keyof typeof REVERSAL_KIND];
 	const result = await applyLedgerEntry({
 		tenantId,
 		clientId: credit.clientId,
-		deltaMinutes: -credit.deltaMinutes,
+		deltaMinutes: -toReverse,
 		kind,
 		sourceType: 'invoice',
 		sourceId: invoiceId,
@@ -1175,9 +1190,9 @@ export async function reverseCancelledInvoiceCredit(params: {
 		currencySnapshot: credit.currencySnapshot
 	});
 	if (!result.applied) return { status: 'already_reversed' };
-	logInfo('server', `hour-credits: factura ${invoiceId} anulată → −${credit.deltaMinutes} min`, {
+	logInfo('server', `hour-credits: factura ${invoiceId} anulată → −${toReverse} min`, {
 		tenantId,
 		metadata: { clientId: credit.clientId, invoiceId }
 	});
-	return { status: 'reversed', minutes: credit.deltaMinutes };
+	return { status: 'reversed', minutes: toReverse };
 }
