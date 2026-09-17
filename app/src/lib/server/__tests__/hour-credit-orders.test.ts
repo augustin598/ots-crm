@@ -282,6 +282,16 @@ describe('createHourCreditOrder', () => {
 		expect(eligibility.eligible).toBe(false);
 	});
 
+	test('factura de ore are scadența în ziua emiterii', async () => {
+		const res = await createHourCreditOrder(baseInput);
+		const [inv] = await testDb
+			.select()
+			.from(table.invoice)
+			.where(eq(table.invoice.id, res.invoiceId!))
+			.limit(1);
+		expect(inv.dueDate?.getTime()).toBe(inv.issueDate?.getTime());
+	});
+
 	test('creditul e „ore cumpărate" legat de factură, nu ajustare manuală', async () => {
 		const res = await createHourCreditOrder(baseInput);
 		const rows = await testDb.select().from(table.clientHourLedger);

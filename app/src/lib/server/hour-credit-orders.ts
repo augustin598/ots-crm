@@ -443,7 +443,8 @@ async function issueHourCreditInvoice(params: {
 
 	const now = new Date();
 	const creditedOn = params.creditedOn ?? now;
-	const dueDate = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000);
+	// Orele se plătesc la emitere (ca la comanda cu cardul de pe /servicii).
+	const dueDate = now;
 	const premium = pricing.multiplierPct > 100;
 	try {
 		await withTursoBusyRetry(
