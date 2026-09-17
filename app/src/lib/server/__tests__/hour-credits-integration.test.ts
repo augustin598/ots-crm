@@ -110,6 +110,15 @@ async function ledgerKinds(): Promise<string[]> {
 	return rows.map((r) => `${r.kind}:${r.delta}`);
 }
 
+async function ledgerNote(kind: string): Promise<string | null> {
+	const [row] = await testDb
+		.select({ note: table.clientHourLedger.note })
+		.from(table.clientHourLedger)
+		.where(and(eq(table.clientHourLedger.clientId, CLIENT), eq(table.clientHourLedger.kind, kind)))
+		.limit(1);
+	return row?.note ?? null;
+}
+
 async function insertTask(id: string, over: Partial<typeof table.task.$inferInsert> = {}) {
 	await testDb.insert(table.task).values({
 		id,
@@ -190,16 +199,17 @@ describe('alimentare din facturi plătite', () => {
 		});
 	}
 
-	test('5.608 RON la cursul 4,96 și referința 55 €/h → 20 h 30 min, idempotent', async () => {
+	test('5.608 RON la cursul 4,96 și referința 55 €/h → 20 h 33 min, idempotent', async () => {
 		await paidInvoice('inv-1');
 		const first = await creditPaidInvoice({
 			tenantId: TENANT,
 			invoiceId: 'inv-1',
 			trigger: 'hook'
 		});
-		expect(first).toEqual({ status: 'credited', minutes: 1230 });
-		expect(await balance()).toBe(1230);
+		expect(first).toEqual({ status: 'credited', minutes: 1233 });
+		expect(await balance()).toBe(1233);
 		expect(notifications).toEqual([{ clientId: CLIENT, kind: 'credited' }]);
+		expect(await ledgerNote('invoice_credit')).toContain('1.130,65 € la 55 €/h');
 
 		// A doua livrare a aceluiași eveniment nu mai mișcă nimic (index unic parțial).
 		const second = await creditPaidInvoice({
@@ -208,8 +218,8 @@ describe('alimentare din facturi plătite', () => {
 			trigger: 'hook'
 		});
 		expect(second).toEqual({ status: 'already_credited' });
-		expect(await balance()).toBe(1230);
-		expect(await ledgerKinds()).toEqual(['invoice_credit:1230']);
+		expect(await balance()).toBe(1233);
+		expect(await ledgerKinds()).toEqual(['invoice_credit:1233']);
 	});
 
 	test('excluderile nu creditează: hosting, ads, depășire', async () => {
@@ -239,7 +249,7 @@ describe('alimentare din facturi plătite', () => {
 			sourceId: 'inv-hc-cancel',
 			note: '3 h adăugate din admin'
 		});
-		expect(await balance()).toBe(1230 + 180);
+		expect(await balance()).toBe(1233 + 180);
 		expect(await listCancelledCreditedInvoices(TENANT)).toEqual([]);
 
 		await testDb
@@ -248,7 +258,7 @@ describe('alimentare din facturi plătite', () => {
 			.where(eq(table.invoice.tenantId, TENANT));
 		const flagged = await listCancelledCreditedInvoices(TENANT);
 		expect(flagged.map((f) => [f.invoiceId, f.creditedMinutes]).sort()).toEqual([
-			['inv-cancel', 1230],
+			['inv-cancel', 1233],
 			['inv-hc-cancel', 180]
 		]);
 
@@ -257,14 +267,14 @@ describe('alimentare din facturi plătite', () => {
 			invoiceId: 'inv-cancel',
 			userId: USER
 		});
-		expect(r1).toEqual({ status: 'reversed', minutes: 1230 });
+		expect(r1).toEqual({ status: 'reversed', minutes: 1233 });
 		await reverseCancelledInvoiceCredit({
 			tenantId: TENANT,
 			invoiceId: 'inv-hc-cancel',
 			userId: USER
 		});
 		expect(await balance()).toBe(0);
-		expect(await ledgerKinds()).toContain('invoice_credit_reversal:-1230');
+		expect(await ledgerKinds()).toContain('invoice_credit_reversal:-1233');
 		expect(await ledgerKinds()).toContain('purchase_reversal:-180');
 		expect(await listCancelledCreditedInvoices(TENANT)).toEqual([]);
 
@@ -286,7 +296,7 @@ describe('alimentare din facturi plătite', () => {
 			userId: USER
 		});
 		expect(r.status).toBe('skipped');
-		expect(await balance()).toBe(1230);
+		expect(await balance()).toBe(1233);
 	});
 
 	test('factura plătită din „Adaugă ore" nu apare în „Necreditate"', async () => {

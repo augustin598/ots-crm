@@ -244,7 +244,11 @@ export async function creditPaidInvoice(params: {
 	}
 	const netEurCents = netToEurCents(invoice.amount!, currency, ronPerEur);
 	const minutes = eurCentsToReferenceMinutes(netEurCents, reference.rateEur);
-	if (minutes <= 0) return { status: 'skipped', reason: 'sumă sub jumătate de pas' };
+	if (minutes <= 0) return { status: 'skipped', reason: 'sumă sub un minut de credit' };
+	const eurLabel = (netEurCents / 100).toLocaleString('ro-RO', {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	});
 
 	const result = await applyLedgerEntry({
 		tenantId,
@@ -253,7 +257,7 @@ export async function creditPaidInvoice(params: {
 		kind: 'invoice_credit',
 		sourceType: 'invoice',
 		sourceId: invoiceId,
-		note: `Factura ${invoice.invoiceNumber ?? invoiceId}${params.trigger === 'manual' ? ' (creditată manual)' : ''}`,
+		note: `Factura ${invoice.invoiceNumber ?? invoiceId} — ${eurLabel} € la ${reference.rateEur} €/h${params.trigger === 'manual' ? ' (creditată manual)' : ''}`,
 		createdByUserId: params.userId ?? null,
 		referenceRateEurSnapshot: reference.rateEur,
 		netCentsSnapshot: invoice.amount!,
