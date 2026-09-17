@@ -197,6 +197,28 @@ export function overageLineAmountCents(minutes: number, unitRateEur: number): nu
 	return Math.round((minutes * unitRateEur * 100) / 60);
 }
 
+/**
+ * Forma liniei de depășire: cantitate × preț === sumă, EXACT în cenți. Keez primește
+ * cantitatea cu 2 zecimale și prețul unitar și își recalculează singur valoarea, deci
+ * o cantitate rotunjită (50 min → 0,83 h × 65 € = 53,95 €) ar scoate o factură fiscală
+ * diferită de cea din CRM (54,17 €).
+ *  - minute multiplu de 15 → orele au cel mult 2 zecimale exacte (,25/,5/,75):
+ *    linia rămâne „ore × tarif orar";
+ *  - altfel → „1 × suma" (unitate: bucată); minutele și tariful stau în nota liniei.
+ */
+export function overageLineShape(
+	minutes: number,
+	unitRateEur: number
+): { quantity: number; rateCents: number; amountCents: number; unit: 'hour' | 'piece' } {
+	const amountCents = overageLineAmountCents(minutes, unitRateEur);
+	const rateCents = unitRateEur * 100;
+	const hours = minutes / 60;
+	if (minutes % 15 === 0 && hours * rateCents === amountCents) {
+		return { quantity: hours, rateCents, amountCents, unit: 'hour' };
+	}
+	return { quantity: 1, rateCents: amountCents, amountCents, unit: 'piece' };
+}
+
 /** Cheia lunii calendaristice (Europe/Bucharest) pentru draftul de depășire. */
 export function overageMonthKey(now: Date): string {
 	const parts = new Intl.DateTimeFormat('en-CA', {

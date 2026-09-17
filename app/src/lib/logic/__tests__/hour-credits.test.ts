@@ -7,6 +7,7 @@ import {
 	invoiceCreditEligibility,
 	overageDraftEditBlockReason,
 	overageLineAmountCents,
+	overageLineShape,
 	lowCreditTransition,
 	availableForTask,
 	consumptionWorkedLabel,
@@ -179,6 +180,35 @@ describe('overageLineAmountCents', () => {
 		expect(overageLineAmountCents(10, 65)).toBe(1083); // nu 1105
 		expect(overageLineAmountCents(15, 65)).toBe(1625);
 		expect(overageLineAmountCents(60, 98)).toBe(9800);
+	});
+});
+
+describe('overageLineShape', () => {
+	test('cantitate × preț === sumă, pentru orice număr de minute', () => {
+		for (const rate of [50, 65, 98, 147]) {
+			for (let minutes = 1; minutes <= 600; minutes++) {
+				const s = overageLineShape(minutes, rate);
+				expect(s.amountCents).toBe(overageLineAmountCents(minutes, rate));
+				expect(s.quantity * s.rateCents).toBe(s.amountCents);
+				// Keez primește cantitatea cu 2 zecimale: rotunjirea nu are voie să o schimbe.
+				expect(Math.round(s.quantity * 100) / 100).toBe(s.quantity);
+			}
+		}
+	});
+
+	test('multiplu de 15 min → ore × tarif orar; altfel 1 × suma', () => {
+		expect(overageLineShape(45, 65)).toEqual({
+			quantity: 0.75,
+			rateCents: 6500,
+			amountCents: 4875,
+			unit: 'hour'
+		});
+		expect(overageLineShape(50, 65)).toEqual({
+			quantity: 1,
+			rateCents: 5417,
+			amountCents: 5417,
+			unit: 'piece'
+		});
 	});
 });
 

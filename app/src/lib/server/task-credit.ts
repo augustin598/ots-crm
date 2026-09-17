@@ -26,7 +26,7 @@ import {
 	HOUR_OVERAGE_INVOICE_SOURCE,
 	OVERAGE_NOTES_PREFIX,
 	ceilToStep,
-	overageLineAmountCents,
+	overageLineShape,
 	overageMonthKey
 } from '$lib/logic/hour-credits';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
@@ -382,10 +382,10 @@ async function addOverageLine(params: {
 	const { vatPercent, zeroVatNote } = await resolveHourOrderVat(tenantId, clientId);
 	const vatBps = vatPercentToBps(vatPercent);
 	const unitRateEur = effectiveRateEur(ctx.rate.rateEur, ctx.mode.multiplierPct);
-	// Suma vine din MINUTE; orele cu 2 zecimale sunt doar afișare (Keez recalculează
-	// din ele — la pas 15 coincid exact).
-	const hours = Math.round((params.overageRealMinutes / 60) * 100) / 100;
-	const lineAmount = overageLineAmountCents(params.overageRealMinutes, unitRateEur);
+	// Suma vine din MINUTE. Keez recalculează valoarea din cantitate (2 zecimale) × preț,
+	// deci linia pleacă doar într-o formă în care cantitate × preț === sumă exact:
+	// „ore × tarif" la multipli de 15 min, „1 × suma" în rest (vezi `overageLineShape`).
+	const shape = overageLineShape(params.overageRealMinutes, unitRateEur);
 
 	const invoiceId = await findOrCreateOverageDraft({
 		tenantId,
@@ -403,12 +403,12 @@ async function addOverageLine(params: {
 					invoiceId,
 					description: `Depășire ore — ${task.title} (${ctx.rate.label}${ctx.mode.slug !== 'standard' ? `, ${ctx.mode.label}` : ''})`,
 					note: `${params.overageRealMinutes} min × ${unitRateEur} €/h · task ${task.id}`,
-					quantity: hours,
-					rate: unitRateEur * 100,
-					amount: lineAmount,
+					quantity: shape.quantity,
+					rate: shape.rateCents,
+					amount: shape.amountCents,
 					taxRate: vatBps,
 					currency: 'EUR',
-					unitOfMeasure: KEEZ_UNIT.HOUR,
+					unitOfMeasure: shape.unit === 'hour' ? KEEZ_UNIT.HOUR : KEEZ_UNIT.PIECE,
 					taskId: task.id
 				});
 				await recomputeDraftTotals(tx, invoiceId);

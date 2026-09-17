@@ -439,8 +439,57 @@ describe('consumul task-urilor', () => {
 				.from(table.invoiceLineItem)
 				.where(eq(table.invoiceLineItem.taskId, 't-amt'));
 			expect(line.amount).toBe(1083);
-			expect(line.rate).toBe(6500);
+			// 10 min = 0,1666… h: cantitatea nu se poate scrie exact cu 2 zecimale →
+			// linia pleacă pe forma „1 × suma", ca Keez să refacă exact aceeași sumă.
+			expect(line.quantity).toBe(1);
+			expect(line.rate).toBe(1083);
+			expect(line.unitOfMeasure).toBe('Buc');
+			expect(Math.round(line.quantity * line.rate)).toBe(line.amount);
 			expect(line.note).toContain('10 min × 65 €/h');
+		} finally {
+			await setStep(15);
+		}
+	});
+
+	test('linia de depășire de 50 min: cantitate × preț === sumă (54,17 €, nu 0,83 h × 65 € = 53,95 €)', async () => {
+		const setStep = (stepMinutes: number) =>
+			testDb
+				.insert(table.hourCreditSettings)
+				.values({ id: 'hcs-int', tenantId: TENANT, stepMinutes })
+				.onConflictDoUpdate({
+					target: table.hourCreditSettings.tenantId,
+					set: { stepMinutes }
+				});
+		await setStep(10);
+		try {
+			await applyLedgerEntry({
+				tenantId: TENANT,
+				clientId: CLIENT,
+				deltaMinutes: 100,
+				kind: 'manual',
+				sourceType: 'manual',
+				sourceId: 'seed-50',
+				note: 'seed test'
+			});
+			await insertTask('t-50', { estimatedMinutes: 140, actualMinutes: 142 });
+			const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-50', userId: USER });
+			if (r.status !== 'settled' || !r.overageInvoiceId) throw new Error('fără draft');
+			expect(r.consumedMinutes).toBe(100);
+			expect(r.overageRealMinutes).toBe(50);
+			const [line] = await testDb
+				.select()
+				.from(table.invoiceLineItem)
+				.where(eq(table.invoiceLineItem.taskId, 't-50'));
+			expect(line.amount).toBe(5417);
+			expect(line.quantity * line.rate).toBe(line.amount);
+			expect(line.description).toContain('Task t-50');
+			expect(line.note).toContain('50 min × 65 €/h');
+			expect(line.note).toContain('task t-50');
+			const [draft] = await testDb
+				.select()
+				.from(table.invoice)
+				.where(eq(table.invoice.id, r.overageInvoiceId));
+			expect(draft.amount).toBe(5417);
 		} finally {
 			await setStep(15);
 		}
