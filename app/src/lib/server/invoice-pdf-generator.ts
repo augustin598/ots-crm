@@ -127,13 +127,32 @@ function addr(d: { address?: string | null; city?: string | null; county?: strin
 	return [d.country, d.city, d.county, d.address].filter(Boolean).join(', ');
 }
 
+/**
+ * Moneda de calcul (a liniilor) și moneda facturii. Facturile de ore pentru clienți
+ * RO au antetul în RON (cerință Keez), dar liniile în EUR cu cursul BNR pe antet —
+ * fără `invoiceCurrency`. Fără detecția asta PDF-ul afișa sumele EUR ale liniilor
+ * cu eticheta RON (235,95 RON în loc de 1.241,12 RON).
+ */
+export function resolvePdfCurrencies(
+	invoice: { currency: string; invoiceCurrency?: string | null },
+	lineItems: { currency?: string | null }[]
+): { calcCurr: string; invCurr: string } {
+	const header = invoice.currency || 'RON';
+	if (invoice.invoiceCurrency) return { calcCurr: header, invCurr: invoice.invoiceCurrency };
+	const lineCurrencies = new Set(lineItems.map((l) => l.currency).filter(Boolean));
+	const [only] = lineCurrencies;
+	if (lineCurrencies.size === 1 && only && only !== header) {
+		return { calcCurr: only, invCurr: header };
+	}
+	return { calcCurr: header, invCurr: header };
+}
+
 export async function generateInvoicePDF(input: InvoicePDFInput): Promise<Buffer> {
 	return new Promise<Buffer>((resolve, reject) => {
 		try {
 			const { invoice, lineItems, tenant, client, displayInvoiceNumber } = input;
 			const ACCENT = tenant.themeColor || DEFAULT_ACCENT;
-			const calcCurr = invoice.currency || 'RON';
-			const invCurr = invoice.invoiceCurrency || calcCurr;
+			const { calcCurr, invCurr } = resolvePdfCurrencies(invoice, lineItems);
 			const isMulti = calcCurr !== invCurr;
 			const taxType = invoice.taxApplicationType || 'apply';
 
