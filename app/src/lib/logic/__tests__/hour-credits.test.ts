@@ -13,6 +13,9 @@ import {
 	consumptionWorkedLabel,
 	startOfMonthUtc,
 	splitTaskSettlement,
+	invoicedOverageMinutes,
+	overageNoticeSentence,
+	OVERAGE_BLOCK_MINUTES,
 	overageMonthKey,
 	LEDGER_KIND_LABELS,
 	type InvoiceCreditCandidate
@@ -150,15 +153,16 @@ describe('ceilToStep', () => {
 
 describe('splitTaskSettlement', () => {
 	// O singură rotunjire, pe timpul lucrat. din_credit + depășire == facturabil.
-	const cases: Array<[number, number, number, number, number, number]> = [
-		// sold, actual, pas → facturabil, din credit, depășire
-		[600, 150, 15, 150, 150, 0],
-		[100, 142, 15, 150, 100, 50],
-		[0, 7, 15, 15, 0, 15],
-		[-20, 60, 15, 60, 0, 60],
-		[10, 20, 15, 30, 10, 20]
+	// Depășirea se facturează în ore întregi; surplusul rămâne credit (addendum §10).
+	const cases: Array<[number, number, number, number, number, number, number, number]> = [
+		// sold, actual, pas → facturabil, din credit, depășire, facturat, surplus
+		[600, 150, 15, 150, 150, 0, 0, 0],
+		[100, 142, 15, 150, 100, 50, 60, 10],
+		[0, 7, 15, 15, 0, 15, 60, 45],
+		[-20, 60, 15, 60, 0, 60, 60, 0],
+		[10, 20, 15, 30, 10, 20, 60, 40]
 	];
-	for (const [balance, actual, step, billed, consumed, overage] of cases) {
+	for (const [balance, actual, step, billed, consumed, overage, invoiced, surplus] of cases) {
 		test(`sold ${balance}, lucrat ${actual}, pas ${step}`, () => {
 			const r = splitTaskSettlement({
 				realMinutes: actual,
@@ -168,11 +172,101 @@ describe('splitTaskSettlement', () => {
 			expect(r).toEqual({
 				billedMinutes: billed,
 				consumedMinutes: consumed,
-				overageRealMinutes: overage
+				overageRealMinutes: overage,
+				invoicedMinutes: invoiced,
+				surplusMinutes: surplus
 			});
 			expect(r.consumedMinutes + r.overageRealMinutes).toBe(r.billedMinutes);
 		});
 	}
+
+	test('tabelul din addendum: sold după = sold − din credit + surplus', () => {
+		// sold, lucrat → din credit, depășire, facturat, sold după
+		const table: Array<[number, number, number, number, number, number]> = [
+			[120, 150, 120, 30, 60, 30],
+			[0, 15, 0, 15, 60, 45],
+			[60, 195, 60, 135, 180, 45],
+			[300, 150, 150, 0, 0, 150],
+			[-20, 60, 0, 60, 60, -20]
+		];
+		for (const [balance, actual, consumed, overage, invoiced, after] of table) {
+			const r = splitTaskSettlement({
+				realMinutes: actual,
+				balanceMinutes: balance,
+				stepMinutes: 15
+			});
+			expect(r.consumedMinutes).toBe(consumed);
+			expect(r.overageRealMinutes).toBe(overage);
+			expect(r.invoicedMinutes).toBe(invoiced);
+			expect(balance - r.consumedMinutes + r.surplusMinutes).toBe(after);
+		}
+	});
+
+	test('invarianții 17–18, pentru orice (sold, lucrat, pas)', () => {
+		expect(OVERAGE_BLOCK_MINUTES).toBe(60);
+		for (const step of [1, 10, 15, 30, 60]) {
+			for (const balance of [-45, 0, 7, 30, 60, 125, 600]) {
+				for (let actual = 0; actual <= 400; actual += 7) {
+					const r = splitTaskSettlement({
+						realMinutes: actual,
+						balanceMinutes: balance,
+						stepMinutes: step
+					});
+					expect(r.invoicedMinutes % 60).toBe(0);
+					expect(r.invoicedMinutes).toBeGreaterThanOrEqual(r.overageRealMinutes);
+					expect(r.surplusMinutes).toBe(r.invoicedMinutes - r.overageRealMinutes);
+					expect(r.surplusMinutes).toBeGreaterThanOrEqual(0);
+					expect(r.surplusMinutes).toBeLessThan(60);
+					// Minimum 1 h la orice depășire; nimic facturat fără depășire.
+					expect(r.invoicedMinutes === 0).toBe(r.overageRealMinutes === 0);
+					// Surplusul nu poate depăși ce s-a facturat peste consum: soldul de după
+					// e soldul de dinainte, minus consumul, plus surplusul.
+					const after = balance - r.consumedMinutes + r.surplusMinutes;
+					expect(after).toBe(balance - r.billedMinutes + r.invoicedMinutes);
+				}
+			}
+		}
+	});
+});
+
+describe('invoicedOverageMinutes', () => {
+	test('în sus, la oră întreagă; minimum 1 h', () => {
+		expect(invoicedOverageMinutes(0)).toBe(0);
+		expect(invoicedOverageMinutes(-5)).toBe(0);
+		expect(invoicedOverageMinutes(1)).toBe(60);
+		expect(invoicedOverageMinutes(60)).toBe(60);
+		expect(invoicedOverageMinutes(61)).toBe(120);
+		expect(invoicedOverageMinutes(135)).toBe(180);
+	});
+});
+
+describe('overageNoticeSentence — fraza de depășire din email și WhatsApp', () => {
+	test('cu surplus, fără surplus, fără tarif', () => {
+		expect(
+			overageNoticeSentence({
+				overageMinutes: 30,
+				invoicedMinutes: 60,
+				surplusMinutes: 30,
+				unitRateEur: 65
+			})
+		).toBe('30 min peste credit → 1 h facturate la 65 €/h; 30 min rămân credit.');
+		expect(
+			overageNoticeSentence({
+				overageMinutes: 120,
+				invoicedMinutes: 120,
+				surplusMinutes: 0,
+				unitRateEur: 98
+			})
+		).toBe('2 h peste credit → 2 h facturate la 98 €/h.');
+		expect(
+			overageNoticeSentence({
+				overageMinutes: 135,
+				invoicedMinutes: 180,
+				surplusMinutes: 45,
+				unitRateEur: null
+			})
+		).toBe('2 h 15 min peste credit → 3 h facturate; 45 min rămân credit.');
+	});
 });
 
 describe('overageLineAmountCents', () => {
@@ -209,6 +303,23 @@ describe('overageLineShape', () => {
 			amountCents: 5417,
 			unit: 'piece'
 		});
+	});
+});
+
+describe('overageLineShape — ore întregi (singura formă care pleacă din decontare)', () => {
+	test('cantitate întreagă, UM oră, cantitate × tarif === sumă, la orice tarif', () => {
+		for (const rate of [50, 65, 98, 147]) {
+			for (let hours = 1; hours <= 12; hours++) {
+				const s = overageLineShape(hours * 60, rate);
+				expect(s).toEqual({
+					quantity: hours,
+					rateCents: rate * 100,
+					amountCents: hours * rate * 100,
+					unit: 'hour'
+				});
+				expect(Number.isInteger(s.quantity)).toBe(true);
+			}
+		}
 	});
 });
 

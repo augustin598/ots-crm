@@ -6,6 +6,7 @@
  * se convertesc din bani în minute, la tariful de referință (cel mai mic tarif
  * activ, suprascriibil în Settings → Tarife orare).
  */
+import { formatMinutes } from './hourly-catalog';
 
 export type LedgerKind =
 	| 'invoice_credit'
@@ -169,16 +170,32 @@ export function startOfMonthUtc(now: Date): Date {
 // tariful de referință rămâne DOAR la facturile de abonament care alimentează
 // creditul (`eurCentsToReferenceMinutes`).
 
+/**
+ * Depășirea nu se facturează „la minut": pleacă pe factură în ore ÎNTREGI (minimum
+ * 1 h), iar partea nefolosită din ora facturată rămâne credit (decizie 17 sep 2026).
+ */
+export const OVERAGE_BLOCK_MINUTES = 60;
+
+/** Minutele de pe factură pentru o depășire: în sus, la oră întreagă. 0 fără depășire. */
+export function invoicedOverageMinutes(overageMinutes: number): number {
+	if (!Number.isFinite(overageMinutes) || overageMinutes <= 0) return 0;
+	return Math.ceil(overageMinutes / OVERAGE_BLOCK_MINUTES) * OVERAGE_BLOCK_MINUTES;
+}
+
 export interface TaskSettlementSplit {
-	/** Timpul lucrat, rotunjit în sus la pas — singura rotunjire. */
+	/** Timpul lucrat, rotunjit în sus la pas — singura rotunjire a timpului lucrat. */
 	billedMinutes: number;
 	/** Minute scăzute din credit (≤ sold, ≥ 0). */
 	consumedMinutes: number;
-	/** Restul exact, facturat ca depășire. */
+	/** Minutele lucrate peste credit. */
 	overageRealMinutes: number;
+	/** Ce ajunge pe factură: depășirea în ore întregi (multiplu de 60; 0 fără depășire). */
+	invoicedMinutes: number;
+	/** Facturat − depășire (0…59): intră în credit pe loc, la Done. */
+	surplusMinutes: number;
 }
 
-/** consumed + overage == billed, mereu. */
+/** consumed + overage == billed și sold_după = sold − consumed + surplus, mereu. */
 export function splitTaskSettlement(params: {
 	realMinutes: number;
 	balanceMinutes: number;
@@ -189,7 +206,32 @@ export function splitTaskSettlement(params: {
 	}
 	const billedMinutes = ceilToStep(params.realMinutes, params.stepMinutes);
 	const consumedMinutes = Math.min(billedMinutes, Math.max(0, params.balanceMinutes));
-	return { billedMinutes, consumedMinutes, overageRealMinutes: billedMinutes - consumedMinutes };
+	const overageRealMinutes = billedMinutes - consumedMinutes;
+	const invoicedMinutes = invoicedOverageMinutes(overageRealMinutes);
+	return {
+		billedMinutes,
+		consumedMinutes,
+		overageRealMinutes,
+		invoicedMinutes,
+		surplusMinutes: invoicedMinutes - overageRealMinutes
+	};
+}
+
+/**
+ * Fraza de depășire din notificările de consum (email + WhatsApp), aceeași peste tot:
+ * „30 min peste credit → 1 h facturate la 65 €/h; 30 min rămân credit." Fără surplus,
+ * ultima parte lipsește; fără tarif cunoscut, lipsește „la Z €/h".
+ */
+export function overageNoticeSentence(params: {
+	overageMinutes: number;
+	invoicedMinutes: number;
+	surplusMinutes: number;
+	unitRateEur: number | null;
+}): string {
+	const rate = params.unitRateEur !== null ? ` la ${params.unitRateEur} €/h` : '';
+	const surplus =
+		params.surplusMinutes > 0 ? `; ${formatMinutes(params.surplusMinutes)} rămân credit` : '';
+	return `${formatMinutes(params.overageMinutes)} peste credit → ${params.invoicedMinutes / OVERAGE_BLOCK_MINUTES} h facturate${rate}${surplus}.`;
 }
 
 /** Suma liniei de depășire, direct din minute (tarif efectiv în EUR întregi). */
@@ -205,6 +247,10 @@ export function overageLineAmountCents(minutes: number, unitRateEur: number): nu
  *  - minute multiplu de 15 → orele au cel mult 2 zecimale exacte (,25/,5/,75):
  *    linia rămâne „ore × tarif orar";
  *  - altfel → „1 × suma" (unitate: bucată); minutele și tariful stau în nota liniei.
+ *
+ * Din 17 sep 2026 decontarea facturează doar ore ÎNTREGI (`invoicedOverageMinutes`),
+ * deci de acolo iese mereu „N ore × tarif"; ramura „1 × suma" a rămas pentru apelanți
+ * care ar da minute oarecare — `addOverageLine` le refuză.
  */
 export function overageLineShape(
 	minutes: number,

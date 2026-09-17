@@ -199,6 +199,24 @@ describe('stornări și expirare (decizie 13 sep 2026)', () => {
 		// FIFO pur ar fi mâncat lotul b (expiră primul) și ar fi lăsat 300 fără termen.
 		expect(remainingBatches(rows).map((b) => [b.id, b.remainingMinutes])).toEqual([['b', 300]]);
 	});
+
+	test('surplusul orei facturate e un lot ca oricare altul; reopen-ul îl retrage pe EL', () => {
+		// Depășire 15 min → 1 h facturată → 45 min surplus (`purchase`, sursa = urma depășirii).
+		const rows = [
+			row('b', '2026-09-02', 300, 'invoice_credit', 'inv1', '2026-09-20'),
+			row('ov', '2026-09-05', 0, 'overage_invoiced', 't1'),
+			row('s', '2026-09-05', 45, 'purchase', 'ov', '2026-10-05')
+		];
+		expect(expiredBatches(rows, d('2026-10-06')).map((b) => [b.batchId, b.minutes])).toEqual([
+			['b', 300],
+			['s', 45]
+		]);
+		// Reopen: `purchase_reversal` cu aceeași sursă scoate lotul de surplus, nu din `b`.
+		const reopened = [...rows, row('sr', '2026-09-06', -45, 'purchase_reversal', 'ov')];
+		expect(remainingBatches(reopened).map((b) => [b.id, b.remainingMinutes])).toEqual([
+			['b', 300]
+		]);
+	});
 });
 
 describe('oprire și repornire (decizie 13 sep 2026: fără expirare retroactivă)', () => {
