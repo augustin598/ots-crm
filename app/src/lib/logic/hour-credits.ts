@@ -320,8 +320,8 @@ export function availableForTask(params: {
 
 /**
  * Eticheta orelor lucrate din notificările de consum (email + WhatsApp): specializarea,
- * fără tarif — prețul apare doar la depășire. Soldul rămâne în ore la tariful de
- * referință; decizie 13 sep 2026: fără explicații despre conversie în mesaj.
+ * fără tarif — prețul apare doar la depășire. Soldul e în minute REALE (1 h lucrată =
+ * 1 h de credit, indiferent de specializare), deci mesajul nu are ce conversie explica.
  */
 export function consumptionWorkedLabel(params: {
 	rateLabel: string;

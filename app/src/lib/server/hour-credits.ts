@@ -907,9 +907,11 @@ export async function getMonthlyReport(
 	const monthStart = startOfMonthUtc(new Date());
 	const rows = await db
 		.select({
+			id: table.clientHourLedger.id,
 			kind: table.clientHourLedger.kind,
 			deltaMinutes: table.clientHourLedger.deltaMinutes,
 			rateSlug: table.clientHourLedger.rateSlug,
+			sourceId: table.clientHourLedger.sourceId,
 			createdAt: table.clientHourLedger.createdAt
 		})
 		.from(table.clientHourLedger)
@@ -919,6 +921,36 @@ export async function getMonthlyReport(
 				gte(table.clientHourLedger.createdAt, monthStart)
 			)
 		);
+
+	// O corecție intră în coșul rândului pe care îl corectează (consum / alimentat /
+	// cumpărat), în luna CORECȚIEI. Rândul corectat poate fi dintr-o lună anterioară,
+	// deci cele care lipsesc din citirea lunii se aduc separat.
+	const corrected = new Map<string, { kind: string; rateSlug: string | null }>(
+		rows.map((r) => [r.id, { kind: r.kind, rateSlug: r.rateSlug }])
+	);
+	const missingIds = [
+		...new Set(
+			rows
+				.filter((r) => r.kind === 'correction' && !corrected.has(r.sourceId))
+				.map((r) => r.sourceId)
+		)
+	];
+	for (let i = 0; i < missingIds.length; i += 200) {
+		const older = await db
+			.select({
+				id: table.clientHourLedger.id,
+				kind: table.clientHourLedger.kind,
+				rateSlug: table.clientHourLedger.rateSlug
+			})
+			.from(table.clientHourLedger)
+			.where(
+				and(
+					eq(table.clientHourLedger.tenantId, tenantId),
+					inArray(table.clientHourLedger.id, missingIds.slice(i, i + 200))
+				)
+			);
+		for (const o of older) corrected.set(o.id, { kind: o.kind, rateSlug: o.rateSlug });
+	}
 
 	let creditedMinutes = 0;
 	let purchasedMinutes = 0;
@@ -938,7 +970,25 @@ export async function getMonthlyReport(
 			Math.floor((r.createdAt.getTime() - monthStart.getTime()) / (7 * 24 * 60 * 60 * 1000))
 		);
 		const week = weeks[Math.max(0, weekIndex)];
-		if (r.kind === 'invoice_credit') {
+		if (r.kind === 'correction') {
+			// Semnat: pe alimentare, delta se adună; pe consum (rând negativ), un plus
+			// restituie consum, deci „consumat" scade. Corecțiile pe ajustări manuale nu
+			// au coș — nici ajustările manuale nu apar în raport.
+			const target = corrected.get(r.sourceId);
+			if (target?.kind === 'invoice_credit') {
+				creditedMinutes += r.deltaMinutes;
+				week.creditedMinutes += r.deltaMinutes;
+			} else if (target?.kind === 'purchase') {
+				purchasedMinutes += r.deltaMinutes;
+				week.creditedMinutes += r.deltaMinutes;
+			} else if (target?.kind === 'task_consumption') {
+				consumedMinutes -= r.deltaMinutes;
+				week.consumedMinutes -= r.deltaMinutes;
+				if (target.rateSlug) {
+					byRate.set(target.rateSlug, (byRate.get(target.rateSlug) ?? 0) - r.deltaMinutes);
+				}
+			}
+		} else if (r.kind === 'invoice_credit') {
 			creditedMinutes += r.deltaMinutes;
 			week.creditedMinutes += r.deltaMinutes;
 		} else if (r.kind === 'purchase') {
@@ -954,20 +1004,24 @@ export async function getMonthlyReport(
 		}
 	}
 
+	// O corecție a unui rând din altă lună poate duce un coș sub zero; raportul
+	// (bare, procente) lucrează cu valori nenegative.
+	const nonNegative = (n: number) => Math.max(0, n);
 	return {
 		monthStart,
-		creditedMinutes,
-		purchasedMinutes,
-		consumedMinutes,
+		creditedMinutes: nonNegative(creditedMinutes),
+		purchasedMinutes: nonNegative(purchasedMinutes),
+		consumedMinutes: nonNegative(consumedMinutes),
 		expiredMinutes,
 		byRate: [...byRate.entries()]
+			.filter(([, minutes]) => minutes > 0)
 			.map(([slug, minutes]) => ({ slug, label: rateLabels.get(slug) ?? slug, minutes }))
 			.sort((a, b) => b.minutes - a.minutes),
 		weeks: weeks.map((w, i) => ({
 			label: `săpt. ${i + 1}`,
 			startsOn: w.startsOn,
-			creditedMinutes: w.creditedMinutes,
-			consumedMinutes: w.consumedMinutes
+			creditedMinutes: nonNegative(w.creditedMinutes),
+			consumedMinutes: nonNegative(w.consumedMinutes)
 		}))
 	};
 }

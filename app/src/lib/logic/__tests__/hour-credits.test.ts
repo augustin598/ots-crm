@@ -315,8 +315,8 @@ describe('availableForTask — avertizarea din formularul de task', () => {
 	});
 });
 
-describe('consumptionWorkedLabel — orele lucrate cu prețul specializării', () => {
-	test('specializarea cu tariful ei, fără explicații despre referință', () => {
+describe('consumptionWorkedLabel — orele lucrate, cu specializarea și fără tarif', () => {
+	test('doar specializarea: fără tarif și fără explicații despre referință', () => {
 		expect(
 			consumptionWorkedLabel({
 				rateLabel: 'Development',

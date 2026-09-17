@@ -12,7 +12,7 @@ import { mock } from 'bun:test';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
@@ -73,7 +73,9 @@ const {
 	listCancelledCreditedInvoices,
 	reverseCancelledInvoiceCredit,
 	applyLedgerEntry,
-	assertLedgerRowCorrectable
+	assertLedgerRowCorrectable,
+	getMonthlyReport,
+	findHourCreditDrift
 } = await import('../hour-credits');
 const {
 	settleTaskCredit,
@@ -1081,6 +1083,77 @@ describe('assertLedgerRowCorrectable — ce rânduri acceptă o corecție', () =
 	});
 });
 
+describe('getMonthlyReport — corecțiile intră în coșul rândului corectat', () => {
+	test('corecție pe consum → consumat (și pe specializare); corecție pe alimentare → alimentat/cumpărat', async () => {
+		const rowOf = async (kind: string, sourceId: string) => {
+			const [row] = await testDb
+				.select()
+				.from(table.clientHourLedger)
+				.where(
+					and(eq(table.clientHourLedger.kind, kind), eq(table.clientHourLedger.sourceId, sourceId))
+				);
+			return row;
+		};
+		const correct = (sourceId: string, deltaMinutes: number) =>
+			applyLedgerEntry({
+				tenantId: TENANT,
+				clientId: CLIENT,
+				deltaMinutes,
+				kind: 'correction',
+				sourceType: 'ledger',
+				sourceId,
+				note: 'test raport'
+			});
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 600,
+			kind: 'purchase',
+			sourceType: 'hours_order',
+			sourceId: 'ord-rep',
+			note: 'seed test'
+		});
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 300,
+			kind: 'invoice_credit',
+			sourceType: 'invoice',
+			sourceId: 'inv-rep',
+			note: 'seed test'
+		});
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 100,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'man-rep',
+			note: 'seed test'
+		});
+		await insertTask('t-rep', { actualMinutes: 150 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-rep', userId: USER });
+
+		const before = await getMonthlyReport(TENANT);
+		expect(before.purchasedMinutes).toBe(600);
+		expect(before.creditedMinutes).toBe(300);
+		expect(before.consumedMinutes).toBe(150);
+
+		await correct((await rowOf('task_consumption', 't-rep')).id, 30); // consum real: 120
+		await correct((await rowOf('purchase', 'ord-rep')).id, -60); // cumpărat real: 540
+		await correct((await rowOf('invoice_credit', 'inv-rep')).id, 15); // alimentat real: 315
+		await correct((await rowOf('manual', 'man-rep')).id, -10); // manualul nu e în raport
+
+		const after = await getMonthlyReport(TENANT);
+		expect(after.consumedMinutes).toBe(120);
+		expect(after.purchasedMinutes).toBe(540);
+		expect(after.creditedMinutes).toBe(315);
+		expect(after.byRate).toEqual([{ slug: 'development', label: 'development', minutes: 120 }]);
+		expect(after.weeks.reduce((s, w) => s + w.consumedMinutes, 0)).toBe(120);
+		expect(after.weeks.reduce((s, w) => s + w.creditedMinutes, 0)).toBe(540 + 315);
+	});
+});
+
 describe('depășirea: ferestre dintre consum și draft', () => {
 	async function overageLines(taskId: string) {
 		return testDb
@@ -1403,6 +1476,138 @@ describe('rezervări și sold', () => {
 		const sum = view!.entries.reduce((s, e) => s + e.deltaMinutes, 0);
 		expect(sum).toBe(view!.balanceMinutes);
 		expect(view!.balanceMinutes).toBe(240);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('cache == Σ ledger și după corecție + reopen + re-Done, și după o rulare de expirare', async () => {
+		await testDb
+			.insert(table.hourCreditSettings)
+			.values({
+				id: 'hcs-int',
+				tenantId: TENANT,
+				creditExpiryDays: 30,
+				creditExpiryEnabledAt: null
+			})
+			.onConflictDoUpdate({
+				target: table.hourCreditSettings.tenantId,
+				set: { creditExpiryDays: 30, creditExpiryEnabledAt: null }
+			});
+		try {
+			await applyLedgerEntry({
+				tenantId: TENANT,
+				clientId: CLIENT,
+				deltaMinutes: 600,
+				kind: 'purchase',
+				sourceType: 'hours_order',
+				sourceId: 'ord-inv',
+				note: 'lot expirat ieri',
+				expiresAt: new Date(Date.now() - 86_400_000)
+			});
+			await insertTask('t-inv', { actualMinutes: 150 });
+			await settleTaskCredit({ tenantId: TENANT, taskId: 't-inv', userId: USER });
+			const [cons] = await testDb
+				.select()
+				.from(table.clientHourLedger)
+				.where(eq(table.clientHourLedger.kind, 'task_consumption'));
+			await applyLedgerEntry({
+				tenantId: TENANT,
+				clientId: CLIENT,
+				deltaMinutes: 28,
+				kind: 'correction',
+				sourceType: 'ledger',
+				sourceId: cons.id,
+				note: 'test invariant'
+			});
+			expect(await balance()).toBe(478);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+			await testDb
+				.update(table.task)
+				.set({ status: 'in-progress' })
+				.where(eq(table.task.id, 't-inv'));
+			await reverseTaskCredit({ tenantId: TENANT, taskId: 't-inv', userId: USER });
+			expect(await balance()).toBe(600);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+			await settleTaskCredit({ tenantId: TENANT, taskId: 't-inv', userId: USER });
+			expect(await balance()).toBe(450);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+			const r = await processHourCreditExpiry({ tenantId: TENANT });
+			expect(r.minutesExpired).toBe(450);
+			expect(await balance()).toBe(0);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+		} finally {
+			await testDb
+				.update(table.hourCreditSettings)
+				.set({ creditExpiryDays: 0, creditExpiryEnabledAt: null })
+				.where(eq(table.hourCreditSettings.tenantId, TENANT));
+		}
+	});
+
+	test('invariant 16: CAS-ul pe sold pică de 3 ori → failed, nimic scris, taskul se poate deconta după', async () => {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 100,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'seed-cas',
+			note: 'seed test'
+		});
+		await insertTask('t-cas', { actualMinutes: 180 }); // 180 > 100 → ramura cu CAS
+		await getHourlyCatalog(TENANT);
+
+		// „Altcineva" mișcă soldul între citirea și scrierea decontării: fiecare UPDATE pe
+		// `client` din tranzacție e precedat de un +1, în ACEEAȘI tranzacție (o altă
+		// conexiune ar primi SQLITE_BUSY). Rollback-ul final îl anulează și pe el.
+		const db = testDb as unknown as { transaction: (cb: (tx: any) => Promise<unknown>) => any };
+		const realTransaction = db.transaction;
+		let casAttempts = 0;
+		db.transaction = (cb) =>
+			realTransaction.call(testDb, async (tx: any) => {
+				const realUpdate = tx.update.bind(tx);
+				tx.update = (target: unknown) => {
+					if (target !== table.client) return realUpdate(target);
+					return {
+						set: (values: unknown) => ({
+							where: (cond: unknown) => ({
+								then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
+									(async () => {
+										casAttempts++;
+										await realUpdate(table.client)
+											.set({ hourCreditMinutes: sql`${table.client.hourCreditMinutes} + 1` })
+											.where(eq(table.client.id, CLIENT));
+										return realUpdate(target).set(values).where(cond);
+									})().then(res, rej)
+							})
+						})
+					};
+				};
+				return cb(tx);
+			});
+		let failed;
+		try {
+			failed = await settleTaskCredit({ tenantId: TENANT, taskId: 't-cas', userId: USER });
+		} finally {
+			db.transaction = realTransaction;
+		}
+		expect(failed.status).toBe('failed');
+		expect(casAttempts).toBe(4); // UPDATE-ul „tot din credit" + 3 încercări cu gardă
+		expect(await ledgerKinds()).toEqual(['manual:100']);
+		expect(await balance()).toBe(100);
+		const [t] = await testDb.select().from(table.task).where(eq(table.task.id, 't-cas'));
+		expect(t.creditSettledAt).toBeNull();
+		expect(await testDb.select().from(table.invoice)).toEqual([]);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+		const ok = await settleTaskCredit({ tenantId: TENANT, taskId: 't-cas', userId: USER });
+		expect(ok.status).toBe('settled');
+		if (ok.status !== 'settled') return;
+		expect(ok.consumedMinutes).toBe(100);
+		expect(ok.overageRealMinutes).toBe(80);
+		expect(await balance()).toBe(0);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
 	});
 });
 

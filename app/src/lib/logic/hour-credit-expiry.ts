@@ -17,8 +17,9 @@
  *  - `invoice_credit_reversal` / `purchase_reversal` retrag exact alimentarea lor
  *    (aceeași sursă), nu lotul care expiră primul.
  *
- * Nici corecțiile (`correction`, 17 sep 2026) nu sunt loturi: plusul restituie consum,
- * minusul micșorează exact rândul corectat (`sourceId` = id-ul lui din ledger).
+ * Nici corecțiile (`correction`, 17 sep 2026) nu sunt loturi: ele ajustează rândul
+ * corectat (`sourceId` = id-ul lui din ledger) — pe un lot îl măresc/micșorează chiar
+ * pe el (cu termenul lui), pe un consum restituie (plus) sau adaugă (minus) consum.
  */
 
 export interface ExpiryLedgerRow {
@@ -100,6 +101,14 @@ export function remainingBatches(rows: readonly ExpiryLedgerRow[]): CreditBatch[
 		.sort(byConsumptionOrder);
 	const byId = new Map(batches.map((b) => [b.id, b]));
 
+	// Plusurile pe LOTURI intră întâi, indiferent de ordinea rândurilor: stornarea
+	// alimentării retrage netul (lot + corecții) și trebuie să găsească lotul deja mărit.
+	const isBatchTopUp = (r: ExpiryLedgerRow) =>
+		r.kind === 'correction' && r.deltaMinutes > 0 && !!r.sourceId && byId.has(r.sourceId);
+	for (const r of rows) {
+		if (isBatchTopUp(r)) byId.get(r.sourceId!)!.remainingMinutes += r.deltaMinutes;
+	}
+
 	let toSpend = 0;
 	for (const r of rows) {
 		if (r.kind === 'task_reversal') {
@@ -107,7 +116,9 @@ export function remainingBatches(rows: readonly ExpiryLedgerRow[]): CreditBatch[
 			continue;
 		}
 		if (r.kind === 'correction') {
-			// Plus = consum restituit; minus = lotul corectat (`sourceId` = id-ul lui) se micșorează.
+			// Plus pe un lot = lotul crește (mai sus); plus pe un consum = consum restituit;
+			// minus = lotul corectat (`sourceId` = id-ul lui) se micșorează.
+			if (isBatchTopUp(r)) continue;
 			if (r.deltaMinutes > 0) {
 				toSpend -= r.deltaMinutes;
 			} else {

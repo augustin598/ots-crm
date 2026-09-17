@@ -280,4 +280,87 @@ describe('remainingBatches — corecții', () => {
 		const left = remainingBatches(rows);
 		expect(left.map((b) => [b.id, b.remainingMinutes])).toEqual([['b1', 30]]);
 	});
+
+	test('corecția pozitivă pe un LOT îl mărește pe el, nu restituie consum altui lot', () => {
+		const at = (s: string) => new Date(s);
+		const rows: ExpiryLedgerRow[] = [
+			// Lotul fără termen, corectat cu +50; lotul cu termen se consumă primul (FIFO).
+			{
+				id: 'soon',
+				createdAt: at('2026-09-01T10:00:00Z'),
+				deltaMinutes: 100,
+				expiresAt: at('2026-10-01T00:00:00Z'),
+				kind: 'purchase',
+				sourceId: 'ord-1'
+			},
+			{
+				id: 'never',
+				createdAt: at('2026-09-02T10:00:00Z'),
+				deltaMinutes: 100,
+				expiresAt: null,
+				kind: 'manual',
+				sourceId: 'm-1'
+			},
+			{
+				id: 'c1',
+				createdAt: at('2026-09-03T10:00:00Z'),
+				deltaMinutes: -60,
+				expiresAt: null,
+				kind: 'task_consumption',
+				sourceId: 't1'
+			},
+			{
+				id: 'k1',
+				createdAt: at('2026-09-04T10:00:00Z'),
+				deltaMinutes: 50,
+				expiresAt: null,
+				kind: 'correction',
+				sourceId: 'never'
+			}
+		];
+		// Greșit (înainte): +50 scădea consumul → soon 90, never 100. Corect: soon 40, never 150.
+		expect(remainingBatches(rows).map((b) => [b.id, b.remainingMinutes])).toEqual([
+			['soon', 40],
+			['never', 150]
+		]);
+		// Ordinea rândurilor nu contează: stornarea alimentării retrage netul (100 + 50),
+		// chiar dacă apare în listă înaintea corecției.
+		const reversed: ExpiryLedgerRow[] = [
+			{
+				id: 'r1',
+				createdAt: at('2026-09-05T10:00:00Z'),
+				deltaMinutes: -150,
+				expiresAt: null,
+				kind: 'purchase_reversal',
+				sourceId: 'ord-2'
+			},
+			{
+				id: 'p2',
+				createdAt: at('2026-09-01T10:00:00Z'),
+				deltaMinutes: 100,
+				expiresAt: at('2026-10-01T00:00:00Z'),
+				kind: 'purchase',
+				sourceId: 'ord-2'
+			},
+			{
+				id: 'other',
+				createdAt: at('2026-09-01T11:00:00Z'),
+				deltaMinutes: 70,
+				expiresAt: at('2026-09-20T00:00:00Z'),
+				kind: 'manual',
+				sourceId: 'm-2'
+			},
+			{
+				id: 'k2',
+				createdAt: at('2026-09-04T10:00:00Z'),
+				deltaMinutes: 50,
+				expiresAt: null,
+				kind: 'correction',
+				sourceId: 'p2'
+			}
+		];
+		expect(remainingBatches(reversed).map((b) => [b.id, b.remainingMinutes])).toEqual([
+			['other', 70]
+		]);
+	});
 });
