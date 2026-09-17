@@ -55,8 +55,7 @@
 					</TooltipTrigger>
 					<TooltipContent class="max-w-xs text-xs">
 						{#if task.creditSettledAt}
-							Orele au fost deja scăzute din creditul clientului, la trecerea taskului în Done —
-							ponderate cu tariful specializării.
+							Orele au fost deja scăzute din creditul clientului, la trecerea taskului în Done.
 						{:else}
 							Estimarea blochează credit din soldul clientului, dar încă nu s-a scăzut nimic.
 							Scăderea se face la trecerea în Done, pe orele efective.

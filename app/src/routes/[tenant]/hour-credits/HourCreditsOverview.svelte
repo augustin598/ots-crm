@@ -167,7 +167,7 @@
 			<div class="hc-kpi">
 				<div class="hc-kpi-label">Rezervat de taskuri</div>
 				<div class="hc-kpi-value">{fmtMinutes(data.kpis.totalReservedMinutes)}</div>
-				<div class="hc-kpi-sub">estimări ponderate ale taskurilor deschise</div>
+				<div class="hc-kpi-sub">estimările taskurilor deschise</div>
 			</div>
 			<div class="hc-kpi">
 				<div class="hc-kpi-label">Sub prag</div>

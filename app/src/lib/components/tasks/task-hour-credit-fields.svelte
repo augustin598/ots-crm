@@ -1,18 +1,13 @@
 <!--
 	Câmpurile de credit de ore ale unui task (spec §6.1): ore estimate, specializare,
 	regim. Apar doar când task-ul are client; obligatorii dacă orele > 0. Sub câmp:
-	echivalentul ponderat în credit și soldul clientului. Nimic nu blochează crearea.
+	orele rezervate din credit (ore reale) și soldul clientului. Nimic nu blochează crearea.
 -->
 <script lang="ts">
 	import { getHourlyCatalogView } from '$lib/remotes/hourly-rates.remote';
 	import { getClientHourCreditView } from '$lib/remotes/hour-credits.remote';
 	import { formatMinutes } from '$lib/logic/hourly-catalog';
-	import {
-		availableForTask,
-		roundToStep,
-		weightFactor,
-		weightedMinutes
-	} from '$lib/logic/hour-credits';
+	import { availableForTask, roundToStep } from '$lib/logic/hour-credits';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 
@@ -38,39 +33,16 @@
 	const creditQuery = $derived(clientId ? getClientHourCreditView(clientId) : null);
 	const credit = $derived(creditQuery?.current ?? null);
 
-	const rate = $derived(catalog?.hourlyRates.find((r) => r.slug === rateSlug) ?? null);
-	const mode = $derived(catalog?.rateModes.find((m) => m.slug === modeSlug) ?? null);
 	const estimatedMinutes = $derived(Math.max(0, Math.round(Number(estimatedHours) * 60)));
-	const weighted = $derived.by(() => {
-		if (!rate || !mode || !credit?.reference || estimatedMinutes === 0) return null;
-		try {
-			return weightedMinutes(
-				estimatedMinutes,
-				weightFactor(rate.rate, mode.multiplierPct, credit.reference.rateEur)
-			);
-		} catch {
-			return null;
-		}
-	});
 	const stepMinutes = $derived(credit?.stepMinutes ?? 15);
 
-	/** Ce rezervă deja taskul editat (dacă e deschis), ponderat ca pe server. */
+	/** Ce rezervă deja taskul editat (dacă e deschis), în ore reale ca pe server. */
 	const ownReserved = $derived.by(() => {
-		if (!taskId || !credit?.reference) return 0;
+		if (!taskId || !credit) return 0;
 		const own = credit.tasks.find((t) => t.id === taskId);
 		if (!own?.estimatedMinutes || own.creditSettledAt) return 0;
 		if (own.status === 'done' || own.status === 'cancelled') return 0;
-		const ownRate = catalog?.hourlyRates.find((r) => r.slug === own.rateSlug);
-		const ownMode = catalog?.rateModes.find((m) => m.slug === (own.modeSlug ?? 'standard'));
-		if (!ownRate) return 0;
-		try {
-			return weightedMinutes(
-				own.estimatedMinutes,
-				weightFactor(ownRate.rate, ownMode?.multiplierPct ?? 100, credit.reference.rateEur)
-			);
-		} catch {
-			return 0;
-		}
+		return own.estimatedMinutes;
 	});
 	const available = $derived(
 		credit
@@ -81,8 +53,10 @@
 				})
 			: null
 	);
-	// Spec §6.1: galben când estimarea ponderată trece de DISPONIBIL, nu de sold.
-	const overReserve = $derived(weighted !== null && available !== null && weighted > available);
+	// Spec §6.1: galben când estimarea trece de DISPONIBIL, nu de sold.
+	const overReserve = $derived(
+		!!rateSlug && estimatedMinutes > 0 && available !== null && estimatedMinutes > available
+	);
 
 	/** Estimarea se păstrează în multipli de pas (spec §6.1). */
 	function snapToStep() {
@@ -139,13 +113,10 @@
 		<p class="text-xs text-muted-foreground sm:col-span-3 {overReserve ? 'text-amber-600' : ''}">
 			{#if estimatedMinutes > 0 && !rateSlug}
 				Alege specializarea ca orele să fie luate din credit.
-			{:else if weighted !== null && credit}
-				{formatMinutes(estimatedMinutes)}
-				{rate?.label} = {formatMinutes(weighted)} credit · Sold: {formatMinutes(
-					credit.balanceMinutes
-				)} · Disponibil: {formatMinutes(available ?? credit.balanceMinutes)}{overReserve
-					? ' — peste disponibil, diferența se va factura la finalizare'
-					: ''}
+			{:else if rateSlug && estimatedMinutes > 0 && credit}
+				Sold: {formatMinutes(credit.balanceMinutes)} · Disponibil: {formatMinutes(
+					available ?? credit.balanceMinutes
+				)}{overReserve ? ' — peste disponibil, diferența se va factura la finalizare' : ''}
 			{:else if credit}
 				Sold client: {formatMinutes(credit.balanceMinutes)}
 			{/if}

@@ -300,9 +300,9 @@ export async function creditPaidHoursOrder(params: {
 	const reference = await loadReference(tenantId);
 	if (!reference)
 		return { status: 'failed', reason: 'nicio specializare activă (tarif de referință lipsă)' };
-	const netEurCents = netToEurCents(order.netCents, order.currency, null);
-	const minutes = eurCentsToReferenceMinutes(netEurCents, reference.rateEur, reference.stepMinutes);
-	if (minutes <= 0) return { status: 'skipped', reason: 'sumă sub jumătate de pas' };
+	// Orele cumpărate intră ca ore reale (nu suma convertită la referință).
+	const minutes = order.hours * 60;
+	if (minutes <= 0) return { status: 'skipped', reason: 'comandă fără ore' };
 
 	const result = await applyLedgerEntry({
 		tenantId,
@@ -818,18 +818,10 @@ export async function listHoursOrders(tenantId: string, limit = 100): Promise<Ho
 			)
 		);
 	const creditedMinutes = new Map(purchases.map((p) => [p.sourceId, p.deltaMinutes]));
-	const reference = await loadReference(tenantId);
-
 	return rows.map((r) => {
 		const ledgerMinutes = creditedMinutes.get(r.id);
 		let creditMinutes: number | null = ledgerMinutes ?? null;
-		if (ledgerMinutes === undefined && reference && r.currency === 'EUR' && r.netCents > 0) {
-			creditMinutes = eurCentsToReferenceMinutes(
-				r.netCents,
-				reference.rateEur,
-				reference.stepMinutes
-			);
-		}
+		if (ledgerMinutes === undefined && r.hours > 0) creditMinutes = r.hours * 60;
 		return { ...r, credited: ledgerMinutes !== undefined, creditMinutes };
 	});
 }

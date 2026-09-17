@@ -166,7 +166,7 @@ describe('quoteHourCreditOrder', () => {
 		expect(q.vatPercent).toBe(21);
 	});
 
-	test('creditul se rotunjește la pasul configurat, ca la creditarea din facturi', async () => {
+	test('creditul = orele cumpărate, nu suma convertită la tariful de referință', async () => {
 		const q = await quoteHourCreditOrder({
 			tenantId: TENANT,
 			rateSlug: 'development',
@@ -175,10 +175,9 @@ describe('quoteHourCreditOrder', () => {
 		});
 		expect(q.ok).toBe(true);
 		if (!q.ok) return;
-		// stepMinutes implicit = 15. Fără rotunjire ar ieși 320,7 → 321, care ar face
-		// soldul clientului să nu mai fie multiplu de pas (spre deosebire de toate
-		// celelalte alimentări).
-		expect(q.creditMinutes % 15).toBe(0);
+		// 3 h cumpărate = 3 h în credit, indiferent de specializare și regim (prețul
+		// diferă, orele nu). Vechea conversie la 55 €/h dădea 5 h 15 min.
+		expect(q.creditMinutes).toBe(180);
 	});
 
 	test('cota de TVA vine din setările tenantului, nu hardcodată', async () => {
@@ -251,8 +250,8 @@ describe('createHourCreditOrder', () => {
 	test('creditează, emite factura și trimite emailul', async () => {
 		const res = await createHourCreditOrder(baseInput);
 
-		expect(res.creditMinutes).toBeGreaterThan(0);
-		expect(await balance()).toBe(res.creditMinutes);
+		expect(res.creditMinutes).toBe(180);
+		expect(await balance()).toBe(180);
 		expect(res.invoiceId).not.toBeNull();
 		expect(res.keezPushed).toBe(true);
 		expect(res.emailSent).toBe(true);

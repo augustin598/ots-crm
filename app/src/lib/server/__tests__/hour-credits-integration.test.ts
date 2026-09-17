@@ -69,6 +69,7 @@ const {
 	listUncreditedInvoices,
 	listClientCreditTasks,
 	listHoursOrders,
+	creditPaidHoursOrder,
 	listCancelledCreditedInvoices,
 	reverseCancelledInvoiceCredit,
 	applyLedgerEntry
@@ -159,6 +160,7 @@ beforeEach(async () => {
 	await testDb.delete(table.clientHourLedger);
 	await testDb.delete(table.task);
 	await testDb.delete(table.invoice);
+	await testDb.delete(table.serviceHoursOrder);
 	await testDb.delete(table.client);
 	await testDb.insert(table.client).values({
 		id: CLIENT,
@@ -322,7 +324,7 @@ describe('alimentare din facturi plătite', () => {
 });
 
 describe('consumul task-urilor', () => {
-	test('credit suficient: 3 h Development consumă 3 h 33 min ponderat', async () => {
+	test('credit suficient: 3 h Development consumă exact 3 h (ore reale, nu ponderate)', async () => {
 		await applyLedgerEntry({
 			tenantId: TENANT,
 			clientId: CLIENT,
@@ -336,11 +338,11 @@ describe('consumul task-urilor', () => {
 		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 'task-1', userId: USER });
 		expect(r).toEqual({
 			status: 'settled',
-			consumedMinutes: 213,
+			consumedMinutes: 180,
 			overageRealMinutes: 0,
 			overageInvoiceId: null
 		});
-		expect(await balance()).toBe(600 - 213);
+		expect(await balance()).toBe(600 - 180);
 		// Fără depășire → niciun draft de factură.
 		const drafts = await testDb.select().from(table.invoice);
 		expect(drafts).toHaveLength(0);
@@ -360,7 +362,7 @@ describe('consumul task-urilor', () => {
 		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-2', userId: USER });
 		const again = await settleTaskCredit({ tenantId: TENANT, taskId: 'task-2', userId: USER });
 		expect(again).toEqual({ status: 'skipped', reason: 'deja decontat' });
-		expect(await balance()).toBe(387);
+		expect(await balance()).toBe(420);
 	});
 
 	test('credit insuficient: se scade cât există, restul intră în draftul lunar', async () => {
@@ -378,8 +380,8 @@ describe('consumul task-urilor', () => {
 		expect(r.status).toBe('settled');
 		if (r.status !== 'settled') return;
 		expect(r.consumedMinutes).toBe(60);
-		// 180 min reale − 60/1,1818 min acoperite = 129,2 → 135 (pas 15).
-		expect(r.overageRealMinutes).toBe(135);
+		// 180 min reale − 60 acoperite = 120.
+		expect(r.overageRealMinutes).toBe(120);
 		expect(await balance()).toBe(0);
 
 		const [draft] = await testDb.select().from(table.invoice);
@@ -392,12 +394,12 @@ describe('consumul task-urilor', () => {
 			.from(table.invoiceLineItem)
 			.where(eq(table.invoiceLineItem.invoiceId, draft.id));
 		expect(line.taskId).toBe('task-3');
-		expect(line.quantity).toBe(2.25); // 135 min
+		expect(line.quantity).toBe(2); // 120 min
 		expect(line.rate).toBe(6500); // 65 €/h în cenți
-		expect(line.amount).toBe(14625); // 2,25 h × 65 € = 146,25 €
-		expect(draft.amount).toBe(14625);
-		expect(draft.taxAmount).toBe(Math.round((14625 * 2100) / 10000));
-		expect(draft.totalAmount).toBe(14625 + draft.taxAmount!);
+		expect(line.amount).toBe(13000); // 2 h × 65 € = 130 €
+		expect(draft.amount).toBe(13000);
+		expect(draft.taxAmount).toBe(Math.round((13000 * 2100) / 10000));
+		expect(draft.totalAmount).toBe(13000 + draft.taxAmount!);
 		expect(await ledgerKinds()).toEqual([
 			'manual:60',
 			'task_consumption:-60',
@@ -446,23 +448,23 @@ describe('consumul task-urilor', () => {
 		await applyLedgerEntry({
 			tenantId: TENANT,
 			clientId: CLIENT,
-			deltaMinutes: 213,
+			deltaMinutes: 180,
 			kind: 'manual',
 			sourceType: 'manual',
 			sourceId: 'seed-cycle',
 			note: 'seed test'
 		});
 		await insertTask('task-cycle');
-		// Ciclul 1: Done consumă 213, reopen le dă înapoi.
+		// Ciclul 1: Done consumă 180, reopen le dă înapoi.
 		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-cycle', userId: USER });
 		await reverseTaskCredit({ tenantId: TENANT, taskId: 'task-cycle', userId: USER });
-		expect(await balance()).toBe(213);
+		expect(await balance()).toBe(180);
 
 		// Soldul se golește din altă parte; ciclul 2 nu mai are ce consuma.
 		await applyLedgerEntry({
 			tenantId: TENANT,
 			clientId: CLIENT,
-			deltaMinutes: -213,
+			deltaMinutes: -180,
 			kind: 'manual',
 			sourceType: 'manual',
 			sourceId: 'drain-cycle',
@@ -493,7 +495,7 @@ describe('consumul task-urilor', () => {
 			settleTaskCredit({ tenantId: TENANT, taskId: 'task-race', userId: USER })
 		]);
 		expect(results.filter((r) => r.status === 'settled')).toHaveLength(1);
-		expect(await balance()).toBe(600 - 213);
+		expect(await balance()).toBe(600 - 180);
 		expect((await ledgerKinds()).filter((k) => k.startsWith('task_consumption'))).toHaveLength(1);
 	});
 
@@ -830,15 +832,15 @@ describe('jobul de expirare: concurență și repornire', () => {
 });
 
 describe('rezervări și sold', () => {
-	test('estimările task-urilor deschise se ponderează; cele decontate nu mai contează', async () => {
+	test('estimările task-urilor deschise rezervă ore reale; cele decontate nu mai contează', async () => {
 		await insertTask('task-open', { estimatedMinutes: 120, rateSlug: 'development' });
 		await insertTask('task-pm', { estimatedMinutes: 60, rateSlug: 'project-management' });
 		await insertTask('task-done', { estimatedMinutes: 600, status: 'done' });
 		await insertTask('task-cancelled', { estimatedMinutes: 600, status: 'cancelled' });
 
 		const reserved = await computeReservedMinutes(TENANT, [CLIENT]);
-		// 120 × 65/55 = 141,8 → 142; PM 60 × 1 = 60.
-		expect(reserved.get(CLIENT)).toBe(142 + 60);
+		// Ore reale, indiferent de specializare.
+		expect(reserved.get(CLIENT)).toBe(120 + 60);
 	});
 
 	test('soldul din cache e mereu suma ledger-ului', async () => {
@@ -927,14 +929,14 @@ describe('listHoursOrders — tabul „Comenzi ore"', () => {
 		});
 	}
 
-	test('creditul afișat e cel din ledger (minute la referință), nu orele comandate', async () => {
+	test('creditul afișat e cel din ledger; neplătită = orele comandate (ore reale)', async () => {
 		await testDb.delete(table.serviceHoursOrder);
 		await insertOrder('ord-credited');
 		await applyLedgerEntry({
 			tenantId: TENANT,
 			clientId: CLIENT,
-			// 10 h Development la 65 € = 650 € → la referința 55 € = 11 h 49 min → pas 15 = 11 h 45 min.
-			deltaMinutes: 705,
+			// Orele cumpărate intră ca ore reale: 10 h = 600 min, indiferent de specializare.
+			deltaMinutes: 600,
 			kind: 'purchase',
 			sourceType: 'hours_order',
 			sourceId: 'ord-credited',
@@ -946,10 +948,16 @@ describe('listHoursOrders — tabul „Comenzi ore"', () => {
 		const credited = rows.find((r) => r.id === 'ord-credited')!;
 		const pending = rows.find((r) => r.id === 'ord-pending')!;
 		expect(credited.credited).toBe(true);
-		expect(credited.creditMinutes).toBe(705);
-		// Neplătită: estimarea cu regula reală de conversie, nu `hours × 60`.
+		expect(credited.creditMinutes).toBe(600);
 		expect(pending.credited).toBe(false);
-		expect(pending.creditMinutes).toBe(705);
+		expect(pending.creditMinutes).toBe(600);
+	});
+
+	test('comanda plătită de pe /servicii creditează orele cumpărate (ore reale)', async () => {
+		await insertOrder('ord-paid-real', { hours: 3, netCents: 19_500 });
+		const r = await creditPaidHoursOrder({ tenantId: TENANT, orderId: 'ord-paid-real' });
+		expect(r).toEqual({ status: 'credited', minutes: 180 });
+		expect(await balance()).toBe(180);
 	});
 });
 

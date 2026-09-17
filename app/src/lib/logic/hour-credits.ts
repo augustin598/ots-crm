@@ -1,10 +1,10 @@
 /**
  * Creditul de ore — reguli PURE (fără DB, fără rețea).
  *
- * Unitatea creditului: MINUTE la tariful de referință (cel mai mic tarif activ,
- * suprascriibil în Settings → Tarife orare). Alimentarea din bani (facturi
- * plătite, ore cumpărate) se convertește aici; consumul ponderat al task-urilor
- * (faza 3) va folosi același tarif de referință ca numitor.
+ * Unitatea creditului: MINUTE reale. Orele cumpărate intră 1:1 și taskurile
+ * consumă 1:1, indiferent de specializare. Doar facturile de abonament plătite
+ * se convertesc din bani în minute, la tariful de referință (cel mai mic tarif
+ * activ, suprascriibil în Settings → Tarife orare).
  */
 
 import { effectiveRateEur } from './hours-pricing';
@@ -155,65 +155,44 @@ export function startOfMonthUtc(now: Date): Date {
 	return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-// ---- Consumul ponderat al task-urilor (spec §6) ----------------------------
-
-/** `tarif specializare × regim ÷ referință` — câte minute de credit costă un minut real. */
-export function weightFactor(
-	rateEur: number,
-	multiplierPct: number,
-	referenceRateEur: number
-): number {
-	if (!Number.isFinite(rateEur) || rateEur <= 0) throw new Error(`Tarif invalid: ${rateEur}`);
-	if (!Number.isFinite(multiplierPct) || multiplierPct < 100) {
-		throw new Error(`Multiplicator invalid: ${multiplierPct}`);
-	}
-	if (!Number.isFinite(referenceRateEur) || referenceRateEur <= 0) {
-		throw new Error(`Tarif de referință invalid: ${referenceRateEur}`);
-	}
-	return (rateEur * multiplierPct) / 100 / referenceRateEur;
-}
-
-/** Minute reale → minute de credit (ponderate), rotunjite în sus la minut întreg. */
-export function weightedMinutes(realMinutes: number, factor: number): number {
-	if (!Number.isInteger(realMinutes) || realMinutes < 0) {
-		throw new Error(`Minute reale invalide: ${realMinutes}`);
-	}
-	return Math.max(0, Math.ceil(realMinutes * factor - 1e-9));
-}
+// ---- Consumul task-urilor (spec §6) ----------------------------------------
+//
+// Creditul se ține și se consumă în ore REALE: 1 h cumpărată = 1 h lucrată,
+// indiferent de specializare sau regim. Tariful contează la cumpărare (prețul
+// orelor) și la depășire (prețul orelor peste credit). Conversia lei → ore la
+// tariful de referință rămâne DOAR la facturile de abonament care alimentează
+// creditul (`eurCentsToReferenceMinutes`).
 
 export interface TaskSettlementSplit {
-	/** Minute de credit cerute de task. */
-	weightedMinutes: number;
-	/** Minute de credit scăzute efectiv (≤ sold, ≥ 0). */
+	/** Minute scăzute efectiv din credit (≤ sold, ≥ 0). */
 	consumedMinutes: number;
-	/** Minute REALE care depășesc creditul și se facturează. */
+	/** Minute care depășesc creditul și se facturează. */
 	overageRealMinutes: number;
 }
 
 /**
  * Împarte orele efective între credit și depășire (spec §6.2): se scade cât
- * există; restul se convertește înapoi în ore reale, rotunjite în sus la pas.
+ * există; restul se rotunjește în sus la pas.
  */
 export function splitTaskSettlement(params: {
 	realMinutes: number;
-	factor: number;
 	balanceMinutes: number;
 	stepMinutes: number;
 }): TaskSettlementSplit {
-	const weighted = weightedMinutes(params.realMinutes, params.factor);
+	if (!Number.isInteger(params.realMinutes) || params.realMinutes < 0) {
+		throw new Error(`Minute reale invalide: ${params.realMinutes}`);
+	}
 	const available = Math.max(0, params.balanceMinutes);
-	const consumed = Math.min(weighted, available);
-	if (consumed >= weighted) {
-		return { weightedMinutes: weighted, consumedMinutes: consumed, overageRealMinutes: 0 };
+	const consumed = Math.min(params.realMinutes, available);
+	if (consumed >= params.realMinutes) {
+		return { consumedMinutes: consumed, overageRealMinutes: 0 };
 	}
 	const step =
 		Number.isInteger(params.stepMinutes) && params.stepMinutes > 0 ? params.stepMinutes : 1;
-	const coveredReal = consumed / params.factor;
-	const overageReal = Math.ceil((params.realMinutes - coveredReal - 1e-9) / step) * step;
+	const overage = Math.ceil((params.realMinutes - consumed) / step) * step;
 	return {
-		weightedMinutes: weighted,
 		consumedMinutes: consumed,
-		overageRealMinutes: Math.max(0, Math.min(params.realMinutes, overageReal))
+		overageRealMinutes: Math.min(params.realMinutes, overage)
 	};
 }
 
@@ -304,7 +283,7 @@ export function lowCreditTransition(params: {
 
 /**
  * Creditul disponibil pentru estimarea unui task (spec §6.1: avertizare galbenă
- * când estimarea ponderată depășește DISPONIBILUL, nu soldul). La editare, taskul
+ * când estimarea depășește DISPONIBILUL, nu soldul). La editare, taskul
  * rezervă deja o parte din `reservedMinutes`; fără scăderea ei s-ar număra de două ori.
  */
 export function availableForTask(params: {

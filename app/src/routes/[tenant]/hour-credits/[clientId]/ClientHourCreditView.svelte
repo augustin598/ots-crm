@@ -394,8 +394,8 @@
 				<div class="hc-card-h tight">
 					<h3>Consum pe taskuri</h3>
 					<p>
-						Rezervatul de mai sus e suma estimărilor taskurilor deschise, ponderate cu tariful
-						specializării. Bara arată pontatul față de estimat.
+						Rezervatul de mai sus e suma estimărilor taskurilor deschise. Bara arată pontatul
+						față de estimat.
 					</p>
 				</div>
 				{#if view.tasks.length === 0}

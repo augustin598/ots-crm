@@ -1,5 +1,5 @@
 /**
- * Creditul de ore pe task (spec §6): consum ponderat la Done, draft lunar de
+ * Creditul de ore pe task (spec §6): consum în ore reale la Done, draft lunar de
  * depășire, reopen.
  *
  * Consumul se face printr-un UPDATE atomic condiționat pe `client` (nu „citește +
@@ -26,9 +26,7 @@ import {
 	HOUR_OVERAGE_INVOICE_SOURCE,
 	OVERAGE_NOTES_PREFIX,
 	overageMonthKey,
-	splitTaskSettlement,
-	weightFactor,
-	weightedMinutes
+	splitTaskSettlement
 } from '$lib/logic/hour-credits';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
@@ -48,10 +46,9 @@ interface CreditContext {
 	mode: CatalogMode;
 	referenceRateEur: number;
 	stepMinutes: number;
-	factor: number;
 }
 
-/** Tariful/regimul task-ului (inclusiv inactive) și factorul de ponderare. */
+/** Tariful/regimul task-ului (inclusiv inactive): prețul depășirii și snapshot-ul din ledger. */
 async function loadContext(
 	tenantId: string,
 	task: { rateSlug: string | null; modeSlug: string | null }
@@ -68,8 +65,7 @@ async function loadContext(
 		rate,
 		mode,
 		referenceRateEur: reference.rateEur,
-		stepMinutes: catalog.rules.stepMinutes,
-		factor: weightFactor(rate.rateEur, mode.multiplierPct, reference.rateEur)
+		stepMinutes: catalog.rules.stepMinutes
 	};
 }
 
@@ -107,7 +103,6 @@ export async function settleTaskCredit(params: {
 
 	const ctx = await loadContext(tenantId, task);
 	if ('error' in ctx) return { status: 'failed', reason: ctx.error };
-	const weighted = weightedMinutes(actual, ctx.factor);
 	const now = new Date();
 	const ledgerId = generateId();
 
@@ -138,18 +133,19 @@ export async function settleTaskCredit(params: {
 					const full = await tx
 						.update(table.client)
 						.set({
-							hourCreditMinutes: sql`${table.client.hourCreditMinutes} - ${weighted}`,
+							hourCreditMinutes: sql`${table.client.hourCreditMinutes} - ${actual}`,
 							updatedAt: now
 						})
 						.where(
 							and(
 								eq(table.client.id, task.clientId!),
 								eq(table.client.tenantId, tenantId),
-								sql`${table.client.hourCreditMinutes} >= ${weighted}`
+								sql`${table.client.hourCreditMinutes} >= ${actual}`
 							)
 						);
 					if (full.rowsAffected === 1) {
-						consumed = weighted;
+						// Ore reale: 1 h lucrată consumă 1 h de credit, indiferent de specializare.
+						consumed = actual;
 					} else {
 						// Încercarea 2: cât există (≥ 0), cu gardă pe valoarea citită.
 						for (let attempt = 0; attempt < 3 && consumed === 0; attempt++) {
@@ -200,7 +196,6 @@ export async function settleTaskCredit(params: {
 					// regenera. Scrisă după draft, s-ar fi pierdut fără urmă.
 					const inTx = splitTaskSettlement({
 						realMinutes: actual,
-						factor: ctx.factor,
 						balanceMinutes: consumed,
 						stepMinutes: ctx.stepMinutes
 					});
@@ -242,7 +237,6 @@ export async function settleTaskCredit(params: {
 
 	const split = splitTaskSettlement({
 		realMinutes: actual,
-		factor: ctx.factor,
 		balanceMinutes: consumed,
 		stepMinutes: ctx.stepMinutes
 	});
