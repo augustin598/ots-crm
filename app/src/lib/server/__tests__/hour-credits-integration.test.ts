@@ -87,6 +87,7 @@ const {
 
 const { processHourCreditExpiry } = await import('../scheduler/tasks/hour-credit-expiry');
 const { getHourlyCatalog } = await import('../hourly-catalog');
+const { getZeroVatLegalNote } = await import('../vat/classify-client');
 
 const TENANT = 't-int';
 const USER = 'u-int';
@@ -406,6 +407,55 @@ describe('consumul task-urilor', () => {
 			'task_consumption:-60',
 			'overage_invoiced:0'
 		]);
+	});
+
+	test('linia de depășire: suma vine din minute (10 min × 65 € = 10,83 €, nu 11,05 €)', async () => {
+		// Pas 10 ca să existe o depășire de 10 min; la final revine la 15.
+		const setStep = (stepMinutes: number) =>
+			testDb
+				.insert(table.hourCreditSettings)
+				.values({ id: 'hcs-int', tenantId: TENANT, stepMinutes })
+				.onConflictDoUpdate({
+					target: table.hourCreditSettings.tenantId,
+					set: { stepMinutes }
+				});
+		await setStep(10);
+		try {
+			await insertTask('t-amt', { estimatedMinutes: 10, actualMinutes: 10 });
+			const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-amt', userId: USER });
+			if (r.status !== 'settled' || !r.overageInvoiceId) throw new Error('fără draft');
+			const [line] = await testDb
+				.select()
+				.from(table.invoiceLineItem)
+				.where(eq(table.invoiceLineItem.taskId, 't-amt'));
+			expect(line.amount).toBe(1083);
+			expect(line.rate).toBe(6500);
+			expect(line.note).toContain('10 min × 65 €/h');
+		} finally {
+			await setStep(15);
+		}
+	});
+
+	test('draftul de depășire: client intracomunitar → TVA 0% și mențiunea legală la FINALUL notelor', async () => {
+		await testDb
+			.update(table.client)
+			.set({ country: 'DE', cui: 'DE123456789' })
+			.where(eq(table.client.id, CLIENT));
+		await insertTask('t-vat0');
+		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-vat0', userId: USER });
+		if (r.status !== 'settled' || !r.overageInvoiceId) throw new Error('fără draft');
+		const [draft] = await testDb.select().from(table.invoice);
+		const [line] = await testDb
+			.select()
+			.from(table.invoiceLineItem)
+			.where(eq(table.invoiceLineItem.taskId, 't-vat0'));
+		expect(line.taxRate).toBe(0);
+		expect(draft.taxRate).toBe(0);
+		expect(draft.taxAmount).toBe(0);
+		expect(draft.totalAmount).toBe(draft.amount);
+		// Markerul rămâne primul: findOrCreateOverageDraft caută draftul după prefix.
+		expect(draft.notes?.startsWith('hour-overage:')).toBe(true);
+		expect(draft.notes?.endsWith(getZeroVatLegalNote('intracom')!)).toBe(true);
 	});
 
 	test('al doilea task al aceleiași luni intră pe ACELAȘI draft', async () => {

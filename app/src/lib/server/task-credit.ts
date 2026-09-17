@@ -15,7 +15,7 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { logError, logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { generateInvoiceNumber } from '$lib/server/invoice-utils';
-import { resolveVatPercent, vatPercentToBps } from '$lib/utils/vat';
+import { vatPercentToBps } from '$lib/utils/vat';
 import { effectiveRateEur } from '$lib/logic/hours-pricing';
 import {
 	resolveReferenceRate,
@@ -26,10 +26,12 @@ import {
 	HOUR_OVERAGE_INVOICE_SOURCE,
 	OVERAGE_NOTES_PREFIX,
 	ceilToStep,
+	overageLineAmountCents,
 	overageMonthKey
 } from '$lib/logic/hour-credits';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
+import { resolveHourOrderVat } from '$lib/server/hour-credit-vat';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -374,17 +376,21 @@ async function addOverageLine(params: {
 }): Promise<{ invoiceId: string; lineId: string }> {
 	const { tenantId, clientId, task, now } = params;
 	const ctx = params.pricing;
-	const [settings] = await db
-		.select({ defaultTaxRate: table.invoiceSettings.defaultTaxRate })
-		.from(table.invoiceSettings)
-		.where(eq(table.invoiceSettings.tenantId, tenantId))
-		.limit(1);
-	const vatBps = vatPercentToBps(resolveVatPercent(settings?.defaultTaxRate));
+	const { vatPercent, zeroVatNote } = await resolveHourOrderVat(tenantId, clientId);
+	const vatBps = vatPercentToBps(vatPercent);
 	const unitRateEur = effectiveRateEur(ctx.rate.rateEur, ctx.mode.multiplierPct);
+	// Suma vine din MINUTE; orele cu 2 zecimale sunt doar afișare (Keez recalculează
+	// din ele — la pas 15 coincid exact).
 	const hours = Math.round((params.overageRealMinutes / 60) * 100) / 100;
-	const lineAmount = Math.round(hours * unitRateEur * 100);
+	const lineAmount = overageLineAmountCents(params.overageRealMinutes, unitRateEur);
 
-	const invoiceId = await findOrCreateOverageDraft({ tenantId, clientId, now, vatBps });
+	const invoiceId = await findOrCreateOverageDraft({
+		tenantId,
+		clientId,
+		now,
+		vatBps,
+		zeroVatNote
+	});
 	const lineId = generateId();
 	await withTursoBusyRetry(
 		() =>
@@ -393,7 +399,7 @@ async function addOverageLine(params: {
 					id: lineId,
 					invoiceId,
 					description: `Depășire ore — ${task.title} (${ctx.rate.label}${ctx.mode.slug !== 'standard' ? `, ${ctx.mode.label}` : ''})`,
-					note: `${hours} h × ${unitRateEur} € · task ${task.id}`,
+					note: `${params.overageRealMinutes} min × ${unitRateEur} €/h · task ${task.id}`,
 					quantity: hours,
 					rate: unitRateEur * 100,
 					amount: lineAmount,
@@ -702,8 +708,10 @@ async function findOrCreateOverageDraft(params: {
 	clientId: string;
 	now: Date;
 	vatBps: number;
+	/** Mențiunea legală de TVA 0% (intracom/export); se adaugă la FINALUL notelor. */
+	zeroVatNote: string | null;
 }): Promise<string> {
-	const { tenantId, clientId, now, vatBps } = params;
+	const { tenantId, clientId, now, vatBps, zeroVatNote } = params;
 	// Luna curentă; dacă draftul ei a plecat din `draft`, mergem pe luna următoare.
 	let monthKey = overageMonthKey(now);
 	for (let hop = 0; hop < 2; hop++) {
@@ -757,7 +765,7 @@ async function findOrCreateOverageDraft(params: {
 				issueDate: now,
 				dueDate: due,
 				externalSource: HOUR_OVERAGE_INVOICE_SOURCE,
-				notes: `${OVERAGE_NOTES_PREFIX}${monthKey} — ore peste creditul clientului, luna ${monthKey}. Liniile sunt generate automat la finalizarea task-urilor; confirmă manual înainte de emitere.`
+				notes: `${OVERAGE_NOTES_PREFIX}${monthKey} — ore peste creditul clientului, luna ${monthKey}. Liniile sunt generate automat la finalizarea task-urilor; confirmă manual înainte de emitere.${zeroVatNote ? ` ${zeroVatNote}` : ''}`
 			}),
 		{ tenantId, label: 'task-credit.createDraft' }
 	);
