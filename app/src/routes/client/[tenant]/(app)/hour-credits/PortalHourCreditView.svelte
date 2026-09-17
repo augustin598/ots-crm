@@ -77,8 +77,8 @@
 		</dd>
 		<dt>Dacă se termină creditul</dt>
 		<dd>
-			Timpul lucrat peste credit se facturează separat, la tariful lucrării, pe factura lunară de
-			depășire.
+			Timpul lucrat peste credit se facturează în ore întregi, la tariful lucrării. Ce nu se
+			folosește din ora facturată rămâne credit în contul tău.
 		</dd>
 		{#if view.expiryDays > 0}
 			<dt>Expirare</dt>
@@ -126,7 +126,9 @@
 									</span>
 									<span>{e.note || LEDGER_KIND_LABELS[e.kind] || e.kind}</span>
 								</div>
-								{#if e.realMinutes && e.kind !== 'purchase'}
+								{#if e.realMinutes && e.kind === 'overage_invoiced'}
+									<div class="hc-muted hc-led-sub">{fmtMinutes(e.realMinutes)} facturate</div>
+								{:else if e.realMinutes && e.kind !== 'purchase'}
 									<div class="hc-muted hc-led-sub">{fmtMinutes(e.realMinutes)} lucrate</div>
 								{/if}
 								{#if e.realMinutes && e.kind === 'task_consumption' && Math.abs(e.deltaMinutes) === ceilToStep(e.realMinutes, view.stepMinutes) && Math.abs(e.deltaMinutes) !== e.realMinutes}

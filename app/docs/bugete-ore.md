@@ -25,9 +25,9 @@ Singura rotunjire a timpului e `ceilToStep(minute, pas)` din
 `$lib/logic/hour-credits.ts` — în sus, la pasul din Settings, aplicată **o
 singură dată**: la decontarea taskului (Done) și la normalizarea estimărilor.
 Pasul (`stepMinutes`) are opțiunile `10 / 15 / 30 / 60`, implicit 15. La
-pasul de 10 min, cantitatea trimisă la Keez pe factura de depășire are 2
-zecimale (10 min = 0,1667 h nu încape exact) — Settings arată avertismentul
-direct pe câmp; pasul de 15 e exact.
+pasul de 10 min, 10 min = 0,1667 h nu se scrie exact cu 2 zecimale — Settings
+arată nota direct pe câmp. Facturile de depășire nu mai sunt afectate: pleacă în
+ore întregi (vezi „Depășirea se facturează în ore întregi").
 
 Tariful de referință (Settings; dacă nu e ales niciunul, cel mai mic tarif
 activ — `resolveReferenceRate`) NU mai intervine la decontarea taskurilor.
@@ -110,6 +110,58 @@ linia din draft și legarea ei de task vin după. Dacă taskul s-a schimbat înt
 timp, linia se retrage. Liniile se caută după `invoice_line_item.task_id`, nu doar
 după `task.overage_invoice_id`.
 
+## Depășirea se facturează în ore întregi
+
+Decizia owner-ului (17 sep 2026, addendum §10 din
+`docs/superpowers/specs/2026-09-17-hour-credits-calcul-ore-reale-design.md`):
+nicio factură „la minut". Timpul lucrat peste credit se facturează în ore
+întregi (minimum 1 h), la tariful × regimul taskului, iar partea nefolosită din
+ora facturată intră în creditul clientului **pe loc, la Done**.
+
+```
+facturabil = ceilToStep(actual, pas)
+din_credit = min(facturabil, max(0, sold))
+depășire   = facturabil − din_credit
+facturat   = ceil(depășire / 60) × 60        // OVERAGE_BLOCK_MINUTES, invoicedOverageMinutes
+surplus    = facturat − depășire             // 0…59
+sold_după  = sold − din_credit + surplus
+```
+
+Exemplu: sold 2 h, lucrat 2 h 30 → 2 h din credit, 30 min depășire, o linie de
+1 h pe draft, sold după = 30 min.
+
+Ledger, în tranzacția de consum (`settleTaskCredit`):
+
+- `overage_invoiced`: delta 0, `real_minutes` = **minutele facturate** (multiplu de
+  60), snapshot-uri de preț;
+- dacă `surplus > 0`: rând `purchase` (+surplus), `source_type = 'ledger'`,
+  `source_id` = id-ul rândului `overage_invoiced` al ciclului (unic per Done, deci
+  indexul `client_hour_ledger_source_uidx` nu se lovește la re-Done), `expires_at`
+  după regula tenantului. E un lot de credit ca oricare altul: apare ca „Ore
+  cumpărate", expiră la fel, iar nota lui se vede în portal.
+
+Linia de factură: `quantity = facturat / 60` (întreg), UM oră, `rate` = tariful
+efectiv în cenți, `amount = quantity × rate` exact la orice pas. `addOverageLine`
+aruncă dacă primește minute care nu sunt multiplu de 60. Draftul lunar rămâne: o
+linie per depășire; surplusul acoperă taskurile următoare.
+
+Reopen (`reverseTaskCredit`), în aceeași tranzacție: pe lângă restituirea
+consumului, scrie `purchase_reversal` cu `−surplus` și aceeași sursă ca rândul de
+surplus (expirarea îl scade din lotul lui, nu FIFO). Se retrage netul: surplus +
+corecțiile lui − ce a expirat deja din lot. Soldul revine exact la valoarea
+dinainte de Done; dacă surplusul a fost consumat între timp de alt task, soldul
+devine negativ, iar decontarea următoare îl tratează ca 0 și facturează.
+
+Urme moștenite: rândurile `overage_invoiced` scrise înainte de regula asta țin
+minutele exacte (pot fi non-multipli de 60). „Regenerează" le facturează rotunjit
+în sus la oră și creditează surplusul o singură dată, cu același rând `purchase`
+legat de urma depășirii (idempotent prin indexul unic). Liniile deja aflate pe
+drafturi/facturi nu se rescriu.
+
+Notificări (email + WhatsApp), fraza comună `overageNoticeSentence`: „30 min peste
+credit → 1 h facturate la 65 €/h; 30 min rămân credit." (fără surplus, ultima
+parte lipsește).
+
 ## Corecții istorice (`kind = 'correction'`)
 
 Un rând de ledger nu se editează niciodată — un rând scris greșit (ex. sub
@@ -127,8 +179,9 @@ ajustarea manuală din UI, care cere un delta multiplu de pas.
 ## Tabul „De rezolvat"
 
 - **Depășiri fără factură** — urma `overage_invoiced` a decontării curente, fără
-  linie pe niciun draft (draft picat, legare picată, draft șters). „Regenerează"
-  relegă linia existentă sau o recreează la tariful înghețat.
+  linie pe niciun draft (draft picat, legare picată, draft șters). Coloana arată
+  orele care se vor factura (întregi). „Regenerează" relegă linia existentă sau o
+  recreează la tariful înghețat.
 - **Taskuri Done nedecontate** — fie taskul n-are `actual_minutes` (lipsă sau
   0: nu există fallback pe estimare, taskul rămâne „De rezolvat" până se
   introduc orele efective), fie decontarea a eșuat propriu-zis (CAS-ul

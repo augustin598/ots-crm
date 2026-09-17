@@ -131,7 +131,8 @@
 			<h3>Depășiri fără factură</h3>
 			<p>
 				Taskuri decontate peste credit a căror linie nu stă pe niciun draft (draftul a picat sau a
-				fost șters). Regenerarea folosește tariful înghețat la decontare.
+				fost șters). Depășirea se facturează în ore întregi; regenerarea folosește tariful înghețat
+				la decontare.
 			</p>
 		</div>
 		<div class="hc-tablescroll">
@@ -140,7 +141,7 @@
 					<tr>
 						<th>Task</th>
 						<th>Client</th>
-						<th class="r">Peste credit</th>
+						<th class="r">De facturat</th>
 						<th>Decontat</th>
 						<th class="r"></th>
 					</tr>
@@ -150,7 +151,7 @@
 						<tr>
 							<td><a class="hc-strong" href="/{tenantSlug}/tasks/{o.taskId}">{o.taskTitle}</a></td>
 							<td>{o.clientName}</td>
-							<td class="hc-num">{fmtMinutes(o.overageRealMinutes)}</td>
+							<td class="hc-num">{fmtMinutes(o.invoicedMinutes)}</td>
 							<td>{fmtDate(o.settledAt)}</td>
 							<td class="r">
 								{#if canEdit}

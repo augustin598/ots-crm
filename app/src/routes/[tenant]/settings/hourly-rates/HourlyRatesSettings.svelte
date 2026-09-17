@@ -542,8 +542,8 @@
 							</select>
 							{#if Number(stepMinutes) === 10}
 								<p class="hc-muted">
-									La pas de 10 min, facturile de depășire pot diferi cu câțiva cenți în Keez
-									(cantitatea se trimite cu 2 zecimale). Pasul de 15 min e exact.
+									La pas de 10 min, 10 min = 0,1667 h nu se scrie exact cu 2 zecimale. Facturile
+									de depășire nu sunt afectate: se emit în ore întregi, iar restul rămâne credit.
 								</p>
 							{/if}
 						</label>

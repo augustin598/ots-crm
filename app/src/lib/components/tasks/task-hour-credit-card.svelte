@@ -88,10 +88,10 @@
 					timeStyle: 'short'
 				})}.
 				{#if task.overageInvoiceId}
-					Orele peste credit sunt în
+					Timpul peste credit e facturat în ore întregi, în
 					<a class="underline" href="/{tenantSlug}/invoices/{task.overageInvoiceId}"
 						>draftul lunar de depășire</a
-					>.
+					>; ce rămâne din ora facturată a intrat în credit.
 				{:else}
 					Totul a intrat în credit.
 				{/if}
