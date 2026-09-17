@@ -255,7 +255,7 @@
 			{:else}
 				<button type="button" class="hc-btn hc-btn-light" onclick={onclose}>Renunță</button>
 				<div class="hc-total">
-					<div class="hc-total-l">Total de plată</div>
+					<div class="hc-total-l">Total de plată (cu TVA)</div>
 					<div class="hc-total-v">
 						{quote?.ok ? fmtMoneyCents(quote.grossCents) : '—'}
 					</div>
