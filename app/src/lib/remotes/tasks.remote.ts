@@ -22,6 +22,8 @@ import { toNaiveDateTime } from '$lib/server/google-calendar/time';
 import { requireStaff } from '$lib/server/get-actor';
 import { applyTaskStatusCreditEffects, assertTaskReopenAllowed } from '$lib/server/task-credit';
 import { getEligibleClientAssigneeIds, getTaskParticipantEmails } from '$lib/server/client-users';
+import { getHourlyCatalog } from '$lib/server/hourly-catalog';
+import { ceilToStep } from '$lib/logic/hour-credits';
 // import static, NU dinamic: rolldown (Vite 8) compilează `await import(...)` din
 // fișierele .remote.ts în `await void 0` → funcția pică pe build-ul de producție
 import { deleteMeetEvent } from '$lib/server/google-calendar/meet';
@@ -374,6 +376,16 @@ const taskSchema = v.object({
 	tagNames: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
 	assigneeUserIds: v.optional(v.array(v.pipe(v.string(), v.minLength(1))))
 });
+
+/** Estimările se țin în multipli de pas, rotunjite în sus (spec 2026-09-17 §2.4). */
+async function normalizeEstimate(
+	tenantId: string,
+	minutes: number | null | undefined
+): Promise<number | null> {
+	if (!minutes || minutes <= 0) return minutes ?? null;
+	const { rules } = await getHourlyCatalog(tenantId);
+	return ceilToStep(minutes, rules.stepMinutes);
+}
 
 function validateHourCreditPayload(data: {
 	clientId?: string | null;
@@ -1057,6 +1069,7 @@ export const createTask = command(taskSchema, async (data) => {
 	}
 
 	validateHourCreditPayload({ clientId: event.locals.isClientUser ? 'client' : data.clientId, estimatedMinutes: data.estimatedMinutes, rateSlug: data.rateSlug });
+	const normalizedEstimatedMinutes = await normalizeEstimate(targetTenantId, data.estimatedMinutes);
 	// If client user, set clientId from context
 	const clientId =
 		event.locals.isClientUser && event.locals.client
@@ -1164,7 +1177,7 @@ export const createTask = command(taskSchema, async (data) => {
 			title: data.title,
 			description: data.description || null,
 			status: status,
-			estimatedMinutes: data.estimatedMinutes ?? null,
+			estimatedMinutes: normalizedEstimatedMinutes,
 			actualMinutes: null,
 			rateSlug: data.estimatedMinutes ? (data.rateSlug ?? null) : null,
 			modeSlug: data.estimatedMinutes ? (data.modeSlug ?? 'standard') : null,
@@ -1503,6 +1516,12 @@ export const updateTask = command(
 			estimatedMinutes: updateData.estimatedMinutes ?? existing.estimatedMinutes,
 			rateSlug: updateData.rateSlug ?? existing.rateSlug
 		});
+		if (updateData.estimatedMinutes !== undefined) {
+			updateData.estimatedMinutes = await normalizeEstimate(
+				existing.tenantId,
+				updateData.estimatedMinutes
+			);
+		}
 		if (oldStatus === 'done' && newStatus && newStatus !== 'done') {
 			await assertTaskReopenAllowed(existing.tenantId, taskId);
 		}

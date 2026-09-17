@@ -540,6 +540,12 @@
 									<option value={opt}>{opt} min</option>
 								{/each}
 							</select>
+							{#if Number(stepMinutes) === 10}
+								<p class="hc-muted">
+									La pas de 10 min, facturile de depășire pot diferi cu câțiva cenți în Keez
+									(cantitatea se trimite cu 2 zecimale). Pasul de 15 min e exact.
+								</p>
+							{/if}
 						</label>
 					</div>
 

@@ -7,7 +7,7 @@
 	import { getHourlyCatalogView } from '$lib/remotes/hourly-rates.remote';
 	import { getClientHourCreditView } from '$lib/remotes/hour-credits.remote';
 	import { formatMinutes } from '$lib/logic/hourly-catalog';
-	import { availableForTask, roundToStep } from '$lib/logic/hour-credits';
+	import { availableForTask, ceilToStep } from '$lib/logic/hour-credits';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 
@@ -62,7 +62,7 @@
 	function snapToStep() {
 		const minutes = Math.max(0, Number(estimatedHours) * 60);
 		if (!Number.isFinite(minutes)) return;
-		estimatedHours = roundToStep(minutes, stepMinutes) / 60;
+		estimatedHours = ceilToStep(minutes, stepMinutes) / 60;
 	}
 </script>
 

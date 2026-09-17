@@ -99,7 +99,7 @@ export const DEFAULT_HOUR_CREDIT_RULES: HourCreditRules = {
 export const CREDIT_EXPIRY_DAYS_MIN = 0;
 export const CREDIT_EXPIRY_DAYS_MAX = 3650;
 
-export const STEP_MINUTES_OPTIONS = [15, 30, 60] as const;
+export const STEP_MINUTES_OPTIONS = [10, 15, 30, 60] as const;
 export const RATE_EUR_MIN = 1;
 export const RATE_EUR_MAX = 999;
 export const MULTIPLIER_PCT_MIN = 100;

@@ -517,4 +517,11 @@ describe('updateHourCreditRules', () => {
 		});
 		expect(writes[0].values!.createdAt).toBeInstanceOf(Date);
 	});
+
+	test('pas de 10 min e acceptat', async () => {
+		await updateHourCreditRules({ ...RULES_INPUT, stepMinutes: 10 });
+		expect(writes).toHaveLength(1);
+		expect(writes[0].values!.stepMinutes).toBe(10);
+		expect(writes[0].set!.stepMinutes).toBe(10);
+	});
 });
