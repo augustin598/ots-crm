@@ -38,6 +38,7 @@
 	} from '$lib/remotes/hosting-accounts.remote';
 	import { getDAServers, getDAPackagesForServer } from '$lib/remotes/da-servers.remote';
 	import { resolveVatPercent } from '$lib/utils/vat';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import { getHostingProducts } from '$lib/remotes/hosting-products.remote';
 	import { getInvoiceSettings } from '$lib/remotes/invoice-settings.remote';
 	import PackageIcon from '@lucide/svelte/icons/package';
@@ -160,7 +161,7 @@
 			// precedentă ar marca silențios proforma următoare la orice salvare.
 			markPaidSelection = {};
 		} catch (e) {
-			paymentError = e instanceof Error ? e.message : 'Eroare la încărcare';
+			paymentError = remoteErrorMessage(e, 'Eroare la încărcare');
 			paymentHistory = [];
 		} finally {
 			paymentLoading = false;
@@ -480,7 +481,7 @@
 				toast.success('Cont suspendat', { id: toastId });
 				notifySaved();
 			} catch (e) {
-				toast.error(e instanceof Error ? e.message : 'Eroare suspendare', { id: toastId });
+				toast.error(remoteErrorMessage(e, 'Eroare suspendare'), { id: toastId });
 			} finally {
 				statusBusy = false;
 			}
@@ -501,7 +502,7 @@
 				toast.success('Cont reactivat', { id: toastId });
 				notifySaved();
 			} catch (e) {
-				toast.error(e instanceof Error ? e.message : 'Eroare reactivare', { id: toastId });
+				toast.error(remoteErrorMessage(e, 'Eroare reactivare'), { id: toastId });
 			} finally {
 				statusBusy = false;
 			}
@@ -615,7 +616,7 @@
 			}
 			notifySaved();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare la salvare', { id: toastId });
+			toast.error(remoteErrorMessage(e, 'Eroare la salvare'), { id: toastId });
 		} finally {
 			saving = false;
 		}
@@ -899,7 +900,7 @@
 				</section>
 			{:catch e}
 				<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-					Eroare la încărcarea pachetelor: {e instanceof Error ? e.message : String(e)}
+					Eroare la încărcarea pachetelor: {remoteErrorMessage(e, String(e))}
 				</div>
 			{/await}
 		{:else if activeTab === 'billing'}

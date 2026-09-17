@@ -35,6 +35,15 @@ export type DaErrorKind =
 	| 'password_weak'
 	| 'access_denied'
 	| 'license_restricted'
+	/**
+	 * DA answered with its LOGIN handler (`401 {"error":"Not logged in"}` or the
+	 * legacy `text=Not logged in`) — the request never reached the command. The
+	 * credential itself may still be valid for other endpoints, so this is NOT
+	 * `access_denied`: it means DA refused to authenticate THIS call (login key
+	 * scoped without the command, 2FA-forced key, or a POST blocked by DA's
+	 * referer/CSRF check). Actionable by an admin on the DA panel, not by a retry.
+	 */
+	| 'not_authenticated'
 	| 'unknown';
 
 export class DirectAdminApiError extends Error {
@@ -73,6 +82,9 @@ export function classifyDaError(message: string, daCode?: string): DaErrorKind {
 	if (/\b(no .*package|package .*(not exist|not found))/.test(msg)) return 'package_missing';
 	if (/\b(no .*ip|valid ip|ip.*not (provided|available|allowed))/.test(msg)) return 'ip_unavailable';
 	if (/\b(password|passwd).*(weak|strong|complex|complexity|short)/.test(msg)) return 'password_weak';
+	// DA's login handler reply — see the `not_authenticated` note above. Checked
+	// BEFORE access_denied because DA words it as a login failure, not a denial.
+	if (/\bnot logged in\b|\blogin key\b|\bsession expired\b/.test(msg)) return 'not_authenticated';
 	if (/\baccess denied|permission denied|not authoriz/.test(msg)) return 'access_denied';
 	if (/\blicense\b/.test(msg)) return 'license_restricted';
 	return 'unknown';
@@ -272,11 +284,32 @@ export interface DAResourceUsage {
 	timestamp: string;
 }
 
+/**
+ * A DA login key, as `GET /api/login-keys/keys` really returns it
+ * (`web.loginKeyResponse` in the server's own swagger — probed on Server1,
+ * 2026-09-16). The previous shape here (`name`, `createdAt`, `lastUsedAt`) was
+ * invented and never matched DA.
+ *
+ * The gating fields matter for debugging "Not logged in": a key authenticates
+ * only for commands inside `allowCommands` (empty = no restriction), minus
+ * `denyCommands`, and only from `allowNetworks` (empty = no restriction). A
+ * request outside those is answered by DA's LOGIN handler — i.e. it looks like
+ * a credential failure, not like a permission error. `readOnly` is about UI
+ * editing of the key itself, NOT about read-only API access.
+ */
 export interface DALoginKey {
 	id: string;
-	name: string;
-	createdAt: string;
-	lastUsedAt: string | null;
+	allowCommands: string[];
+	denyCommands: string[];
+	allowNetworks: string[];
+	allowLogin: boolean;
+	autoRemove: boolean;
+	hasExpiry: boolean;
+	/** Present only when `hasExpiry`. */
+	expires?: string;
+	created: string;
+	createdBy: string;
+	readOnly: boolean;
 }
 
 export interface DAVacationConfig {
@@ -522,6 +555,66 @@ export class DirectAdminClient {
 				});
 				const body = await response.text();
 				return { status: response.status, body };
+			} finally {
+				clearTimeout(timeoutId);
+			}
+		});
+	}
+
+	/**
+	 * Diagnostic-only — probe how DA authenticates a *legacy POST*.
+	 *
+	 * Why this exists: on 2026-09-16 `suspendUser` started failing with DA's
+	 * login-handler payload (`HTTP 401 {"error":"Not logged in","success":"no"}`)
+	 * in ~9ms, while the very same Basic-auth credential kept working for
+	 * `/api/users/*` reads and legacy GETs. Same code, same pod, same key — so
+	 * the rejection is method/header-specific on DA's side and the only way to
+	 * tell WHICH header matters is to send the same POST with the variables
+	 * flipped one at a time.
+	 *
+	 * NON-MUTATING BY CONSTRUCTION: the body carries `location` + `select0` but
+	 * NO action button (`dosuspend`/`dounsuspend`/`delete`). DA's CMD_SELECT_USERS
+	 * handler resolves such a request to command "none" and answers
+	 * `error=1&text=Unkown Select Command&details=none` (typo is DA's) without
+	 * touching the account — which is exactly the useful signal: reaching that
+	 * error means DA *authenticated* the POST.
+	 */
+	async probeLegacySelectUsersAuth(
+		username: string,
+		opts: { accept?: string; withReferer?: boolean } = {}
+	): Promise<{ status: number; contentType: string | null; body: string }> {
+		return this.limiter(async () => {
+			const url = `${this.baseUrl}/CMD_API_SELECT_USERS`;
+			const headers: Record<string, string> = {
+				Authorization: this.authHeader,
+				Accept: opts.accept ?? 'application/json',
+				'Content-Type': 'application/x-www-form-urlencoded'
+			};
+			if (opts.withReferer) {
+				headers.Referer = `${this.baseUrl}/evo/`;
+				headers.Origin = this.baseUrl;
+			}
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+			try {
+				const response = await fetch(url, {
+					method: 'POST',
+					headers,
+					// No action button on purpose — see the note above.
+					body: new URLSearchParams({
+						location: 'CMD_SELECT_USERS',
+						select0: username
+					}).toString(),
+					signal: controller.signal,
+					// Bun extends RequestInit with `tls`; types vary by Bun version, see https://bun.sh/docs/api/fetch
+					tls: { rejectUnauthorized: false } as never
+				});
+				const body = await response.text();
+				return {
+					status: response.status,
+					contentType: response.headers.get('content-type'),
+					body
+				};
 			} finally {
 				clearTimeout(timeoutId);
 			}
@@ -1243,10 +1336,15 @@ export class DirectAdminClient {
 		return this.request<DAVersionInfo>('GET', '/api/version');
 	}
 
+	/**
+	 * `/api/login-keys` (what this used to call) is the Evolution SPA route and
+	 * answers `200 text/html` — so this method returned `[]` on every server.
+	 * The API path is `/api/login-keys/keys`.
+	 */
 	async listLoginKeys(): Promise<DALoginKey[]> {
 		const result = await this.request<{ list?: DALoginKey[] } | DALoginKey[]>(
 			'GET',
-			'/api/login-keys'
+			'/api/login-keys/keys'
 		);
 		return Array.isArray(result) ? result : (result as { list?: DALoginKey[] }).list ?? [];
 	}
@@ -1258,17 +1356,41 @@ export class DirectAdminClient {
 		);
 	}
 
-	async ping(): Promise<{ online: boolean; responseMs: number }> {
+	/**
+	 * Health probe. Tries the admin endpoint, falls back to the session endpoint
+	 * for reseller-level credentials.
+	 *
+	 * `error`/`kind` carry DA's own reason for the failure. They exist because
+	 * both catches used to swallow it and the panel then reported "Connection
+	 * failed" for a rejected credential — identical to a dead server. With a DA
+	 * that answers `401 {"error":"Not logged in"}` (expired/scoped login key)
+	 * that difference is the whole diagnosis.
+	 */
+	async ping(): Promise<{
+		online: boolean;
+		responseMs: number;
+		error?: string;
+		kind?: DaErrorKind;
+	}> {
 		const start = Date.now();
 		try {
 			await this.request('GET', '/api/admin-usage');
 			return { online: true, responseMs: Date.now() - start };
-		} catch {
+		} catch (adminErr) {
 			try {
 				await this.request('GET', '/api/session/user-usage');
 				return { online: true, responseMs: Date.now() - start };
-			} catch {
-				return { online: false, responseMs: Date.now() - start };
+			} catch (sessionErr) {
+				// Report the admin-endpoint failure: the session fallback exists for
+				// reseller credentials, so its error is the less informative one.
+				const err = adminErr instanceof Error ? adminErr : sessionErr;
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					online: false,
+					responseMs: Date.now() - start,
+					error: message,
+					kind: err instanceof DirectAdminApiError ? err.kind : classifyDaError(message)
+				};
 			}
 		}
 	}

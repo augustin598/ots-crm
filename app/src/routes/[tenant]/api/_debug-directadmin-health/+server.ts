@@ -34,6 +34,14 @@ import type { RequestHandler } from './$types';
  *                                          CMD_API_ACCOUNT_USER. Returns the
  *                                          exact payload that WOULD be sent.
  *   action=audit-log[&limit=20]          — recent da_audit_log entries (this tenant)
+ *   action=diag-suspend&serverId=X&username=daUser
+ *                                        — why DA refuses suspend: same legacy
+ *                                          POST sent 4 ways (Accept json vs any,
+ *                                          with/without Referer) + a legacy GET +
+ *                                          the login-key scopes. NON-MUTATING:
+ *                                          the POST has no action button, so DA
+ *                                          answers "Unkown Select Command"
+ *                                          instead of suspending.
  *
  * Mutating actions (POST, require `?confirm=yes`):
  *   action=real-create&serverId=X        — create a real DA user from the body
@@ -358,6 +366,77 @@ export const GET: RequestHandler = async (event) => {
 		} catch (err) {
 			return errorResponse(err, performance.now() - start);
 		}
+	}
+
+	// === diag-suspend ======================================================
+	// Why: manual suspend broke on 2026-09-16 with DA's login payload
+	// (`401 {"error":"Not logged in"}`) after months of working, while the SAME
+	// credential kept serving `/api/users/*` reads and legacy GETs from the same
+	// pod. So the credential is valid — DA refuses this POST. This action fires
+	// the same POST four ways (Accept json vs */*, with and without Referer/Origin)
+	// plus a legacy GET and the login-key list, so one call says whether the fix
+	// belongs in our headers or in the DA credential's scope.
+	//
+	// Every probe is NON-MUTATING: the POST body has no action button, so DA
+	// answers "Unkown Select Command" instead of suspending anything.
+	if (action === 'diag-suspend') {
+		const start = performance.now();
+		const username = (event.url.searchParams.get('username') ?? '').toLowerCase();
+		if (!isValidUsername(username)) throw error(400, 'username required (DA username)');
+		// Only probe a DA user this tenant actually owns — keeps the endpoint from
+		// becoming a per-username prober for the whole server.
+		const [owned] = await db
+			.select({ id: table.hostingAccount.id })
+			.from(table.hostingAccount)
+			.where(
+				and(
+					eq(table.hostingAccount.tenantId, tenantId),
+					eq(table.hostingAccount.daUsername, username)
+				)
+			)
+			.limit(1);
+		if (!owned) throw error(404, `No hosting account with daUsername "${username}" in this tenant`);
+
+		const sample = (r: { status: number; contentType?: string | null; body: string }) => ({
+			status: r.status,
+			contentType: r.contentType ?? null,
+			body: r.body.slice(0, 400)
+		});
+		const fail = (e: unknown) => ({ status: 0, contentType: null, body: `<error: ${serializeError(e).message}>` });
+
+		const [legacyGet, postJson, postAny, postReferer, loginKeys] = await Promise.all([
+			// Legacy GET with the exact headers the wrapper uses in production.
+			client
+				.listUserPackages()
+				.then((p) => ({ ok: true, packages: p }))
+				.catch((e) => ({ ok: false, error: serializeError(e).message })),
+			client.probeLegacySelectUsersAuth(username).then(sample).catch(fail),
+			client.probeLegacySelectUsersAuth(username, { accept: '*/*' }).then(sample).catch(fail),
+			client
+				.probeLegacySelectUsersAuth(username, { accept: '*/*', withReferer: true })
+				.then(sample)
+				.catch(fail),
+			client
+				.listLoginKeys()
+				.then((k) => ({ ok: true, keys: k }))
+				.catch((e) => ({ ok: false, error: serializeError(e).message }))
+		]);
+
+		return json({
+			ok: true,
+			durationMs: Math.round(performance.now() - start),
+			server: { id: server.id, name: server.name, hostname: server.hostname },
+			username,
+			legacyGetWithJsonAccept: legacyGet,
+			legacyPostAcceptJson: postJson,
+			legacyPostAcceptAny: postAny,
+			legacyPostWithReferer: postReferer,
+			loginKeys,
+			readMe:
+				'"Not logged in" on a probe = DA refused to authenticate that POST. ' +
+				'"Unkown Select Command" = DA authenticated it (the payload deliberately has no action button). ' +
+				'First probe that reaches "Unkown Select Command" names the header suspendUser() is missing.'
+		});
 	}
 
 	throw error(400, `Unknown action: ${action}`);

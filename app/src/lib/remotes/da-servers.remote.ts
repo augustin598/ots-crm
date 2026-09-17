@@ -446,11 +446,16 @@ export const addDAServer = command(ServerSchema, async (data) => {
 			.update(table.daServer)
 			.set({
 				lastCheckedAt: new Date().toISOString(),
-				lastError: result.online ? null : 'Ping failed',
+				lastError: result.online ? null : result.error ?? 'Ping failed',
 				updatedAt: new Date()
 			})
 			.where(eq(table.daServer.id, id));
-		return { id, online: result.online, responseMs: result.responseMs };
+		return {
+			id,
+			online: result.online,
+			responseMs: result.responseMs,
+			...(result.online ? {} : { error: result.error ?? 'Ping failed' })
+		};
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
 		await db
@@ -547,11 +552,17 @@ export const testDAServer = command(IdSchema, async (serverId) => {
 			.update(table.daServer)
 			.set({
 				lastCheckedAt: new Date().toISOString(),
-				lastError: result.online ? null : 'Connection failed',
+				// Keep DA's wording ("Not logged in", "Unauthorized", …) — a generic
+				// "Connection failed" made a refused credential look like downtime.
+				lastError: result.online ? null : result.error ?? 'Connection failed',
 				updatedAt: new Date()
 			})
 			.where(eq(table.daServer.id, serverId));
-		return { online: result.online, responseMs: result.responseMs };
+		return {
+			online: result.online,
+			responseMs: result.responseMs,
+			...(result.online ? {} : { error: result.error ?? 'Connection failed' })
+		};
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
 		await db

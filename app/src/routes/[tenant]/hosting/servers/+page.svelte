@@ -28,6 +28,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import NewServerModal from './_new-server-modal.svelte';
 	import { focusTrap } from '$lib/actions/focus-trap';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 
 	type Status = 'online' | 'warning' | 'maintenance' | 'offline';
 
@@ -156,7 +157,7 @@
 			);
 			await refresh();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare sync');
+			toast.error(remoteErrorMessage(e, 'Eroare sync'));
 		} finally {
 			syncingId = null;
 		}
@@ -184,7 +185,7 @@
 			else toast.error(r.error ?? 'Offline');
 			await refresh();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare test');
+			toast.error(remoteErrorMessage(e, 'Eroare test'));
 		}
 	}
 
@@ -213,7 +214,7 @@
 			deleteInput = '';
 			await refresh();
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Eroare ștergere');
+			toast.error(remoteErrorMessage(e, 'Eroare ștergere'));
 		} finally {
 			deleting = false;
 		}

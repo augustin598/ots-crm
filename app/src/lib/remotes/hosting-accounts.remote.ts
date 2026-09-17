@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error as svelteError } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -8,6 +9,7 @@ import { getActor } from '$lib/server/get-actor';
 import { assertCan } from '$lib/server/access';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit, withAccountLock } from '$lib/server/plugins/directadmin/audit';
+import { daErrorDetails } from '$lib/server/plugins/directadmin/error-message';
 import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import type { DAUserUsage } from '$lib/server/plugins/directadmin/client';
 import { createHostingAccountInternal } from '$lib/server/hosting/create-account';
@@ -241,16 +243,28 @@ export const suspendHostingAccount = command(SuspendSchema, async (params) => {
 	await withAccountLock(`${tenantId}:${account.daUsername}`, async () => {
 		if (server) {
 			const daClient = createDAClient(tenantId, server);
-			await runWithAudit(
-				{
-					tenantId,
-					hostingAccountId: account.id,
-					daServerId: account.daServerId,
-					action: 'suspend',
-					trigger: 'manual'
-				},
-				() => daClient.suspendUser(account.daUsername)
-			);
+			try {
+				await runWithAudit(
+					{
+						tenantId,
+						hostingAccountId: account.id,
+						daServerId: account.daServerId,
+						action: 'suspend',
+						trigger: 'manual'
+					},
+					() => daClient.suspendUser(account.daUsername)
+				);
+			} catch (e) {
+				// Surface DA's own words. A bare `throw` here becomes SvelteKit's
+				// redacted "A aparut o eroare interna." and the panel shows its
+				// generic fallback toast — which is how a DA "Not logged in"
+				// stayed invisible to staff for a full day.
+				const { status, message } = daErrorDetails(
+					e,
+					'Suspendarea pe DirectAdmin a eșuat — contul a rămas activ.'
+				);
+				throw svelteError(status, message);
+			}
 		}
 		await db
 			.update(table.hostingAccount)
@@ -336,16 +350,24 @@ export const unsuspendHostingAccount = command(IdSchema, async (accountId) => {
 	await withAccountLock(`${tenantId}:${account.daUsername}`, async () => {
 		if (server) {
 			const daClient = createDAClient(tenantId, server);
-			await runWithAudit(
-				{
-					tenantId,
-					hostingAccountId: account.id,
-					daServerId: account.daServerId,
-					action: 'unsuspend',
-					trigger: 'manual'
-				},
-				() => daClient.unsuspendUser(account.daUsername)
-			);
+			try {
+				await runWithAudit(
+					{
+						tenantId,
+						hostingAccountId: account.id,
+						daServerId: account.daServerId,
+						action: 'unsuspend',
+						trigger: 'manual'
+					},
+					() => daClient.unsuspendUser(account.daUsername)
+				);
+			} catch (e) {
+				const { status, message } = daErrorDetails(
+					e,
+					'Reactivarea pe DirectAdmin a eșuat — contul a rămas suspendat.'
+				);
+				throw svelteError(status, message);
+			}
 		}
 		await db
 			.update(table.hostingAccount)
@@ -404,22 +426,47 @@ export const terminateHostingAccount = command(IdSchema, async (accountId) => {
 	// stays a deliberate manual action by an admin in the DA panel.
 	if (server) {
 		const daClient = createDAClient(tenantId, server);
-		await runWithAudit(
-			{
-				tenantId,
-				hostingAccountId: account.id,
-				daServerId: account.daServerId,
-				action: 'suspend',
-				trigger: 'manual'
-			},
-			() => daClient.suspendUser(account.daUsername)
-		);
+		try {
+			await runWithAudit(
+				{
+					tenantId,
+					hostingAccountId: account.id,
+					daServerId: account.daServerId,
+					action: 'suspend',
+					trigger: 'manual'
+				},
+				() => daClient.suspendUser(account.daUsername)
+			);
+		} catch (e) {
+			// Don't mark the CRM row `terminated` when DA never stopped the
+			// service — that divergence is exactly what the audit flagged.
+			const { status, message } = daErrorDetails(
+				e,
+				'Terminarea a eșuat: suspendarea pe DirectAdmin nu a reușit, contul NU a fost marcat terminat.'
+			);
+			throw svelteError(status, message);
+		}
 	}
 
 	await db
 		.update(table.hostingAccount)
 		.set({ status: 'terminated', suspendedAt: new Date(), updatedAt: new Date() })
 		.where(eq(table.hostingAccount.id, accountId));
+
+	// Contul terminat nu se mai facturează. `upsertRecurringInvoiceForHostingAccount`
+	// iese din start pe `terminated`, deci n-ar dezactiva niciodată singur șablonul —
+	// scheduler-ul ar emite în continuare proforme (SOLX, 2026-09-17: client plecat,
+	// șablon activ care pica zilnic pe CUI lipsă).
+	await db
+		.update(table.recurringInvoice)
+		.set({ isActive: false, updatedAt: new Date() })
+		.where(
+			and(
+				eq(table.recurringInvoice.tenantId, tenantId),
+				eq(table.recurringInvoice.hostingAccountId, accountId),
+				eq(table.recurringInvoice.isActive, true)
+			)
+		);
 
 	return { success: true };
 });
