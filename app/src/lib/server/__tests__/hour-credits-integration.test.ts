@@ -117,6 +117,7 @@ async function insertTask(id: string, over: Partial<typeof table.task.$inferInse
 		title: `Task ${id}`,
 		status: 'in-progress',
 		estimatedMinutes: 180,
+		actualMinutes: 180,
 		rateSlug: 'development',
 		modeSlug: 'standard',
 		createdAt: new Date(),
@@ -470,7 +471,13 @@ describe('consumul task-urilor', () => {
 			sourceId: 'drain-cycle',
 			note: 'golire test'
 		});
-		const second = await settleTaskCredit({ tenantId: TENANT, taskId: 'task-cycle', userId: USER });
+		// Reopen-ul golește (deocamdată) orele efective, deci ciclul 2 le primește explicit.
+		const second = await settleTaskCredit({
+			tenantId: TENANT,
+			taskId: 'task-cycle',
+			userId: USER,
+			actualMinutes: 180
+		});
 		expect(second.status === 'settled' && second.consumedMinutes).toBe(0);
 
 		// Reopen-ul ciclului 2 nu are ce storna: nimic nu s-a scăzut.
@@ -548,6 +555,57 @@ describe('consumul task-urilor', () => {
 			.where(eq(table.invoiceLineItem.invoiceId, fresh!.id));
 		expect(lines.map((l) => l.taskId)).toEqual(['task-7']);
 	});
+
+	test('Done fără ore efective nu consumă estimarea și rămâne în „De rezolvat"', async () => {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 600,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'seed-d8',
+			note: 'seed test'
+		});
+		await insertTask('t-d8', { status: 'done', actualMinutes: null });
+		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-d8', userId: USER });
+		expect(r).toEqual({ status: 'skipped', reason: 'fără ore efective' });
+		expect(await balance()).toBe(600);
+		expect((await listUnsettledDoneTasks(TENANT)).map((t) => t.taskId)).toContain('t-d8');
+	});
+
+	test('timpul lucrat se rotunjește o singură dată: 142 min cu sold 100 → 100 din credit, 50 depășire', async () => {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 100,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'seed-round',
+			note: 'seed test'
+		});
+		await insertTask('t-round', { actualMinutes: 142 });
+		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-round', userId: USER });
+		expect(r.status).toBe('settled');
+		if (r.status !== 'settled') return;
+		expect(r.consumedMinutes).toBe(100);
+		expect(r.overageRealMinutes).toBe(50);
+		expect(await balance()).toBe(0);
+	});
+
+	test('credit suficient: 142 min lucrate scad 150 din credit', async () => {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 600,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId: 'seed-round2',
+			note: 'seed test'
+		});
+		await insertTask('t-round2', { actualMinutes: 142 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-round2', userId: USER });
+		expect(await balance()).toBe(450);
+	});
 });
 
 describe('depășirea: ferestre dintre consum și draft', () => {
@@ -575,7 +633,13 @@ describe('depășirea: ferestre dintre consum și draft', () => {
 		// Fără linie rămasă: altfel Done-ul următor ar factura depășirea a doua oară.
 		expect(await overageLines('task-gap')).toHaveLength(0);
 
-		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-gap', userId: USER });
+		// Reopen-ul golește (deocamdată) orele efective, deci Done-ul următor le primește explicit.
+		await settleTaskCredit({
+			tenantId: TENANT,
+			taskId: 'task-gap',
+			userId: USER,
+			actualMinutes: 180
+		});
 		expect(await overageLines('task-gap')).toHaveLength(1);
 	});
 
@@ -658,7 +722,11 @@ describe('depășirea: ferestre dintre consum și draft', () => {
 		await insertTask('task-done-settled', { status: 'done', estimatedMinutes: 60 });
 		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-done-settled', userId: USER });
 		await insertTask('task-open', { status: 'in-progress', estimatedMinutes: 60 });
-		await insertTask('task-done-no-hours', { status: 'done', estimatedMinutes: null });
+		await insertTask('task-done-no-hours', {
+			status: 'done',
+			estimatedMinutes: null,
+			actualMinutes: null
+		});
 
 		const rows = await listUnsettledDoneTasks(TENANT);
 		expect(rows.map((r) => r.taskId)).toEqual(['task-done-open']);
@@ -701,29 +769,33 @@ describe('jobul de expirare, pe bază reală', () => {
 			sourceId: 'noexp',
 			note: 'credit fără termen'
 		});
-		// Taskul consumase 500 din lot înainte de termen.
-		await insertTask('task-exp', { estimatedMinutes: 500, rateSlug: 'project-management' });
+		// Taskul consumase din lot înainte de termen: 500 min lucrate → 510 facturabile (pas 15).
+		await insertTask('task-exp', {
+			estimatedMinutes: 500,
+			actualMinutes: 500,
+			rateSlug: 'project-management'
+		});
 		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-exp', userId: USER });
-		expect(await balance()).toBe(400);
+		expect(await balance()).toBe(390);
 
-		// Rularea 1: expiră restul de 100 al lotului.
+		// Rularea 1: expiră restul de 90 al lotului.
 		const r1 = await processHourCreditExpiry({ tenantId: TENANT });
-		expect(r1.minutesExpired).toBe(100);
+		expect(r1.minutesExpired).toBe(90);
 		expect(await balance()).toBe(300);
 
-		// Reopen după termen: cele 500 restituite aparțin lotului expirat.
+		// Reopen după termen: cele 510 restituite aparțin lotului expirat.
 		await reverseTaskCredit({ tenantId: TENANT, taskId: 'task-exp', userId: USER });
-		expect(await balance()).toBe(800);
+		expect(await balance()).toBe(810);
 		const [r2, r2bis] = await Promise.all([
 			processHourCreditExpiry({ tenantId: TENANT }),
 			processHourCreditExpiry({ tenantId: TENANT })
 		]);
 		// Rulări paralele: doar una scrie; cealaltă vede conflictul (sau recitește) și raportează 0.
-		expect(r2.minutesExpired + r2bis.minutesExpired).toBe(500);
+		expect(r2.minutesExpired + r2bis.minutesExpired).toBe(510);
 		expect(await balance()).toBe(300);
 		expect((await ledgerKinds()).filter((k) => k.startsWith('expire'))).toEqual([
-			'expire:-100',
-			'expire:-500'
+			'expire:-90',
+			'expire:-510'
 		]);
 
 		// Creditul fără termen nu e atins, iar rularea 3 nu mai are nimic de expirat.
@@ -853,7 +925,11 @@ describe('rezervări și sold', () => {
 			sourceId: 'ord-1',
 			note: 'ore cumpărate'
 		});
-		await insertTask('task-8', { estimatedMinutes: 60, rateSlug: 'project-management' });
+		await insertTask('task-8', {
+			estimatedMinutes: 60,
+			actualMinutes: 60,
+			rateSlug: 'project-management'
+		});
 		await settleTaskCredit({ tenantId: TENANT, taskId: 'task-8', userId: USER });
 		const view = await getClientHourCredit(TENANT, CLIENT);
 		const sum = view!.entries.reduce((s, e) => s + e.deltaMinutes, 0);
@@ -889,7 +965,7 @@ describe('listClientCreditTasks — tabelul „Consum pe taskuri"', () => {
 	});
 
 	test('taskurile fără ore nu apar', async () => {
-		await insertTask('task-no-hours', { estimatedMinutes: null });
+		await insertTask('task-no-hours', { estimatedMinutes: null, actualMinutes: null });
 		const rows = await listClientCreditTasks(TENANT, CLIENT);
 		expect(rows.find((r) => r.id === 'task-no-hours')).toBeUndefined();
 	});
@@ -898,7 +974,7 @@ describe('listClientCreditTasks — tabelul „Consum pe taskuri"', () => {
 		const old = new Date(Date.now() - 86_400_000);
 		await insertTask('task-hours-old', { estimatedMinutes: 60, updatedAt: old });
 		for (let i = 0; i < 5; i++) {
-			await insertTask(`task-noise-${i}`, { estimatedMinutes: null });
+			await insertTask(`task-noise-${i}`, { estimatedMinutes: null, actualMinutes: null });
 		}
 		const rows = await listClientCreditTasks(TENANT, CLIENT, 3);
 		expect(rows.map((r) => r.id)).toEqual(['task-hours-old']);

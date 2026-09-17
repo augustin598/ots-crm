@@ -21,6 +21,8 @@
 
 	let busyId = $state<string | null>(null);
 	let actionError = $state<string | null>(null);
+	/** Ore efective introduse pe loc pentru taskurile Done care n-au niciuna salvată. */
+	let hoursByTask = $state<Record<string, number>>({});
 
 	async function run(id: string, action: () => Promise<unknown>, fallback: string) {
 		busyId = id;
@@ -180,8 +182,8 @@
 		<div class="hc-card-h tight">
 			<h3>Taskuri Done nedecontate</h3>
 			<p>
-				Au ore, dar decontarea n-a rulat (de ex. lipsea tariful de referință). Nu mai rezervă și
-				nici n-au consumat din credit.
+				Taskuri finalizate fără decontare: fie n-au ore efective, fie decontarea n-a rulat. Nu
+				rezervă și n-au consumat din credit.
 			</p>
 		</div>
 		<div class="hc-tablescroll">
@@ -200,18 +202,42 @@
 						<tr>
 							<td><a class="hc-strong" href="/{tenantSlug}/tasks/{t.taskId}">{t.taskTitle}</a></td>
 							<td>{t.clientName}</td>
-							<td class="hc-num">{fmtMinutes(t.actualMinutes ?? t.estimatedMinutes ?? 0)}</td>
+							<td class="hc-num">
+								{#if t.actualMinutes}
+									{fmtMinutes(t.actualMinutes)}
+								{:else if canEdit}
+									<input
+										class="hc-input"
+										style="width:84px;text-align:right"
+										type="number"
+										min="0.25"
+										step="0.25"
+										placeholder="ore"
+										aria-label="Ore efective pentru {t.taskTitle}"
+										bind:value={hoursByTask[t.taskId]}
+									/>
+								{:else}
+									—
+								{/if}
+							</td>
 							<td>{fmtDate(t.updatedAt)}</td>
 							<td class="r">
 								{#if canEdit}
 									<button
 										type="button"
 										class="hc-btn hc-btn-light"
-										disabled={busyId === t.taskId}
+										disabled={busyId === t.taskId ||
+											(!t.actualMinutes && !(hoursByTask[t.taskId] > 0))}
 										onclick={() =>
 											run(
 												t.taskId,
-												() => settleDoneTaskNow(t.taskId).updates(getHourCreditsPage()),
+												() =>
+													settleDoneTaskNow({
+														taskId: t.taskId,
+														actualMinutes: t.actualMinutes
+															? undefined
+															: Math.round(Number(hoursByTask[t.taskId]) * 60)
+													}).updates(getHourCreditsPage()),
 												'Nu am putut deconta taskul.'
 											)}
 									>

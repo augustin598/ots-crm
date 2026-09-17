@@ -25,8 +25,8 @@ import {
 import {
 	HOUR_OVERAGE_INVOICE_SOURCE,
 	OVERAGE_NOTES_PREFIX,
-	overageMonthKey,
-	splitTaskSettlement
+	ceilToStep,
+	overageMonthKey
 } from '$lib/logic/hour-credits';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
@@ -98,11 +98,17 @@ export async function settleTaskCredit(params: {
 	if (!task) return { status: 'failed', reason: 'task inexistent' };
 	if (!task.clientId) return { status: 'skipped', reason: 'task fără client' };
 	if (task.creditSettledAt) return { status: 'skipped', reason: 'deja decontat' };
-	const actual = params.actualMinutes ?? task.actualMinutes ?? task.estimatedMinutes ?? 0;
-	if (!Number.isInteger(actual) || actual <= 0) return { status: 'skipped', reason: 'fără ore' };
+	// Doar ore EFECTIVE. Fără ele taskul rămâne nedecontat și apare în „De rezolvat":
+	// estimarea e o rezervare, nu timp lucrat.
+	const actual = params.actualMinutes ?? task.actualMinutes ?? 0;
+	if (!Number.isInteger(actual) || actual <= 0) {
+		return { status: 'skipped', reason: 'fără ore efective' };
+	}
 
 	const ctx = await loadContext(tenantId, task);
 	if ('error' in ctx) return { status: 'failed', reason: ctx.error };
+	// Singura rotunjire: timpul lucrat, în sus, la pas. consumed + overage == billed.
+	const billed = ceilToStep(actual, ctx.stepMinutes);
 	const now = new Date();
 	const ledgerId = generateId();
 
@@ -133,21 +139,22 @@ export async function settleTaskCredit(params: {
 					const full = await tx
 						.update(table.client)
 						.set({
-							hourCreditMinutes: sql`${table.client.hourCreditMinutes} - ${actual}`,
+							hourCreditMinutes: sql`${table.client.hourCreditMinutes} - ${billed}`,
 							updatedAt: now
 						})
 						.where(
 							and(
 								eq(table.client.id, task.clientId!),
 								eq(table.client.tenantId, tenantId),
-								sql`${table.client.hourCreditMinutes} >= ${actual}`
+								sql`${table.client.hourCreditMinutes} >= ${billed}`
 							)
 						);
 					if (full.rowsAffected === 1) {
 						// Ore reale: 1 h lucrată consumă 1 h de credit, indiferent de specializare.
-						consumed = actual;
+						consumed = billed;
 					} else {
 						// Încercarea 2: cât există (≥ 0), cu gardă pe valoarea citită.
+						let sawCredit = false;
 						for (let attempt = 0; attempt < 3 && consumed === 0; attempt++) {
 							const [row] = await tx
 								.select({ balance: table.client.hourCreditMinutes })
@@ -157,7 +164,11 @@ export async function settleTaskCredit(params: {
 								)
 								.limit(1);
 							const available = Math.max(0, row?.balance ?? 0);
-							if (available === 0) break;
+							if (available === 0) {
+								sawCredit = false;
+								break;
+							}
+							sawCredit = true;
 							const partial = await tx
 								.update(table.client)
 								.set({ hourCreditMinutes: 0, updatedAt: now })
@@ -169,6 +180,11 @@ export async function settleTaskCredit(params: {
 									)
 								);
 							if (partial.rowsAffected === 1) consumed = available;
+						}
+						// Credit existent pe care nu l-am putut revendica: NU îl transformăm în
+						// depășire. Anulăm tot; taskul rămâne nedecontat și se poate relua.
+						if (consumed === 0 && sawCredit) {
+							throw new Error('soldul s-a schimbat de 3 ori în timpul decontării');
 						}
 					}
 					if (consumed > 0) {
@@ -194,12 +210,8 @@ export async function settleTaskCredit(params: {
 					// Urma depășirii intră în ACEEAȘI tranzacție cu consumul: dacă draftul
 					// pică după commit, depășirea rămâne vizibilă („nefacturată") și se poate
 					// regenera. Scrisă după draft, s-ar fi pierdut fără urmă.
-					const inTx = splitTaskSettlement({
-						realMinutes: actual,
-						balanceMinutes: consumed,
-						stepMinutes: ctx.stepMinutes
-					});
-					if (inTx.overageRealMinutes > 0) {
+					const overageInTx = billed - consumed;
+					if (overageInTx > 0) {
 						await tx.insert(table.clientHourLedger).values({
 							id: generateId(),
 							tenantId,
@@ -208,14 +220,14 @@ export async function settleTaskCredit(params: {
 							kind: 'overage_invoiced',
 							sourceType: 'task',
 							sourceId: taskId,
-							note: `${task.title} — ${inTx.overageRealMinutes} min peste credit`,
+							note: `${task.title} — ${overageInTx} min peste credit`,
 							createdByUserId: params.userId ?? null,
 							referenceRateEurSnapshot: ctx.referenceRateEur,
 							rateSlug: ctx.rate.slug,
 							modeSlug: ctx.mode.slug,
 							rateEurSnapshot: ctx.rate.rateEur,
 							multiplierPctSnapshot: ctx.mode.multiplierPct,
-							realMinutes: inTx.overageRealMinutes,
+							realMinutes: overageInTx,
 							createdAt: now
 						});
 					}
@@ -235,13 +247,8 @@ export async function settleTaskCredit(params: {
 		return { status: 'failed', reason: serializeError(err).message };
 	}
 
-	const split = splitTaskSettlement({
-		realMinutes: actual,
-		balanceMinutes: consumed,
-		stepMinutes: ctx.stepMinutes
-	});
-	// `balanceMinutes: consumed` → consumul e exact ce s-a scăzut, restul e depășire.
-	const overageReal = split.overageRealMinutes;
+	// Consumul e exact ce s-a scăzut; restul din facturabil e depășire (fără a doua rotunjire).
+	const overageReal = billed - consumed;
 
 	let overageInvoiceId: string | null = null;
 	if (overageReal > 0) {

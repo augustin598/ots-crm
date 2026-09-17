@@ -366,19 +366,26 @@ export const regenerateTaskOverage = command(taskIdSchema, async (taskId) => {
 });
 
 /** Decontează un task rămas Done fără decontare (ex. lipsea tariful de referință). */
-export const settleDoneTaskNow = command(taskIdSchema, async (taskId) => {
-	const { tenantId, userId } = await requireOwnerOrAdmin();
-	const [task] = await db
-		.select({ status: table.task.status })
-		.from(table.task)
-		.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
-		.limit(1);
-	if (!task) throw error(404, 'Taskul nu există.');
-	if (task.status !== 'done') throw error(400, 'Doar taskurile Done se decontează de aici.');
-	const result = await settleTaskCredit({ tenantId, taskId, userId });
-	if (result.status !== 'settled') throw error(400, `Nu s-a decontat: ${result.reason}.`);
-	return result;
-});
+export const settleDoneTaskNow = command(
+	v.object({
+		taskId: taskIdSchema,
+		/** Obligatoriu când taskul n-are ore efective salvate. */
+		actualMinutes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(999 * 60)))
+	}),
+	async ({ taskId, actualMinutes }) => {
+		const { tenantId, userId } = await requireOwnerOrAdmin();
+		const [task] = await db
+			.select({ status: table.task.status })
+			.from(table.task)
+			.where(and(eq(table.task.id, taskId), eq(table.task.tenantId, tenantId)))
+			.limit(1);
+		if (!task) throw error(404, 'Taskul nu există.');
+		if (task.status !== 'done') throw error(400, 'Doar taskurile Done se decontează de aici.');
+		const result = await settleTaskCredit({ tenantId, taskId, userId, actualMinutes });
+		if (result.status !== 'settled') throw error(400, `Nu s-a decontat: ${result.reason}.`);
+		return result;
+	}
+);
 
 /** Retrage orele date de o factură anulată. */
 export const reverseCancelledInvoiceHours = command(
