@@ -41,8 +41,7 @@
 		cancelled: ['hc-chip-mut', 'Anulată']
 	};
 	const chip = $derived(STATUS[order.status] ?? ['hc-chip-mut', order.status]);
-	// Orele REALE comandate. Creditul din sold e altă mărime (`order.creditMinutes`):
-	// o oră de specializare scumpă aduce mai mult de o oră la tariful de referință.
+	// Orele comandate. Intră 1:1 în credit (`order.creditMinutes`), indiferent de specializare.
 	const orderedMinutes = $derived(order.hours * 60);
 
 	function onkeydown(e: KeyboardEvent) {
