@@ -191,6 +191,39 @@ Reguli: numai ore/minute; euro doar pe prețuri plătite sau facturate.
 - Draftul de depășire e în EUR, iar factura de ore în RON: se verifică ce acceptă Keez pentru clienții români înainte de a atinge `addOverageLine` dincolo de sumă și TVA.
 - Emailul de consum fără €/h schimbă o decizie din 13 sep 2026; se actualizează și demo-ul de email.
 
+## 10. Addendum (17 sep, seara): depășirea se facturează în ore întregi
+
+Decizia owner-ului: nicio factură „la minut". Orice depășire se facturează în ore întregi (minimum 1 h), iar diferența rămâne credit în contul clientului.
+
+```
+facturabil = ceilToStep(actual, pas)              // neschimbat
+din_credit = min(facturabil, max(0, sold))        // neschimbat
+depășire   = facturabil − din_credit              // minutele lucrate peste credit
+facturat   = ceil(depășire / 60) × 60             // OVERAGE_BLOCK_MINUTES = 60
+surplus    = facturat − depășire                  // intră în credit PE LOC, la Done
+sold_după  = sold − din_credit + surplus
+```
+
+| sold | lucrat | din credit | depășire | facturat | sold după |
+|---|---|---|---|---|---|
+| 120 | 150 | 120 | 30 | 60 | 30 |
+| 0 | 15 | 0 | 15 | 60 | 45 |
+| 60 | 195 | 60 | 135 | 180 | 45 |
+| 300 | 150 | 150 | 0 | 0 | 150 |
+| −20 | 60 | 0 | 60 | 60 | −20 |
+
+Ledger, în aceeași tranzacție cu consumul:
+- `overage_invoiced`: delta 0, `real_minutes = facturat` (ce e pe factură), snapshot-uri de preț. Nota: „{titlu} — {depășire} min peste credit, facturate {facturat/60} h".
+- dacă `surplus > 0`: rând `purchase`, delta `+surplus`, `source_type='ledger'`, `source_id = id-ul rândului overage_invoiced` (unic per ciclu de Done), `real_minutes = surplus`, snapshot-uri de tarif/regim, `expires_at` după regula tenantului. Nota: „{titlu} — {facturat/60} h facturate, {depășire} min folosite, {surplus} min rămân credit".
+
+Linia de factură: `quantity = facturat / 60` (întreg), `rate = tarif_efectiv × 100`, UM oră, `amount = quantity × rate` — exact la orice pas; forma cu `quantity 1`/„Buc" nu mai apare. Draftul lunar rămâne: fiecare depășire e o linie, rotunjită la oră; surplusul acoperă taskurile următoare.
+
+Reopen: pe lângă restituirea consumului (net de corecții) și scoaterea liniei din draft, se scrie `purchase_reversal` cu `−surplus`, același `source_type`/`source_id` ca rândul de surplus. Dacă surplusul a fost deja consumat, soldul devine negativ; următoarea decontare îl tratează ca 0 și facturează.
+
+Invarianți noi: (17) `facturat % 60 == 0` și `0 ≤ surplus < 60`; (18) `sold_după = sold − din_credit + surplus`; (19) linia de depășire are `quantity` întreg și `quantity × rate == amount`; (20) Done → reopen readuce soldul exact la valoarea dinainte; (21) cache == Σ ledger după Done cu surplus și după reopen.
+
+Afișări: fișa adminului arată surplusul ca „Ore cumpărate"; „De rezolvat" arată orele facturate. Portal, cardul informativ, punctul „Dacă se termină creditul": „Timpul lucrat peste credit se facturează în ore întregi, la tariful lucrării. Ce nu se folosește din ora facturată rămâne credit în contul tău." Email/WhatsApp la depășire: „{depășire} peste credit → {facturat/60} h facturate la Z €/h; {surplus} rămân credit."
+
 ## În afara scopului
 
 Solduri separate pe specializare; tarif de conversie per client; afișarea sumei „plătite" în euro lângă sold.
