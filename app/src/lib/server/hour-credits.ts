@@ -819,9 +819,9 @@ export interface HoursOrderRow {
 	/** Dacă orele au ajuns deja în ledger (creditare idempotentă pe comandă). */
 	credited: boolean;
 	/**
-	 * Creditul comenzii, în minute la tariful de REFERINȚĂ: cel scris în ledger dacă
-	 * e creditată, altfel estimarea cu aceeași conversie ca la plată. NU e `hours × 60`
-	 * — 10 h Development la referința PM înseamnă 11 h 45 min de credit.
+	 * Creditul comenzii, în minute reale: `hours × 60`, orice specializare sau
+	 * regim — cel scris în ledger dacă e creditată, altfel aceeași estimare
+	 * înainte de creditare/plată.
 	 */
 	creditMinutes: number | null;
 }

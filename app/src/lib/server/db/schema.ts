@@ -190,7 +190,7 @@ export const client = sqliteTable('client', {
 	/** Lifetime value in cents — sum of all paid invoices. Refreshed by recalcClientLTV(). */
 	ltvCents: integer('ltv_cents').notNull().default(0),
 	// === Credit de ore (hour credits) ===
-	/** Sold CACHE, în minute la tarif de referință; se scrie DOAR în aceeași tranzacție cu client_hour_ledger. */
+	/** Sold CACHE, în minute reale; se scrie DOAR în aceeași tranzacție cu client_hour_ledger. */
 	hourCreditMinutes: integer('hour_credit_minutes').notNull().default(0),
 	/** Bifa „facturile plătite alimentează creditul de ore" (abonamentele rămân în Keez). */
 	hourCreditFromInvoices: boolean('hour_credit_from_invoices').notNull().default(false),
@@ -2536,10 +2536,14 @@ export const hourCreditSettings = sqliteTable(
 // ---- Ledger-ul creditului de ore (append-only) ----------------------------------
 //
 // Sursa de adevăr a soldului; `client.hour_credit_minutes` e doar cache, scris în
-// aceeași tranzacție. Minutele sunt la TARIFUL DE REFERINȚĂ (consumul task-urilor e
-// ponderat). Idempotență la evenimente duble prin indexul unic parțial pe
-// (tenant, kind, source_type, source_id) — doar pentru alimentări/stornări; rândurile
-// de task pot apărea de mai multe ori pentru același task (Done → reopen → Done).
+// aceeași tranzacție. Minutele sunt REALE, fără ponderare pe specializare/regim;
+// excepție: `invoice_credit` convertește suma netă a facturii de abonament în minute
+// la tariful de referință, rotunjită în JOS la minut. Idempotență la evenimente
+// duble prin indexul unic parțial pe (tenant, kind, source_type, source_id) — doar
+// pentru alimentări/stornări; rândurile de task pot apărea de mai multe ori pentru
+// același task (Done → reopen → Done). `correction` (append-only, legată de rândul
+// corectat prin `source_type='ledger'`) are propriul index unic parțial pe
+// (tenant, kind='correction', source_id) — o singură corecție per rând corectat.
 export const clientHourLedger = sqliteTable(
 	'client_hour_ledger',
 	{

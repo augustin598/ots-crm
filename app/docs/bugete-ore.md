@@ -17,12 +17,26 @@ clientului (`$lib/components/hour-credits/HcDashboardWidget.svelte`,
 
 ## Unitatea de măsură
 
-Soldul e în **minute la tariful de referință**. O oră de specializare scumpă
-consumă proporțional mai mult credit decât una ieftină — raportul se calculează
-cu `weightFactor` din `$lib/logic/hour-credits.ts`.
+Soldul e în **minute reale**, întregi, semnate — nicio ponderare pe
+specializare sau regim. 1 oră de credit (cumpărată sau lucrată) înseamnă
+exact 1 oră, indiferent de tariful specializării.
 
-Tariful de referință e cel ales în Settings; dacă nu e ales niciunul, e cel mai
-mic tarif activ (`resolveReferenceRate`).
+Singura rotunjire a timpului e `ceilToStep(minute, pas)` din
+`$lib/logic/hour-credits.ts` — în sus, la pasul din Settings, aplicată **o
+singură dată**: la decontarea taskului (Done) și la normalizarea estimărilor.
+Pasul (`stepMinutes`) are opțiunile `10 / 15 / 30 / 60`, implicit 15. La
+pasul de 10 min, cantitatea trimisă la Keez pe factura de depășire are 2
+zecimale (10 min = 0,1667 h nu încape exact) — Settings arată avertismentul
+direct pe câmp; pasul de 15 e exact.
+
+Tariful de referință (Settings; dacă nu e ales niciunul, cel mai mic tarif
+activ — `resolveReferenceRate`) NU mai intervine la decontarea taskurilor.
+Singurul loc unde contează e conversia facturilor de abonament plătite (mai
+jos), unde suma netă devine minute, rotunjite **în jos**, la minut.
+
+Interfața arată doar ore/minute pentru sold, rezervat și disponibil; euro
+apare numai pe prețuri plătite (comenzi, „Adaugă ore") sau facturate
+(depășire) — nicio echivalență „≈ X €" lângă credit.
 
 ## Sursa de adevăr
 
@@ -40,12 +54,17 @@ cod:
 
 ## De unde vin orele
 
-1. **Facturi plătite** — doar clienții cu `hour_credit_from_invoices`. Conversia
-   se face la tariful de referință, cu cursul BNR **din ziua plății**. Regulile
-   de eligibilitate sunt în `invoiceCreditEligibility`: nu alimentează facturile
-   de hosting, cele din surse ads, cele de depășire, cele ale comenzilor de ore
-   și nici cele emise din „Adaugă ore".
-2. **Comenzi de ore de pe `/servicii`** — orele intră după confirmarea plății.
+1. **Facturi plătite** — doar clienții cu `hour_credit_from_invoices`. Suma
+   netă (EUR direct, sau RON convertit cu cursul BNR **din ziua plății**) se
+   transformă în minute la tariful de referință, **rotunjite în jos, la
+   minut** (`floor(netEurCents × 60 / (tarif × 100))`; creditul nu depășește
+   niciodată banii plătiți). Nota din ledger scrie explicit conversia — ex.
+   „1.130,65 € la 55 €/h". Regulile de eligibilitate sunt în
+   `invoiceCreditEligibility`: nu alimentează facturile de hosting, cele din
+   surse ads, cele de depășire, cele ale comenzilor de ore și nici cele emise
+   din „Adaugă ore".
+2. **Comenzi de ore de pe `/servicii`** — `ore × 60`, orice specializare sau
+   regim; orele intră după confirmarea plății.
 3. **„Adaugă ore" din admin** — creditul intră **la emitere**, apoi se emite
    factura și pleacă pe email cu link de plată
    (`$lib/server/hour-credit-orders.ts`). Rândul din ledger e `purchase` cu
@@ -63,8 +82,10 @@ explicit. Fără marcajul ăsta, `invoice.paid` ar adăuga a doua oară aceleaș
 
 ## Rezervat vs. disponibil
 
-`rezervat` = suma estimărilor taskurilor deschise, ponderate
-(`computeReservedMinutes`). **Nu scade soldul** — scade doar disponibilul:
+`rezervat` = suma estimărilor taskurilor deschise, în minute reale
+(`computeReservedMinutes`); estimarea se normalizează la scriere cu
+`ceilToStep(estimatedMinutes, pas)`, la fel ca timpul lucrat la Done. **Nu
+scade soldul** — scade doar disponibilul:
 
 ```
 disponibil = sold − rezervat
@@ -72,7 +93,7 @@ disponibil = sold − rezervat
 
 „Sub prag" se calculează pe *disponibil*, nu pe sold — și în listă, și în
 alerta de „credit scăzut" (`lowCreditTransition`). Formularul de task avertizează
-când estimarea ponderată trece de disponibil, fără să numere de două ori
+când estimarea (rotunjită la pas) trece de disponibil, fără să numere de două ori
 rezervarea taskului editat (`availableForTask`).
 
 ## Decontarea taskurilor (concurență)
@@ -89,13 +110,31 @@ linia din draft și legarea ei de task vin după. Dacă taskul s-a schimbat înt
 timp, linia se retrage. Liniile se caută după `invoice_line_item.task_id`, nu doar
 după `task.overage_invoice_id`.
 
+## Corecții istorice (`kind = 'correction'`)
+
+Un rând de ledger nu se editează niciodată — un rând scris greșit (ex. sub
+vechiul model ponderat) se corectează append-only. `client_hour_ledger.kind =
+'correction'`, cu `source_type = 'ledger'` și `source_id` = id-ul rândului
+corectat; un index unic parțial pe `(tenant_id, kind='correction', source_id)`
+garantează o singură corecție per rând. FIFO-ul de expirare, reopen-ul și
+stornarea unei facturi anulate țin cont de corecțiile rândurilor lor.
+
+Se scriu doar prin endpointul owner-only `[tenant]/api/_debug-hour-credit-correct`
+(`POST { ledgerId, deltaMinutes, note }`, notă ≥ 5 caractere), idempotent — a
+doua chemare pe același `ledgerId` întoarce `applied: false`. Nu prin
+ajustarea manuală din UI, care cere un delta multiplu de pas.
+
 ## Tabul „De rezolvat"
 
 - **Depășiri fără factură** — urma `overage_invoiced` a decontării curente, fără
   linie pe niciun draft (draft picat, legare picată, draft șters). „Regenerează"
   relegă linia existentă sau o recreează la tariful înghețat.
-- **Taskuri Done nedecontate** — decontarea n-a rulat (ex. tarif de referință
-  lipsă). „Decontează" rulează logica reală.
+- **Taskuri Done nedecontate** — fie taskul n-are `actual_minutes` (lipsă sau
+  0: nu există fallback pe estimare, taskul rămâne „De rezolvat" până se
+  introduc orele efective), fie decontarea a eșuat propriu-zis (CAS-ul
+  parțial eșuat de 3 ori deși există sold → `failed` + `logError`, creditul
+  existent nu devine niciodată depășire în tăcere). „Decontează" rulează
+  logica reală, cu orele introduse manual când lipsesc.
 - **Ore adăugate fără factură** — „Adaugă ore" cu curs BNR lipsă sau INSERT eșuat.
   „Emite factura" folosește prețul înghețat în ledger, cursul și TVA-ul de azi, și
   id-ul facturii referit de rândul din ledger (a doua emitere e refuzată); creditul
@@ -158,6 +197,19 @@ Tarifele sunt în EUR, dar Keez refuză facturi în EUR pentru clienți din Rom�
 Factura are deci **antetul în RON** cu cursul BNR blocat pe rând
 (`invoice.exchange_rate`) și **linia în EUR**. Fără curs BNR în bază nu se emite
 factura — dar creditul rămâne acordat, iar adminul reia emiterea după sync-ul BNR.
+
+## Portalul clientului
+
+`PortalHourCreditView.svelte` arată soldul, rezervatul și disponibilul, plus
+un card pliabil **„Cum funcționează creditul de ore"** (`<details>`, deschis
+implicit cât timp nu există nicio mișcare) cu explicații pe înțelesul
+clientului: ce e creditul, cum se alimentează (ore cumpărate și, dacă bifa e
+activă, facturile de abonament la tariful de referință), cum se consumă (cu
+exemplul rotunjirii la pas), ce înseamnă rezervat, ce se întâmplă la
+depășire, expirarea (doar dacă e pornită) și pragul de alertă. Valorile —
+pas, prag, zile de expirare, tariful de conversie — vin din `getMyHourCredit`,
+nu sunt hardcodate în componentă. Alerta „sub prag" se calculează pe
+disponibil, nu pe sold, la fel ca în admin.
 
 ## Design
 

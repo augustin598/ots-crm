@@ -11,9 +11,9 @@ import type { RequestHandler } from './$types';
  *   POST { taskId, actualMinutes? }        → decontează
  *   POST { taskId, dryRun: true }          → doar raportează starea curentă
  *
- * Trece prin `settleTaskCredit`, deci respectă ponderarea cu tariful specializării,
- * rotunjirea la pas și idempotența pe `credit_settled_at` — nu scrie SQL pe lângă
- * logica de business. Owner/admin.
+ * Trece prin `settleTaskCredit`, deci respectă regula pe ore reale (facturabil =
+ * `ceilToStep(actual, pas)`, o singură rotunjire) și idempotența pe
+ * `credit_settled_at` — nu scrie SQL pe lângă logica de business. Owner/admin.
  */
 function requireAdmin(event: Parameters<RequestHandler>[0]) {
 	if (!event.locals.user || !event.locals.tenant) throw error(401, 'Unauthorized');
