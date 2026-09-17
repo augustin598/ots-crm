@@ -7,7 +7,7 @@
  * scrieri simultane nu pot pierde minute. Conflictul pe indexul unic parțial
  * (evenimente livrate de două ori) e tratat ca „deja aplicat", nu ca eroare.
  */
-import { and, desc, eq, gt, gte, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -447,7 +447,26 @@ export interface ClientHourCreditOverviewRow {
 	lastMovementAt: Date | null;
 	/** Creditul cu termen apropiat; null dacă nimic nu expiră. */
 	expiring: { minutes: number; on: Date } | null;
+	/**
+	 * Clientul are deja un buget de ore (bifă, sold sau istoric în ledger).
+	 * Clienții activi fără buget apar în listă doar ca să poată fi bifați —
+	 * nu intră în KPI-uri și nici în „sub prag".
+	 */
+	tracked: boolean;
+	/**
+	 * Data ultimei facturi emise (nu draft, nu anulată) din fereastra
+	 * `RECENT_INVOICE_MONTHS`; null dacă n-a fost facturat de atunci.
+	 */
+	lastInvoiceAt: Date | null;
 }
+
+/**
+ * Un client „activ" pentru Bugete ore = facturat în ultimele N luni. Statusul
+ * clientului nu ajută: aproape toți sunt `active` în bază, inclusiv testele.
+ * Contează data emiterii, nu a plății — `paid_date` e completat și pe
+ * facturile vechi importate.
+ */
+export const RECENT_INVOICE_MONTHS = 3;
 
 /** Tabelul „Bugete ore": clienții bifați sau cu sold/mișcări. */
 export async function getHourCreditsOverview(
@@ -458,6 +477,7 @@ export async function getHourCreditsOverview(
 			id: table.client.id,
 			name: table.client.name,
 			cui: table.client.cui,
+			status: table.client.status,
 			optedIn: table.client.hourCreditFromInvoices,
 			balance: table.client.hourCreditMinutes
 		})
@@ -469,7 +489,38 @@ export async function getHourCreditsOverview(
 		.where(eq(table.clientHourLedger.tenantId, tenantId))
 		.groupBy(table.clientHourLedger.clientId);
 	const ledgerClients = new Set(withLedger.map((r) => r.clientId));
-	const relevant = clients.filter((c) => c.optedIn || c.balance !== 0 || ledgerClients.has(c.id));
+	const isTracked = (c: (typeof clients)[number]) =>
+		!!c.optedIn || c.balance !== 0 || ledgerClients.has(c.id);
+
+	const invoicedSince = new Date();
+	invoicedSince.setUTCMonth(invoicedSince.getUTCMonth() - RECENT_INVOICE_MONTHS);
+	const recentInvoices = await db
+		.select({
+			clientId: table.invoice.clientId,
+			issueDate: table.invoice.issueDate
+		})
+		.from(table.invoice)
+		.where(
+			and(
+				eq(table.invoice.tenantId, tenantId),
+				notInArray(table.invoice.status, ['draft', 'cancelled']),
+				gte(table.invoice.issueDate, invoicedSince)
+			)
+		);
+	const lastInvoiceBy = new Map<string, Date>();
+	for (const inv of recentInvoices) {
+		if (!inv.clientId || !inv.issueDate) continue;
+		const prev = lastInvoiceBy.get(inv.clientId);
+		if (!prev || inv.issueDate > prev) lastInvoiceBy.set(inv.clientId, inv.issueDate);
+	}
+
+	// Pe lângă clienții cu buget vin și ceilalți clienți activi, ca bifa
+	// „Facturile plătite alimentează creditul" să poată fi pusă din listă. Pagina
+	// arată implicit doar pe cei cu buget sau facturați recent (`lastInvoiceAt`);
+	// restul apar la „Toți clienții".
+	const relevant = clients.filter(
+		(c) => isTracked(c) || c.status === 'active' || lastInvoiceBy.has(c.id)
+	);
 	if (relevant.length === 0) return [];
 
 	const ids = relevant.map((c) => c.id);
@@ -588,6 +639,8 @@ export async function getHourCreditsOverview(
 				lastCreditAt: lastCredit.get(c.id)?.at ?? null,
 				lastCreditMinutes: lastCredit.get(c.id)?.minutes ?? null,
 				lastMovementAt: lastMovement.get(c.id) ?? null,
+				tracked: isTracked(c),
+				lastInvoiceAt: lastInvoiceBy.get(c.id) ?? null,
 				expiring:
 					first && first.expiresAt
 						? {

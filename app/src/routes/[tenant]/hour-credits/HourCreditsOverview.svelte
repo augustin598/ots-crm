@@ -12,7 +12,8 @@
 	import {
 		creditInvoiceNow,
 		getHourCreditsPage,
-		getHoursOrdersPage
+		getHoursOrdersPage,
+		setClientHourCreditFromInvoices
 	} from '$lib/remotes/hour-credits.remote';
 	import { getClients } from '$lib/remotes/clients.remote';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
@@ -53,12 +54,21 @@
 			.sort((a, b) => a.name.localeCompare(b.name, 'ro'))
 	);
 
+	// Implicit: clienții cu buget + cei facturați recent (regula e pe server).
+	// „Toți clienții" îi aduce și pe ceilalți activi, pentru bifă.
+	let showAllClients = $state(false);
+	const listed = $derived(
+		showAllClients ? data.rows : data.rows.filter((r) => r.tracked || r.lastInvoiceAt)
+	);
+	// Câți clienți ascunde vederea implicită — pentru contoarele din comutator.
+	const hiddenAll = $derived(data.rows.filter((r) => !r.tracked && !r.lastInvoiceAt).length);
+
 	const rows = $derived(
-		data.rows.filter((r) => {
+		listed.filter((r) => {
 			if (q && !r.clientName.toLowerCase().includes(q.toLowerCase())) return false;
 			if (filter === 'invoices') return r.optedIn;
 			if (filter === 'low')
-				return r.balanceMinutes - r.reservedMinutes < data.lowCreditThresholdMinutes;
+				return r.tracked && r.balanceMinutes - r.reservedMinutes < data.lowCreditThresholdMinutes;
 			return true;
 		})
 	);
@@ -69,6 +79,21 @@
 			data.issues.cancelledCredited.length +
 			data.issues.uninvoicedCredits.length
 	);
+
+	let togglingId = $state<string | null>(null);
+	let toggleError = $state<string | null>(null);
+
+	async function toggleOptIn(clientId: string, enabled: boolean) {
+		togglingId = clientId;
+		toggleError = null;
+		try {
+			await setClientHourCreditFromInvoices({ clientId, enabled }).updates(getHourCreditsPage());
+		} catch (err) {
+			toggleError = remoteErrorMessage(err, 'Nu am putut salva bifa.');
+		} finally {
+			togglingId = null;
+		}
+	}
 
 	let creditingId = $state<string | null>(null);
 	let creditError = $state<string | null>(null);
@@ -196,7 +221,7 @@
 				class:active={tab === 'clients'}
 				onclick={() => (tab = 'clients')}
 			>
-				Clienți <span class="hc-tab-count">{data.rows.length}</span>
+				Clienți <span class="hc-tab-count">{listed.length}</span>
 			</button>
 			<button
 				type="button"
@@ -266,16 +291,39 @@
 						onclick={() => (filter = 'low')}>Sub prag</button
 					>
 				</div>
+				<div class="hc-seg" role="group" aria-label="Ce clienți apar în listă">
+					<button
+						type="button"
+						class:active={!showAllClients}
+						aria-pressed={!showAllClients}
+						title="Clienții cu buget de ore și cei facturați în ultimele {data.recentInvoiceMonths} luni"
+						onclick={() => (showAllClients = false)}
+					>
+						Activi <span class="hc-tab-count">{data.rows.length - hiddenAll}</span>
+					</button>
+					<button
+						type="button"
+						class:active={showAllClients}
+						aria-pressed={showAllClients}
+						title="Toți clienții activi, inclusiv cei nefacturați recent"
+						onclick={() => (showAllClients = true)}
+					>
+						Toți clienții <span class="hc-tab-count">{data.rows.length}</span>
+					</button>
+				</div>
 				<div class="hc-spacer"></div>
 				<HcLegend />
 			</div>
+			{#if toggleError}
+				<div class="hc-error">{toggleError}</div>
+			{/if}
 
 			{#if rows.length === 0}
 				<div class="hc-tablecard">
 					<div class="hc-empty">
 						<b>Niciun client pe acest filtru</b>
-						{#if data.rows.length === 0}
-							Bifează „Facturile plătite alimentează creditul" în fișa unui client sau adaugă ore
+						{#if listed.length === 0}
+							Niciun client cu buget sau facturat recent. Vezi „Toți clienții" sau adaugă ore
 							manual.
 						{:else}
 							Schimbă filtrul sau caută alt nume.
@@ -290,6 +338,10 @@
 							thresholdMinutes={data.lowCreditThresholdMinutes}
 							referenceLabel={data.reference?.label ?? null}
 							href="/{tenantSlug}/hour-credits/{row.clientId}"
+							onToggleOptIn={data.canEdit
+								? (enabled: boolean) => toggleOptIn(row.clientId, enabled)
+								: null}
+							toggling={togglingId === row.clientId}
 						/>
 					{/each}
 				</div>

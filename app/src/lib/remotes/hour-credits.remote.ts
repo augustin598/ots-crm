@@ -18,6 +18,7 @@ import {
 	creditPaidHoursOrder,
 	creditPaidInvoice,
 	getClientHourCredit,
+	RECENT_INVOICE_MONTHS,
 	getHourCreditsOverview,
 	getMonthlyReport,
 	listClientCreditTasks,
@@ -107,18 +108,21 @@ export const getHourCreditsPage = query(async () => {
 	const endOfMonth = new Date(
 		Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)
 	);
-	const lowRows = withReserved.filter((r) => r.balanceMinutes - r.reservedMinutes < threshold);
+	// Clienții activi fără buget sunt în listă doar pentru bifă — altfel toți ar
+	// umfla „pe N clienți" și ar apărea „sub prag" cu sold 0.
+	const trackedRows = withReserved.filter((r) => r.tracked);
+	const lowRows = trackedRows.filter((r) => r.balanceMinutes - r.reservedMinutes < threshold);
 	const kpis = {
-		totalBalanceMinutes: withReserved.reduce((s, r) => s + r.balanceMinutes, 0),
-		totalReservedMinutes: withReserved.reduce((s, r) => s + r.reservedMinutes, 0),
-		clientCount: withReserved.length,
+		totalBalanceMinutes: trackedRows.reduce((s, r) => s + r.balanceMinutes, 0),
+		totalReservedMinutes: trackedRows.reduce((s, r) => s + r.reservedMinutes, 0),
+		clientCount: trackedRows.length,
 		lowCount: lowRows.length,
 		negativeCount: lowRows.filter((r) => r.balanceMinutes < 0).length,
-		expiringThisMonthMinutes: withReserved.reduce(
+		expiringThisMonthMinutes: trackedRows.reduce(
 			(s, r) => (r.expiring && r.expiring.on < endOfMonth ? s + r.expiring.minutes : s),
 			0
 		),
-		expiringClientCount: withReserved.filter((r) => r.expiring && r.expiring.on < endOfMonth).length
+		expiringClientCount: trackedRows.filter((r) => r.expiring && r.expiring.on < endOfMonth).length
 	};
 
 	return {
@@ -129,6 +133,7 @@ export const getHourCreditsPage = query(async () => {
 		kpis,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		lowCreditThresholdMinutes: threshold,
+		recentInvoiceMonths: RECENT_INVOICE_MONTHS,
 		canEdit: role === 'owner' || role === 'admin'
 	};
 });

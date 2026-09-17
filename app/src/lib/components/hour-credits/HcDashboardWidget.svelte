@@ -12,7 +12,9 @@
 	const data = $derived(await getHourCreditsPage());
 	const low = $derived(
 		data.rows
-			.filter((r) => r.balanceMinutes - r.reservedMinutes < data.lowCreditThresholdMinutes)
+			.filter(
+				(r) => r.tracked && r.balanceMinutes - r.reservedMinutes < data.lowCreditThresholdMinutes
+			)
 			.slice(0, 3)
 	);
 </script>

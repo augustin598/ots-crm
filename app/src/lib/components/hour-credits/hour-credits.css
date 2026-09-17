@@ -272,7 +272,7 @@
 .hc-seg button:focus-visible,
 .hc-switch:focus-visible,
 .hc-mode:focus-visible,
-.hc-row:focus-visible {
+.hc-row:has(.hc-row-link:focus-visible) {
 	outline: 2px solid var(--cl-accent);
 	outline-offset: 2px;
 }
@@ -463,6 +463,15 @@
 	color: var(--cl-text);
 	box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
+.hc-seg button:has(.hc-tab-count) {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+.hc-seg button.active .hc-tab-count {
+	background: var(--hc-info-bg);
+	color: var(--hc-info-fg);
+}
 .hc-spacer {
 	flex: 1;
 }
@@ -524,6 +533,35 @@
 }
 .hc-row.low {
 	border-left: 3px solid var(--hc-err);
+}
+.hc-row {
+	position: relative;
+}
+.hc-row-link {
+	display: block;
+	text-decoration: none;
+	outline: none;
+}
+/* Tot rândul rămâne clicabil spre fișa clientului. */
+.hc-row-link::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: 16px;
+}
+.hc-rowopt {
+	position: relative;
+	z-index: 1;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--hc-muted);
+	cursor: pointer;
+}
+.hc-row.untracked .hc-bal-v {
+	color: var(--hc-muted);
 }
 @media (max-width: 1080px) {
 	.hc-row {
