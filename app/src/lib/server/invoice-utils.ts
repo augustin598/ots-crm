@@ -19,6 +19,7 @@ import {
 	appendZeroVatNote
 } from '$lib/server/whmcs/zero-vat-detection';
 import { getLatestBnrRateWithDate } from '$lib/server/bnr/client';
+import { nextScheduledRunDate } from '$lib/server/recurring-schedule';
 
 /** Returns the rate to use (in cents), applying drift guard if Keez price differs >20% from template. */
 export function applyKeezDriftGuard(liveRateCents: number, templateRateCents: number): { rate: number; driftDetected: boolean } {
@@ -349,6 +350,13 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 			)
 			.limit(1);
 		hostingAccount = ha ?? null;
+	}
+	// Barieră: un cont terminat/anulat nu mai primește facturi, chiar dacă șablonul
+	// a rămas activ (terminări făcute înainte ca terminate să dezactiveze șablonul).
+	if (hostingAccount?.status === 'terminated' || hostingAccount?.status === 'cancelled') {
+		throw new Error(
+			`Contul de hosting ${hostingAccount.domain} este ${hostingAccount.status} — șablonul recurent nu mai emite facturi. Dezactivează șablonul.`
+		);
 	}
 	const periodStart = new Date(recurringInvoice.nextRunDate);
 	const periodEnd = calculateNextRunDate(
@@ -798,10 +806,13 @@ export async function generateInvoiceFromRecurringTemplate(recurringInvoiceId: s
 	// Wrap invoice + line items + recurring update in a transaction
 	const previousLastRunDate = recurringInvoice.lastRunDate;
 	const previousNextRunDate = recurringInvoice.nextRunDate;
-	const nextRunDate = calculateNextRunDate(
-		now,
+	// Din data PROGRAMATĂ, nu din `now`: ora generării nu mai intră în șablon și o
+	// rulare întârziată nu mută ziua de facturare (recurring-schedule.ts).
+	const nextRunDate = nextScheduledRunDate(
+		recurringInvoice.nextRunDate,
 		recurringInvoice.recurringType,
-		recurringInvoice.recurringInterval
+		recurringInvoice.recurringInterval,
+		now
 	);
 
 	await db.transaction(async (tx) => {

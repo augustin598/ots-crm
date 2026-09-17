@@ -5,6 +5,7 @@ import { generateInvoiceFromRecurringTemplate } from '../../invoice-utils';
 import { sendInvoiceEmail, getNotificationRecipients } from '../../email';
 import { logInfo, logWarning, logError, serializeError } from '$lib/server/logger';
 import { isProductionInstance } from '$lib/server/runtime-env';
+import { dueCutoffIso } from '$lib/server/recurring-schedule';
 
 /**
  * Process recurring invoices - finds active recurring invoices that are due
@@ -20,10 +21,12 @@ export async function processRecurringInvoices(params: Record<string, any> = {})
 		const now = new Date();
 		logInfo('scheduler', `Recurring invoices: checking at ${now.toISOString()}`, { action: 'recurring_start' });
 
-		// Find all active recurring invoices where nextRunDate <= now
+		// Scadente = programate până la finalul zilei curente (București), nu până la
+		// milisecunda de pornire a jobului: un nextRunDate cu ora 06:00:04Z sărea o zi
+		// când jobul pornea la 06:00:00Z (incident 2026-09-17, vezi recurring-schedule.ts).
 		const conditions = [
 			eq(table.recurringInvoice.isActive, true),
-			sql`${table.recurringInvoice.nextRunDate} <= ${now.toISOString()}`
+			sql`${table.recurringInvoice.nextRunDate} <= ${dueCutoffIso(now)}`
 		];
 
 		const recurringInvoices = await db
