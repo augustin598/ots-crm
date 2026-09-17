@@ -433,6 +433,8 @@ describe('consumul task-urilor', () => {
 			status: 'settled',
 			consumedMinutes: 180,
 			overageRealMinutes: 0,
+			invoicedMinutes: 0,
+			surplusMinutes: 0,
 			overageInvoiceId: null
 		});
 		expect(await balance()).toBe(600 - 180);
@@ -500,7 +502,7 @@ describe('consumul task-urilor', () => {
 		]);
 	});
 
-	test('linia de depășire: suma vine din minute (10 min × 65 € = 10,83 €, nu 11,05 €)', async () => {
+	test('depășire de 10 min (pas 10): o oră facturată (65 €), 50 min rămân credit', async () => {
 		// Pas 10 ca să existe o depășire de 10 min; la final revine la 15.
 		const setStep = (stepMinutes: number) =>
 			testDb
@@ -515,24 +517,30 @@ describe('consumul task-urilor', () => {
 			await insertTask('t-amt', { estimatedMinutes: 10, actualMinutes: 10 });
 			const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-amt', userId: USER });
 			if (r.status !== 'settled' || !r.overageInvoiceId) throw new Error('fără draft');
+			expect(r.overageRealMinutes).toBe(10);
+			expect(r.invoicedMinutes).toBe(60);
+			expect(r.surplusMinutes).toBe(50);
 			const [line] = await testDb
 				.select()
 				.from(table.invoiceLineItem)
 				.where(eq(table.invoiceLineItem.taskId, 't-amt'));
-			expect(line.amount).toBe(1083);
-			// 10 min = 0,1666… h: cantitatea nu se poate scrie exact cu 2 zecimale →
-			// linia pleacă pe forma „1 × suma", ca Keez să refacă exact aceeași sumă.
+			// Nicio linie „la minut": 1 h × 65 €, UM oră — forma „1 × suma"/Buc nu mai apare.
+			expect(line.amount).toBe(6500);
 			expect(line.quantity).toBe(1);
-			expect(line.rate).toBe(1083);
-			expect(line.unitOfMeasure).toBe('Buc');
-			expect(Math.round(line.quantity * line.rate)).toBe(line.amount);
-			expect(line.note).toContain('10 min × 65 €/h');
+			expect(line.rate).toBe(6500);
+			expect(line.unitOfMeasure).toBe('Ora');
+			expect(line.quantity * line.rate).toBe(line.amount);
+			expect(line.note).toContain('1 h × 65 €/h');
+			expect(line.note).toContain('10 min peste credit');
+			expect(await balance()).toBe(50);
+			expect(await ledgerKinds()).toEqual(['overage_invoiced:0', 'purchase:50']);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
 		} finally {
 			await setStep(15);
 		}
 	});
 
-	test('linia de depășire de 50 min: cantitate × preț === sumă (54,17 €, nu 0,83 h × 65 € = 53,95 €)', async () => {
+	test('depășire de 50 min: o oră facturată (65 €, nu 54,17 €), 10 min rămân credit', async () => {
 		const setStep = (stepMinutes: number) =>
 			testDb
 				.insert(table.hourCreditSettings)
@@ -557,20 +565,26 @@ describe('consumul task-urilor', () => {
 			if (r.status !== 'settled' || !r.overageInvoiceId) throw new Error('fără draft');
 			expect(r.consumedMinutes).toBe(100);
 			expect(r.overageRealMinutes).toBe(50);
+			expect(r.invoicedMinutes).toBe(60);
+			expect(r.surplusMinutes).toBe(10);
 			const [line] = await testDb
 				.select()
 				.from(table.invoiceLineItem)
 				.where(eq(table.invoiceLineItem.taskId, 't-50'));
-			expect(line.amount).toBe(5417);
+			expect(line.amount).toBe(6500);
+			expect(line.quantity).toBe(1);
 			expect(line.quantity * line.rate).toBe(line.amount);
 			expect(line.description).toContain('Task t-50');
-			expect(line.note).toContain('50 min × 65 €/h');
+			expect(line.note).toContain('1 h × 65 €/h');
+			expect(line.note).toContain('50 min peste credit');
 			expect(line.note).toContain('task t-50');
 			const [draft] = await testDb
 				.select()
 				.from(table.invoice)
 				.where(eq(table.invoice.id, r.overageInvoiceId));
-			expect(draft.amount).toBe(5417);
+			expect(draft.amount).toBe(6500);
+			expect(await balance()).toBe(10);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
 		} finally {
 			await setStep(15);
 		}
@@ -625,7 +639,7 @@ describe('consumul task-urilor', () => {
 		expect(await balance()).toBe(0);
 
 		const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 'task-5', userId: USER });
-		expect(rev).toEqual({ reversedMinutes: 60 });
+		expect(rev).toEqual({ reversedMinutes: 60, surplusReversedMinutes: 0 });
 		expect(await balance()).toBe(60);
 		expect(await testDb.select().from(table.invoice)).toHaveLength(0);
 		expect(await testDb.select().from(table.invoiceLineItem)).toHaveLength(0);
@@ -667,7 +681,7 @@ describe('consumul task-urilor', () => {
 
 		// Reopen-ul ciclului 2 nu are ce storna: nimic nu s-a scăzut.
 		const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 'task-cycle', userId: USER });
-		expect(rev).toEqual({ reversedMinutes: 0 });
+		expect(rev).toEqual({ reversedMinutes: 0, surplusReversedMinutes: 0 });
 		expect(await balance()).toBe(0);
 	});
 
@@ -758,7 +772,7 @@ describe('consumul task-urilor', () => {
 		expect((await listUnsettledDoneTasks(TENANT)).map((t) => t.taskId)).toContain('t-d8');
 	});
 
-	test('timpul lucrat se rotunjește o singură dată: 142 min cu sold 100 → 100 din credit, 50 depășire', async () => {
+	test('timpul lucrat se rotunjește o singură dată: 142 min cu sold 100 → 100 din credit, 50 depășire → 1 h facturată, 10 min credit', async () => {
 		await applyLedgerEntry({
 			tenantId: TENANT,
 			clientId: CLIENT,
@@ -774,7 +788,9 @@ describe('consumul task-urilor', () => {
 		if (r.status !== 'settled') return;
 		expect(r.consumedMinutes).toBe(100);
 		expect(r.overageRealMinutes).toBe(50);
-		expect(await balance()).toBe(0);
+		expect(r.invoicedMinutes).toBe(60);
+		expect(r.surplusMinutes).toBe(10);
+		expect(await balance()).toBe(10);
 		const rows = await testDb
 			.select()
 			.from(table.clientHourLedger)
@@ -784,17 +800,36 @@ describe('consumul task-urilor', () => {
 		expect(consumption?.realMinutes).toBe(142);
 		const overage = rows.find((x) => x.kind === 'overage_invoiced');
 		expect(overage?.deltaMinutes).toBe(0);
-		expect(overage?.realMinutes).toBe(50);
+		// Urma ține ce e pe factură (ore întregi), nu minutele lucrate peste credit.
+		expect(overage?.realMinutes).toBe(60);
+		expect(overage?.note).toBe('Task t-round — 50 min peste credit, facturate 1 h');
+		const [surplus] = await testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(eq(table.clientHourLedger.sourceId, overage!.id));
+		expect(surplus.kind).toBe('purchase');
+		expect(surplus.sourceType).toBe('ledger');
+		expect(surplus.deltaMinutes).toBe(10);
+		expect(surplus.realMinutes).toBe(10);
+		expect(surplus.rateSlug).toBe('development');
+		expect(surplus.modeSlug).toBe('standard');
+		expect(surplus.rateEurSnapshot).toBe(65);
+		expect(surplus.multiplierPctSnapshot).toBe(100);
+		expect(surplus.createdByUserId).toBe(USER);
+		expect(surplus.note).toBe(
+			'Task t-round — 1 h facturate, 50 min folosite, 10 min rămân credit'
+		);
 	});
 
-	test('sold 0: 7 min lucrate → nimic din credit, 15 min depășire, soldul rămâne 0', async () => {
+	test('sold 0: 7 min lucrate → nimic din credit, 15 min depășire → 1 h facturată, sold 45', async () => {
 		await insertTask('t-zero', { actualMinutes: 7 });
 		const r = await settleTaskCredit({ tenantId: TENANT, taskId: 't-zero', userId: USER });
 		expect(r.status).toBe('settled');
 		if (r.status !== 'settled') return;
 		expect(r.consumedMinutes).toBe(0);
 		expect(r.overageRealMinutes).toBe(15);
-		expect(await balance()).toBe(0);
+		expect(r.invoicedMinutes).toBe(60);
+		expect(await balance()).toBe(45);
 	});
 
 	test('sold negativ (−20): 60 min lucrate → nimic din credit, 60 min depășire, soldul rămâne −20', async () => {
@@ -1210,7 +1245,7 @@ describe('depășirea: ferestre dintre consum și draft', () => {
 		// Depășirea NU se pierde: rândul de urmă există și taskul apare ca nefacturat.
 		expect(await ledgerKinds()).toContain('overage_invoiced:0');
 		const unbilled = await listUnbilledOverages(TENANT);
-		expect(unbilled.map((u) => [u.taskId, u.overageRealMinutes])).toEqual([['task-fail', 180]]);
+		expect(unbilled.map((u) => [u.taskId, u.invoicedMinutes])).toEqual([['task-fail', 180]]);
 
 		const regen = await regenerateOverageDraft({ tenantId: TENANT, taskId: 'task-fail' });
 		expect(regen.status).toBe('billed');
@@ -1272,6 +1307,455 @@ describe('depășirea: ferestre dintre consum și draft', () => {
 		const rows = await listUnsettledDoneTasks(TENANT);
 		expect(rows.map((r) => r.taskId)).toEqual(['task-done-open']);
 		expect(rows[0].clientName).toBe('Lucky Group');
+	});
+});
+
+describe('depășirea în ore întregi, surplusul rămâne credit (addendum 17 sep 2026)', () => {
+	const DAY = 86_400_000;
+
+	async function seed(minutes: number, sourceId = 'seed-wh') {
+		if (minutes === 0) return;
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: minutes,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId,
+			note: 'seed test'
+		});
+	}
+	async function ledgerRows() {
+		return testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(eq(table.clientHourLedger.clientId, CLIENT));
+	}
+	async function overageLines(taskId?: string) {
+		const rows = await testDb.select().from(table.invoiceLineItem);
+		return taskId ? rows.filter((l) => l.taskId === taskId) : rows;
+	}
+	async function settle(taskId: string) {
+		const r = await settleTaskCredit({ tenantId: TENANT, taskId, userId: USER });
+		if (r.status !== 'settled') throw new Error(`nedecontat: ${JSON.stringify(r)}`);
+		return r;
+	}
+	async function setExpiryDays(days: number) {
+		await testDb
+			.insert(table.hourCreditSettings)
+			.values({ id: 'hcs-int', tenantId: TENANT, creditExpiryDays: days })
+			.onConflictDoUpdate({
+				target: table.hourCreditSettings.tenantId,
+				set: { creditExpiryDays: days, creditExpiryEnabledAt: null }
+			});
+	}
+
+	// sold, lucrat → din credit, depășire, facturat, sold după (tabelul din addendum)
+	const TABLE: Array<[number, number, number, number, number, number]> = [
+		[120, 150, 120, 30, 60, 30],
+		[0, 15, 0, 15, 60, 45],
+		[60, 195, 60, 135, 180, 45],
+		[300, 150, 150, 0, 0, 150],
+		[-20, 60, 0, 60, 60, -20]
+	];
+	for (const [start, worked, consumed, overage, invoiced, after] of TABLE) {
+		test(`sold ${start}, lucrat ${worked} → din credit ${consumed}, depășire ${overage}, facturat ${invoiced}, sold după ${after}`, async () => {
+			await seed(start);
+			await insertTask('t-wh', { estimatedMinutes: worked, actualMinutes: worked });
+			const r = await settle('t-wh');
+			const surplus = invoiced - overage;
+			expect(r.consumedMinutes).toBe(consumed);
+			expect(r.overageRealMinutes).toBe(overage);
+			expect(r.invoicedMinutes).toBe(invoiced);
+			expect(r.surplusMinutes).toBe(surplus);
+			// Invariant 18.
+			expect(await balance()).toBe(after);
+			expect(after).toBe(start - consumed + surplus);
+
+			// Ledger: consum (dacă a existat credit), urma depășirii, surplus (dacă există).
+			const rows = await ledgerRows();
+			const kinds = rows.filter((x) => x.kind !== 'manual').map((x) => `${x.kind}:${x.deltaMinutes}`);
+			expect(kinds).toEqual([
+				...(consumed > 0 ? [`task_consumption:-${consumed}`] : []),
+				...(overage > 0 ? ['overage_invoiced:0'] : []),
+				...(surplus > 0 ? [`purchase:${surplus}`] : [])
+			]);
+			const trace = rows.find((x) => x.kind === 'overage_invoiced');
+			if (overage > 0) {
+				// Invariant 17 + urma ține ce e pe factură.
+				expect(trace!.realMinutes).toBe(invoiced);
+				expect(invoiced % 60).toBe(0);
+				expect(surplus).toBeGreaterThanOrEqual(0);
+				expect(surplus).toBeLessThan(60);
+				expect(trace!.note).toBe(
+					`Task t-wh — ${overage} min peste credit, facturate ${invoiced / 60} h`
+				);
+			}
+			const surplusRow = rows.find((x) => x.kind === 'purchase');
+			if (surplus > 0) {
+				expect(surplusRow!.sourceType).toBe('ledger');
+				expect(surplusRow!.sourceId).toBe(trace!.id);
+				expect(surplusRow!.realMinutes).toBe(surplus);
+				expect(surplusRow!.note).toBe(
+					`Task t-wh — ${invoiced / 60} h facturate, ${overage} min folosite, ${surplus} min rămân credit`
+				);
+			} else {
+				expect(surplusRow).toBeUndefined();
+			}
+
+			// Invariant 19: linia are cantitate întreagă, UM oră și cantitate × tarif === sumă.
+			const lines = await overageLines('t-wh');
+			const drafts = await testDb.select().from(table.invoice);
+			if (overage === 0) {
+				expect(lines).toEqual([]);
+				expect(drafts).toEqual([]);
+			} else {
+				expect(lines).toHaveLength(1);
+				const [line] = lines;
+				expect(line.quantity).toBe(invoiced / 60);
+				expect(Number.isInteger(line.quantity)).toBe(true);
+				expect(line.rate).toBe(6500);
+				expect(line.unitOfMeasure).toBe('Ora');
+				expect(line.quantity * line.rate).toBe(line.amount);
+				expect(drafts).toHaveLength(1);
+				expect(drafts[0].amount).toBe(line.amount);
+				expect(drafts[0].taxAmount).toBe(Math.round((line.amount! * 2100) / 10000));
+				expect(drafts[0].totalAmount).toBe(line.amount! + drafts[0].taxAmount!);
+			}
+			// Invariant 21.
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+		});
+	}
+
+	test('exemplul owner-ului: sold 2 h, lucrat 2 h 30 → factură 1 h, sold 30 min', async () => {
+		await seed(120);
+		await insertTask('t-owner', { actualMinutes: 150 });
+		const r = await settle('t-owner');
+		expect([r.consumedMinutes, r.overageRealMinutes, r.invoicedMinutes, r.surplusMinutes]).toEqual(
+			[120, 30, 60, 30]
+		);
+		expect(await balance()).toBe(30);
+		const [line] = await overageLines('t-owner');
+		expect([line.quantity, line.rate, line.amount]).toEqual([1, 6500, 6500]);
+	});
+
+	test('regimul intră în prețul orei întregi: urgență +50% → 1 h × 98 €', async () => {
+		const catalog = await getHourlyCatalog(TENANT, { includeInactive: true });
+		const urgent = catalog.modes.find((m) => m.multiplierPct > 100);
+		if (!urgent) throw new Error('catalogul de test nu are regim cu supliment');
+		await insertTask('t-mode', { actualMinutes: 20, modeSlug: urgent.slug });
+		const r = await settle('t-mode');
+		expect(r.invoicedMinutes).toBe(60);
+		const [line] = await overageLines('t-mode');
+		expect(line.quantity).toBe(1);
+		expect(Number.isInteger(line.rate)).toBe(true);
+		expect(line.rate).toBeGreaterThan(6500);
+		expect(line.quantity * line.rate).toBe(line.amount);
+		const surplusRow = (await ledgerRows()).find((x) => x.kind === 'purchase');
+		expect(surplusRow!.modeSlug).toBe(urgent.slug);
+		expect(surplusRow!.multiplierPctSnapshot).toBe(urgent.multiplierPct);
+	});
+
+	test('al doilea task al lunii consumă întâi surplusul; fiecare depășire e o linie, rotunjită la oră', async () => {
+		await insertTask('t-a', { actualMinutes: 15 });
+		await insertTask('t-b', { actualMinutes: 30 });
+		await insertTask('t-c', { actualMinutes: 30 });
+		await settle('t-a'); // 15 peste credit → 1 h facturată, 45 rămân
+		expect(await balance()).toBe(45);
+
+		const b = await settle('t-b'); // 30 din surplus, fără factură
+		expect([b.consumedMinutes, b.overageRealMinutes, b.invoicedMinutes]).toEqual([30, 0, 0]);
+		expect(b.overageInvoiceId).toBeNull();
+		expect(await balance()).toBe(15);
+
+		const c = await settle('t-c'); // 15 din surplus, 15 peste → încă 1 h, 45 rămân
+		expect([c.consumedMinutes, c.overageRealMinutes, c.invoicedMinutes, c.surplusMinutes]).toEqual(
+			[15, 15, 60, 45]
+		);
+		expect(await balance()).toBe(45);
+
+		const drafts = await testDb.select().from(table.invoice);
+		expect(drafts).toHaveLength(1);
+		const lines = await overageLines();
+		expect(lines.map((l) => [l.taskId, l.quantity, l.amount]).sort()).toEqual([
+			['t-a', 1, 6500],
+			['t-c', 1, 6500]
+		]);
+		expect(drafts[0].amount).toBe(13000);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('invariant 20: Done → reopen readuce soldul exact la valoarea dinainte și scoate linia', async () => {
+		for (const [start, worked] of [
+			[120, 150],
+			[0, 15],
+			[60, 195],
+			[-20, 60]
+		]) {
+			await testDb.delete(table.invoiceLineItem);
+			await testDb.delete(table.invoice);
+			await testDb.delete(table.clientHourLedger);
+			await testDb.delete(table.task);
+			await testDb
+				.update(table.client)
+				.set({ hourCreditMinutes: 0 })
+				.where(eq(table.client.id, CLIENT));
+			await seed(start, `seed-${start}`);
+			await insertTask('t-re', { actualMinutes: worked });
+			const r = await settle('t-re');
+			const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 't-re', userId: USER });
+			expect(rev).toEqual({
+				reversedMinutes: r.consumedMinutes,
+				surplusReversedMinutes: r.surplusMinutes
+			});
+			expect(await balance()).toBe(start);
+			expect(await overageLines()).toEqual([]);
+			expect(await testDb.select().from(table.invoice)).toEqual([]);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+			if (r.surplusMinutes > 0) {
+				const rows = await ledgerRows();
+				const surplusRow = rows.find((x) => x.kind === 'purchase')!;
+				const reversal = rows.find((x) => x.kind === 'purchase_reversal')!;
+				expect(reversal.deltaMinutes).toBe(-r.surplusMinutes);
+				expect(reversal.sourceType).toBe(surplusRow.sourceType);
+				expect(reversal.sourceId).toBe(surplusRow.sourceId);
+			}
+		}
+	});
+
+	test('re-Done după reopen: ciclul nou are urma și surplusul LUI (indexul unic nu se lovește)', async () => {
+		await insertTask('t-cycle2', { actualMinutes: 15 });
+		await settle('t-cycle2');
+		await reverseTaskCredit({ tenantId: TENANT, taskId: 't-cycle2', userId: USER });
+		expect(await balance()).toBe(0);
+		const again = await settle('t-cycle2');
+		expect(again.surplusMinutes).toBe(45);
+		expect(await balance()).toBe(45);
+		expect(await overageLines('t-cycle2')).toHaveLength(1);
+		const rows = await ledgerRows();
+		expect(rows.filter((x) => x.kind === 'purchase')).toHaveLength(2);
+		expect(new Set(rows.filter((x) => x.kind === 'purchase').map((x) => x.sourceId)).size).toBe(2);
+		// Al doilea reopen retrage doar surplusul ciclului 2.
+		const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 't-cycle2', userId: USER });
+		expect(rev).toEqual({ reversedMinutes: 0, surplusReversedMinutes: 45 });
+		expect(await balance()).toBe(0);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('reopen după ce surplusul a fost consumat de alt task → sold negativ; Done-ul următor facturează', async () => {
+		await insertTask('t-src', { actualMinutes: 15 });
+		await insertTask('t-eat', { actualMinutes: 45 });
+		await settle('t-src'); // +45 surplus
+		const eat = await settle('t-eat'); // consumă tot surplusul
+		expect([eat.consumedMinutes, eat.overageRealMinutes]).toEqual([45, 0]);
+		expect(await balance()).toBe(0);
+
+		const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 't-src', userId: USER });
+		expect(rev).toEqual({ reversedMinutes: 0, surplusReversedMinutes: 45 });
+		expect(await balance()).toBe(-45);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+		// Soldul negativ e tratat ca 0: nimic din credit, totul facturat în ore întregi.
+		const next = await settle('t-src');
+		expect([next.consumedMinutes, next.overageRealMinutes, next.invoicedMinutes]).toEqual([
+			0, 15, 60
+		]);
+		expect(await balance()).toBe(0); // −45 + 45 surplus
+		expect(await overageLines('t-src')).toHaveLength(1);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('idempotență: al doilea Done nu scrie alt surplus; două reopen simultane îl retrag o singură dată', async () => {
+		await seed(120);
+		await insertTask('t-idem', { actualMinutes: 150 });
+		// Done-urile sunt secvențiale. Pe clientul libSQL LOCAL (fișier), un BEGIN IMMEDIATE
+		// picat cu SQLITE_BUSY lasă pe conexiunea comună o instrucțiune neterminată: COMMIT-ul
+		// liniei pică apoi cu „SQL statements in progress", iar rollback-ul ia cu el și draftul
+		// abia inserat. Se întâmplă și fără surplus (artefact al clientului de test; prod merge
+		// pe Turso remote). Cursa pe revendicare e acoperită de „două Done simultane".
+		await settle('t-idem');
+		expect(await balance()).toBe(30);
+		const third = await settleTaskCredit({ tenantId: TENANT, taskId: 't-idem', userId: USER });
+		expect(third).toEqual({ status: 'skipped', reason: 'deja decontat' });
+		expect((await ledgerKinds()).filter((k) => k.startsWith('purchase'))).toEqual(['purchase:30']);
+		expect(await overageLines('t-idem')).toHaveLength(1);
+
+		const reopened = await Promise.all([
+			reverseTaskCredit({ tenantId: TENANT, taskId: 't-idem', userId: USER }),
+			reverseTaskCredit({ tenantId: TENANT, taskId: 't-idem', userId: USER })
+		]);
+		expect(reopened.filter((x) => x !== null)).toEqual([
+			{ reversedMinutes: 120, surplusReversedMinutes: 30 }
+		]);
+		expect(
+			await reverseTaskCredit({ tenantId: TENANT, taskId: 't-idem', userId: USER })
+		).toBeNull();
+		expect(await balance()).toBe(120);
+		expect((await ledgerKinds()).filter((k) => k.startsWith('purchase'))).toEqual([
+			'purchase:30',
+			'purchase_reversal:-30'
+		]);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('draft picat după consum: surplusul e deja în credit, iar „Regenerează" facturează orele întregi fără al doilea surplus', async () => {
+		await insertTask('t-regen', { actualMinutes: 75 });
+		beforeInvoiceNumber = async () => {
+			throw new Error('numerotare indisponibilă');
+		};
+		const r = await settle('t-regen');
+		expect(r.overageInvoiceId).toBeNull();
+		expect([r.overageRealMinutes, r.invoicedMinutes, r.surplusMinutes]).toEqual([75, 120, 45]);
+		expect(await balance()).toBe(45);
+		expect((await listUnbilledOverages(TENANT)).map((u) => [u.taskId, u.invoicedMinutes])).toEqual(
+			[['t-regen', 120]]
+		);
+
+		const regen = await regenerateOverageDraft({ tenantId: TENANT, taskId: 't-regen' });
+		expect(regen.status).toBe('billed');
+		const [line] = await overageLines('t-regen');
+		expect([line.quantity, line.rate, line.amount]).toEqual([2, 6500, 13000]);
+		expect(line.note).toContain('75 min peste credit');
+		expect(await balance()).toBe(45);
+		expect((await ledgerKinds()).filter((k) => k.startsWith('purchase'))).toEqual(['purchase:45']);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('urmă MOȘTENITĂ (minute exacte): „Regenerează" facturează ora întreagă și creditează surplusul o singură dată', async () => {
+		// Starea lăsată de codul dinainte de 17 sep: task decontat, urmă de 50 min, fără linie.
+		const settledAt = new Date(Date.now() - 60_000);
+		await insertTask('t-legacy', { actualMinutes: 142, creditSettledAt: settledAt, status: 'done' });
+		await testDb.insert(table.clientHourLedger).values({
+			id: 'ov-legacy',
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 0,
+			kind: 'overage_invoiced',
+			sourceType: 'task',
+			sourceId: 't-legacy',
+			note: 'Task t-legacy — 50 min peste credit',
+			referenceRateEurSnapshot: 55,
+			rateSlug: 'development',
+			modeSlug: 'standard',
+			rateEurSnapshot: 65,
+			multiplierPctSnapshot: 100,
+			realMinutes: 50,
+			createdAt: settledAt
+		});
+		expect((await listUnbilledOverages(TENANT)).map((u) => u.invoicedMinutes)).toEqual([60]);
+
+		// Prima încercare pică la draft: surplusul a intrat, linia nu. Reluarea nu-l dublează.
+		beforeInvoiceNumber = async () => {
+			throw new Error('numerotare indisponibilă');
+		};
+		await expect(
+			regenerateOverageDraft({ tenantId: TENANT, taskId: 't-legacy' })
+		).rejects.toThrow('numerotare indisponibilă');
+		expect(await balance()).toBe(10);
+
+		const regen = await regenerateOverageDraft({ tenantId: TENANT, taskId: 't-legacy' });
+		expect(regen.status).toBe('billed');
+		const [line] = await overageLines('t-legacy');
+		expect([line.quantity, line.rate, line.amount, line.unitOfMeasure]).toEqual([
+			1,
+			6500,
+			6500,
+			'Ora'
+		]);
+		expect(await balance()).toBe(10);
+		const surplusRows = (await ledgerRows()).filter((x) => x.kind === 'purchase');
+		expect(surplusRows).toHaveLength(1);
+		expect(surplusRows[0].sourceType).toBe('ledger');
+		expect(surplusRows[0].sourceId).toBe('ov-legacy');
+		expect(surplusRows[0].deltaMinutes).toBe(10);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+
+		// Reopen-ul retrage și surplusul moștenit.
+		const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 't-legacy', userId: USER });
+		expect(rev).toEqual({ reversedMinutes: 0, surplusReversedMinutes: 10 });
+		expect(await balance()).toBe(0);
+		expect(await overageLines('t-legacy')).toEqual([]);
+		expect(await findHourCreditDrift(TENANT)).toEqual([]);
+	});
+
+	test('expirare: surplusul primește termenul tenantului, expiră ca orice credit, iar reopen-ul nu-l mai scoate a doua oară', async () => {
+		await setExpiryDays(30);
+		try {
+			await insertTask('t-exp-s', { actualMinutes: 15 });
+			const before = Date.now();
+			await settle('t-exp-s');
+			const surplusRow = (await ledgerRows()).find((x) => x.kind === 'purchase')!;
+			const days = (surplusRow.expiresAt!.getTime() - before) / DAY;
+			expect(days).toBeGreaterThan(29.9);
+			expect(days).toBeLessThan(30.1);
+
+			// Încă în termen: nimic de expirat.
+			expect((await processHourCreditExpiry({ tenantId: TENANT })).minutesExpired).toBe(0);
+			// Termenul trece.
+			await testDb
+				.update(table.clientHourLedger)
+				.set({ expiresAt: new Date(Date.now() - DAY) })
+				.where(eq(table.clientHourLedger.id, surplusRow.id));
+			const run = await processHourCreditExpiry({ tenantId: TENANT });
+			expect(run.minutesExpired).toBe(45);
+			expect(await balance()).toBe(0);
+			const expire = (await ledgerRows()).find((x) => x.kind === 'expire')!;
+			expect(expire.sourceId).toBe(surplusRow.id);
+
+			// Reopen după expirare: surplusul nu mai e în sold, deci nu se retrage iar.
+			const rev = await reverseTaskCredit({ tenantId: TENANT, taskId: 't-exp-s', userId: USER });
+			expect(rev).toEqual({ reversedMinutes: 0, surplusReversedMinutes: 0 });
+			expect(await balance()).toBe(0);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+		} finally {
+			await setExpiryDays(0);
+		}
+	});
+
+	test('expirare: `purchase_reversal` lovește lotul de surplus, nu lotul care expiră primul', async () => {
+		await setExpiryDays(30);
+		try {
+			// Lot cu termen apropiat, neatins de task (taskul n-are credit când se decontează).
+			await insertTask('t-exp-r', { actualMinutes: 15 });
+			await settle('t-exp-r'); // +45 surplus, termen peste 30 de zile
+			await applyLedgerEntry({
+				tenantId: TENANT,
+				clientId: CLIENT,
+				deltaMinutes: 300,
+				kind: 'purchase',
+				sourceType: 'hours_order',
+				sourceId: 'ord-soon',
+				note: 'lot care expiră ieri',
+				expiresAt: new Date(Date.now() - DAY)
+			});
+			await reverseTaskCredit({ tenantId: TENANT, taskId: 't-exp-r', userId: USER });
+			expect(await balance()).toBe(300);
+			// FIFO pur ar fi scăzut cele 45 din lotul de 300 și ar fi lăsat surplusul în viață.
+			const run = await processHourCreditExpiry({ tenantId: TENANT });
+			expect(run.minutesExpired).toBe(300);
+			expect(await balance()).toBe(0);
+			expect(await findHourCreditDrift(TENANT)).toEqual([]);
+		} finally {
+			await setExpiryDays(0);
+		}
+	});
+
+	test('fără expirare pe tenant: surplusul nu are termen', async () => {
+		await setExpiryDays(0);
+		await insertTask('t-noexp', { actualMinutes: 15 });
+		await settle('t-noexp');
+		const surplusRow = (await ledgerRows()).find((x) => x.kind === 'purchase')!;
+		expect(surplusRow.expiresAt).toBeNull();
+	});
+
+	test('raportul lunar și fișa: surplusul apare ca „Ore cumpărate"', async () => {
+		await insertTask('t-rep', { actualMinutes: 15 });
+		await settle('t-rep');
+		const report = await getMonthlyReport(TENANT);
+		expect(report.purchasedMinutes).toBe(45);
+		const sheet = await getClientHourCredit(TENANT, CLIENT);
+		expect(sheet?.balanceMinutes).toBe(45);
 	});
 });
 
@@ -1606,7 +2090,9 @@ describe('rezervări și sold', () => {
 		if (ok.status !== 'settled') return;
 		expect(ok.consumedMinutes).toBe(100);
 		expect(ok.overageRealMinutes).toBe(80);
-		expect(await balance()).toBe(0);
+		// 80 min peste credit → 2 h facturate, 40 min rămân credit.
+		expect(ok.invoicedMinutes).toBe(120);
+		expect(await balance()).toBe(40);
 		expect(await findHourCreditDrift(TENANT)).toEqual([]);
 	});
 });

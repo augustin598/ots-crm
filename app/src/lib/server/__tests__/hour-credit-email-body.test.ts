@@ -16,7 +16,7 @@ const base = {
 };
 
 describe('buildHourCreditEmailBody — consumed', () => {
-	test('rotunjit cu depășire: 142 min lucrate, 100 din credit, 50 depășire → „taxate" + tariful la depășire', () => {
+	test('rotunjit cu depășire: 142 min lucrate, 100 din credit, 50 depășire → „taxate" + ora întreagă facturată, la tarif', () => {
 		const event: HourCreditEvent = {
 			kind: 'consumed',
 			taskId: 't1',
@@ -24,15 +24,17 @@ describe('buildHourCreditEmailBody — consumed', () => {
 			realMinutes: 142,
 			consumedMinutes: 100,
 			overageRealMinutes: 50,
+			invoicedMinutes: 60,
+			surplusMinutes: 10,
 			pricing: { rateLabel: 'Development', rateEur: 65, multiplierPct: 100, modeLabel: 'Standard' }
 		};
 		const html = buildHourCreditEmailBody({ ...base, event });
 
 		expect(html).toContain('taxate 2 h 30 min');
-		expect(html).toContain('50 min depășesc creditul');
-		expect(html).toContain('la 65 €/h');
+		expect(html).toContain('50 min peste credit → 1 h facturate la 65 €/h; 10 min rămân credit.');
+		expect(html).not.toContain('se facturează separat');
 		// tariful nu apare lângă orele lucrate, doar în fraza de depășire
-		expect(html.indexOf('€/h')).toBeGreaterThan(html.indexOf('depășesc creditul'));
+		expect(html.indexOf('€/h')).toBeGreaterThan(html.indexOf('peste credit'));
 	});
 
 	test('fără depășire: facturabil == lucrat → fără „taxate" și fără niciun €/h în mesaj', () => {
@@ -43,6 +45,8 @@ describe('buildHourCreditEmailBody — consumed', () => {
 			realMinutes: 150,
 			consumedMinutes: 150,
 			overageRealMinutes: 0,
+			invoicedMinutes: 0,
+			surplusMinutes: 0,
 			pricing: { rateLabel: 'Development', rateEur: 65, multiplierPct: 100, modeLabel: 'Standard' }
 		};
 		const html = buildHourCreditEmailBody({ ...base, event });
@@ -61,11 +65,31 @@ describe('buildHourCreditEmailBody — consumed', () => {
 			realMinutes: 20,
 			consumedMinutes: 30,
 			overageRealMinutes: 0,
+			invoicedMinutes: 0,
+			surplusMinutes: 0,
 			pricing: { rateLabel: 'Development', rateEur: 65, multiplierPct: 100, modeLabel: 'Standard' }
 		};
 		const html = buildHourCreditEmailBody({ ...base, event });
 
 		expect(html).toContain('taxate 30 min');
 		expect(html).not.toContain('€/h');
+	});
+
+	test('depășire fără surplus (60 min peste credit → 1 h): fraza se oprește la tarif', () => {
+		const event: HourCreditEvent = {
+			kind: 'consumed',
+			taskId: 't4',
+			taskTitle: 'Audit SEO',
+			realMinutes: 60,
+			consumedMinutes: 0,
+			overageRealMinutes: 60,
+			invoicedMinutes: 60,
+			surplusMinutes: 0,
+			pricing: { rateLabel: 'Development', rateEur: 65, multiplierPct: 150, modeLabel: 'Urgență' }
+		};
+		const html = buildHourCreditEmailBody({ ...base, event });
+
+		expect(html).toContain('1 h peste credit → 1 h facturate la 98 €/h.');
+		expect(html).not.toContain('rămân credit');
 	});
 });

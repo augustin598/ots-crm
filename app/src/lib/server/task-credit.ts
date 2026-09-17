@@ -24,14 +24,18 @@ import {
 } from '$lib/logic/hourly-catalog';
 import {
 	HOUR_OVERAGE_INVOICE_SOURCE,
+	OVERAGE_BLOCK_MINUTES,
 	OVERAGE_NOTES_PREFIX,
 	ceilToStep,
+	invoicedOverageMinutes,
 	overageLineShape,
 	overageMonthKey
 } from '$lib/logic/hour-credits';
+import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
 import { KEEZ_UNIT } from '$lib/constants/keez-measure-units';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
 import { resolveHourOrderVat } from '$lib/server/hour-credit-vat';
+import { isUniqueViolation } from '$lib/server/hour-credits';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -48,6 +52,8 @@ interface CreditContext {
 	mode: CatalogMode;
 	referenceRateEur: number;
 	stepMinutes: number;
+	/** Regula de expirare a tenantului: surplusul orei facturate e credit ca oricare altul. */
+	creditExpiryDays: number;
 }
 
 /** Tariful/regimul task-ului (inclusiv inactive): prețul depășirii și snapshot-ul din ledger. */
@@ -67,7 +73,8 @@ async function loadContext(
 		rate,
 		mode,
 		referenceRateEur: reference.rateEur,
-		stepMinutes: catalog.rules.stepMinutes
+		stepMinutes: catalog.rules.stepMinutes,
+		creditExpiryDays: catalog.rules.creditExpiryDays
 	};
 }
 
@@ -75,7 +82,12 @@ export type SettleResult =
 	| {
 			status: 'settled';
 			consumedMinutes: number;
+			/** Minutele lucrate peste credit. */
 			overageRealMinutes: number;
+			/** Ce s-a facturat pentru depășire: ore întregi (multiplu de 60). */
+			invoicedMinutes: number;
+			/** Facturat − depășire: a intrat în credit pe loc. */
+			surplusMinutes: number;
 			overageInvoiceId: string | null;
 	  }
 	| { status: 'skipped'; reason: string }
@@ -83,7 +95,9 @@ export type SettleResult =
 
 /**
  * Scade orele efective ale unui task din creditul clientului (spec §6.2).
- * Idempotent prin `credit_settled_at`. Depășirea intră în draftul lunar.
+ * Idempotent prin `credit_settled_at`. Depășirea intră în draftul lunar în ORE ÎNTREGI
+ * (minimum 1 h); partea nefolosită din ora facturată intră în credit în aceeași
+ * tranzacție (addendum 17 sep 2026).
  */
 export async function settleTaskCredit(params: {
 	tenantId: string;
@@ -113,6 +127,9 @@ export async function settleTaskCredit(params: {
 	const billed = ceilToStep(actual, ctx.stepMinutes);
 	const now = new Date();
 	const ledgerId = generateId();
+	// Id-ul urmei de depășire e știut dinainte: rândul de surplus îl poartă ca sursă
+	// (unic per ciclu de Done, deci indexul unic pe `purchase` nu se lovește la re-Done).
+	const overageLedgerId = generateId();
 
 	// Tranzacția de consum: UPDATE atomic condiționat + ledger + task.
 	let consumed = 0;
@@ -217,24 +234,45 @@ export async function settleTaskCredit(params: {
 					// regenera. Scrisă după draft, s-ar fi pierdut fără urmă.
 					const overageInTx = billed - consumed;
 					if (overageInTx > 0) {
+						const invoicedInTx = invoicedOverageMinutes(overageInTx);
+						const surplusInTx = invoicedInTx - overageInTx;
 						await tx.insert(table.clientHourLedger).values({
-							id: generateId(),
+							id: overageLedgerId,
 							tenantId,
 							clientId: task.clientId!,
 							deltaMinutes: 0,
 							kind: 'overage_invoiced',
 							sourceType: 'task',
 							sourceId: taskId,
-							note: `${task.title} — ${overageInTx} min peste credit`,
+							note: `${task.title} — ${overageInTx} min peste credit, facturate ${invoicedInTx / OVERAGE_BLOCK_MINUTES} h`,
 							createdByUserId: params.userId ?? null,
 							referenceRateEurSnapshot: ctx.referenceRateEur,
 							rateSlug: ctx.rate.slug,
 							modeSlug: ctx.mode.slug,
 							rateEurSnapshot: ctx.rate.rateEur,
 							multiplierPctSnapshot: ctx.mode.multiplierPct,
-							realMinutes: overageInTx,
+							// Ce e pe factură, nu ce s-a lucrat peste credit: de aici se regenerează linia.
+							realMinutes: invoicedInTx,
 							createdAt: now
 						});
+						if (surplusInTx > 0) {
+							await insertOverageSurplus(tx, {
+								tenantId,
+								clientId: task.clientId!,
+								overageLedgerId,
+								taskTitle: task.title,
+								overageMinutes: overageInTx,
+								invoicedMinutes: invoicedInTx,
+								userId: params.userId ?? null,
+								referenceRateEur: ctx.referenceRateEur,
+								rateSlug: ctx.rate.slug,
+								modeSlug: ctx.mode.slug,
+								rateEur: ctx.rate.rateEur,
+								multiplierPct: ctx.mode.multiplierPct,
+								expiresAt: computeExpiryDate(now, ctx.creditExpiryDays),
+								now
+							});
+						}
 					}
 				}),
 			{ tenantId, label: 'task-credit.settle' }
@@ -252,8 +290,11 @@ export async function settleTaskCredit(params: {
 		return { status: 'failed', reason: serializeError(err).message };
 	}
 
-	// Consumul e exact ce s-a scăzut; restul din facturabil e depășire (fără a doua rotunjire).
+	// Consumul e exact ce s-a scăzut; restul din facturabil e depășire, facturată în
+	// ore întregi — aceleași cifre ca în tranzacție (`consumed` e cel comis).
 	const overageReal = billed - consumed;
+	const invoiced = invoicedOverageMinutes(overageReal);
+	const surplus = invoiced - overageReal;
 
 	let overageInvoiceId: string | null = null;
 	if (overageReal > 0) {
@@ -264,6 +305,7 @@ export async function settleTaskCredit(params: {
 				task: { id: taskId, title: task.title },
 				settledAt: now,
 				overageRealMinutes: overageReal,
+				invoicedMinutes: invoiced,
 				pricing: ctx,
 				now
 			});
@@ -275,7 +317,7 @@ export async function settleTaskCredit(params: {
 				`task-credit: draftul de depășire pentru ${taskId} a picat — ${serializeError(err).message}`,
 				{
 					tenantId,
-					metadata: { taskId, overageReal }
+					metadata: { taskId, overageReal, invoiced }
 				}
 			);
 		}
@@ -283,10 +325,18 @@ export async function settleTaskCredit(params: {
 
 	logInfo(
 		'server',
-		`task-credit: task ${taskId} decontat: −${consumed} min credit, ${overageReal} min depășire`,
+		`task-credit: task ${taskId} decontat: −${consumed} min credit, ${overageReal} min depășire → ${invoiced} min facturate, +${surplus} min surplus în credit`,
 		{
 			tenantId,
-			metadata: { taskId, clientId: task.clientId, consumed, overageReal, overageInvoiceId }
+			metadata: {
+				taskId,
+				clientId: task.clientId,
+				consumed,
+				overageReal,
+				invoiced,
+				surplus,
+				overageInvoiceId
+			}
 		}
 	);
 	await notifyHourCreditEvent({
@@ -299,6 +349,8 @@ export async function settleTaskCredit(params: {
 			realMinutes: actual,
 			consumedMinutes: consumed,
 			overageRealMinutes: overageReal,
+			invoicedMinutes: invoiced,
+			surplusMinutes: surplus,
 			pricing: {
 				rateLabel: ctx.rate.label,
 				rateEur: ctx.rate.rateEur,
@@ -311,8 +363,69 @@ export async function settleTaskCredit(params: {
 		status: 'settled',
 		consumedMinutes: consumed,
 		overageRealMinutes: overageReal,
+		invoicedMinutes: invoiced,
+		surplusMinutes: surplus,
 		overageInvoiceId
 	};
+}
+
+/**
+ * Surplusul orei facturate: rând `purchase` (apare ca „Ore cumpărate") + cache, în
+ * tranzacția apelantului. Sursa e rândul `overage_invoiced` al ciclului — unică per
+ * Done, deci indexul unic pe `purchase` face a doua scriere imposibilă, iar reopen-ul
+ * și expirarea găsesc lotul după `source_type='ledger'` + `source_id`.
+ */
+async function insertOverageSurplus(
+	tx: Tx,
+	p: {
+		tenantId: string;
+		clientId: string;
+		overageLedgerId: string;
+		taskTitle: string;
+		overageMinutes: number;
+		invoicedMinutes: number;
+		userId: string | null;
+		referenceRateEur: number | null;
+		rateSlug: string | null;
+		modeSlug: string | null;
+		rateEur: number | null;
+		multiplierPct: number | null;
+		expiresAt: Date | null;
+		now: Date;
+	}
+): Promise<number> {
+	const surplus = p.invoicedMinutes - p.overageMinutes;
+	if (!Number.isInteger(surplus) || surplus <= 0 || surplus >= OVERAGE_BLOCK_MINUTES) {
+		throw new Error(`Surplus de depășire invalid: ${surplus} min`);
+	}
+	await tx.insert(table.clientHourLedger).values({
+		id: generateId(),
+		tenantId: p.tenantId,
+		clientId: p.clientId,
+		deltaMinutes: surplus,
+		kind: 'purchase',
+		sourceType: 'ledger',
+		sourceId: p.overageLedgerId,
+		// Nota se vede și în portalul clientului.
+		note: `${p.taskTitle} — ${p.invoicedMinutes / OVERAGE_BLOCK_MINUTES} h facturate, ${p.overageMinutes} min folosite, ${surplus} min rămân credit`,
+		createdByUserId: p.userId,
+		referenceRateEurSnapshot: p.referenceRateEur,
+		rateSlug: p.rateSlug,
+		modeSlug: p.modeSlug,
+		rateEurSnapshot: p.rateEur,
+		multiplierPctSnapshot: p.multiplierPct,
+		realMinutes: surplus,
+		expiresAt: p.expiresAt,
+		createdAt: p.now
+	});
+	await tx
+		.update(table.client)
+		.set({
+			hourCreditMinutes: sql`${table.client.hourCreditMinutes} + ${surplus}`,
+			updatedAt: p.now
+		})
+		.where(and(eq(table.client.id, p.clientId), eq(table.client.tenantId, p.tenantId)));
+	return surplus;
 }
 
 /** Ce trebuie știut ca să prețuiești o linie de depășire (din catalog sau din snapshot). */
@@ -332,7 +445,10 @@ async function billOverage(params: {
 	clientId: string;
 	task: { id: string; title: string };
 	settledAt: Date;
-	overageRealMinutes: number;
+	/** Minutele lucrate peste credit — doar pentru nota liniei; null = necunoscute. */
+	overageRealMinutes: number | null;
+	/** Ce se facturează: ore întregi. */
+	invoicedMinutes: number;
 	pricing: OveragePricing;
 	now: Date;
 }): Promise<string | null> {
@@ -373,19 +489,34 @@ async function addOverageLine(params: {
 	tenantId: string;
 	clientId: string;
 	task: { id: string; title: string };
-	overageRealMinutes: number;
+	overageRealMinutes: number | null;
+	invoicedMinutes: number;
 	pricing: OveragePricing;
 	now: Date;
 }): Promise<{ invoiceId: string; lineId: string }> {
 	const { tenantId, clientId, task, now } = params;
 	const ctx = params.pricing;
+	// Gardă pe bani: nicio linie „la minut". Apelanții rotunjesc cu `invoicedOverageMinutes`.
+	if (
+		!Number.isInteger(params.invoicedMinutes) ||
+		params.invoicedMinutes <= 0 ||
+		params.invoicedMinutes % OVERAGE_BLOCK_MINUTES !== 0
+	) {
+		throw new Error(
+			`Depășirea se facturează în ore întregi; am primit ${params.invoicedMinutes} min`
+		);
+	}
 	const { vatPercent, zeroVatNote } = await resolveHourOrderVat(tenantId, clientId);
 	const vatBps = vatPercentToBps(vatPercent);
 	const unitRateEur = effectiveRateEur(ctx.rate.rateEur, ctx.mode.multiplierPct);
-	// Suma vine din MINUTE. Keez recalculează valoarea din cantitate (2 zecimale) × preț,
-	// deci linia pleacă doar într-o formă în care cantitate × preț === sumă exact:
-	// „ore × tarif" la multipli de 15 min, „1 × suma" în rest (vezi `overageLineShape`).
-	const shape = overageLineShape(params.overageRealMinutes, unitRateEur);
+	// Ore întregi × tarif orar: cantitate întreagă, deci cantitate × preț === sumă exact,
+	// oricum ar rotunji Keez cantitatea (2 zecimale).
+	const shape = overageLineShape(params.invoicedMinutes, unitRateEur);
+	if (shape.unit !== 'hour' || !Number.isInteger(shape.quantity)) {
+		throw new Error(`Linie de depășire fără ore întregi: ${params.invoicedMinutes} min`);
+	}
+	const workedNote =
+		params.overageRealMinutes !== null ? ` · ${params.overageRealMinutes} min peste credit` : '';
 
 	const invoiceId = await findOrCreateOverageDraft({
 		tenantId,
@@ -402,13 +533,13 @@ async function addOverageLine(params: {
 					id: lineId,
 					invoiceId,
 					description: `Depășire ore — ${task.title} (${ctx.rate.label}${ctx.mode.slug !== 'standard' ? `, ${ctx.mode.label}` : ''})`,
-					note: `${params.overageRealMinutes} min × ${unitRateEur} €/h · task ${task.id}`,
+					note: `${shape.quantity} h × ${unitRateEur} €/h${workedNote} · task ${task.id}`,
 					quantity: shape.quantity,
 					rate: shape.rateCents,
 					amount: shape.amountCents,
 					taxRate: vatBps,
 					currency: 'EUR',
-					unitOfMeasure: shape.unit === 'hour' ? KEEZ_UNIT.HOUR : KEEZ_UNIT.PIECE,
+					unitOfMeasure: KEEZ_UNIT.HOUR,
 					taskId: task.id
 				});
 				await recomputeDraftTotals(tx, invoiceId);
@@ -488,8 +619,11 @@ export interface UnbilledOverage {
 	taskTitle: string;
 	clientId: string;
 	clientName: string;
-	/** Minute REALE peste credit, din urma decontării curente. */
-	overageRealMinutes: number;
+	/**
+	 * Ce se va factura la „Regenerează": ore întregi. Urmele scrise înainte de
+	 * 17 sep 2026 țin minutele exacte; aici apar deja rotunjite în sus la oră.
+	 */
+	invoicedMinutes: number;
 	settledAt: Date;
 }
 
@@ -553,7 +687,7 @@ export async function listUnbilledOverages(tenantId: string): Promise<UnbilledOv
 			taskTitle: r.taskTitle,
 			clientId: r.clientId!,
 			clientName: r.clientName,
-			overageRealMinutes: r.traceMinutes!,
+			invoicedMinutes: invoicedOverageMinutes(r.traceMinutes!),
 			settledAt: r.settledAt!
 		}));
 }
@@ -567,6 +701,11 @@ export type RegenerateOverageResult =
  * „Regenerează draftul" pentru un task din `listUnbilledOverages`. Dacă linia există
  * deja pe un draft (s-a pierdut doar legătura), o relegăm; altfel o recreăm din
  * snapshot-ul de preț al decontării (tariful înghețat atunci, nu cel de azi).
+ *
+ * Linia recreată e mereu în ore întregi. Urma nouă ține deja minutele facturate
+ * (multiplu de 60). Urma MOȘTENITĂ (dinainte de 17 sep 2026) ține minutele exacte:
+ * se facturează rotunjit în sus la oră, iar surplusul intră în credit O SINGURĂ dată,
+ * cu același rând `purchase` legat de urma depășirii (indexul unic îl face idempotent).
  */
 export async function regenerateOverageDraft(params: {
 	tenantId: string;
@@ -620,12 +759,49 @@ export async function regenerateOverageDraft(params: {
 	} else {
 		const catalog = await getHourlyCatalog(tenantId, { includeInactive: true });
 		const modeSlug = trace.modeSlug ?? 'standard';
+		const invoicedMinutes = invoicedOverageMinutes(trace.realMinutes);
+		let overageRealMinutes: number | null;
+		if (invoicedMinutes !== trace.realMinutes) {
+			// Urmă moștenită: `real_minutes` = minutele lucrate peste credit. Surplusul
+			// intră ÎNAINTEA liniei: dacă linia pică, „Regenerează" se poate relua (creditul
+			// e idempotent); invers, clientul ar fi plătit ora fără să-și primească restul.
+			overageRealMinutes = trace.realMinutes;
+			const credited = await creditLegacyOverageSurplus({
+				tenantId,
+				clientId: task.clientId,
+				taskId,
+				taskTitle: task.title,
+				settledAt,
+				trace: { ...trace, realMinutes: trace.realMinutes },
+				invoicedMinutes,
+				expiryDays: catalog.rules.creditExpiryDays
+			});
+			if (!credited) {
+				return { status: 'skipped', reason: 'taskul s-a schimbat între timp; reîncearcă' };
+			}
+		} else {
+			// Urmă nouă: minutele lucrate peste credit = facturat − surplusul ciclului.
+			const [surplusRow] = await db
+				.select({ deltaMinutes: table.clientHourLedger.deltaMinutes })
+				.from(table.clientHourLedger)
+				.where(
+					and(
+						eq(table.clientHourLedger.tenantId, tenantId),
+						eq(table.clientHourLedger.kind, 'purchase'),
+						eq(table.clientHourLedger.sourceType, 'ledger'),
+						eq(table.clientHourLedger.sourceId, trace.id)
+					)
+				)
+				.limit(1);
+			overageRealMinutes = invoicedMinutes - (surplusRow?.deltaMinutes ?? 0);
+		}
 		invoiceId = await billOverage({
 			tenantId,
 			clientId: task.clientId,
 			task: { id: taskId, title: task.title },
 			settledAt,
-			overageRealMinutes: trace.realMinutes,
+			overageRealMinutes,
+			invoicedMinutes,
 			pricing: {
 				rate: {
 					label:
@@ -648,6 +824,82 @@ export async function regenerateOverageDraft(params: {
 		metadata: { taskId, invoiceId }
 	});
 	return { status: 'billed', invoiceId };
+}
+
+/**
+ * Surplusul unei urme de depășire MOȘTENITE (minute exacte), creditat la regenerare.
+ * `false` = taskul nu mai e în decontarea `settledAt` (reopen concurent) — nu scriem
+ * nimic. Surplus deja creditat (a doua regenerare) = `true`, fără a doua scriere.
+ */
+async function creditLegacyOverageSurplus(p: {
+	tenantId: string;
+	clientId: string;
+	taskId: string;
+	taskTitle: string;
+	settledAt: Date;
+	trace: {
+		id: string;
+		realMinutes: number;
+		createdByUserId: string | null;
+		referenceRateEurSnapshot: number | null;
+		rateSlug: string | null;
+		modeSlug: string | null;
+		rateEurSnapshot: number | null;
+		multiplierPctSnapshot: number | null;
+	};
+	invoicedMinutes: number;
+	expiryDays: number;
+}): Promise<boolean> {
+	const { tenantId, trace } = p;
+	const now = new Date();
+	try {
+		await withTursoBusyRetry(
+			() =>
+				db.transaction(async (tx) => {
+					// Gardă ca scriere, pe exact decontarea citită: un reopen intrat între timp
+					// nu ar mai găsi surplusul de stornat.
+					const still = await tx
+						.update(table.task)
+						.set({ updatedAt: now })
+						.where(
+							and(
+								eq(table.task.id, p.taskId),
+								eq(table.task.tenantId, tenantId),
+								eq(table.task.creditSettledAt, p.settledAt)
+							)
+						);
+					if (still.rowsAffected !== 1) throw new TaskCreditClaimLost();
+					await insertOverageSurplus(tx, {
+						tenantId,
+						clientId: p.clientId,
+						overageLedgerId: trace.id,
+						taskTitle: p.taskTitle,
+						overageMinutes: trace.realMinutes,
+						invoicedMinutes: p.invoicedMinutes,
+						userId: trace.createdByUserId,
+						referenceRateEur: trace.referenceRateEurSnapshot,
+						rateSlug: trace.rateSlug,
+						modeSlug: trace.modeSlug,
+						rateEur: trace.rateEurSnapshot,
+						multiplierPct: trace.multiplierPctSnapshot,
+						expiresAt: computeExpiryDate(now, p.expiryDays),
+						now
+					});
+				}),
+			{ tenantId, label: 'task-credit.legacySurplus' }
+		);
+	} catch (err) {
+		if (err instanceof TaskCreditClaimLost) return false;
+		// Surplusul există deja (regenerare reluată): nimic de scris, linia poate merge.
+		if (isUniqueViolation(err)) return true;
+		throw err;
+	}
+	logInfo(
+		'server',
+		`task-credit: urmă de depășire moștenită (${trace.realMinutes} min) → ${p.invoicedMinutes} min facturate, surplus creditat`,
+		{ tenantId, metadata: { taskId: p.taskId, clientId: p.clientId, overageLedgerId: trace.id } }
+	);
+	return true;
 }
 
 export interface UnsettledDoneTask {
@@ -829,14 +1081,24 @@ export async function assertTaskReopenAllowed(tenantId: string, taskId: string):
 }
 
 /**
- * Reopen din Done: stornează consumul (net de corecții), scoate linia din draft și
- * golește decontarea. Păstrează orele efective — Done-ul următor pornește de la ele.
+ * Reopen din Done: stornează consumul (net de corecții), retrage surplusul orei
+ * facturate (`purchase_reversal`), scoate linia din draft și golește decontarea.
+ * Păstrează orele efective — Done-ul următor pornește de la ele.
+ *
+ * Soldul revine exact la valoarea dinainte de Done. Dacă surplusul a fost între timp
+ * consumat de alt task, soldul devine negativ: decontarea următoare îl tratează ca 0
+ * și facturează.
  */
 export async function reverseTaskCredit(params: {
 	tenantId: string;
 	taskId: string;
 	userId: string | null;
-}): Promise<{ reversedMinutes: number } | null> {
+}): Promise<{
+	/** Consumul restituit (net de corecții). */
+	reversedMinutes: number;
+	/** Surplusul de depășire retras din credit (0 dacă ciclul n-a avut). */
+	surplusReversedMinutes: number;
+} | null> {
 	const { tenantId, taskId } = params;
 	const [task] = await db
 		.select()
@@ -849,11 +1111,14 @@ export async function reverseTaskCredit(params: {
 	const settledAt = task.creditSettledAt;
 	const now = new Date();
 	let reversed = 0;
+	let surplusReversed = 0;
 
 	try {
 		await withTursoBusyRetry(
 			() =>
 				db.transaction(async (tx) => {
+					reversed = 0;
+					surplusReversed = 0;
 					// Revendicarea ciclului de Done, condiționată pe exact decontarea citită:
 					// două reopen simultane (sau o reluare după SQLITE_BUSY) ar storna altfel
 					// de două ori.
@@ -932,6 +1197,15 @@ export async function reverseTaskCredit(params: {
 							})
 							.where(and(eq(table.client.id, task.clientId!), eq(table.client.tenantId, tenantId)));
 					}
+					surplusReversed = await reverseCycleOverageSurplus(tx, {
+						tenantId,
+						clientId: task.clientId!,
+						taskId,
+						taskTitle: task.title,
+						settledAt,
+						userId: params.userId ?? null,
+						now
+					});
 					// După `task_id`, nu după `task.overage_invoice_id`: legătura poate lipsi
 					// (legare picată, reopen intrat înainte de legare).
 					await removeTaskOverageLines(tx, tenantId, taskId);
@@ -942,11 +1216,123 @@ export async function reverseTaskCredit(params: {
 		if (err instanceof TaskCreditClaimLost) return null;
 		throw err;
 	}
-	logInfo('server', `task-credit: task ${taskId} redeschis, +${reversed} min înapoi în credit`, {
-		tenantId,
-		metadata: { taskId, clientId: task.clientId }
-	});
-	return { reversedMinutes: reversed };
+	logInfo(
+		'server',
+		`task-credit: task ${taskId} redeschis, +${reversed} min înapoi în credit, −${surplusReversed} min surplus de depășire retras`,
+		{
+			tenantId,
+			metadata: { taskId, clientId: task.clientId, reversed, surplusReversed }
+		}
+	);
+	return { reversedMinutes: reversed, surplusReversedMinutes: surplusReversed };
+}
+
+/**
+ * Retrage surplusul de depășire al ciclului de Done (`settledAt`), în tranzacția
+ * reopen-ului: `purchase_reversal` cu aceeași sursă ca rândul de surplus, ca expirarea
+ * să-l scadă din lotul lui. Se retrage NETUL: surplus + corecțiile lui − ce a expirat
+ * deja din lot (altfel aceleași minute ar ieși din sold a doua oară).
+ */
+async function reverseCycleOverageSurplus(
+	tx: Tx,
+	p: {
+		tenantId: string;
+		clientId: string;
+		taskId: string;
+		taskTitle: string;
+		settledAt: Date;
+		userId: string | null;
+		now: Date;
+	}
+): Promise<number> {
+	const { tenantId } = p;
+	const overageRows = await tx
+		.select({ id: table.clientHourLedger.id })
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'overage_invoiced'),
+				eq(table.clientHourLedger.sourceType, 'task'),
+				eq(table.clientHourLedger.sourceId, p.taskId),
+				gte(table.clientHourLedger.createdAt, p.settledAt)
+			)
+		);
+	if (overageRows.length === 0) return 0;
+	const surplusRows = await tx
+		.select({
+			id: table.clientHourLedger.id,
+			sourceId: table.clientHourLedger.sourceId,
+			deltaMinutes: table.clientHourLedger.deltaMinutes
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'purchase'),
+				eq(table.clientHourLedger.sourceType, 'ledger'),
+				inArray(
+					table.clientHourLedger.sourceId,
+					overageRows.map((r) => r.id)
+				)
+			)
+		);
+	let total = 0;
+	for (const row of surplusRows) {
+		const adjustments = await tx
+			.select({
+				kind: table.clientHourLedger.kind,
+				deltaMinutes: table.clientHourLedger.deltaMinutes
+			})
+			.from(table.clientHourLedger)
+			.where(
+				and(
+					eq(table.clientHourLedger.tenantId, tenantId),
+					or(
+						and(
+							eq(table.clientHourLedger.kind, 'correction'),
+							eq(table.clientHourLedger.sourceType, 'ledger'),
+							eq(table.clientHourLedger.sourceId, row.id)
+						),
+						and(
+							eq(table.clientHourLedger.kind, 'expire'),
+							or(
+								eq(table.clientHourLedger.sourceId, row.id),
+								sql`${table.clientHourLedger.sourceId} LIKE ${`${row.id}#%`}`
+							)
+						)
+					)
+				)
+			);
+		const net = row.deltaMinutes + adjustments.reduce((s, a) => s + a.deltaMinutes, 0);
+		if (net <= 0) continue;
+		// Indexul unic pe (`purchase_reversal`, 'ledger', id-ul urmei) garantează o singură
+		// retragere per ciclu, chiar dacă revendicarea de mai sus ar fi ocolită.
+		await tx.insert(table.clientHourLedger).values({
+			id: generateId(),
+			tenantId,
+			clientId: p.clientId,
+			deltaMinutes: -net,
+			kind: 'purchase_reversal',
+			sourceType: 'ledger',
+			sourceId: row.sourceId,
+			note: `${p.taskTitle} — redeschis: ${net} min din ora facturată ies din credit`,
+			createdByUserId: p.userId,
+			createdAt: p.now
+		});
+		total += net;
+	}
+	if (total > 0) {
+		// Fără plafon la zero: surplus deja consumat → sold negativ, facturat la Done-ul următor.
+		await tx
+			.update(table.client)
+			.set({
+				hourCreditMinutes: sql`${table.client.hourCreditMinutes} - ${total}`,
+				updatedAt: p.now
+			})
+			.where(and(eq(table.client.id, p.clientId), eq(table.client.tenantId, tenantId)));
+	}
+	return total;
 }
 
 /** Efectele unei tranziții de status asupra creditului (apelat din toate căile). */

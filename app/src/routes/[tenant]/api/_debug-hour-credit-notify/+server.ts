@@ -4,10 +4,12 @@ import {
 	buildHourCreditEmailBody,
 	hourCreditEmailSubject
 } from '$lib/server/hour-credit-email-body';
-import type { HourCreditEvent } from '$lib/server/hour-credit-notifications';
+import {
+	buildWhatsappBody,
+	type HourCreditEvent
+} from '$lib/server/hour-credit-notifications';
 import { sendText } from '$lib/server/whatsapp/session-manager';
 import { getAppBaseUrl } from '$lib/server/app-url';
-import { formatMinutes } from '$lib/logic/hourly-catalog';
 import { serializeError } from '$lib/server/logger';
 import type { RequestHandler } from './$types';
 
@@ -46,8 +48,10 @@ const EVENTS: Record<'credited' | 'consumed' | 'low', { event: HourCreditEvent; 
 				taskId: 'debug',
 				taskTitle: 'Landing page campanie toamnă (TEST)',
 				realMinutes: 180,
-				consumedMinutes: 213,
+				consumedMinutes: 135,
 				overageRealMinutes: 45,
+				invoicedMinutes: 60,
+				surplusMinutes: 15,
 				pricing: {
 					rateLabel: 'Development',
 					rateEur: 65,
@@ -62,21 +66,6 @@ const EVENTS: Record<'credited' | 'consumed' | 'low', { event: HourCreditEvent; 
 			balance: 90
 		}
 	};
-
-function whatsappBody(clientName: string, ev: HourCreditEvent, balance: number, portalUrl: string) {
-	const sold = `Sold: *${formatMinutes(balance)}*`;
-	if (ev.kind === 'credited') {
-		return `⏱️ *Credit de ore ${clientName}*\n+${formatMinutes(ev.minutes)} (${ev.source}).\n${sold}\n${portalUrl}`;
-	}
-	if (ev.kind === 'consumed') {
-		const overage =
-			ev.overageRealMinutes > 0
-				? `\n⚠️ ${formatMinutes(ev.overageRealMinutes)} peste credit — se facturează separat.`
-				: '';
-		return `⏱️ *Task finalizat: ${ev.taskTitle}*\n${formatMinutes(ev.realMinutes)} lucrate, −${formatMinutes(ev.consumedMinutes)} din credit.${overage}\n${sold}\n${portalUrl}`;
-	}
-	return `⚠️ *Credit de ore scăzut — ${clientName}*\n${sold} (sub pragul de ${formatMinutes(ev.thresholdMinutes)}).\nPoți cumpăra ore: ${getAppBaseUrl()}/servicii`;
-}
 
 export const POST: RequestHandler = async (event) => {
 	const { tenantId, tenantSlug } = requireAdmin(event);
@@ -133,7 +122,7 @@ export const POST: RequestHandler = async (event) => {
 				const wamId = await sendText(
 					tenantId,
 					phone,
-					whatsappBody(clientName, ev, balance, portalUrl)
+					buildWhatsappBody(clientName, ev, balance, portalUrl)
 				);
 				row.whatsapp = `trimis către ${phone} (${wamId})`;
 			} catch (err) {

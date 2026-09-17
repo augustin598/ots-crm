@@ -3,7 +3,7 @@
  * `scripts/demo-hour-credit-email.ts` să randeze exact ce trimite serverul.
  */
 import { formatMinutes } from '$lib/logic/hourly-catalog';
-import { consumptionWorkedLabel } from '$lib/logic/hour-credits';
+import { consumptionWorkedLabel, overageNoticeSentence } from '$lib/logic/hour-credits';
 import { effectiveRateEur } from '$lib/logic/hours-pricing';
 import type { HourCreditEvent } from './hour-credit-notifications';
 
@@ -58,12 +58,18 @@ export function buildHourCreditEmailBody(params: {
 		const workedLabel = event.pricing ? consumptionWorkedLabel(event.pricing) : null;
 		const billed = event.consumedMinutes + event.overageRealMinutes;
 		const rounded = billed !== event.realMinutes ? ` (taxate ${formatMinutes(billed)})` : '';
-		const overageRate = event.pricing
-			? ` la ${effectiveRateEur(event.pricing.rateEur, event.pricing.multiplierPct)} €/h`
-			: '';
 		const overage =
 			event.overageRealMinutes > 0
-				? `<div style="margin-top: 8px; color: #b45309;">${formatMinutes(event.overageRealMinutes)} depășesc creditul și se facturează separat${overageRate}.</div>`
+				? `<div style="margin-top: 8px; color: #b45309;">${escapeHtml(
+						overageNoticeSentence({
+							overageMinutes: event.overageRealMinutes,
+							invoicedMinutes: event.invoicedMinutes,
+							surplusMinutes: event.surplusMinutes,
+							unitRateEur: event.pricing
+								? effectiveRateEur(event.pricing.rateEur, event.pricing.multiplierPct)
+								: null
+						})
+					)}</div>`
 				: '';
 		return `
 			<p style="${P}">Bună ziua,</p>

@@ -12,7 +12,11 @@ import * as table from '$lib/server/db/schema';
 import { logError, logWarning, serializeError } from '$lib/server/logger';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { formatMinutes } from '$lib/logic/hourly-catalog';
-import { consumptionWorkedLabel, lowCreditTransition } from '$lib/logic/hour-credits';
+import {
+	consumptionWorkedLabel,
+	lowCreditTransition,
+	overageNoticeSentence
+} from '$lib/logic/hour-credits';
 import { effectiveRateEur } from '$lib/logic/hours-pricing';
 import { computeReservedMinutes } from '$lib/server/hour-credit-reserved';
 import { getAppBaseUrl } from '$lib/server/app-url';
@@ -34,7 +38,12 @@ export type HourCreditEvent =
 			taskTitle: string;
 			realMinutes: number;
 			consumedMinutes: number;
+			/** Minutele lucrate peste credit. */
 			overageRealMinutes: number;
+			/** Ce se facturează pentru depășire: ore întregi (0 fără depășire). */
+			invoicedMinutes: number;
+			/** Facturat − depășire: rămâne credit în contul clientului. */
+			surplusMinutes: number;
 			/** Specializarea și tariful, pentru „3 h Development (65 €/h)"; lipsă = doar orele. */
 			pricing?: ConsumptionPricing;
 	  }
@@ -103,12 +112,16 @@ export function buildWhatsappBody(
 	if (ev.kind === 'consumed') {
 		const billed = ev.consumedMinutes + ev.overageRealMinutes;
 		const rounded = billed !== ev.realMinutes ? ` (taxate ${formatMinutes(billed)})` : '';
-		const overageRate = ev.pricing
-			? ` la ${effectiveRateEur(ev.pricing.rateEur, ev.pricing.multiplierPct)} €/h`
-			: '';
 		const overage =
 			ev.overageRealMinutes > 0
-				? `\n⚠️ ${formatMinutes(ev.overageRealMinutes)} depășesc creditul și se facturează separat${overageRate}.`
+				? `\n⚠️ ${overageNoticeSentence({
+						overageMinutes: ev.overageRealMinutes,
+						invoicedMinutes: ev.invoicedMinutes,
+						surplusMinutes: ev.surplusMinutes,
+						unitRateEur: ev.pricing
+							? effectiveRateEur(ev.pricing.rateEur, ev.pricing.multiplierPct)
+							: null
+					})}`
 				: '';
 		const worked = ev.pricing
 			? `${formatMinutes(ev.realMinutes)}${rounded} ${consumptionWorkedLabel(ev.pricing)}`

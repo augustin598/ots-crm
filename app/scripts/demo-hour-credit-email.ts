@@ -29,6 +29,8 @@ const events = [
 		realMinutes: 142,
 		consumedMinutes: 100,
 		overageRealMinutes: 50,
+		invoicedMinutes: 60,
+		surplusMinutes: 10,
 		pricing: {
 			rateLabel: 'Development',
 			rateEur: 65,
@@ -41,7 +43,7 @@ const events = [
 
 const sections = events
 	.map((event, i) => {
-		const balance = [1230, 1130, 90][i];
+		const balance = [1230, 10, 90][i];
 		const body = buildHourCreditEmailBody({
 			clientName: fixture.clientName,
 			event,

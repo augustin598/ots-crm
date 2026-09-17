@@ -14,6 +14,10 @@ import type { RequestHandler } from './$types';
  * Trece prin `settleTaskCredit`, deci respectă regula pe ore reale (facturabil =
  * `ceilToStep(actual, pas)`, o singură rotunjire) și idempotența pe
  * `credit_settled_at` — nu scrie SQL pe lângă logica de business. Owner/admin.
+ *
+ * Depășirea se facturează în ore întregi: `result` întoarce `overageRealMinutes`
+ * (lucrate peste credit), `invoicedMinutes` (pe factură, multiplu de 60) și
+ * `surplusMinutes` (intrate pe loc în credit, rând `purchase` în `lastEntries`).
  */
 function requireAdmin(event: Parameters<RequestHandler>[0]) {
 	if (!event.locals.user || !event.locals.tenant) throw error(401, 'Unauthorized');
