@@ -21,7 +21,6 @@
 	import HcRatePill from '$lib/components/hour-credits/HcRatePill.svelte';
 	import HcAddHoursModal from '$lib/components/hour-credits/HcAddHoursModal.svelte';
 	import {
-		creditToEur,
 		fmtDate,
 		fmtDateShort,
 		fmtHoursShort,
@@ -126,9 +125,6 @@
 						<h1>{view.clientName}</h1>
 						<div class="hc-detail-meta">
 							<span>{view.cui ?? 'fără CUI'}</span>
-							{#if view.reference}
-								<span>referință {view.reference.label}, {view.reference.rateEur} €/h</span>
-							{/if}
 							<span>ultima mișcare {fmtRelative(view.entries[0]?.createdAt ?? null)}</span>
 						</div>
 					</div>
@@ -151,11 +147,6 @@
 			<div class="hc-detail-side">
 				<div class="hc-bignum-l">Disponibil acum</div>
 				<div class="hc-bignum" class:neg={available < 0}>{fmtMinutes(available)}</div>
-				{#if view.reference}
-					<div style="font-size:12.5px;color:var(--hc-muted);margin-top:10px">
-						≈ {creditToEur(available, view.reference.rateEur)} la tariful de referință
-					</div>
-				{/if}
 				<div class="hc-side-actions">
 					<a class="hc-btn hc-btn-ghost" href="/{tenantSlug}/clients/{clientId}">
 						Panoul clientului
@@ -198,8 +189,10 @@
 				<div class="hc-card-h">
 					<h3>Alimentare din facturi</h3>
 					<p>
-						Facturile plătite (fără hosting, ads, depășiri și comenzi de ore) se convertesc în ore
-						la tariful de referință, la cursul BNR din ziua plății.
+						Facturile plătite (fără hosting, ads, depășiri și comenzi de ore) se transformă în ore
+						la tariful de referință{view.reference
+							? ` (${view.reference.label}, ${view.reference.rateEur} €/h)`
+							: ''}, la cursul BNR din ziua plății. Orele cumpărate intră 1 la 1.
 					</p>
 				</div>
 				<div class="hc-card-b">
@@ -275,8 +268,11 @@
 									placeholder="ex. ore incluse în contractul semnat pe 1 septembrie"
 								></textarea>
 							</label>
+							<p class="hc-muted">Minimum 5 caractere.</p>
 							<div class="hc-preview">
-								Sold după ajustare: <b>{fmtMinutes(view.balanceMinutes + adjustMinutes)}</b>
+								Sold după ajustare: <b>{fmtMinutes(view.balanceMinutes + adjustMinutes)}</b> ·
+								disponibil:
+								<b>{fmtMinutes(view.balanceMinutes + adjustMinutes - view.reservedMinutes)}</b>
 							</div>
 							<button
 								type="submit"

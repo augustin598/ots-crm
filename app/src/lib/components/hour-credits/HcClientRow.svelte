@@ -22,14 +22,12 @@
 	let {
 		row,
 		thresholdMinutes,
-		referenceLabel,
 		href,
 		onToggleOptIn = null,
 		toggling = false
 	}: {
 		row: Row;
 		thresholdMinutes: number;
-		referenceLabel: string | null;
 		href: string;
 		/** Null = fără drept de editare (doar owner/admin pot bifa). */
 		onToggleOptIn?: ((enabled: boolean) => void) | null;
@@ -49,7 +47,7 @@
 		<div style="min-width:0">
 			<a class="hc-cname hc-row-link" {href}>{row.clientName}</a>
 			<div class="hc-cmeta">
-				{row.cui ?? 'fără CUI'}{referenceLabel ? ` · ${referenceLabel}` : ''}
+				{row.cui ?? 'fără CUI'}
 			</div>
 		</div>
 	</div>

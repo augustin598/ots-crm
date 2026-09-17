@@ -183,7 +183,7 @@
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="">None</SelectItem>
-									{#each milestones as milestone}
+									{#each milestones as milestone (milestone.id)}
 										<SelectItem value={milestone.id}>{milestone.name}</SelectItem>
 									{/each}
 								</SelectContent>
@@ -261,7 +261,7 @@
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="">None</SelectItem>
-									{#each users as user}
+									{#each users as user (user.id)}
 										<SelectItem value={user.id}>
 											{`${user.firstName} ${user.lastName}`.trim() || user.email}
 										</SelectItem>
@@ -296,7 +296,8 @@
 									bind:value={actualHours}
 								/>
 								<p class="text-xs text-muted-foreground">
-									Dacă lipsesc, la trecerea în Done se folosesc orele estimate.
+									Scăderea se face la finalizare, pe orele efective. Fără ore efective, taskul rămâne
+									nedecontat până le completezi.
 								</p>
 							</div>
 						{:else if task?.creditSettledAt}

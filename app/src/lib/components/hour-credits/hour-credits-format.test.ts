@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
 	avatarColor,
-	creditToEur,
 	fmtHoursShort,
 	fmtMinutes,
 	fmtRelative,
@@ -32,17 +31,6 @@ describe('fmtHoursShort', () => {
 		expect(fmtHoursShort(120)).toBe('2 h');
 		expect(fmtHoursShort(210)).toBe('3,5 h');
 		expect(fmtHoursShort(-210)).toBe('−3,5 h');
-	});
-});
-
-describe('creditToEur', () => {
-	test('conversie la tariful de referință', () => {
-		expect(creditToEur(600, 55)).toBe('550 €');
-	});
-
-	test('fără tarif de referință → null (nu 0 €)', () => {
-		expect(creditToEur(600, null)).toBeNull();
-		expect(creditToEur(600, 0)).toBeNull();
 	});
 });
 

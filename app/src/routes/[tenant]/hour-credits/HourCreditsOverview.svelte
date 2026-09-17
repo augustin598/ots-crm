@@ -24,7 +24,6 @@
 	import HcMonthlyReport from '$lib/components/hour-credits/HcMonthlyReport.svelte';
 	import HcIssuesPanel from '$lib/components/hour-credits/HcIssuesPanel.svelte';
 	import {
-		creditToEur,
 		fmtDate,
 		fmtHoursShort,
 		fmtMinutes,
@@ -156,13 +155,7 @@
 					pe /servicii și din ajustări manuale.
 				</p>
 				<div class="hc-ref">
-					Tarif de referință
-					{#if data.reference}
-						<b>{data.reference.label}, {data.reference.rateEur} €/h</b>
-					{:else}
-						<b>nicio specializare activă</b>
-					{/if}
-					· prag credit scăzut <b>{fmtMinutes(data.lowCreditThresholdMinutes)}</b> · se schimbă din
+					Prag credit scăzut <b>{fmtMinutes(data.lowCreditThresholdMinutes)}</b> · se schimbă din
 					<a href="/{tenantSlug}/settings/hourly-rates">Settings → Tarife orare</a>
 				</div>
 			</div>
@@ -184,9 +177,6 @@
 				<div class="hc-kpi-value">{fmtMinutes(data.kpis.totalBalanceMinutes)}</div>
 				<div class="hc-kpi-sub">
 					pe <b>{data.kpis.clientCount} clienți</b>
-					{#if data.reference}
-						· ≈ {creditToEur(data.kpis.totalBalanceMinutes, data.reference.rateEur)} la referință
-					{/if}
 				</div>
 			</div>
 			<div class="hc-kpi">
@@ -336,7 +326,6 @@
 						<HcClientRow
 							{row}
 							thresholdMinutes={data.lowCreditThresholdMinutes}
-							referenceLabel={data.reference?.label ?? null}
 							href="/{tenantSlug}/hour-credits/{row.clientId}"
 							onToggleOptIn={data.canEdit
 								? (enabled: boolean) => toggleOptIn(row.clientId, enabled)

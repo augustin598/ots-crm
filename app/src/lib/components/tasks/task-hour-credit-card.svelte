@@ -98,8 +98,8 @@
 			</p>
 		{:else}
 			<p class="text-xs text-muted-foreground">
-				La trecerea în Done se scad orele efective (sau estimarea) din creditul clientului; ce
-				depășește intră în draftul lunar de factură.
+				Scăderea se face la finalizare, pe orele efective. Fără ore efective, taskul rămâne
+				nedecontat până le completezi.
 			</p>
 		{/if}
 		{#if task.clientId}

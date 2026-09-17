@@ -37,13 +37,6 @@ export function fmtMoneyCents(cents: number, currency = 'EUR'): string {
 	}).format(cents / 100);
 }
 
-/** Echivalentul în euro al unui credit, la tariful de referință. */
-export function creditToEur(minutes: number, referenceRateEur: number | null): string | null {
-	if (!referenceRateEur || referenceRateEur <= 0) return null;
-	const eur = (minutes / 60) * referenceRateEur;
-	return new Intl.NumberFormat('ro-RO', { maximumFractionDigits: 0 }).format(eur) + ' €';
-}
-
 export function fmtDate(d: Date | string | null | undefined): string {
 	if (!d) return '—';
 	return new Date(d).toLocaleDateString('ro-RO', {

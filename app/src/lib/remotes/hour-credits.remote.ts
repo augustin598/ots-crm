@@ -1,8 +1,8 @@
 /**
  * Bugete ore (creditul de ore per client) — citire pentru staff, mutații owner/admin.
  *
- * Soldul e în minute la tariful de referință; UI-ul îl afișează în ore/minute
- * (`formatMinutes`). Scrierile trec toate prin `$lib/server/hour-credits.ts`.
+ * Soldul e în minute reale (1 h cumpărată = 1 h lucrată); UI-ul îl afișează în
+ * ore/minute (`formatMinutes`). Scrierile trec toate prin `$lib/server/hour-credits.ts`.
  */
 import { command, getRequestEvent, query } from '$app/server';
 import { error } from '@sveltejs/kit';
@@ -91,7 +91,6 @@ export const getHourCreditsPage = query(async () => {
 		listCancelledCreditedInvoices(tenantId),
 		listUninvoicedHourCredits(tenantId)
 	]);
-	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
 	const reserved = await computeReservedMinutes(
 		tenantId,
 		rows.map((r) => r.clientId)
@@ -131,7 +130,6 @@ export const getHourCreditsPage = query(async () => {
 		// Tabul „De rezolvat": bani care altfel s-ar pierde fără urmă.
 		issues: { unbilledOverages, unsettledDone, cancelledCredited, uninvoicedCredits },
 		kpis,
-		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		lowCreditThresholdMinutes: threshold,
 		recentInvoiceMonths: RECENT_INVOICE_MONTHS,
 		canEdit: role === 'owner' || role === 'admin'

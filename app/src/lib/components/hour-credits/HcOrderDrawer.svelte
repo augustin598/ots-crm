@@ -27,7 +27,7 @@
 		invoiceNumber: string | null;
 		createdAt: Date | string;
 		credited: boolean;
-		/** Minute la tariful de referință (din ledger sau estimate), NU `hours × 60`. */
+		/** Minutele creditate (din ledger) sau, înainte de plată, orele comandate: 1 h cumpărată = 1 h de credit. */
 		creditMinutes: number | null;
 	}
 
@@ -141,8 +141,8 @@
 						{#if order.credited}
 							Creditat: <b>+{fmtMinutes(order.creditMinutes ?? 0)}</b> în soldul clientului.
 						{:else if order.creditMinutes !== null}
-							În așteptare: <b>~{fmtMinutes(order.creditMinutes)}</b> se adaugă automat când plata e confirmată
-							(la tariful de referință din acel moment).
+							În așteptare: <b>{fmtMinutes(order.creditMinutes)}</b> se adaugă automat când plata e confirmată
+							(1 oră cumpărată = 1 oră de credit).
 						{:else}
 							În așteptare: creditul se calculează la confirmarea plății.
 						{/if}
