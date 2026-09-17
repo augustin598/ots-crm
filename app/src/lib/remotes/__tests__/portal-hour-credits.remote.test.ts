@@ -28,11 +28,13 @@ mock.module('$lib/server/portal-access', () => ({
 }));
 
 const viewCalls: Array<[string, string]> = [];
+let optedIn = false;
 mock.module('$lib/server/hour-credits', () => ({
 	getClientHourCredit: async (tenantId: string, clientId: string) => {
 		viewCalls.push([tenantId, clientId]);
 		return {
 			balanceMinutes: 120,
+			optedIn,
 			entries: [
 				{
 					id: 'l1',
@@ -99,6 +101,22 @@ describe('getMyHourCredit', () => {
 		expect(viewCalls).toEqual([['t1', 'c1']]);
 		expect(view.balanceMinutes).toBe(120);
 		expect(view.reservedMinutes).toBe(30);
+	});
+
+	test('tariful conversiei apare doar clientului cu alimentare din facturi', async () => {
+		currentEvent = portalEvent(true);
+		portalFlags = { hourCredits: true };
+		optedIn = false;
+		const off = await (getMyHourCredit as any)();
+		expect(off.subscriptionRateEur).toBeNull();
+		expect(off.reference).toBeUndefined();
+		expect(off.stepMinutes).toBe(15);
+		// Regulile fără termen de expirare → 0 („orele nu expiră").
+		expect(off.expiryDays).toBe(0);
+		optedIn = true;
+		const on = await (getMyHourCredit as any)();
+		expect(on.subscriptionRateEur).toBe(55);
+		optedIn = false;
 	});
 
 	test('nota unei ajustări manuale nu ajunge în portal; restul notelor rămân', async () => {

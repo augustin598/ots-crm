@@ -35,8 +35,15 @@ export const getMyHourCredit = query(async () => {
 	return {
 		balanceMinutes: view.balanceMinutes,
 		reservedMinutes: reserved.get(client.id) ?? 0,
-		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		lowCreditThresholdMinutes: catalog.rules.lowCreditThresholdMinutes,
+		stepMinutes: catalog.rules.stepMinutes,
+		/** 0 = orele nu expiră (expirarea e pornită doar cu `creditExpiryDays > 0`). */
+		expiryDays: catalog.rules.creditExpiryDays > 0 ? catalog.rules.creditExpiryDays : 0,
+		/**
+		 * Tariful conversiei apare DOAR clienților cu alimentare din facturi. Tarifele pe
+		 * specializare nu ajung în portal.
+		 */
+		subscriptionRateEur: view.optedIn && reference ? reference.rateEur : null,
 		// Fără numele userilor interni (spec §8): doar ce vede clientul. Nota unei
 		// ajustări manuale e motivul intern al staff-ului — clientul vede eticheta tipului.
 		entries: view.entries.map((e) => ({

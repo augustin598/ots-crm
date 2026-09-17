@@ -5,14 +5,15 @@
 	 * specializare, fără cine a făcut ajustarea, fără facturi necreditate.
 	 */
 	import { getMyHourCredit } from '$lib/remotes/portal-hour-credits.remote';
-	import { LEDGER_KIND_LABELS } from '$lib/logic/hour-credits';
+	import { LEDGER_KIND_LABELS, ceilToStep } from '$lib/logic/hour-credits';
 	import HcGauge from '$lib/components/hour-credits/HcGauge.svelte';
 	import HcLegend from '$lib/components/hour-credits/HcLegend.svelte';
 	import { fmtDate, fmtMinutes } from '$lib/components/hour-credits/hour-credits-format';
 
 	const view = $derived(await getMyHourCredit());
 	const available = $derived(view.balanceMinutes - view.reservedMinutes);
-	const low = $derived(view.balanceMinutes < view.lowCreditThresholdMinutes);
+	// Aceeași regulă ca în admin: alerta e pe DISPONIBIL, nu pe sold.
+	const low = $derived(available < view.lowCreditThresholdMinutes);
 	const consumed30 = $derived(
 		view.entries
 			.filter(
@@ -46,14 +47,50 @@
 
 	<HcGauge balance={view.balanceMinutes} reserved={view.reservedMinutes} spent={consumed30} lg />
 	<div style="margin-top:12px"><HcLegend /></div>
-
-	{#if view.reference}
-		<div class="hc-preview" style="margin-top:14px;margin-bottom:0">
-			1 h de credit = 1 h de <b>{view.reference.label}</b>; specializările mai scumpe consumă
-			proporțional mai mult.
-		</div>
-	{/if}
 </div>
+
+<details class="hc-widget hc-how" open={view.entries.length === 0}>
+	<summary>Cum funcționează creditul de ore</summary>
+	<dl>
+		<dt>Ce este</dt>
+		<dd>
+			Timpul pe care l-ai plătit în avans. 1 oră de credit = 1 oră lucrată, indiferent de tipul
+			lucrării.
+		</dd>
+		<dt>Cum se alimentează</dt>
+		<dd>
+			Din orele cumpărate: 1 oră cumpărată = 1 oră de credit.
+			{#if view.subscriptionRateEur}
+				În plus, facturile de abonament plătite se transformă în ore: suma netă, la
+				{view.subscriptionRateEur} €/h.
+			{/if}
+		</dd>
+		<dt>Cum se consumă</dt>
+		<dd>
+			La finalizarea unui task scădem timpul lucrat, rotunjit în sus la {view.stepMinutes} minute. Exemplu:
+			20 min lucrate = {fmtMinutes(ceilToStep(20, view.stepMinutes))}.
+		</dd>
+		<dt>Ce înseamnă „rezervat"</dt>
+		<dd>
+			Taskurile deschise blochează estimarea lor din sold. Disponibil = sold − rezervat. Nimic nu se
+			scade până la finalizare.
+		</dd>
+		<dt>Dacă se termină creditul</dt>
+		<dd>
+			Timpul lucrat peste credit se facturează separat, la tariful lucrării, pe factura lunară de
+			depășire.
+		</dd>
+		{#if view.expiryDays > 0}
+			<dt>Expirare</dt>
+			<dd>
+				Orele neconsumate expiră după {view.expiryDays} zile de la alimentare. Consumăm întâi orele cele
+				mai vechi.
+			</dd>
+		{/if}
+		<dt>Credit scăzut</dt>
+		<dd>Te anunțăm când disponibilul scade sub {fmtMinutes(view.lowCreditThresholdMinutes)}.</dd>
+	</dl>
+</details>
 
 <div class="hc-tablecard hc-widget" style="padding:0">
 	<div class="hc-card-h tight">
@@ -91,6 +128,9 @@
 								</div>
 								{#if e.realMinutes && e.kind !== 'purchase'}
 									<div class="hc-muted hc-led-sub">{fmtMinutes(e.realMinutes)} lucrate</div>
+								{/if}
+								{#if e.realMinutes && e.kind === 'task_consumption' && Math.abs(e.deltaMinutes) > e.realMinutes}
+									<div class="hc-muted hc-led-sub">rotunjit la {view.stepMinutes} min</div>
 								{/if}
 							</td>
 							<td class="hc-muted">{fmtDate(e.createdAt)}</td>
