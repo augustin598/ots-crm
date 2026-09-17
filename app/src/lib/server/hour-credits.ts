@@ -243,7 +243,7 @@ export async function creditPaidInvoice(params: {
 		if (!ronPerEur) return { status: 'failed', reason: `curs BNR indisponibil pentru ${paidOn}` };
 	}
 	const netEurCents = netToEurCents(invoice.amount!, currency, ronPerEur);
-	const minutes = eurCentsToReferenceMinutes(netEurCents, reference.rateEur, reference.stepMinutes);
+	const minutes = eurCentsToReferenceMinutes(netEurCents, reference.rateEur);
 	if (minutes <= 0) return { status: 'skipped', reason: 'sumă sub jumătate de pas' };
 
 	const result = await applyLedgerEntry({

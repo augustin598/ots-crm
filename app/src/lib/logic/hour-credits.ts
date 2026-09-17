@@ -7,8 +7,6 @@
  * activ, suprascriibil în Settings → Tarife orare).
  */
 
-import { effectiveRateEur } from './hours-pricing';
-
 export type LedgerKind =
 	| 'invoice_credit'
 	| 'invoice_credit_reversal'
@@ -18,7 +16,8 @@ export type LedgerKind =
 	| 'task_consumption'
 	| 'task_reversal'
 	| 'overage_invoiced'
-	| 'expire';
+	| 'expire'
+	| 'correction';
 
 export type LedgerSourceType = 'invoice' | 'hours_order' | 'task' | 'manual' | 'ledger';
 
@@ -31,7 +30,8 @@ export const LEDGER_KIND_LABELS: Record<LedgerKind, string> = {
 	task_consumption: 'Consum task',
 	task_reversal: 'Task redeschis',
 	overage_invoiced: 'Depășire facturată',
-	expire: 'Expirare credit'
+	expire: 'Expirare credit',
+	correction: 'Corecție'
 };
 
 /** Sursele de facturi care NU alimentează creditul (media plătită, nu muncă). */
@@ -51,6 +51,13 @@ export function roundToStep(minutes: number, stepMinutes: number): number {
 	if (!Number.isFinite(minutes)) return 0;
 	const step = Number.isInteger(stepMinutes) && stepMinutes > 0 ? stepMinutes : 1;
 	return Math.round(minutes / step) * step;
+}
+
+/** Singura rotunjire a timpului LUCRAT: în sus, la pas. Pas invalid = minut întreg. */
+export function ceilToStep(minutes: number, stepMinutes: number): number {
+	if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+	const step = Number.isInteger(stepMinutes) && stepMinutes > 0 ? stepMinutes : 1;
+	return Math.ceil(minutes / step) * step;
 }
 
 /** Cenți RON/EUR → cenți EUR, la cursul BNR (lei per euro) din ziua plății. */
@@ -73,19 +80,18 @@ export function netToEurCents(
 	throw new Error(`Monedă neacceptată: ${currency}`);
 }
 
-/** Cenți EUR → minute la tariful de referință, rotunjite la pas. */
-export function eurCentsToReferenceMinutes(
-	netEurCents: number,
-	referenceRateEur: number,
-	stepMinutes: number
-): number {
+/**
+ * Cenți EUR → minute la tariful de referință, ÎN JOS la minut: creditul nu poate
+ * depăși banii plătiți. Pasul e regula timpului lucrat, nu a banilor.
+ */
+export function eurCentsToReferenceMinutes(netEurCents: number, referenceRateEur: number): number {
 	if (!Number.isInteger(netEurCents) || netEurCents < 0) {
 		throw new Error(`Sumă EUR invalidă: ${netEurCents}`);
 	}
 	if (!Number.isInteger(referenceRateEur) || referenceRateEur <= 0) {
 		throw new Error(`Tarif de referință invalid: ${referenceRateEur}`);
 	}
-	return roundToStep((netEurCents / 100 / referenceRateEur) * 60, stepMinutes);
+	return Math.floor((netEurCents * 60) / (referenceRateEur * 100));
 }
 
 export interface InvoiceCreditCandidate {
@@ -164,16 +170,15 @@ export function startOfMonthUtc(now: Date): Date {
 // creditul (`eurCentsToReferenceMinutes`).
 
 export interface TaskSettlementSplit {
-	/** Minute scăzute efectiv din credit (≤ sold, ≥ 0). */
+	/** Timpul lucrat, rotunjit în sus la pas — singura rotunjire. */
+	billedMinutes: number;
+	/** Minute scăzute din credit (≤ sold, ≥ 0). */
 	consumedMinutes: number;
-	/** Minute care depășesc creditul și se facturează. */
+	/** Restul exact, facturat ca depășire. */
 	overageRealMinutes: number;
 }
 
-/**
- * Împarte orele efective între credit și depășire (spec §6.2): se scade cât
- * există; restul se rotunjește în sus la pas.
- */
+/** consumed + overage == billed, mereu. */
 export function splitTaskSettlement(params: {
 	realMinutes: number;
 	balanceMinutes: number;
@@ -182,18 +187,14 @@ export function splitTaskSettlement(params: {
 	if (!Number.isInteger(params.realMinutes) || params.realMinutes < 0) {
 		throw new Error(`Minute reale invalide: ${params.realMinutes}`);
 	}
-	const available = Math.max(0, params.balanceMinutes);
-	const consumed = Math.min(params.realMinutes, available);
-	if (consumed >= params.realMinutes) {
-		return { consumedMinutes: consumed, overageRealMinutes: 0 };
-	}
-	const step =
-		Number.isInteger(params.stepMinutes) && params.stepMinutes > 0 ? params.stepMinutes : 1;
-	const overage = Math.ceil((params.realMinutes - consumed) / step) * step;
-	return {
-		consumedMinutes: consumed,
-		overageRealMinutes: Math.min(params.realMinutes, overage)
-	};
+	const billedMinutes = ceilToStep(params.realMinutes, params.stepMinutes);
+	const consumedMinutes = Math.min(billedMinutes, Math.max(0, params.balanceMinutes));
+	return { billedMinutes, consumedMinutes, overageRealMinutes: billedMinutes - consumedMinutes };
+}
+
+/** Suma liniei de depășire, direct din minute (tarif efectiv în EUR întregi). */
+export function overageLineAmountCents(minutes: number, unitRateEur: number): number {
+	return Math.round((minutes * unitRateEur * 100) / 60);
 }
 
 /** Cheia lunii calendaristice (Europe/Bucharest) pentru draftul de depășire. */
@@ -296,8 +297,8 @@ export function availableForTask(params: {
 }
 
 /**
- * Eticheta orelor lucrate din notificările de consum (email + WhatsApp): specializarea
- * cu tariful ei efectiv, ex. „Development (65 €/h)". Soldul rămâne în ore la tariful de
+ * Eticheta orelor lucrate din notificările de consum (email + WhatsApp): specializarea,
+ * fără tarif — prețul apare doar la depășire. Soldul rămâne în ore la tariful de
  * referință; decizie 13 sep 2026: fără explicații despre conversie în mesaj.
  */
 export function consumptionWorkedLabel(params: {
@@ -306,7 +307,6 @@ export function consumptionWorkedLabel(params: {
 	multiplierPct: number;
 	modeLabel: string;
 }): string {
-	const effective = effectiveRateEur(params.rateEur, params.multiplierPct);
 	const mode = params.multiplierPct > 100 ? `, ${params.modeLabel}` : '';
-	return `${params.rateLabel}${mode} (${effective} €/h)`;
+	return `${params.rateLabel}${mode}`;
 }

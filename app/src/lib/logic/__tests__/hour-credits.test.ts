@@ -1,16 +1,19 @@
 import { describe, test, expect } from 'bun:test';
 import {
 	roundToStep,
+	ceilToStep,
 	netToEurCents,
 	eurCentsToReferenceMinutes,
 	invoiceCreditEligibility,
 	overageDraftEditBlockReason,
+	overageLineAmountCents,
 	lowCreditTransition,
 	availableForTask,
 	consumptionWorkedLabel,
 	startOfMonthUtc,
 	splitTaskSettlement,
 	overageMonthKey,
+	LEDGER_KIND_LABELS,
 	type InvoiceCreditCandidate
 } from '../hour-credits';
 
@@ -44,21 +47,16 @@ describe('netToEurCents', () => {
 });
 
 describe('eurCentsToReferenceMinutes', () => {
-	test('exemplul din spec: 5.608 RON ≈ 1.130,65 € ÷ 55 €/h ≈ 20,5 h', () => {
-		expect(eurCentsToReferenceMinutes(113065, 55, 15)).toBe(1230); // 20 h 30 min
-	});
-
-	test('10 h Development la 65 € = 650 € → 11 h 45 min la referința 55 €', () => {
-		expect(eurCentsToReferenceMinutes(65000, 55, 15)).toBe(705);
-	});
-
-	test('sub jumătate de pas → 0 (nu se creditează nimic)', () => {
-		expect(eurCentsToReferenceMinutes(100, 55, 15)).toBe(0);
+	test('floor la minut: creditul nu depășește banii plătiți', () => {
+		expect(eurCentsToReferenceMinutes(113065, 55)).toBe(1233); // 20 h 33 min
+		expect(eurCentsToReferenceMinutes(5500, 55)).toBe(60);
+		expect(eurCentsToReferenceMinutes(91, 55)).toBe(0); // sub un minut
+		expect((1233 * 55 * 100) / 60).toBeLessThanOrEqual(113065);
 	});
 
 	test('validări', () => {
-		expect(() => eurCentsToReferenceMinutes(-1, 55, 15)).toThrow();
-		expect(() => eurCentsToReferenceMinutes(1000, 0, 15)).toThrow(/referință/);
+		expect(() => eurCentsToReferenceMinutes(-1, 55)).toThrow();
+		expect(() => eurCentsToReferenceMinutes(1000, 0)).toThrow(/referință/);
 	});
 });
 
@@ -135,35 +133,58 @@ describe('startOfMonthUtc', () => {
 	});
 });
 
+describe('ceilToStep', () => {
+	test('rotunjește în sus la pas; multiplii rămân', () => {
+		expect(ceilToStep(0, 15)).toBe(0);
+		expect(ceilToStep(1, 15)).toBe(15);
+		expect(ceilToStep(15, 15)).toBe(15);
+		expect(ceilToStep(142, 15)).toBe(150);
+		expect(ceilToStep(142, 10)).toBe(150);
+		expect(ceilToStep(7, 10)).toBe(10);
+	});
+	test('pas invalid → minut întreg', () => {
+		expect(ceilToStep(37, 0)).toBe(37);
+	});
+});
+
 describe('splitTaskSettlement', () => {
-	// Creditul se consumă în ore REALE: 1 h cumpărată = 1 h lucrată, indiferent de
-	// specializare. Tariful contează doar la prețul depășirii și la cumpărare.
-	test('credit suficient: totul din credit, fără depășire', () => {
-		expect(splitTaskSettlement({ realMinutes: 180, balanceMinutes: 180, stepMinutes: 15 })).toEqual(
-			{ consumedMinutes: 180, overageRealMinutes: 0 }
-		);
-	});
-
-	test('exemplul din spec: 1 h credit, task de 2 h → 1 h din credit, 1 h facturată', () => {
-		expect(splitTaskSettlement({ realMinutes: 120, balanceMinutes: 60, stepMinutes: 15 })).toEqual({
-			consumedMinutes: 60,
-			overageRealMinutes: 60
+	// O singură rotunjire, pe timpul lucrat. din_credit + depășire == facturabil.
+	const cases: Array<[number, number, number, number, number, number]> = [
+		// sold, actual, pas → facturabil, din credit, depășire
+		[600, 150, 15, 150, 150, 0],
+		[100, 142, 15, 150, 100, 50],
+		[0, 7, 15, 15, 0, 15],
+		[-20, 60, 15, 60, 0, 60],
+		[10, 20, 15, 30, 10, 20]
+	];
+	for (const [balance, actual, step, billed, consumed, overage] of cases) {
+		test(`sold ${balance}, lucrat ${actual}, pas ${step}`, () => {
+			const r = splitTaskSettlement({
+				realMinutes: actual,
+				balanceMinutes: balance,
+				stepMinutes: step
+			});
+			expect(r).toEqual({
+				billedMinutes: billed,
+				consumedMinutes: consumed,
+				overageRealMinutes: overage
+			});
+			expect(r.consumedMinutes + r.overageRealMinutes).toBe(r.billedMinutes);
 		});
-	});
+	}
+});
 
-	test('depășirea se rotunjește în sus la pas și nu depășește orele reale', () => {
-		const r = splitTaskSettlement({ realMinutes: 120, balanceMinutes: 100, stepMinutes: 15 });
-		expect(r).toEqual({ consumedMinutes: 100, overageRealMinutes: 30 }); // 20 → 30
-		expect(splitTaskSettlement({ realMinutes: 50, balanceMinutes: 0, stepMinutes: 15 })).toEqual({
-			consumedMinutes: 0,
-			overageRealMinutes: 50
-		});
+describe('overageLineAmountCents', () => {
+	test('suma se calculează din minute, nu din ore rotunjite', () => {
+		expect(overageLineAmountCents(10, 65)).toBe(1083); // nu 1105
+		expect(overageLineAmountCents(15, 65)).toBe(1625);
+		expect(overageLineAmountCents(60, 98)).toBe(9800);
 	});
+});
 
-	test('sold negativ tratat ca zero', () => {
-		expect(
-			splitTaskSettlement({ realMinutes: 60, balanceMinutes: -30, stepMinutes: 15 }).consumedMinutes
-		).toBe(0);
+describe('kind-ul correction', () => {
+	test('are etichetă', () => {
+		expect(LEDGER_KIND_LABELS.correction).toBe('Corecție');
 	});
 });
 
@@ -273,10 +294,10 @@ describe('consumptionWorkedLabel — orele lucrate cu prețul specializării', (
 				multiplierPct: 100,
 				modeLabel: 'Standard'
 			})
-		).toBe('Development (65 €/h)');
+		).toBe('Development');
 	});
 
-	test('regim cu majorare: tariful efectiv și numele regimului', () => {
+	test('regim cu majorare: numele regimului, fără tarif', () => {
 		expect(
 			consumptionWorkedLabel({
 				rateLabel: 'Development',
@@ -284,6 +305,6 @@ describe('consumptionWorkedLabel — orele lucrate cu prețul specializării', (
 				multiplierPct: 150,
 				modeLabel: 'Urgență'
 			})
-		).toBe('Development, Urgență (98 €/h)');
+		).toBe('Development, Urgență');
 	});
 });
