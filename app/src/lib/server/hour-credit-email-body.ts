@@ -4,6 +4,7 @@
  */
 import { formatMinutes } from '$lib/logic/hourly-catalog';
 import { consumptionWorkedLabel } from '$lib/logic/hour-credits';
+import { effectiveRateEur } from '$lib/logic/hours-pricing';
 import type { HourCreditEvent } from './hour-credit-notifications';
 
 function escapeHtml(s: string): string {
@@ -55,15 +56,20 @@ export function buildHourCreditEmailBody(params: {
 	}
 	if (event.kind === 'consumed') {
 		const workedLabel = event.pricing ? consumptionWorkedLabel(event.pricing) : null;
+		const billed = event.consumedMinutes + event.overageRealMinutes;
+		const rounded = billed !== event.realMinutes ? ` (taxate ${formatMinutes(billed)})` : '';
+		const overageRate = event.pricing
+			? ` la ${effectiveRateEur(event.pricing.rateEur, event.pricing.multiplierPct)} €/h`
+			: '';
 		const overage =
 			event.overageRealMinutes > 0
-				? `<div style="margin-top: 8px; color: #b45309;">${formatMinutes(event.overageRealMinutes)} depășesc creditul și se facturează separat, la tariful specializării.</div>`
+				? `<div style="margin-top: 8px; color: #b45309;">${formatMinutes(event.overageRealMinutes)} depășesc creditul și se facturează separat${overageRate}.</div>`
 				: '';
 		return `
 			<p style="${P}">Bună ziua,</p>
 			<p style="${P}">Task-ul <strong>${escapeHtml(event.taskTitle)}</strong> a fost finalizat.</p>
 			<table role="presentation" cellpadding="0" cellspacing="0" style="${BOX}"><tr><td style="padding: 16px 18px; color: #374151; font-size: 14px; line-height: 1.7;">
-				<div><span style="color: #6b7280;">Ore lucrate</span> &nbsp;·&nbsp; <strong>${formatMinutes(event.realMinutes)}${workedLabel ? ` ${escapeHtml(workedLabel)}` : ''}</strong></div>
+				<div><span style="color: #6b7280;">Ore lucrate</span> &nbsp;·&nbsp; <strong>${formatMinutes(event.realMinutes)}${rounded}${workedLabel ? ` ${escapeHtml(workedLabel)}` : ''}</strong></div>
 				${overage}
 				${balanceRow}
 			</td></tr></table>

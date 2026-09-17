@@ -26,9 +26,9 @@ const events = [
 		kind: 'consumed' as const,
 		taskId: 'demo',
 		taskTitle: 'Landing page campanie toamnă',
-		realMinutes: 180,
-		consumedMinutes: 213,
-		overageRealMinutes: 0,
+		realMinutes: 142,
+		consumedMinutes: 100,
+		overageRealMinutes: 50,
 		pricing: {
 			rateLabel: 'Development',
 			rateEur: 65,
@@ -41,7 +41,7 @@ const events = [
 
 const sections = events
 	.map((event, i) => {
-		const balance = [1230, 1017, 90][i];
+		const balance = [1230, 1130, 90][i];
 		const body = buildHourCreditEmailBody({
 			clientName: fixture.clientName,
 			event,

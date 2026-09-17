@@ -13,6 +13,7 @@ import { logError, logWarning, serializeError } from '$lib/server/logger';
 import { getHourlyCatalog } from '$lib/server/hourly-catalog';
 import { formatMinutes } from '$lib/logic/hourly-catalog';
 import { consumptionWorkedLabel, lowCreditTransition } from '$lib/logic/hour-credits';
+import { effectiveRateEur } from '$lib/logic/hours-pricing';
 import { computeReservedMinutes } from '$lib/server/hour-credit-reserved';
 import { getAppBaseUrl } from '$lib/server/app-url';
 import { enqueueGroupMessage } from '$lib/server/whatsapp/outbox';
@@ -89,7 +90,7 @@ async function resolveGroupJid(
 	return byClient?.groupJid ?? null;
 }
 
-function buildWhatsappBody(
+export function buildWhatsappBody(
 	clientName: string,
 	ev: HourCreditEvent,
 	balanceMinutes: number,
@@ -100,13 +101,18 @@ function buildWhatsappBody(
 		return `⏱️ *Credit de ore ${clientName}*\n+${formatMinutes(ev.minutes)} (${ev.source}).\n${sold}\n${portalUrl}`;
 	}
 	if (ev.kind === 'consumed') {
+		const billed = ev.consumedMinutes + ev.overageRealMinutes;
+		const rounded = billed !== ev.realMinutes ? ` (taxate ${formatMinutes(billed)})` : '';
+		const overageRate = ev.pricing
+			? ` la ${effectiveRateEur(ev.pricing.rateEur, ev.pricing.multiplierPct)} €/h`
+			: '';
 		const overage =
 			ev.overageRealMinutes > 0
-				? `\n⚠️ ${formatMinutes(ev.overageRealMinutes)} peste credit — se facturează separat.`
+				? `\n⚠️ ${formatMinutes(ev.overageRealMinutes)} depășesc creditul și se facturează separat${overageRate}.`
 				: '';
 		const worked = ev.pricing
-			? `${formatMinutes(ev.realMinutes)} ${consumptionWorkedLabel(ev.pricing)}`
-			: formatMinutes(ev.realMinutes);
+			? `${formatMinutes(ev.realMinutes)}${rounded} ${consumptionWorkedLabel(ev.pricing)}`
+			: `${formatMinutes(ev.realMinutes)}${rounded}`;
 		return `⏱️ *Task finalizat: ${ev.taskTitle}*\n${worked} lucrate.${overage}\n${sold}\n${portalUrl}`;
 	}
 	return `⚠️ *Credit de ore scăzut — ${clientName}*\n${sold} · disponibil *${formatMinutes(ev.availableMinutes)}* după taskurile în lucru (sub pragul de ${formatMinutes(ev.thresholdMinutes)}).\nPoți cumpăra ore: ${getAppBaseUrl()}/servicii`;
