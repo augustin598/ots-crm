@@ -1126,6 +1126,122 @@ export async function listCancelledCreditedInvoices(
 		}));
 }
 
+/** Tipurile de rând care acceptă o corecție (alimentări și consum). */
+const CORRECTABLE_KINDS = ['manual', 'purchase', 'invoice_credit', 'task_consumption'] as const;
+
+export type LedgerCorrectableResult =
+	| { ok: true; row: { id: string; clientId: string; kind: string; deltaMinutes: number } }
+	| { ok: false; reason: 'not_found' | 'invalid'; message: string };
+
+/**
+ * Se poate corecta rândul `ledgerId` cu `deltaMinutes`? Doar citește. Refuză:
+ *  - alt tip decât alimentare/consum (stornările, expirările și corecțiile rămân cum sunt);
+ *  - un net care schimbă semnul rândului sau îl aduce la zero (asta e stornare, nu corecție);
+ *  - o sursă deja stornată, expirată sau — la consum — un ciclu de decontare închis:
+ *    corecția ar mișca soldul fără ca stornarea/reopen-ul să o mai poată lua în calcul.
+ */
+export async function assertLedgerRowCorrectable(
+	tenantId: string,
+	ledgerId: string,
+	deltaMinutes: number
+): Promise<LedgerCorrectableResult> {
+	const invalid = (message: string): LedgerCorrectableResult => ({
+		ok: false,
+		reason: 'invalid',
+		message
+	});
+	if (!Number.isInteger(deltaMinutes) || deltaMinutes === 0) {
+		return invalid('deltaMinutes trebuie să fie un întreg nenul');
+	}
+	const [row] = await db
+		.select({
+			id: table.clientHourLedger.id,
+			clientId: table.clientHourLedger.clientId,
+			kind: table.clientHourLedger.kind,
+			deltaMinutes: table.clientHourLedger.deltaMinutes,
+			sourceType: table.clientHourLedger.sourceType,
+			sourceId: table.clientHourLedger.sourceId,
+			createdAt: table.clientHourLedger.createdAt
+		})
+		.from(table.clientHourLedger)
+		.where(
+			and(eq(table.clientHourLedger.id, ledgerId), eq(table.clientHourLedger.tenantId, tenantId))
+		)
+		.limit(1);
+	if (!row) return { ok: false, reason: 'not_found', message: 'rândul de ledger nu există' };
+	if (row.kind === 'correction') return invalid('o corecție nu se corectează');
+	if (!(CORRECTABLE_KINDS as readonly string[]).includes(row.kind)) {
+		return invalid(
+			`un rând de tip „${row.kind}" nu se corectează — doar alimentările și consumul pe task`
+		);
+	}
+	if (Math.sign(row.deltaMinutes + deltaMinutes) !== Math.sign(row.deltaMinutes)) {
+		return invalid(
+			`corecția de ${deltaMinutes} min ar duce rândul de ${row.deltaMinutes} min la ${row.deltaMinutes + deltaMinutes} min — netul trebuie să păstreze semnul și să nu fie zero`
+		);
+	}
+
+	if (row.kind === 'task_consumption') {
+		const [task] = await db
+			.select({ creditSettledAt: table.task.creditSettledAt })
+			.from(table.task)
+			.where(and(eq(table.task.id, row.sourceId), eq(table.task.tenantId, tenantId)))
+			.limit(1);
+		const [reversal] = await db
+			.select({ id: table.clientHourLedger.id })
+			.from(table.clientHourLedger)
+			.where(
+				and(
+					eq(table.clientHourLedger.tenantId, tenantId),
+					eq(table.clientHourLedger.kind, 'task_reversal'),
+					eq(table.clientHourLedger.sourceType, 'task'),
+					eq(table.clientHourLedger.sourceId, row.sourceId),
+					gte(table.clientHourLedger.createdAt, row.createdAt)
+				)
+			)
+			.limit(1);
+		if (!task?.creditSettledAt || reversal) {
+			return invalid(
+				'consumul a fost deja stornat (task redeschis) — ciclul de decontare e închis'
+			);
+		}
+		return { ok: true, row };
+	}
+
+	// Alimentare: stornată (factură anulată) sau expirată?
+	if (row.kind === 'invoice_credit' || row.kind === 'purchase') {
+		const [reversal] = await db
+			.select({ id: table.clientHourLedger.id })
+			.from(table.clientHourLedger)
+			.where(
+				and(
+					eq(table.clientHourLedger.tenantId, tenantId),
+					eq(table.clientHourLedger.kind, REVERSAL_KIND[row.kind]),
+					eq(table.clientHourLedger.sourceType, row.sourceType),
+					eq(table.clientHourLedger.sourceId, row.sourceId)
+				)
+			)
+			.limit(1);
+		if (reversal) return invalid('alimentarea a fost deja stornată (factura ei e anulată)');
+	}
+	const [expired] = await db
+		.select({ id: table.clientHourLedger.id })
+		.from(table.clientHourLedger)
+		.where(
+			and(
+				eq(table.clientHourLedger.tenantId, tenantId),
+				eq(table.clientHourLedger.kind, 'expire'),
+				or(
+					eq(table.clientHourLedger.sourceId, row.id),
+					sql`${table.clientHourLedger.sourceId} LIKE ${`${row.id}#%`}`
+				)
+			)
+		)
+		.limit(1);
+	if (expired) return invalid('alimentarea a expirat deja (parțial sau total)');
+	return { ok: true, row };
+}
+
 export type ReverseInvoiceCreditResult =
 	| { status: 'reversed'; minutes: number }
 	| { status: 'already_reversed' }
@@ -1178,6 +1294,9 @@ export async function reverseCancelledInvoiceCredit(params: {
 		);
 	const corrections = correctionRows.reduce((s, r) => s + r.deltaMinutes, 0);
 	const toReverse = credit.deltaMinutes + corrections;
+	if (toReverse <= 0) {
+		return { status: 'skipped', reason: 'corecțiile au anulat deja creditul facturii' };
+	}
 
 	const kind = REVERSAL_KIND[credit.kind as keyof typeof REVERSAL_KIND];
 	const result = await applyLedgerEntry({

@@ -129,8 +129,8 @@
 								{#if e.realMinutes && e.kind !== 'purchase'}
 									<div class="hc-muted hc-led-sub">{fmtMinutes(e.realMinutes)} lucrate</div>
 								{/if}
-								{#if e.realMinutes && e.kind === 'task_consumption' && Math.abs(e.deltaMinutes) > e.realMinutes}
-									<div class="hc-muted hc-led-sub">rotunjit la {view.stepMinutes} min</div>
+								{#if e.realMinutes && e.kind === 'task_consumption' && Math.abs(e.deltaMinutes) === ceilToStep(e.realMinutes, view.stepMinutes) && Math.abs(e.deltaMinutes) !== e.realMinutes}
+									<div class="hc-muted hc-led-sub">rotunjit în sus la {view.stepMinutes} min</div>
 								{/if}
 							</td>
 							<td class="hc-muted">{fmtDate(e.createdAt)}</td>

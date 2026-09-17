@@ -51,6 +51,14 @@ mock.module('$lib/server/hour-credits', () => ({
 					note: 'Configurare GA4 — 90 min Development',
 					realMinutes: 76,
 					createdAt: new Date('2026-09-11T10:00:00Z')
+				},
+				{
+					id: 'l3',
+					deltaMinutes: 28,
+					kind: 'correction',
+					note: 'cronometrul a rămas pornit peste noapte — vina lui X',
+					realMinutes: 62,
+					createdAt: new Date('2026-09-12T10:00:00Z')
 				}
 			]
 		};
@@ -129,5 +137,16 @@ describe('getMyHourCredit', () => {
 		expect(manual.note).toBeNull();
 		expect(manual.realMinutes).toBeNull();
 		expect(task.note).toBe('Configurare GA4 — 90 min Development');
+	});
+
+	test('nota unei corecții e raționament intern: nu ajunge în portal', async () => {
+		currentEvent = portalEvent(true);
+		portalFlags = { hourCredits: true };
+		const view = await (getMyHourCredit as any)();
+		const correction = view.entries.find((e: any) => e.id === 'l3');
+		expect(correction.kind).toBe('correction');
+		expect(correction.deltaMinutes).toBe(28);
+		expect(correction.note).toBeNull();
+		expect(correction.realMinutes).toBeNull();
 	});
 });

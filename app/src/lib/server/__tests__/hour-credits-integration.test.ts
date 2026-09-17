@@ -72,7 +72,8 @@ const {
 	creditPaidHoursOrder,
 	listCancelledCreditedInvoices,
 	reverseCancelledInvoiceCredit,
-	applyLedgerEntry
+	applyLedgerEntry,
+	assertLedgerRowCorrectable
 } = await import('../hour-credits');
 const {
 	settleTaskCredit,
@@ -284,6 +285,84 @@ describe('alimentare din facturi plătite', () => {
 			userId: USER
 		});
 		expect(again.status).toBe('already_reversed');
+		expect(await balance()).toBe(0);
+	});
+
+	async function ledgerRow(kind: string, sourceId: string) {
+		const [row] = await testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(
+				and(eq(table.clientHourLedger.kind, kind), eq(table.clientHourLedger.sourceId, sourceId))
+			);
+		return row;
+	}
+
+	test('invariant 14: credit + corecție −N → storna retrage netul; a doua chemare e no-op', async () => {
+		await paidInvoice('inv-net');
+		await creditPaidInvoice({ tenantId: TENANT, invoiceId: 'inv-net', trigger: 'hook' });
+		const credit = await ledgerRow('invoice_credit', 'inv-net');
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -233,
+			kind: 'correction',
+			sourceType: 'ledger',
+			sourceId: credit.id,
+			note: 'creditat prea mult'
+		});
+		expect(await balance()).toBe(1000);
+		await testDb
+			.update(table.invoice)
+			.set({ status: 'cancelled' })
+			.where(eq(table.invoice.id, 'inv-net'));
+
+		const r = await reverseCancelledInvoiceCredit({
+			tenantId: TENANT,
+			invoiceId: 'inv-net',
+			userId: USER
+		});
+		expect(r).toEqual({ status: 'reversed', minutes: 1000 });
+		expect(await balance()).toBe(0);
+		const before = await ledgerKinds();
+		const again = await reverseCancelledInvoiceCredit({
+			tenantId: TENANT,
+			invoiceId: 'inv-net',
+			userId: USER
+		});
+		expect(again.status).toBe('already_reversed');
+		expect(await balance()).toBe(0);
+		expect(await ledgerKinds()).toEqual(before);
+	});
+
+	test('storna: corecțiile au anulat deja tot creditul → skipped, fără scriere', async () => {
+		await paidInvoice('inv-zero');
+		await creditPaidInvoice({ tenantId: TENANT, invoiceId: 'inv-zero', trigger: 'hook' });
+		const credit = await ledgerRow('invoice_credit', 'inv-zero');
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -1233,
+			kind: 'correction',
+			sourceType: 'ledger',
+			sourceId: credit.id,
+			note: 'rând vechi, corectat la zero'
+		});
+		await testDb
+			.update(table.invoice)
+			.set({ status: 'cancelled' })
+			.where(eq(table.invoice.id, 'inv-zero'));
+		const before = await ledgerKinds();
+		const r = await reverseCancelledInvoiceCredit({
+			tenantId: TENANT,
+			invoiceId: 'inv-zero',
+			userId: USER
+		});
+		expect(r).toEqual({
+			status: 'skipped',
+			reason: 'corecțiile au anulat deja creditul facturii'
+		});
+		expect(await ledgerKinds()).toEqual(before);
 		expect(await balance()).toBe(0);
 	});
 
@@ -813,6 +892,192 @@ describe('consumul task-urilor', () => {
 		});
 		expect(a.applied).toBe(true);
 		expect(b.applied).toBe(false);
+	});
+});
+
+describe('assertLedgerRowCorrectable — ce rânduri acceptă o corecție', () => {
+	async function seed(
+		sourceId: string,
+		over: Partial<Parameters<typeof applyLedgerEntry>[0]> = {}
+	) {
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 600,
+			kind: 'manual',
+			sourceType: 'manual',
+			sourceId,
+			note: 'seed test',
+			...over
+		});
+		const [row] = await testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(eq(table.clientHourLedger.sourceId, sourceId));
+		return row;
+	}
+	async function rowOf(kind: string, sourceId: string) {
+		const [row] = await testDb
+			.select()
+			.from(table.clientHourLedger)
+			.where(
+				and(eq(table.clientHourLedger.kind, kind), eq(table.clientHourLedger.sourceId, sourceId))
+			);
+		return row;
+	}
+
+	test('drumul fericit: alimentare manuală și consum din ciclul curent', async () => {
+		const supply = await seed('ok-1');
+		const r = await assertLedgerRowCorrectable(TENANT, supply.id, -100);
+		expect(r.ok).toBe(true);
+		if (r.ok) {
+			expect(r.row.id).toBe(supply.id);
+			expect(r.row.clientId).toBe(CLIENT);
+		}
+		await insertTask('t-ok', { actualMinutes: 150 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-ok', userId: USER });
+		const cons = await rowOf('task_consumption', 't-ok');
+		expect((await assertLedgerRowCorrectable(TENANT, cons.id, 28)).ok).toBe(true);
+		expect((await assertLedgerRowCorrectable(TENANT, cons.id, -30)).ok).toBe(true);
+	});
+
+	test('rând inexistent sau al altui tenant → not_found', async () => {
+		const supply = await seed('nf-1');
+		const a = await assertLedgerRowCorrectable(TENANT, 'nu-exista', 10);
+		expect(a).toMatchObject({ ok: false, reason: 'not_found' });
+		const b = await assertLedgerRowCorrectable('alt-tenant', supply.id, 10);
+		expect(b).toMatchObject({ ok: false, reason: 'not_found' });
+	});
+
+	test('delta zero sau neîntreg → invalid', async () => {
+		const supply = await seed('z-1');
+		expect(await assertLedgerRowCorrectable(TENANT, supply.id, 0)).toMatchObject({
+			ok: false,
+			reason: 'invalid'
+		});
+		expect(await assertLedgerRowCorrectable(TENANT, supply.id, 1.5)).toMatchObject({
+			ok: false,
+			reason: 'invalid'
+		});
+	});
+
+	test('doar alimentările și consumul se corectează: stornare, expirare, corecție → refuz', async () => {
+		const supply = await seed('k-1');
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -10,
+			kind: 'correction',
+			sourceType: 'ledger',
+			sourceId: supply.id,
+			note: 'test'
+		});
+		const corr = await rowOf('correction', supply.id);
+		expect(await assertLedgerRowCorrectable(TENANT, corr.id, -5)).toMatchObject({
+			ok: false,
+			reason: 'invalid'
+		});
+
+		await insertTask('t-k', { actualMinutes: 60 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-k', userId: USER });
+		await testDb.update(table.task).set({ status: 'in-progress' }).where(eq(table.task.id, 't-k'));
+		await reverseTaskCredit({ tenantId: TENANT, taskId: 't-k', userId: USER });
+		const reversal = await rowOf('task_reversal', 't-k');
+		const r = await assertLedgerRowCorrectable(TENANT, reversal.id, -5);
+		expect(r).toMatchObject({ ok: false, reason: 'invalid' });
+		if (!r.ok) expect(r.message).toContain('task_reversal');
+	});
+
+	test('netul trebuie să păstreze semnul rândului și să nu fie zero', async () => {
+		const supply = await seed('s-1');
+		for (const delta of [-600, -601]) {
+			expect(await assertLedgerRowCorrectable(TENANT, supply.id, delta)).toMatchObject({
+				ok: false,
+				reason: 'invalid'
+			});
+		}
+		expect((await assertLedgerRowCorrectable(TENANT, supply.id, -599)).ok).toBe(true);
+
+		await insertTask('t-s', { actualMinutes: 150 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-s', userId: USER });
+		const cons = await rowOf('task_consumption', 't-s'); // −150
+		for (const delta of [150, 151]) {
+			expect(await assertLedgerRowCorrectable(TENANT, cons.id, delta)).toMatchObject({
+				ok: false,
+				reason: 'invalid'
+			});
+		}
+	});
+
+	test('alimentare deja stornată (factură anulată) → refuz', async () => {
+		await testDb.insert(table.invoice).values({
+			id: 'inv-corr-rev',
+			tenantId: TENANT,
+			clientId: CLIENT,
+			createdByUserId: USER,
+			invoiceNumber: 'OTS-corr-rev',
+			status: 'paid',
+			amount: 560800,
+			currency: 'RON',
+			paidDate: new Date()
+		});
+		await creditPaidInvoice({ tenantId: TENANT, invoiceId: 'inv-corr-rev', trigger: 'hook' });
+		const credit = await rowOf('invoice_credit', 'inv-corr-rev');
+		expect((await assertLedgerRowCorrectable(TENANT, credit.id, -33)).ok).toBe(true);
+		await testDb
+			.update(table.invoice)
+			.set({ status: 'cancelled' })
+			.where(eq(table.invoice.id, 'inv-corr-rev'));
+		await reverseCancelledInvoiceCredit({
+			tenantId: TENANT,
+			invoiceId: 'inv-corr-rev',
+			userId: USER
+		});
+		const r = await assertLedgerRowCorrectable(TENANT, credit.id, -33);
+		expect(r).toMatchObject({ ok: false, reason: 'invalid' });
+		if (!r.ok) expect(r.message).toContain('stornată');
+	});
+
+	test('alimentare deja expirată (cheia lotului sau „id#n") → refuz', async () => {
+		const a = await seed('e-1');
+		const b = await seed('e-2');
+		const c = await seed('e-3');
+		for (const [i, sourceId] of [a.id, `${b.id}#2`].entries()) {
+			await applyLedgerEntry({
+				tenantId: TENANT,
+				clientId: CLIENT,
+				deltaMinutes: -50,
+				kind: 'expire',
+				sourceType: 'ledger',
+				sourceId,
+				note: `expirare test ${i}`
+			});
+		}
+		for (const row of [a, b]) {
+			const r = await assertLedgerRowCorrectable(TENANT, row.id, -10);
+			expect(r).toMatchObject({ ok: false, reason: 'invalid' });
+			if (!r.ok) expect(r.message).toContain('expirat');
+		}
+		expect((await assertLedgerRowCorrectable(TENANT, c.id, -10)).ok).toBe(true);
+	});
+
+	test('consum dintr-un ciclu închis (task redeschis, chiar și re-decontat) → refuz', async () => {
+		await seed('c-1');
+		await insertTask('t-c', { actualMinutes: 150 });
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-c', userId: USER });
+		const first = await rowOf('task_consumption', 't-c');
+		await testDb.update(table.task).set({ status: 'in-progress' }).where(eq(table.task.id, 't-c'));
+		await reverseTaskCredit({ tenantId: TENANT, taskId: 't-c', userId: USER });
+		const r = await assertLedgerRowCorrectable(TENANT, first.id, 20);
+		expect(r).toMatchObject({ ok: false, reason: 'invalid' });
+		if (!r.ok) expect(r.message).toContain('stornat');
+
+		// Re-decontat: taskul are din nou `creditSettledAt`, dar rândul vechi rămâne închis.
+		await settleTaskCredit({ tenantId: TENANT, taskId: 't-c', userId: USER });
+		expect(await assertLedgerRowCorrectable(TENANT, first.id, 20)).toMatchObject({
+			ok: false,
+			reason: 'invalid'
+		});
 	});
 });
 

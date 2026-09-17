@@ -45,14 +45,18 @@ export const getMyHourCredit = query(async () => {
 		 */
 		subscriptionRateEur: view.optedIn && reference ? reference.rateEur : null,
 		// Fără numele userilor interni (spec §8): doar ce vede clientul. Nota unei
-		// ajustări manuale e motivul intern al staff-ului — clientul vede eticheta tipului.
-		entries: view.entries.map((e) => ({
-			id: e.id,
-			deltaMinutes: e.deltaMinutes,
-			kind: e.kind,
-			note: e.kind === 'manual' ? null : e.note,
-			realMinutes: e.kind === 'manual' ? null : e.realMinutes,
-			createdAt: e.createdAt
-		}))
+		// ajustări manuale sau a unei corecții e motivul intern al staff-ului — clientul
+		// vede eticheta tipului.
+		entries: view.entries.map((e) => {
+			const internal = e.kind === 'manual' || e.kind === 'correction';
+			return {
+				id: e.id,
+				deltaMinutes: e.deltaMinutes,
+				kind: e.kind,
+				note: internal ? null : e.note,
+				realMinutes: internal ? null : e.realMinutes,
+				createdAt: e.createdAt
+			};
+		})
 	};
 });
