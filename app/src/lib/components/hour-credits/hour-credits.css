@@ -890,6 +890,60 @@
 .hc-banner .hc-btn-primary {
 	margin-left: auto;
 }
+/* Varianta „plată primită": același banner, în tonul de succes al chipurilor. */
+.hc-banner-ok {
+	background: var(--hc-ok-bg);
+	border-color: transparent;
+}
+.hc-banner-ok .hc-banner-text {
+	color: var(--hc-body);
+}
+.hc-banner-ok a {
+	color: var(--hc-ok-fg);
+	font-weight: 700;
+}
+
+/* ---- Facturi și plăți (fișa clientului) ---- */
+.hc-invoices {
+	margin-bottom: 14px;
+}
+.hc-chiprow {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+.hc-inv-sub {
+	margin-top: 2px;
+}
+.hc-paymethod {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--hc-body);
+}
+/* Culoarea de brand Stripe: singurul loc unde nu folosim un token al temei. */
+.hc-stripe-badge {
+	width: 18px;
+	height: 18px;
+	border-radius: 5px;
+	background: #635bff;
+	color: #fff;
+	display: grid;
+	place-items: center;
+	flex-shrink: 0;
+}
+.hc-stripe-glyph {
+	width: 10px;
+	height: 10px;
+}
+.hc-chip-inline {
+	font-size: 10px;
+	padding: 1px 7px;
+	vertical-align: 1px;
+}
 
 /* ---- Grile ---- */
 .hc-grid2 {

@@ -76,6 +76,7 @@ const {
 	listUncreditedInvoices,
 	listClientCreditTasks,
 	listHoursOrders,
+	listClientHourInvoices,
 	creditPaidHoursOrder,
 	listCancelledCreditedInvoices,
 	reverseCancelledInvoiceCredit,
@@ -187,8 +188,9 @@ async function resetTables(): Promise<void> {
 			await testDb.delete(table.invoiceLineItem);
 			await testDb.delete(table.clientHourLedger);
 			await testDb.delete(table.task);
-			await testDb.delete(table.invoice);
+			// Comenzile de ore țin FK spre factură: se șterg înaintea ei.
 			await testDb.delete(table.serviceHoursOrder);
+			await testDb.delete(table.invoice);
 			await testDb.delete(table.client);
 			return;
 		} catch (err) {
@@ -2220,6 +2222,144 @@ describe('listHoursOrders — tabul „Comenzi ore"', () => {
 		const r = await creditPaidHoursOrder({ tenantId: TENANT, orderId: 'ord-paid-real' });
 		expect(r).toEqual({ status: 'credited', minutes: 180 });
 		expect(await balance()).toBe(180);
+	});
+});
+
+describe('listClientHourInvoices — cardul „Facturi și plăți" din fișa clientului', () => {
+	async function inv(id: string, over: Partial<typeof table.invoice.$inferInsert> = {}) {
+		await testDb.insert(table.invoice).values({
+			id,
+			tenantId: TENANT,
+			clientId: CLIENT,
+			createdByUserId: USER,
+			invoiceNumber: `OTS-${id}`,
+			status: 'sent',
+			amount: 102_572,
+			totalAmount: 124_112,
+			currency: 'RON',
+			issueDate: new Date('2026-09-17T00:00:00Z'),
+			dueDate: new Date('2026-10-02T00:00:00Z'),
+			...over
+		});
+	}
+
+	test('factura din „Adaugă ore", plătită cu cardul: plată, fiscalizare și orele din ledger', async () => {
+		await inv('hc-paid', {
+			externalSource: 'hour-credit',
+			status: 'paid',
+			paidDate: new Date('2026-09-18T07:33:48Z'),
+			paymentMethod: 'Card',
+			keezStatus: 'Valid',
+			stripePaymentIntentId: 'pi_test_1'
+		});
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 180,
+			kind: 'purchase',
+			sourceType: 'invoice',
+			sourceId: 'hc-paid',
+			note: '3 h Development'
+		});
+
+		const rows = await listClientHourInvoices(TENANT, CLIENT);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			id: 'hc-paid',
+			invoiceNumber: 'OTS-hc-paid',
+			status: 'paid',
+			totalAmount: 124_112,
+			currency: 'RON',
+			paymentMethod: 'Card',
+			keezStatus: 'Valid',
+			paidByStripe: true,
+			creditedMinutes: 180,
+			origin: 'hour-credit'
+		});
+		expect(rows[0].paidDate?.toISOString()).toBe('2026-09-18T07:33:48.000Z');
+	});
+
+	test('apar doar facturile legate de ore: hour-credit, depășire, creditate în ledger, comenzi /servicii', async () => {
+		await inv('a-unrelated', { externalSource: 'meta-ads' });
+		await inv('b-plain'); // factură obișnuită, necreditată → nu are ce căuta în fișă
+		await inv('c-overage', { externalSource: 'hour-overage' });
+		await inv('d-credited', { status: 'paid', paidDate: new Date() });
+		await creditPaidInvoice({ tenantId: TENANT, invoiceId: 'd-credited', trigger: 'hook' });
+		await inv('e-order', { status: 'paid', paidDate: new Date() });
+		await testDb.insert(table.serviceHoursOrder).values({
+			id: 'ord-inv',
+			tenantId: TENANT,
+			clientId: CLIENT,
+			rateSlug: 'development',
+			rateLabel: 'Development',
+			rateEur: 65,
+			hours: 2,
+			netCents: 13_000,
+			vatCents: 2_730,
+			grossCents: 15_730,
+			vatPercent: 21,
+			contactName: 'Test',
+			contactEmail: 'client@test.ro',
+			status: 'paid',
+			invoiceId: 'e-order'
+		});
+
+		const rows = await listClientHourInvoices(TENANT, CLIENT);
+		const byId = new Map(rows.map((r) => [r.id, r]));
+		expect([...byId.keys()].sort()).toEqual(['c-overage', 'd-credited', 'e-order']);
+		expect(byId.get('c-overage')!.origin).toBe('hour-overage');
+		expect(byId.get('d-credited')!.origin).toBe('invoice-credit');
+		expect(byId.get('d-credited')!.creditedMinutes).toBeGreaterThan(0);
+		expect(byId.get('e-order')!.origin).toBe('hours-order');
+	});
+
+	test('stornarea scade orele facturii; alt client și alt tenant nu se văd', async () => {
+		await inv('f-rev', { externalSource: 'hour-credit', status: 'cancelled' });
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: 120,
+			kind: 'purchase',
+			sourceType: 'invoice',
+			sourceId: 'f-rev',
+			note: '2 h'
+		});
+		await applyLedgerEntry({
+			tenantId: TENANT,
+			clientId: CLIENT,
+			deltaMinutes: -120,
+			kind: 'purchase_reversal',
+			sourceType: 'invoice',
+			sourceId: 'f-rev',
+			note: 'storno'
+		});
+		await testDb.insert(table.client).values({
+			id: 'c-other',
+			tenantId: TENANT,
+			name: 'Alt client',
+			email: 'alt@test.ro'
+		});
+		await testDb.insert(table.invoice).values({
+			id: 'g-other',
+			tenantId: TENANT,
+			clientId: 'c-other',
+			createdByUserId: USER,
+			invoiceNumber: 'OTS-other',
+			status: 'sent',
+			externalSource: 'hour-credit'
+		});
+
+		const rows = await listClientHourInvoices(TENANT, CLIENT);
+		expect(rows.map((r) => r.id)).toEqual(['f-rev']);
+		expect(rows[0].creditedMinutes).toBe(0);
+		expect(await listClientHourInvoices('alt-tenant', CLIENT)).toEqual([]);
+	});
+
+	test('cele mai recente sus, după data emiterii', async () => {
+		await inv('old', { externalSource: 'hour-credit', issueDate: new Date('2026-08-01T00:00:00Z') });
+		await inv('new', { externalSource: 'hour-credit', issueDate: new Date('2026-09-17T00:00:00Z') });
+		const rows = await listClientHourInvoices(TENANT, CLIENT);
+		expect(rows.map((r) => r.id)).toEqual(['new', 'old']);
 	});
 });
 

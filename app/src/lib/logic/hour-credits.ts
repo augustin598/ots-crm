@@ -378,3 +378,57 @@ export function consumptionWorkedLabel(params: {
 	const mode = params.multiplierPct > 100 ? `, ${params.modeLabel}` : '';
 	return `${params.rateLabel}${mode}`;
 }
+
+// ── Facturi și plăți (fișa de credit a clientului) ───────────────────────────
+
+/** Starea de plată afișată în fișă; „restantă" se deduce și din scadență. */
+export type InvoicePaymentState = 'paid' | 'unpaid' | 'overdue' | 'draft' | 'cancelled';
+
+/**
+ * Statusul din DB trece pe `overdue` abia la jobul zilnic; până atunci o factură
+ * `sent` cu scadența depășită ar apărea „neachitată". Scadența ține până la
+ * finalul zilei (UTC, ca `issueDate`/`dueDate` din facturi).
+ */
+export function invoicePaymentState(
+	inv: { status: string; dueDate: Date | null },
+	now: Date
+): InvoicePaymentState {
+	if (inv.status === 'paid') return 'paid';
+	if (inv.status === 'cancelled') return 'cancelled';
+	if (inv.status === 'draft') return 'draft';
+	if (inv.status === 'overdue') return 'overdue';
+	if (inv.dueDate) {
+		const endOfDueDay = Date.UTC(
+			inv.dueDate.getUTCFullYear(),
+			inv.dueDate.getUTCMonth(),
+			inv.dueDate.getUTCDate() + 1
+		);
+		if (now.getTime() >= endOfDueDay) return 'overdue';
+	}
+	return 'unpaid';
+}
+
+/** Proforma (Keez `Draft`) devine fiscală (`Valid`) la plată sau la validarea manuală. */
+export type InvoiceFiscalState = 'proforma' | 'fiscal' | 'cancelled' | 'none';
+
+export function invoiceFiscalState(keezStatus: string | null | undefined): InvoiceFiscalState {
+	if (keezStatus === 'Draft') return 'proforma';
+	if (keezStatus === 'Valid') return 'fiscal';
+	if (keezStatus === 'Cancelled') return 'cancelled';
+	return 'none';
+}
+
+export const INVOICE_PAYMENT_STATE_LABELS: Record<InvoicePaymentState, string> = {
+	paid: 'Achitată',
+	unpaid: 'Neachitată',
+	overdue: 'Restantă',
+	draft: 'Draft',
+	cancelled: 'Anulată'
+};
+
+export const INVOICE_FISCAL_STATE_LABELS: Record<InvoiceFiscalState, string> = {
+	proforma: 'Proformă',
+	fiscal: 'Fiscală',
+	cancelled: 'Anulată în Keez',
+	none: 'Fără Keez'
+};

@@ -8,12 +8,20 @@
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import IconStripe from '$lib/components/marketing/icon-stripe.svelte';
 	import {
 		adjustHourCredit,
 		getClientHourCreditView,
 		setClientHourCreditFromInvoices
 	} from '$lib/remotes/hour-credits.remote';
-	import { LEDGER_KIND_LABELS } from '$lib/logic/hour-credits';
+	import {
+		INVOICE_FISCAL_STATE_LABELS,
+		INVOICE_PAYMENT_STATE_LABELS,
+		LEDGER_KIND_LABELS,
+		type InvoiceFiscalState,
+		type InvoicePaymentState
+	} from '$lib/logic/hour-credits';
 	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import HcAvatar from '$lib/components/hour-credits/HcAvatar.svelte';
 	import HcGauge from '$lib/components/hour-credits/HcGauge.svelte';
@@ -25,6 +33,7 @@
 		fmtDateShort,
 		fmtHoursShort,
 		fmtMinutes,
+		fmtMoneyCents,
 		fmtRelative
 	} from '$lib/components/hour-credits/hour-credits-format';
 
@@ -105,6 +114,48 @@
 		return null;
 	}
 
+	// Facturile legate de ore, indexate pentru rândurile de ledger care le citează.
+	const invoiceById = $derived(new Map(view.invoices.map((inv) => [inv.id, inv])));
+	// „Plată primită": doar încasările recente, ca bannerul să nu rămână la nesfârșit.
+	const RECENT_PAYMENT_DAYS = 7;
+	const recentPayments = $derived(
+		view.invoices.filter(
+			(inv) =>
+				inv.paymentState === 'paid' &&
+				inv.paidDate &&
+				new Date(inv.paidDate).getTime() > Date.now() - RECENT_PAYMENT_DAYS * 86_400_000
+		)
+	);
+	const unpaidCount = $derived(
+		view.invoices.filter((inv) => inv.paymentState === 'unpaid' || inv.paymentState === 'overdue')
+			.length
+	);
+
+	const PAYMENT_CHIP: Record<InvoicePaymentState, string> = {
+		paid: 'hc-chip-ok',
+		unpaid: 'hc-chip-warn',
+		overdue: 'hc-chip-err',
+		draft: 'hc-chip-mut',
+		cancelled: 'hc-chip-mut'
+	};
+	const FISCAL_CHIP: Record<InvoiceFiscalState, string> = {
+		fiscal: 'hc-chip-info',
+		proforma: 'hc-chip-mut',
+		cancelled: 'hc-chip-mut',
+		none: 'hc-chip-mut'
+	};
+	const ORIGIN_LABELS = {
+		'hour-credit': 'Ore adăugate din admin',
+		'hour-overage': 'Depășire de ore',
+		'hours-order': 'Comandă /servicii',
+		'invoice-credit': 'Factură care alimentează creditul'
+	} as const;
+
+	function paymentMethodLabel(inv: { paymentMethod: string | null; paidByStripe: boolean }): string {
+		if (inv.paidByStripe) return 'card · Stripe';
+		return inv.paymentMethod ? inv.paymentMethod.toLowerCase() : 'metodă nespecificată';
+	}
+
 	/** Fundalul pastilei din ledger: verde la alimentare, roșu la consum, gri la expirare. */
 	function toneOf(kind: string, delta: number): string {
 		if (kind === 'expire') return 'var(--hc-chip-mut-bg)';
@@ -162,6 +213,17 @@
 	</div>
 
 	<div class="hc-in">
+		{#each recentPayments as inv (inv.id)}
+			<div class="hc-banner hc-banner-ok" role="status">
+				<span class="hc-chip hc-chip-ok">Plată primită</span>
+				<span class="hc-banner-text">
+					Factura <a href="/{tenantSlug}/invoices/{inv.id}">{inv.invoiceNumber}</a>
+					({fmtMoneyCents(inv.totalAmount ?? 0, inv.currency)}) a fost achitată pe
+					{fmtDate(inv.paidDate)}, {paymentMethodLabel(inv)}.
+					{#if inv.fiscalState === 'fiscal'}Factura fiscală e validată în Keez.{/if}
+				</span>
+			</div>
+		{/each}
 		{#if low}
 			<div class="hc-banner">
 				<span class="hc-chip hc-chip-err">
@@ -320,6 +382,90 @@
 			</div>
 		</div>
 
+		<div class="hc-tablecard hc-invoices">
+			<div class="hc-card-h tight">
+				<h3>Facturi și plăți</h3>
+				<p>
+					Facturile legate de creditul de ore: ore adăugate, comenzi, depășiri și facturile care
+					au alimentat ledger-ul.
+					{#if unpaidCount > 0}
+						<b>{unpaidCount} de încasat.</b>
+					{/if}
+				</p>
+			</div>
+			{#if view.invoices.length === 0}
+				<div class="hc-empty">
+					<b>Nicio factură</b>
+					Facturile emise pentru ore și plățile lor apar aici.
+				</div>
+			{:else}
+				<div class="hc-tablescroll">
+					<table class="hc-table">
+						<thead>
+							<tr>
+								<th>Factură</th>
+								<th>Stare</th>
+								<th>Plată</th>
+								<th class="r">Ore</th>
+								<th class="r">Total</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each view.invoices as inv (inv.id)}
+								<tr>
+									<td>
+										<a class="hc-tasklink" href="/{tenantSlug}/invoices/{inv.id}">
+											{inv.invoiceNumber}
+											<ExternalLinkIcon size={12} />
+										</a>
+										<div class="hc-muted hc-inv-sub">
+											{ORIGIN_LABELS[inv.origin]} · emisă {fmtDateShort(inv.issueDate)}
+										</div>
+									</td>
+									<td>
+										<div class="hc-chiprow">
+											<span class="hc-chip {PAYMENT_CHIP[inv.paymentState]}">
+												{INVOICE_PAYMENT_STATE_LABELS[inv.paymentState]}
+											</span>
+											<span class="hc-chip {FISCAL_CHIP[inv.fiscalState]}">
+												{INVOICE_FISCAL_STATE_LABELS[inv.fiscalState]}
+											</span>
+										</div>
+									</td>
+									<td class="hc-muted">
+										{#if inv.paymentState === 'paid'}
+											{fmtDate(inv.paidDate)}
+											{#if inv.paidByStripe}
+												<div class="hc-paymethod">
+													<span class="hc-stripe-badge" aria-hidden="true">
+														<IconStripe class="hc-stripe-glyph" />
+													</span>
+													<CreditCardIcon size={13} aria-hidden="true" />
+													<span>Card · Stripe</span>
+												</div>
+											{:else}
+												<div class="hc-inv-sub">{paymentMethodLabel(inv)}</div>
+											{/if}
+										{:else if inv.paymentState === 'unpaid' || inv.paymentState === 'overdue'}
+											scadentă {fmtDateShort(inv.dueDate)}
+										{:else}
+											—
+										{/if}
+									</td>
+									<td class="hc-num" class:hc-plus={inv.creditedMinutes > 0}>
+										{inv.creditedMinutes === 0
+											? '—'
+											: `${inv.creditedMinutes > 0 ? '+' : ''}${fmtMinutes(inv.creditedMinutes)}`}
+									</td>
+									<td class="hc-num">{fmtMoneyCents(inv.totalAmount ?? 0, inv.currency)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</div>
+
 		<div class="hc-grid2 tables">
 			<div class="hc-tablecard">
 				<div class="hc-card-h tight">
@@ -342,6 +488,8 @@
 								{#each view.entries as e (e.id)}
 									{@const plus = e.deltaMinutes > 0}
 									{@const href = sourceHref(e.sourceType, e.sourceId)}
+									{@const srcInvoice =
+										e.sourceType === 'invoice' ? invoiceById.get(e.sourceId) : undefined}
 									<tr>
 										<td>
 											<div class="hc-led-type">
@@ -361,6 +509,12 @@
 													· <a {href}>{LEDGER_KIND_LABELS[e.kind]}</a>
 												{:else}
 													· {LEDGER_KIND_LABELS[e.kind]}
+												{/if}
+												{#if srcInvoice}
+													· {srcInvoice.invoiceNumber}
+													<span class="hc-chip hc-chip-inline {PAYMENT_CHIP[srcInvoice.paymentState]}">
+														{INVOICE_PAYMENT_STATE_LABELS[srcInvoice.paymentState]}
+													</span>
 												{/if}
 											</div>
 										</td>

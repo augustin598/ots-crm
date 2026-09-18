@@ -18,6 +18,8 @@ import {
 	OVERAGE_BLOCK_MINUTES,
 	overageMonthKey,
 	LEDGER_KIND_LABELS,
+	invoicePaymentState,
+	invoiceFiscalState,
 	type InvoiceCreditCandidate
 } from '../hour-credits';
 
@@ -447,5 +449,44 @@ describe('consumptionWorkedLabel — orele lucrate, cu specializarea și fără 
 				modeLabel: 'Urgență'
 			})
 		).toBe('Development, Urgență');
+	});
+});
+
+describe('invoicePaymentState — cardul „Facturi și plăți" din fișa clientului', () => {
+	const now = new Date('2026-09-18T12:00:00Z');
+	const due = (iso: string | null) => (iso ? new Date(iso) : null);
+
+	test('plătită bate orice termen', () => {
+		expect(invoicePaymentState({ status: 'paid', dueDate: due('2026-09-01') }, now)).toBe('paid');
+	});
+	test('anulată și draft rămân ce sunt', () => {
+		expect(invoicePaymentState({ status: 'cancelled', dueDate: null }, now)).toBe('cancelled');
+		expect(invoicePaymentState({ status: 'draft', dueDate: due('2026-09-01') }, now)).toBe('draft');
+	});
+	test('trimisă, cu scadența în viitor sau fără scadență → neachitată', () => {
+		expect(invoicePaymentState({ status: 'sent', dueDate: due('2026-10-02') }, now)).toBe('unpaid');
+		expect(invoicePaymentState({ status: 'sent', dueDate: null }, now)).toBe('unpaid');
+	});
+	test('restantă: status overdue SAU scadența depășită pe o factură trimisă', () => {
+		expect(invoicePaymentState({ status: 'overdue', dueDate: null }, now)).toBe('overdue');
+		expect(invoicePaymentState({ status: 'sent', dueDate: due('2026-09-17') }, now)).toBe('overdue');
+	});
+	test('scadența e până la finalul zilei: în ziua scadenței încă nu e restantă', () => {
+		expect(invoicePaymentState({ status: 'sent', dueDate: due('2026-09-18T00:00:00Z') }, now)).toBe(
+			'unpaid'
+		);
+	});
+});
+
+describe('invoiceFiscalState', () => {
+	test('Keez Draft = proformă, Valid = fiscală, Cancelled = anulată', () => {
+		expect(invoiceFiscalState('Draft')).toBe('proforma');
+		expect(invoiceFiscalState('Valid')).toBe('fiscal');
+		expect(invoiceFiscalState('Cancelled')).toBe('cancelled');
+	});
+	test('fără Keez (null / necunoscut) → none', () => {
+		expect(invoiceFiscalState(null)).toBe('none');
+		expect(invoiceFiscalState(undefined)).toBe('none');
+		expect(invoiceFiscalState('altceva')).toBe('none');
 	});
 });

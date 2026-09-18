@@ -22,6 +22,7 @@ import {
 	getHourCreditsOverview,
 	getMonthlyReport,
 	listClientCreditTasks,
+	listClientHourInvoices,
 	listCancelledCreditedInvoices,
 	listHoursOrders,
 	listUncreditedInvoices,
@@ -44,6 +45,7 @@ import {
 } from '$lib/server/task-credit';
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
 import { computeExpiryDate } from '$lib/logic/hour-credit-expiry';
+import { invoiceFiscalState, invoicePaymentState } from '$lib/logic/hour-credits';
 import { notifyHourCreditEvent } from '$lib/server/hour-credit-notifications';
 
 function generateId(): string {
@@ -138,17 +140,26 @@ export const getHourCreditsPage = query(async () => {
 
 export const getClientHourCreditView = query(clientIdSchema, async (clientId) => {
 	const { tenantId, role } = await requireStaffTenant();
-	const [view, catalog, tasks] = await Promise.all([
+	const [view, catalog, tasks, invoices] = await Promise.all([
 		getClientHourCredit(tenantId, clientId),
 		getHourlyCatalog(tenantId),
-		listClientCreditTasks(tenantId, clientId)
+		listClientCreditTasks(tenantId, clientId),
+		listClientHourInvoices(tenantId, clientId)
 	]);
 	if (!view) throw error(404, 'Clientul nu există.');
 	const reference = resolveReferenceRate(catalog.rates, catalog.rules);
 	const reserved = await computeReservedMinutes(tenantId, [clientId]);
+	const now = new Date();
 	return {
 		...view,
 		tasks,
+		// Starea de plată se calculează pe server: „restantă" depinde de ceasul
+		// serverului, nu de al browserului.
+		invoices: invoices.map((inv) => ({
+			...inv,
+			paymentState: invoicePaymentState(inv, now),
+			fiscalState: invoiceFiscalState(inv.keezStatus)
+		})),
 		reservedMinutes: reserved.get(clientId) ?? 0,
 		reference: reference ? { label: reference.label, rateEur: reference.rateEur } : null,
 		stepMinutes: catalog.rules.stepMinutes,

@@ -23,6 +23,8 @@ import {
 import { resolveReferenceRate } from '$lib/logic/hourly-catalog';
 import {
 	eurCentsToReferenceMinutes,
+	HOUR_CREDIT_INVOICE_SOURCE,
+	HOUR_OVERAGE_INVOICE_SOURCE,
 	invoiceCreditEligibility,
 	netToEurCents,
 	startOfMonthUtc,
@@ -741,6 +743,116 @@ export async function getClientHourCredit(tenantId: string, clientId: string, li
 		/** Tot creditul cu termen, indiferent de dată — pentru procentul din card. */
 		expiringTotalMinutes: batches.reduce((sum, b) => sum + b.remainingMinutes, 0)
 	};
+}
+
+/** De unde vine legătura dintre factură și creditul de ore. */
+export type HourInvoiceOrigin = 'hour-credit' | 'hour-overage' | 'hours-order' | 'invoice-credit';
+
+export interface ClientHourInvoiceRow {
+	id: string;
+	invoiceNumber: string;
+	status: string;
+	totalAmount: number | null;
+	currency: string;
+	issueDate: Date | null;
+	dueDate: Date | null;
+	paidDate: Date | null;
+	paymentMethod: string | null;
+	keezStatus: string | null;
+	/** Plata a venit prin Stripe (avem PaymentIntent pe factură). */
+	paidByStripe: boolean;
+	/** Suma netă a mișcărilor din ledger legate de factură (stornările scad). */
+	creditedMinutes: number;
+	origin: HourInvoiceOrigin;
+}
+
+/**
+ * Facturile clientului care au legătură cu creditul de ore, pentru cardul
+ * „Facturi și plăți" din fișă: emise din „Adaugă ore", de depășire, cele care au
+ * alimentat ledger-ul și cele ale comenzilor de pe /servicii. Restul facturilor
+ * clientului (hosting, ads, abonamente necreditate) rămân în pagina de facturi.
+ */
+export async function listClientHourInvoices(
+	tenantId: string,
+	clientId: string,
+	limit = 50
+): Promise<ClientHourInvoiceRow[]> {
+	const [ledgerRows, orderRows] = await Promise.all([
+		db
+			.select({
+				invoiceId: table.clientHourLedger.sourceId,
+				minutes: sql<number>`sum(${table.clientHourLedger.deltaMinutes})`
+			})
+			.from(table.clientHourLedger)
+			.where(
+				and(
+					eq(table.clientHourLedger.tenantId, tenantId),
+					eq(table.clientHourLedger.clientId, clientId),
+					eq(table.clientHourLedger.sourceType, 'invoice')
+				)
+			)
+			.groupBy(table.clientHourLedger.sourceId),
+		db
+			.select({ invoiceId: table.serviceHoursOrder.invoiceId })
+			.from(table.serviceHoursOrder)
+			.where(
+				and(
+					eq(table.serviceHoursOrder.tenantId, tenantId),
+					eq(table.serviceHoursOrder.clientId, clientId)
+				)
+			)
+	]);
+	const minutesByInvoice = new Map(ledgerRows.map((r) => [r.invoiceId, Number(r.minutes) || 0]));
+	const orderInvoiceIds = new Set(
+		orderRows.map((r) => r.invoiceId).filter((id): id is string => !!id)
+	);
+	const linkedIds = [...new Set([...minutesByInvoice.keys(), ...orderInvoiceIds])];
+
+	const hourSources = [HOUR_CREDIT_INVOICE_SOURCE, HOUR_OVERAGE_INVOICE_SOURCE];
+	const invoices = await db
+		.select({
+			id: table.invoice.id,
+			invoiceNumber: table.invoice.invoiceNumber,
+			status: table.invoice.status,
+			totalAmount: table.invoice.totalAmount,
+			currency: table.invoice.currency,
+			issueDate: table.invoice.issueDate,
+			dueDate: table.invoice.dueDate,
+			paidDate: table.invoice.paidDate,
+			paymentMethod: table.invoice.paymentMethod,
+			keezStatus: table.invoice.keezStatus,
+			stripePaymentIntentId: table.invoice.stripePaymentIntentId,
+			externalSource: table.invoice.externalSource
+		})
+		.from(table.invoice)
+		.where(
+			and(
+				eq(table.invoice.tenantId, tenantId),
+				eq(table.invoice.clientId, clientId),
+				linkedIds.length > 0
+					? or(
+							inArray(table.invoice.externalSource, hourSources),
+							inArray(table.invoice.id, linkedIds)
+						)
+					: inArray(table.invoice.externalSource, hourSources)
+			)
+		)
+		.orderBy(desc(table.invoice.issueDate), desc(table.invoice.createdAt))
+		.limit(limit);
+
+	return invoices.map(({ stripePaymentIntentId, externalSource, ...inv }) => ({
+		...inv,
+		paidByStripe: !!stripePaymentIntentId,
+		creditedMinutes: minutesByInvoice.get(inv.id) ?? 0,
+		origin:
+			externalSource === HOUR_CREDIT_INVOICE_SOURCE
+				? 'hour-credit'
+				: externalSource === HOUR_OVERAGE_INVOICE_SOURCE
+					? 'hour-overage'
+					: orderInvoiceIds.has(inv.id)
+						? 'hours-order'
+						: 'invoice-credit'
+	}));
 }
 
 /** Garda de drift: soldul cache vs. suma ledger-ului, per client. */
