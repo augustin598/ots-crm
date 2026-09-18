@@ -9,7 +9,8 @@
  */
 import { describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import { mock } from 'bun:test';
-import { createClient } from '@libsql/client';
+import LibsqlDatabase from 'libsql';
+import { Sqlite3Client } from '@libsql/client/sqlite3';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { and, eq, sql } from 'drizzle-orm';
@@ -25,7 +26,13 @@ mock.module('$env/static/public', () => ({}));
 // Fișier temporar, NU `:memory:`: prima tranzacție libSQL deschide o conexiune
 // nouă, iar pe `:memory:` aceea e o bază GOALĂ (tabelele „dispar" în mijlocul testului).
 const dbPath = join(tmpdir(), `ots-hour-credits-${crypto.randomUUID()}.db`);
-const client = createClient({ url: `file:${dbPath}` });
+// Busy timeout pe conexiunile LOCALE (fiecare tranzacție libSQL deschide una nouă):
+// fără el, sub încărcare, un BEGIN IMMEDIATE concurent pică cu SQLITE_BUSY și lasă
+// conexiunea comună cu o instrucțiune neterminată, iar TOATE testele următoare pică
+// la curățare. `createClient` nu expune opțiunea, deci construim clientul direct.
+// Pe Turso remote (prod) scrierile sunt serializate de server — artefact de test.
+const localDb = new LibsqlDatabase(dbPath, { timeout: 5 });
+const client = new Sqlite3Client(dbPath, { timeout: 5 }, localDb, 'number');
 const testDb = drizzle(client);
 
 mock.module('$lib/server/db', () => ({ db: testDb }));
@@ -167,15 +174,35 @@ await testDb.insert(table.bnrExchangeRate).values({
 	rateDate: new Date().toISOString().slice(0, 10)
 });
 
+/**
+ * Curățarea dintre teste, reluată pe SQLITE_BUSY. Testele de concurență provoacă
+ * intenționat un BUSY; pe clientul libSQL LOCAL (fișier) blocarea rămasă se
+ * eliberează cu întârziere și, sub încărcare (suita completă rulează ~200 de
+ * fișiere în paralel), ar pica toate testele următoare la primul DELETE.
+ * Artefact al mediului de test: pe Turso remote scrierile sunt serializate.
+ */
+async function resetTables(): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await testDb.delete(table.invoiceLineItem);
+			await testDb.delete(table.clientHourLedger);
+			await testDb.delete(table.task);
+			await testDb.delete(table.invoice);
+			await testDb.delete(table.serviceHoursOrder);
+			await testDb.delete(table.client);
+			return;
+		} catch (err) {
+			if (attempt >= 20 || !/SQLITE_BUSY/.test(String((err as Error)?.cause ?? err)))
+				throw err;
+			await new Promise((r) => setTimeout(r, 100));
+		}
+	}
+}
+
 beforeEach(async () => {
 	notifications.length = 0;
 	beforeInvoiceNumber = null;
-	await testDb.delete(table.invoiceLineItem);
-	await testDb.delete(table.clientHourLedger);
-	await testDb.delete(table.task);
-	await testDb.delete(table.invoice);
-	await testDb.delete(table.serviceHoursOrder);
-	await testDb.delete(table.client);
+	await resetTables();
 	await testDb.insert(table.client).values({
 		id: CLIENT,
 		tenantId: TENANT,
