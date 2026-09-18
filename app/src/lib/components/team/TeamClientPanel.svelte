@@ -3,6 +3,7 @@
 		getClientSecondaryEmails,
 		createClientSecondaryEmail,
 		updateClientSecondaryEmailAccess,
+		setClientSecondaryEmailInvoiceEmails,
 		deleteClientSecondaryEmail,
 		setClientContactWhatsappPhone,
 		getWhatsappGroupsForClient,
@@ -13,6 +14,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
+	import { remoteErrorMessage } from '$lib/utils/remote-error';
 	import {
 		CLIENT_ROLE_PRESETS,
 		detectClientRolePreset,
@@ -160,7 +162,7 @@
 			toast.success(res.phoneE164 ? `Legat la ${res.phoneE164}` : 'Legătura a fost scoasă');
 		} catch (err) {
 			clientLogger.apiError('setClientContactWhatsappPhone', err);
-			toast.error(err instanceof Error ? err.message : 'Nu am putut salva numărul');
+			toast.error(remoteErrorMessage(err, 'Nu am putut salva numărul'));
 		} finally {
 			phoneSaving = null;
 		}
@@ -245,6 +247,17 @@
 		} catch (e) {
 			clientLogger.apiError('team_client_panel_toggle_flag', e);
 			toast.error(e instanceof Error ? e.message : 'Eroare la modificare permisiune.');
+		}
+	}
+
+	async function toggleInvoiceEmails(secondaryEmailId: string, receives: boolean) {
+		try {
+			await setClientSecondaryEmailInvoiceEmails({ secondaryEmailId, receives }).updates(
+				secondaryEmailsQuery
+			);
+		} catch (e) {
+			clientLogger.apiError('team_client_panel_toggle_invoice_emails', e);
+			toast.error(e instanceof Error ? e.message : 'Eroare la modificare.');
 		}
 	}
 
@@ -491,6 +504,9 @@
 								{#if se.label}
 									<div class="tcp-row-label">{se.label}</div>
 								{/if}
+								{#if se.receivesInvoiceEmails}
+									<div class="tcp-row-label">Primește facturile pe email</div>
+								{/if}
 							</div>
 							<select
 								class="tcp-role-select"
@@ -551,6 +567,21 @@
 								<div class="tcp-wa-hint">
 									Numărul personal de mobil. Din el vine avatarul afișat în taskuri, comentarii și
 									echipă. Lasă gol ca să scoți legătura.
+								</div>
+								<div class="tcp-flags-title tcp-flags-title-spaced">Emailuri</div>
+								<label class="tcp-flag">
+									<input
+										type="checkbox"
+										checked={se.receivesInvoiceEmails}
+										onchange={(e) =>
+											toggleInvoiceEmails(se.id, (e.currentTarget as HTMLInputElement).checked)}
+									/>
+									<span>Primește facturile pe email</span>
+								</label>
+								<div class="tcp-wa-hint">
+									Pentru contabilitate: factura emisă, confirmarea plății și reamintirile de scadență.
+									Bifa „Facturi" de mai jos dă doar pagina din portal, fără emailuri. Contactul
+									principal le primește mereu.
 								</div>
 								<div class="tcp-flags-title tcp-flags-title-spaced">Permisiuni granulare</div>
 								<div class="tcp-flags-grid">

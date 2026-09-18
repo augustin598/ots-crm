@@ -2105,6 +2105,9 @@ export const clientSecondaryEmail = sqliteTable('client_secondary_email', {
 	notifyInvoices: boolean('notify_invoices').notNull().default(false),
 	notifyTasks: boolean('notify_tasks').notNull().default(false),
 	notifyContracts: boolean('notify_contracts').notNull().default(false),
+	// Primește pe email facturile clientului (emitere, plată, scadență depășită).
+	// Separat de accessFlags.invoices, care dă doar pagina Facturi din portal.
+	receivesInvoiceEmails: boolean('receives_invoice_emails').notNull().default(false),
 	// JSON-serialized AccessFlags. NULL = no portal access; falls back to notify*
 	// columns for backward compat until backfill runs. See lib/server/portal-access.ts.
 	accessFlags: text('access_flags'),

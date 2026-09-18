@@ -457,6 +457,8 @@ export type NotificationCategory = 'invoices' | 'tasks' | 'contracts';
 /**
  * Returns all email addresses that should receive a notification for a given client + category.
  * Always includes the primary client.email, then any secondary emails with the matching toggle.
+ * Invoices go only to contacts marked `receivesInvoiceEmails` (contabilitate), not to
+ * everyone who can open the Facturi page in the portal.
  */
 export type NotificationRecipient = { email: string; name: string | null };
 
@@ -475,10 +477,10 @@ export async function getNotificationRecipients(
 		recipients.push({ email: client.email, name: client.legalRepresentative || client.name || null });
 	}
 
-	// Read all secondary contacts and resolve their access flags. The category
-	// flag (invoices/tasks/contracts) gates whether they receive this notification.
-	// Falls back to legacy notify* columns when access_flags is NULL.
-	const { resolveAccessFlags } = await import('./portal-access');
+	// Read all secondary contacts; secondaryReceivesNotification decides per category
+	// (invoices: explicit opt-in; tasks/contracts: access flag, with the legacy
+	// notify* fallback when access_flags is NULL).
+	const { secondaryReceivesNotification } = await import('./portal-access');
 	const secondaryEmails = await db
 		.select({
 			email: table.clientSecondaryEmail.email,
@@ -486,14 +488,14 @@ export async function getNotificationRecipients(
 			accessFlags: table.clientSecondaryEmail.accessFlags,
 			notifyInvoices: table.clientSecondaryEmail.notifyInvoices,
 			notifyTasks: table.clientSecondaryEmail.notifyTasks,
-			notifyContracts: table.clientSecondaryEmail.notifyContracts
+			notifyContracts: table.clientSecondaryEmail.notifyContracts,
+			receivesInvoiceEmails: table.clientSecondaryEmail.receivesInvoiceEmails
 		})
 		.from(table.clientSecondaryEmail)
 		.where(eq(table.clientSecondaryEmail.clientId, clientId));
 
 	for (const se of secondaryEmails) {
-		const flags = resolveAccessFlags({ isPrimary: false, secondaryEmail: se });
-		if (!flags[category]) continue;
+		if (!secondaryReceivesNotification(category, se)) continue;
 		if (se.email && !recipients.map((r) => r.email.toLowerCase()).includes(se.email.toLowerCase())) {
 			recipients.push({ email: se.email, name: se.label || null });
 		}

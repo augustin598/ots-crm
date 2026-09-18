@@ -6,7 +6,8 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import {
 		getClientSecondaryEmails,
-		updateClientSecondaryEmailAccess
+		updateClientSecondaryEmailAccess,
+		setClientSecondaryEmailInvoiceEmails
 	} from '$lib/remotes/client-secondary-emails.remote';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
@@ -62,6 +63,20 @@
 		} catch (e) {
 			clientLogger.apiError('client_team_permissions_update', e);
 			toast.error('Eroare la salvarea permisiunilor');
+		} finally {
+			savingId = null;
+		}
+	}
+
+	async function toggleInvoiceEmails(secondaryEmailId: string, receives: boolean) {
+		savingId = secondaryEmailId;
+		try {
+			await setClientSecondaryEmailInvoiceEmails({ secondaryEmailId, receives }).updates(
+				membersQuery
+			);
+		} catch (e) {
+			clientLogger.apiError('client_team_invoice_emails_update', e);
+			toast.error('Eroare la salvare');
 		} finally {
 			savingId = null;
 		}
@@ -196,6 +211,23 @@
 												</label>
 											{/each}
 										</div>
+
+										<label
+											class="mt-3 flex cursor-pointer items-center gap-2 border-t border-[#eef1f6] pt-3 text-[12.5px] text-[#0f172a]"
+										>
+											<input
+												type="checkbox"
+												class="h-3.5 w-3.5 accent-[#1877F2]"
+												checked={m.receivesInvoiceEmails}
+												disabled={savingId === m.id}
+												onchange={(e) => toggleInvoiceEmails(m.id, e.currentTarget.checked)}
+											/>
+											<span>Primește facturile pe email</span>
+										</label>
+										<p class="mt-1 text-[11.5px] text-[#94a3b8]">
+											Pentru contabilitate. Modulul „Facturi" de mai sus dă doar pagina din portal,
+											fără emailuri.
+										</p>
 									</div>
 								{/if}
 							</div>

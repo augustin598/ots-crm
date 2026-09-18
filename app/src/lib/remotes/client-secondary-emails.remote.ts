@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -156,13 +157,14 @@ export const setClientContactWhatsappPhone = command(
 			.from(table.user)
 			.where(eq(table.user.email, record.email))
 			.limit(1);
+		// error(400), nu Error simplu: altfel ajunge 500 și toastul pierde mesajul.
 		if (!targetUser) {
-			throw new Error('Contactul nu are încă un cont — invită-l întâi în portal.');
+			error(400, 'Contactul nu are încă un cont în portal. Invită-l întâi, apoi leagă numărul.');
 		}
 
 		const trimmed = data.phone.trim();
 		const e164 = trimmed ? normalizePhoneE164(trimmed) : null;
-		if (trimmed && !e164) throw new Error('Număr de telefon invalid');
+		if (trimmed && !e164) error(400, 'Număr de telefon invalid');
 
 		await db
 			.delete(table.userWhatsappLink)
@@ -492,6 +494,8 @@ const createSchema = v.object({
 	label: v.optional(v.string()),
 	/** Set the portal access flags atomically at creation (no two-step race). */
 	accessFlags: v.optional(accessFlagsSchema),
+	/** Contactul primește facturile pe email (contabilitate). Separat de accesul în portal. */
+	receivesInvoiceEmails: v.optional(v.boolean()),
 	/** Send the colleague a portal invite email with a single-use magic link. */
 	sendInvite: v.optional(v.boolean())
 });
@@ -539,6 +543,7 @@ export const createClientSecondaryEmail = command(createSchema, async (data) => 
 		clientId: data.clientId,
 		email: data.email,
 		label: data.label || null,
+		receivesInvoiceEmails: data.receivesInvoiceEmails ?? false,
 		...(sanitized
 			? {
 					accessFlags: JSON.stringify(sanitized),
@@ -679,6 +684,41 @@ export const updateClientSecondaryEmailAccess = command(
 				notifyContracts: sanitized.contracts,
 				updatedAt: new Date()
 			})
+			.where(and(eq(table.clientSecondaryEmail.id, data.secondaryEmailId), eq(table.clientSecondaryEmail.tenantId, tenantHint)));
+
+		return { success: true };
+	}
+);
+
+/**
+ * Bifa „Primește facturile pe email" a unui contact secundar. Nu atinge accesul
+ * în portal: pagina Facturi rămâne pe accessFlags.invoices.
+ */
+export const setClientSecondaryEmailInvoiceEmails = command(
+	v.object({
+		secondaryEmailId: v.pipe(v.string(), v.minLength(1)),
+		receives: v.boolean()
+	}),
+	async (data) => {
+		const event = getRequestEvent();
+		const tenantHint = event?.locals.tenant?.id ?? event?.locals.client?.tenantId;
+		if (!tenantHint) throw new Error('Unauthorized');
+		const [record] = await db
+			.select({ id: table.clientSecondaryEmail.id, clientId: table.clientSecondaryEmail.clientId })
+			.from(table.clientSecondaryEmail)
+			.where(
+				and(
+					eq(table.clientSecondaryEmail.id, data.secondaryEmailId),
+					eq(table.clientSecondaryEmail.tenantId, tenantHint)
+				)
+			)
+			.limit(1);
+		if (!record) throw new Error('Email secundar negăsit');
+		await authorizeSecondaryEmailAccess(event, record.clientId);
+
+		await db
+			.update(table.clientSecondaryEmail)
+			.set({ receivesInvoiceEmails: data.receives, updatedAt: new Date() })
 			.where(and(eq(table.clientSecondaryEmail.id, data.secondaryEmailId), eq(table.clientSecondaryEmail.tenantId, tenantHint)));
 
 		return { success: true };

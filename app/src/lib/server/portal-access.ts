@@ -129,6 +129,20 @@ export function resolveAccessFlags(opts: {
 }
 
 /**
+ * Whether a secondary contact receives the emails of a notification category.
+ * Invoices use their own opt-in (`receivesInvoiceEmails`): seeing the Facturi
+ * page in the portal must not also subscribe a colleague to every invoice email.
+ * Tasks and contracts still follow the access flag.
+ */
+export function secondaryReceivesNotification(
+	category: 'invoices' | 'tasks' | 'contracts',
+	se: SecondaryEmailAccessRow & { receivesInvoiceEmails?: boolean | null }
+): boolean {
+	if (category === 'invoices') return !!se.receivesInvoiceEmails;
+	return resolveAccessFlags({ isPrimary: false, secondaryEmail: se })[category];
+}
+
+/**
  * Look up the per-user access flags for the current portal request.
  * Use in +server.ts endpoints (which don't run layout server load functions).
  */
