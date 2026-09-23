@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { classifyClientVat, getZeroVatLegalNote } from '$lib/server/vat/classify-client';
 import * as table from '$lib/server/db/schema';
 import { and, desc, eq } from 'drizzle-orm';
 import {
@@ -336,8 +337,31 @@ export const GET: RequestHandler = async (event) => {
 				| 14;
 			// Use tenant invoiceSettings.defaultTaxRate when available; fall back
 			// to 21 (Romania 2025+ standard rate) for the preview.
+			// Zero-VAT residency is applied here too — otherwise previewing a
+			// foreign client's account would show 21% while the real reminder
+			// (and the invoice) correctly say 0%, and the operator would "verify"
+			// the wrong number.
 			const previewSubtotal = account.recurringAmount || 4990;
-			const previewVatRate = DEFAULT_VAT_PERCENT;
+			const previewClient = account.clientId
+				? (
+						await db
+							.select({ country: table.client.country, cui: table.client.cui })
+							.from(table.client)
+							.where(
+								and(
+									eq(table.client.id, account.clientId),
+									eq(table.client.tenantId, tenantId)
+								)
+							)
+							.limit(1)
+					)[0]
+				: undefined;
+			const previewScenario = previewClient
+				? classifyClientVat({ country: previewClient.country, cui: previewClient.cui })
+				: null;
+			const previewZeroVat = previewScenario === 'intracom' || previewScenario === 'export';
+			const previewVatRate = previewZeroVat ? 0 : DEFAULT_VAT_PERCENT;
+			const previewVatNote = previewZeroVat ? getZeroVatLegalNote(previewScenario!) : null;
 			const previewVatAmount = Math.round((previewSubtotal * previewVatRate) / 100);
 			rendered = await renderRenewalReminder({
 				tenantId,
@@ -348,6 +372,7 @@ export const GET: RequestHandler = async (event) => {
 				vatRate: previewVatRate,
 				vatAmount: previewVatAmount,
 				totalAmount: previewSubtotal + previewVatAmount,
+				vatNote: previewVatNote,
 				currency: narrowCurrency(account.currency),
 				daysUntilDue: days,
 				autoRenew: account.autoRenew,

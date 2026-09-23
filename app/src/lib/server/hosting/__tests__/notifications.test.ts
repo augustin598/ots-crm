@@ -7,7 +7,9 @@ import { describe, test, expect, mock, beforeEach, afterAll } from 'bun:test';
 mock.module('$app/environment', () => ({ dev: false, browser: false, building: false }));
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
-mock.module('$env/dynamic/public', () => ({ env: {} }));
+mock.module('$env/dynamic/public', () => ({
+	env: { PUBLIC_APP_URL: 'https://clients.example.ro' }
+}));
 mock.module('$env/static/public', () => ({}));
 
 // ---------------------------------------------------------------------------
@@ -24,6 +26,7 @@ function makeSelectChain() {
 	chain.from = () => chain;
 	chain.innerJoin = () => chain;
 	chain.where = () => chain;
+	chain.orderBy = () => chain;
 	chain.limit = () => chain;
 	chain.then = (resolve: (val: unknown[]) => void, reject?: (e: unknown) => void) => {
 		try {
@@ -358,6 +361,16 @@ mock.module('../email-templates/payment-failed', () => ({
 	}
 }));
 
+// Invoice view tokens mocked at module level — the real helper does its own
+// select + insert, which would desync the chain queues every test uses.
+const createInvoiceViewTokenCalls: string[] = [];
+mock.module('$lib/server/invoice-token', () => ({
+	createInvoiceViewToken: async (invoiceId: string) => {
+		createInvoiceViewTokenCalls.push(invoiceId);
+		return 'tok-raw-123';
+	}
+}));
+
 // resolveCustomerEmail + resolveAdminRecipients mocked at module level so tests
 // can inject return values directly instead of threading admin-resolver SQL
 // (innerJoin on tenant_user) through the chain queue.
@@ -427,6 +440,7 @@ beforeEach(() => {
 	renderSuspendedCalls.length = 0;
 	renderReactivatedCalls.length = 0;
 	renderRenewalReminderCalls.length = 0;
+	createInvoiceViewTokenCalls.length = 0;
 	renderPaymentFailedCalls.length = 0;
 	resolveCustomerEmailReturn = {
 		email: 'client@example.ro',
@@ -1025,8 +1039,13 @@ describe('notifyHostingRenewalReminder', () => {
 		//    asserts the email quotes the template value, NOT the stale snapshot.
 		pushSelect([{ amount: 9950, currency: 'RON', taxRate: 2100, isActive: true }]);
 		// 4. invoiceSettings lookup → VAT fallback (unused when template resolves)
-		pushSelect([{ defaultTaxRate: 21 }]);
-		// 4. Atomic dedupe insert → returns row (insert succeeded)
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		// 5. client lookup → VAT residency classification (RO-domestic → keeps 21%)
+		pushSelect([{ country: 'România', cui: '39988493' }]);
+		// 6. open-invoice lookup → NONE, so the reminder keeps the template numbers
+		//    and the portal renew link.
+		pushSelect([]);
+		// 7. Atomic dedupe insert → returns row (insert succeeded)
 		pushInsert([{ id: 'evt-rr-1' }]);
 		// 5. emailSettings lookup inside buildMail
 		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
@@ -1102,8 +1121,12 @@ describe('notifyHostingRenewalReminder', () => {
 		// 3. recurringInvoice lookup
 		pushSelect([{ amount: 9950, currency: 'RON', taxRate: 2100, isActive: true }]);
 		// 4. invoiceSettings lookup → VAT fallback
-		pushSelect([{ defaultTaxRate: 21 }]);
-		// 5. onConflictDoNothing returns [] → dedupe hit
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		// 5. client lookup → VAT residency classification
+		pushSelect([{ country: 'România', cui: '39988493' }]);
+		// 6. open-invoice lookup → NONE
+		pushSelect([]);
+		// 7. onConflictDoNothing returns [] → dedupe hit
 		pushInsert([]);
 
 		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
@@ -1143,8 +1166,12 @@ describe('notifyHostingRenewalReminder', () => {
 		//    price 1149.00 net = 114900 cents; taxRate stored in BPS = 2100).
 		pushSelect([{ amount: 114900, currency: 'RON', taxRate: 2100, isActive: true }]);
 		// 4. invoiceSettings lookup → VAT fallback (unused when template resolves)
-		pushSelect([{ defaultTaxRate: 21 }]);
-		// 5. Atomic dedupe insert → returns row (insert succeeded)
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		// 5. client lookup → RO-domestic, so the 21% from the template stands
+		pushSelect([{ country: 'România', cui: '39988493' }]);
+		// 6. open-invoice lookup → NONE
+		pushSelect([]);
+		// 7. Atomic dedupe insert → returns row (insert succeeded)
 		pushInsert([{ id: 'evt-rr-reg' }]);
 		// 6. emailSettings lookup inside buildMail
 		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
@@ -1183,8 +1210,12 @@ describe('notifyHostingRenewalReminder', () => {
 		// 3. recurringInvoice lookup → NONE (account has no billing template)
 		pushSelect([]);
 		// 4. invoiceSettings lookup → VAT rate used for the fallback path
-		pushSelect([{ defaultTaxRate: 21 }]);
-		// 5. dedupe insert
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		// 5. client lookup → RO-domestic
+		pushSelect([{ country: 'România', cui: '39988493' }]);
+		// 6. open-invoice lookup → NONE
+		pushSelect([]);
+		// 7. dedupe insert
 		pushInsert([{ id: 'evt-rr-fb' }]);
 		// 6. emailSettings lookup inside buildMail
 		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
@@ -1198,6 +1229,243 @@ describe('notifyHostingRenewalReminder', () => {
 		expect(renderInput.totalAmount).toBe(6050);
 		// Warned about the snapshot fallback so drift is traceable in logs.
 		expect(loggerCalls.warning.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test('REGRESSION: EU-intracom client gets 0% VAT (email must match the 0% invoice)', async () => {
+		// Real reported case: CDVA GLOBAL TECHNOLOGY LTD (CY10440695U, Cipru),
+		// charmboys.ro. The recurring template stores the RO-domestic taxRate
+		// (2100) because recurring-template.ts syncs it from invoiceSettings, but
+		// the generator forces 0% for intracom/export clients — invoice OTSH 17 was
+		// issued at 142.79 EUR while the reminder email quoted 172.78 EUR.
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-cy',
+				daServerId: 'da-1',
+				daUsername: 'charmboys',
+				domain: 'charmboys.ro',
+				nextDueDate: '2026-09-29',
+				recurringAmount: 14279,
+				currency: 'EUR',
+				autoRenew: true
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		// recurringInvoice still carries the tenant default 21% — the override has
+		// to happen downstream, exactly like the invoice generator does it.
+		pushSelect([{ amount: 14279, currency: 'EUR', taxRate: 2100, isActive: true }]);
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		// Cypriot client → CUI prefix CY wins over the free-text country field.
+		pushSelect([{ country: 'Cipru', cui: 'CY10440695U' }]);
+		pushSelect([]); // open-invoice lookup → none
+		pushInsert([{ id: 'evt-rr-cy' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.vatRate).toBe(0);
+		expect(renderInput.vatAmount).toBe(0);
+		// Total == net == what invoice OTSH 17 actually charged.
+		expect(renderInput.subtotal).toBe(14279);
+		expect(renderInput.totalAmount).toBe(14279);
+		expect(renderInput.currency).toBe('EUR');
+		// Reverse-charge legal mention travels with the 0% so the email reads like
+		// the invoice it announces.
+		expect(renderInput.vatNote).toBeTruthy();
+		expect(String(renderInput.vatNote)).toContain('inversă');
+	});
+
+	test('non-EU (export) client also gets 0% VAT', async () => {
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-uk',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.co.uk',
+				nextDueDate: '2026-09-29',
+				recurringAmount: 10000,
+				currency: 'EUR',
+				autoRenew: false
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushSelect([{ amount: 10000, currency: 'EUR', taxRate: 2100, isActive: true }]);
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		pushSelect([{ country: 'United Kingdom', cui: null }]);
+		pushSelect([]); // open-invoice lookup → none
+		pushInsert([{ id: 'evt-rr-uk' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.vatRate).toBe(0);
+		expect(renderInput.totalAmount).toBe(10000);
+		expect(renderInput.vatNote).toBeTruthy();
+	});
+
+	test('whmcsZeroVatAutoDetect=false keeps the tenant VAT even for a foreign client', async () => {
+		// Same switch the recurring generator honours — an operator that turned
+		// auto-detect off must not get a silently different number in the email.
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-cy',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'charmboys.ro',
+				nextDueDate: '2026-09-29',
+				recurringAmount: 14279,
+				currency: 'EUR',
+				autoRenew: true
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushSelect([{ amount: 14279, currency: 'EUR', taxRate: 2100, isActive: true }]);
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: false }]);
+		pushSelect([{ country: 'Cipru', cui: 'CY10440695U' }]);
+		pushSelect([]); // open-invoice lookup → none
+		pushInsert([{ id: 'evt-rr-cy2' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.vatRate).toBe(21);
+		expect(renderInput.vatNote).toBeNull();
+	});
+
+	test('REGRESSION: an issued invoice wins over the template, and the link is the public tokenized one', async () => {
+		// Real reported case (charmboys.ro): invoice OTSH 17 was already issued at
+		// 0% / 142.79 EUR, but the reminder rebuilt the numbers from the template
+		// (21% → 172.78 EUR) and pointed at the portal renew page — which this
+		// client cannot open, having no client_user row.
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-cy',
+				daServerId: 'da-1',
+				daUsername: 'charmboys',
+				domain: 'charmboys.ro',
+				nextDueDate: '2026-09-29',
+				recurringAmount: 14279,
+				currency: 'EUR',
+				autoRenew: true
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushSelect([{ amount: 14279, currency: 'EUR', taxRate: 2100, isActive: true }]);
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		pushSelect([{ country: 'Cipru', cui: 'CY10440695U' }]);
+		// The invoice the customer actually has to pay.
+		pushSelect([
+			{
+				id: 'inv-otsh-17',
+				amount: 14279,
+				taxRate: 0,
+				taxAmount: 0,
+				totalAmount: 14279,
+				currency: 'EUR'
+			}
+		]);
+		pushInsert([{ id: 'evt-rr-inv' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.subtotal).toBe(14279);
+		expect(renderInput.vatRate).toBe(0);
+		expect(renderInput.vatAmount).toBe(0);
+		expect(renderInput.totalAmount).toBe(14279);
+		expect(renderInput.currency).toBe('EUR');
+		// Token minted for THAT invoice, and the link is the public page — no login.
+		expect(createInvoiceViewTokenCalls).toEqual(['inv-otsh-17']);
+		expect(renderInput.payUrl).toBe('https://clients.example.ro/invoice/ots/tok-raw-123');
+		expect(String(renderInput.payUrl)).not.toContain('/client/');
+	});
+
+	test('an issued RON invoice with VAT is quoted as-is (gross from the invoice, not recomputed)', async () => {
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				nextDueDate: '2026-06-01',
+				recurringAmount: 8660,
+				currency: 'RON',
+				autoRenew: false
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushSelect([{ amount: 9950, currency: 'RON', taxRate: 2100, isActive: true }]);
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		pushSelect([{ country: 'România', cui: '39988493' }]);
+		pushSelect([
+			{
+				id: 'inv-ro-1',
+				amount: 11490,
+				taxRate: 2100,
+				taxAmount: 2413,
+				totalAmount: 13903,
+				currency: 'RON'
+			}
+		]);
+		pushInsert([{ id: 'evt-rr-ro' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 7);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.subtotal).toBe(11490);
+		expect(renderInput.vatRate).toBe(21);
+		// taxAmount comes from the invoice row, NOT from round(net × rate).
+		expect(renderInput.vatAmount).toBe(2413);
+		expect(renderInput.totalAmount).toBe(13903);
+		expect(renderInput.vatNote).toBeNull();
+		expect(renderInput.payUrl).toBe('https://clients.example.ro/invoice/ots/tok-raw-123');
+	});
+
+	test('no issued invoice → portal renew link, built from PUBLIC_APP_URL (not hardcoded)', async () => {
+		pushSelect([
+			{
+				id: 'acc-1',
+				tenantId: 't-1',
+				clientId: 'cli-1',
+				daServerId: 'da-1',
+				daUsername: 'da-user',
+				domain: 'example.ro',
+				nextDueDate: '2026-06-01',
+				recurringAmount: 9950,
+				currency: 'RON',
+				autoRenew: true
+			}
+		]);
+		pushSelect([{ id: 't-1', slug: 'ots' }]);
+		pushSelect([{ amount: 9950, currency: 'RON', taxRate: 2100, isActive: true }]);
+		pushSelect([{ defaultTaxRate: 21, whmcsZeroVatAutoDetect: true }]);
+		pushSelect([{ country: 'România', cui: '39988493' }]);
+		pushSelect([]); // no issued invoice yet
+		pushInsert([{ id: 'evt-rr-portal' }]);
+		pushSelect([{ smtpFrom: 'noreply@example.ro', smtpUser: 'noreply@example.ro' }]);
+
+		await notifyHostingRenewalReminder('t-1', 'acc-1', 14);
+
+		const renderInput = renderRenewalReminderCalls[0] as Record<string, unknown>;
+		expect(renderInput.payUrl).toBe(
+			'https://clients.example.ro/client/ots/hosting/accounts/acc-1/renew'
+		);
+		// No invoice → no token minted.
+		expect(createInvoiceViewTokenCalls).toEqual([]);
 	});
 
 	test('throws when account.nextDueDate is null', async () => {

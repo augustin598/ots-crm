@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { eq, and, gt, like, ne, inArray } from 'drizzle-orm';
+import { eq, and, gt, like, ne, inArray, desc } from 'drizzle-orm';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
 import {
 	hostingAccount,
@@ -38,6 +38,9 @@ import { render as renderPasswordReset } from './email-templates/password-reset'
 import { render as renderProvisioningInProgress } from './email-templates/provisioning-in-progress';
 import { logInfo, logError, logWarning } from '$lib/server/logger';
 import { DEFAULT_VAT_PERCENT } from '$lib/server/vat/rate';
+import { classifyClientVat, getZeroVatLegalNote } from '$lib/server/vat/classify-client';
+import { createInvoiceViewToken } from '$lib/server/invoice-token';
+import { getAppBaseUrl } from '$lib/server/app-url';
 
 function generateEventId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -1229,12 +1232,10 @@ export async function notifyHostingRenewalReminder(
 			throw new Error(`tenant ${tenantId} not found`);
 		}
 
-		// 4. Format Romanian date + build payUrl. Under /client/ (portal route group)
-		// so it reaches the real renew page, not the staff tree (the missing /client/
-		// prefix was one of the two reasons the old link failed).
+		// 4. Format Romanian date. The pay link is built at step 5f, once we know
+		//    whether a real open invoice exists.
 		const dueDateIso = account.nextDueDate; // 'YYYY-MM-DD'
 		const dueDateRo = formatTextDateRo(dueDateIso);
-		const payUrl = `https://clients.onetopsolution.ro/client/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
 
 		// 5. Resolve the billed amount from the recurring-invoice template — the
 		//    SAME source the scheduler bills from (recurring-invoices.ts →
@@ -1261,8 +1262,14 @@ export async function notifyHostingRenewalReminder(
 		// 5b. VAT fallback from tenant invoiceSettings — only used on the snapshot
 		//     fallback path below. Per feedback_no_hardcode.md (RO 19% → 21% in
 		//     2025/2026) never hardcode; fallback 21 matches recurring-template.ts.
+		//     `whmcsZeroVatAutoDetect` is read here too — same switch the recurring
+		//     generator honours (invoice-utils.ts:504) so the email can't promise a
+		//     VAT the fiscal invoice will never charge.
 		const [vatRow] = await db
-			.select({ defaultTaxRate: invoiceSettingsTable.defaultTaxRate })
+			.select({
+				defaultTaxRate: invoiceSettingsTable.defaultTaxRate,
+				whmcsZeroVatAutoDetect: invoiceSettingsTable.whmcsZeroVatAutoDetect
+			})
 			.from(invoiceSettingsTable)
 			.where(eq(invoiceSettingsTable.tenantId, tenantId))
 			.limit(1);
@@ -1293,12 +1300,96 @@ export async function notifyHostingRenewalReminder(
 
 		// 5d. Currency narrowing — templates support only these three; anything
 		//     else is normalized to RON (consistent with the rest of the CRM).
-		const currency = (
+		let currency = (
 			currencyRaw === 'EUR' || currencyRaw === 'USD' ? currencyRaw : 'RON'
 		) as 'RON' | 'EUR' | 'USD';
 
-		const vatAmount = Math.round((subtotal * vatRate) / 100);
-		const totalAmount = subtotal + vatAmount;
+		// 5e. Zero-VAT by client residency — the SAME classification the recurring
+		//     generator applies when it actually issues the invoice
+		//     (invoice-utils.ts: `forceZeroVat` → taxRate 0 + taxApplicationType
+		//     'none'). Without it the reminder read the template's stored taxRate
+		//     (the tenant default, 21%) and quoted VAT to an EU-intracom / export
+		//     client whose invoice is issued at 0% — reported case: CY client,
+		//     email said 172.78 EUR, invoice OTSH 17 said 142.79 EUR.
+		//     `recurringInvoice.taxRate` stays the RO-domestic rate by design
+		//     (recurring-template.ts syncs it from invoiceSettings), so the
+		//     override has to happen at every read site, exactly like the generator.
+		const [clientRow] = account.clientId
+			? await db
+					.select({ country: clientTable.country, cui: clientTable.cui })
+					.from(clientTable)
+					.where(
+						and(eq(clientTable.id, account.clientId), eq(clientTable.tenantId, tenantId))
+					)
+					.limit(1)
+			: [undefined];
+		const zeroVatAutoDetect = vatRow?.whmcsZeroVatAutoDetect ?? true;
+		const vatScenario =
+			clientRow && zeroVatAutoDetect
+				? classifyClientVat({ country: clientRow.country, cui: clientRow.cui })
+				: null;
+		let vatNote: string | null = null;
+		if (vatScenario === 'intracom' || vatScenario === 'export') {
+			vatRate = 0;
+			vatNote = getZeroVatLegalNote(vatScenario);
+		}
+
+		let vatAmount = Math.round((subtotal * vatRate) / 100);
+		let totalAmount = subtotal + vatAmount;
+
+		// 5f. An ALREADY-ISSUED invoice outranks every reconstruction above: it is
+		//     literally the document the customer will pay, VAT already resolved by
+		//     the generator. Drafts are excluded on purpose — `invoice-payable.ts`
+		//     relies on view tokens existing only for invoices that were actually
+		//     sent, so minting one for a draft would make a half-edited invoice
+		//     publicly payable.
+		//
+		//     The link matters as much as the number: the portal renew page is
+		//     behind the client-portal login (`client/[tenant]/+layout.server.ts`
+		//     redirects), and plenty of hosting customers have no `client_user` row
+		//     at all — for them the button was a dead end. The tokenized public
+		//     invoice page is the same one the invoice email already links to, and
+		//     it carries the card-payment flow without a login.
+		const [openInvoice] = await db
+			.select({
+				id: invoiceTable.id,
+				amount: invoiceTable.amount,
+				taxRate: invoiceTable.taxRate,
+				taxAmount: invoiceTable.taxAmount,
+				totalAmount: invoiceTable.totalAmount,
+				currency: invoiceTable.currency
+			})
+			.from(invoiceTable)
+			.where(
+				and(
+					eq(invoiceTable.hostingAccountId, accountId),
+					eq(invoiceTable.tenantId, tenantId),
+					inArray(invoiceTable.status, ['sent', 'overdue'])
+				)
+			)
+			.orderBy(desc(invoiceTable.issueDate))
+			.limit(1);
+
+		const baseUrl = getAppBaseUrl();
+		let payUrl = `${baseUrl}/client/${tenantRow.slug}/hosting/accounts/${accountId}/renew`;
+
+		const openInvoiceTotal = openInvoice?.totalAmount ?? 0;
+		if (openInvoice && openInvoiceTotal > 0) {
+			subtotal = openInvoice.amount ?? subtotal;
+			// invoice.taxRate is BPS like the recurring template's.
+			vatRate = Math.round((openInvoice.taxRate ?? 0) / 100);
+			vatAmount = openInvoice.taxAmount ?? 0;
+			totalAmount = openInvoiceTotal;
+			if (openInvoice.currency === 'EUR' || openInvoice.currency === 'USD') {
+				currency = openInvoice.currency;
+			} else if (openInvoice.currency) {
+				currency = 'RON';
+			}
+			vatNote = vatRate === 0 ? (vatNote ?? getZeroVatLegalNote(vatScenario ?? 'export')) : null;
+
+			const rawToken = await createInvoiceViewToken(openInvoice.id, tenantId);
+			payUrl = `${baseUrl}/invoice/${tenantRow.slug}/${encodeURIComponent(rawToken)}`;
+		}
 
 		// 6. Render template with all inputs.
 		const { subject, html } = await renderRenewalReminder({
@@ -1310,6 +1401,7 @@ export async function notifyHostingRenewalReminder(
 			vatRate,
 			vatAmount,
 			totalAmount,
+			vatNote,
 			currency,
 			daysUntilDue,
 			autoRenew: account.autoRenew,

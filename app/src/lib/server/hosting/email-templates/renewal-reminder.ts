@@ -11,13 +11,17 @@ export interface RenewalReminderInput {
 	/** NET amount (pre-VAT) in cents — matches hostingAccount.recurringAmount which
 	 * recurring-template.ts:270 treats as `rate` (pre-tax line item). */
 	subtotal: number;
-	/** VAT rate as integer percent (e.g., 21 for Romania 2025+). Pulled from
-	 * invoiceSettings.defaultTaxRate by the caller — never hardcoded. */
+	/** VAT rate as integer percent (e.g., 21 for Romania 2025+). Resolved by the
+	 * caller from the recurring-invoice template, then forced to 0 for EU-intracom
+	 * / export clients (same rule the invoice generator applies) — never hardcoded. */
 	vatRate: number;
 	/** VAT amount in cents: round(subtotal × vatRate / 100). */
 	vatAmount: number;
 	/** Total in cents: subtotal + vatAmount. This is what the client actually pays. */
 	totalAmount: number;
+	/** Zero-VAT legal mention (reverse charge / export) when vatRate is 0 —
+	 * mirrors the note the generated invoice carries. Null for RO-domestic. */
+	vatNote?: string | null;
 	currency: 'RON' | 'EUR' | 'USD';
 	/** 14 / 7 / 1 — which renewal reminder window this is. */
 	daysUntilDue: 1 | 7 | 14;
@@ -46,6 +50,7 @@ export async function render(input: RenewalReminderInput): Promise<{ subject: st
 	const escVatAmount = escapeHtml(formatCentsToMajor(input.vatAmount));
 	const escTotalAmount = escapeHtml(formatCentsToMajor(input.totalAmount));
 	const escVatRate = escapeHtml(String(input.vatRate));
+	const escVatNote = input.vatNote ? escapeHtml(input.vatNote) : null;
 
 	// Singular vs plural Romanian: "1 zi" / "N zile". The subject + body both use
 	// `dayWord` so the cadence reads naturally regardless of window.
@@ -93,6 +98,12 @@ export async function render(input: RenewalReminderInput): Promise<{ subject: st
 			<tr><td style="padding:6px 0;color:#666;">TVA ${escVatRate}%</td><td style="padding:6px 0;text-align:right;">${escVatAmount} ${escCurrency}</td></tr>
 			<tr><td style="padding:10px 0 6px 0;color:#111827;border-top:1px solid #e5e7eb;"><strong>Total de plată</strong></td><td style="padding:10px 0 6px 0;text-align:right;border-top:1px solid #e5e7eb;"><strong>${escTotalAmount} ${escCurrency}</strong></td></tr>
 		</table>
+
+		${
+			escVatNote
+				? `<p style="margin-top:8px;color:#666;font-size:13px;">${escVatNote}</p>`
+				: ''
+		}
 
 		${autoRenewBlock}
 
