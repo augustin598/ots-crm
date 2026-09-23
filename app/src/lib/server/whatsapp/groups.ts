@@ -100,8 +100,12 @@ export async function isOnWhatsapp(tenantId: string, phoneE164: string): Promise
 	if (!session) return null;
 	try {
 		const results = await session.sock.onWhatsApp(phoneE164);
-		const hit = results?.find((r) => r.jid?.startsWith(phoneE164.replace('+', '')));
-		return hit ? !!hit.exists : (results?.[0]?.exists ?? false);
+		// undefined = interogarea USync n-a primit răspuns → nu știm, NU „nu există".
+		// Altfel refuzam numere reale cu „Numărul nu pare să aibă WhatsApp".
+		// Listă goală = Baileys a filtrat contactul inexistent → chiar nu există.
+		if (!results) return null;
+		const hit = results.find((r) => r.jid?.startsWith(phoneE164.replace('+', '')));
+		return hit ? !!hit.exists : (results[0]?.exists ?? false);
 	} catch {
 		return null;
 	}

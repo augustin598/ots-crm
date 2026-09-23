@@ -457,7 +457,22 @@ export const updateClient = command(
 				)
 				.limit(1);
 
-			if (primary) {
+			// Numărul pus de om din portal (self_service) e al lui personal și bate
+			// telefonul firmei: nu-l suprascriem când agenția schimbă telefonul de pe fișă.
+			const [existingLink] = primary
+				? await db
+						.select({ source: table.userWhatsappLink.source })
+						.from(table.userWhatsappLink)
+						.where(
+							and(
+								eq(table.userWhatsappLink.userId, primary.userId),
+								eq(table.userWhatsappLink.tenantId, tenantId)
+							)
+						)
+						.limit(1)
+				: [];
+
+			if (primary && existingLink?.source !== 'self_service') {
 				await db
 					.delete(table.userWhatsappLink)
 					.where(

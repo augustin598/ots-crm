@@ -14,6 +14,8 @@
  * - "0744431469"     → "+40744431469" (RO national → E164)
  * - "0040744431469"  → "+40744431469" (RO with international prefix)
  * - "0744 431 469"   → "+40744431469" (strips spaces/dashes/parens)
+ * - "+40 0744 431 469" / "+40 (0) 744…" → "+40744431469" (0-ul național după
+ *   prefix — după +40 nu urmează niciodată 0, altfel salvam un număr inexistent)
  * - "" / null / weirdness → null
  *
  * @param phone raw phone from DB or user input
@@ -26,8 +28,13 @@ export function normalizePhoneE164(
 	if (!phone) return null;
 
 	// Strip everything except digits and leading +
-	const cleaned = phone.replace(/[^\d+]/g, '');
+	let cleaned = phone.replace(/[^\d+]/g, '');
 	if (!cleaned) return null;
+
+	// „+40 0748…", „0040 0748…", „40 0748…": scoatem 0-ul național de după prefix.
+	cleaned = cleaned.replace(/^(\+|00)?400(\d{9})$/, (_m, intl: string | undefined, rest: string) =>
+		`${intl ?? ''}40${rest}`
+	);
 
 	// Already E164 (starts with +)
 	if (cleaned.startsWith('+')) {
