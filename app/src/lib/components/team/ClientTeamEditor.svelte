@@ -2,8 +2,7 @@
 	import {
 		getClientSecondaryEmails,
 		createClientSecondaryEmail,
-		deleteClientSecondaryEmail,
-		updateClientSecondaryEmailAccess
+		deleteClientSecondaryEmail
 	} from '$lib/remotes/client-secondary-emails.remote';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
@@ -30,15 +29,17 @@
 		if (!preset) throw new Error('Rol invalid');
 		const created = await createClientSecondaryEmail({
 			clientId,
-			email
+			email,
+			accessFlags: { ...preset.flags },
+			sendInvite: true
 		}).updates(secondaryEmailsQuery);
-		if (created?.id) {
-			await updateClientSecondaryEmailAccess({
-				secondaryEmailId: created.id,
-				accessFlags: preset.flags
-			}).updates(secondaryEmailsQuery);
+		if (created?.inviteSent) {
+			toast.success(`Invitație trimisă la ${email} (rol ${preset.label}).`);
+		} else {
+			toast.warning(
+				`${email} a fost adăugat cu rolul ${preset.label}, dar emailul de invitație nu a putut fi trimis. Se poate autentifica din pagina de login a portalului cu această adresă.`
+			);
 		}
-		toast.success(`${email} adăugat cu rolul ${preset.label}.`);
 	}
 
 	async function handleDelete(secondaryEmailId: string, email: string) {

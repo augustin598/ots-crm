@@ -199,15 +199,17 @@
 		try {
 			const created = await createClientSecondaryEmail({
 				clientId,
-				email: trimmed
+				email: trimmed,
+				accessFlags: { ...preset.flags },
+				sendInvite: true
 			}).updates(secondaryEmailsQuery);
-			if (created?.id) {
-				await updateClientSecondaryEmailAccess({
-					secondaryEmailId: created.id,
-					accessFlags: preset.flags
-				}).updates(secondaryEmailsQuery);
+			if (created?.inviteSent) {
+				toast.success(`Invitație trimisă la ${trimmed} (rol ${preset.label}).`);
+			} else {
+				toast.warning(
+					`${trimmed} a fost adăugat cu rolul ${preset.label}, dar emailul de invitație nu a putut fi trimis. Se poate autentifica din pagina de login a portalului cu această adresă.`
+				);
 			}
-			toast.success(`${trimmed} adăugat cu rolul ${preset.label}.`);
 			inviteEmail = '';
 			inviteOpen = false;
 		} catch (e) {
