@@ -1674,7 +1674,7 @@
 
 <!-- Generated secret display -->
 <Dialog bind:open={updatesOpen}>
-	<DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto">
+	<DialogContent class="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Update-uri — {updatesSite?.name ?? ''}</DialogTitle>
 			<DialogDescription>
@@ -1801,7 +1801,7 @@
 </Dialog>
 
 <Dialog bind:open={backupsOpen}>
-	<DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto">
+	<DialogContent class="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Backup-uri — {backupsSite?.name ?? ''}</DialogTitle>
 			<DialogDescription>

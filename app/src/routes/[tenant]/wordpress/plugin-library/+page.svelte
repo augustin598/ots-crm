@@ -47,7 +47,7 @@
 		type PlanCompareItem,
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
-	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
+	import { runPlanSteps, runPluginStep, stepErrorHint, type StepResult } from '$lib/logic/wordpress-plugin-run';
 	import { backupProgressPercent, describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 
@@ -1307,6 +1307,10 @@
 																			<span class="break-all">{shorten(progress.message, 160)}</span
 																			>
 																		</span>
+																		{@const hint = stepErrorHint(progress.message)}
+																		{#if hint}
+																			<p class="text-xs text-muted-foreground">{hint}</p>
+																		{/if}
 																	{:else}
 																		<span class="text-muted-foreground">–</span>
 																	{/if}
@@ -1330,7 +1334,7 @@
 
 <!-- ─────────────────────────── Upload dialog ─────────────────────────── -->
 <Dialog bind:open={uploadOpen}>
-	<DialogContent class="max-h-[80vh] max-w-2xl overflow-y-auto">
+	<DialogContent class="max-h-[80vh] sm:max-w-2xl overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Upload ZIP-uri în bibliotecă</DialogTitle>
 			<DialogDescription>

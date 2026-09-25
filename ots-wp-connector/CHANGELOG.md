@@ -8,6 +8,14 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.8.2 — 2026-09-25
+
+- `/updates/apply`: când cache-ul de update-uri al WordPress listează o
+  versiune deja instalată, upgrader-ul se oprește cu rezultatul
+  `up_to_date` („The plugin is at the latest version." / „Modulul are o
+  versiune recentă."). Era raportat ca eșec; acum e `success: true,
+  already_current: true`. Detectat după codul rezultatului, nu după text.
+
 ## 0.8.1 — 2026-09-25
 
 - Fix: când WordPress refuza instalarea unui plugin (`/plugins/install`) sau

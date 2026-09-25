@@ -14,7 +14,7 @@
 </script>
 
 <div
-	class="flex items-center gap-3 rounded-xl border px-3.5 py-2.5 {tone === 'warning'
+	class="flex w-full min-w-0 items-center gap-3 rounded-xl border px-3.5 py-2.5 {tone === 'warning'
 		? 'border-amber-500/50 bg-amber-500/10'
 		: 'border-primary/40 bg-primary/5'}"
 	role="status"

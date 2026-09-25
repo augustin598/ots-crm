@@ -41,7 +41,7 @@
 		type PlanCompareItem,
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
-	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
+	import { runPlanSteps, runPluginStep, stepErrorHint, type StepResult } from '$lib/logic/wordpress-plugin-run';
 	import { nextJobView, runSiteBackup, type JobView } from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 
@@ -196,9 +196,23 @@
 			return pr && pr.state !== 'installing';
 		}).length;
 		const current = planSteps.find((st) => planProgress[st.key]?.state === 'installing');
-		const failed = planSteps.filter((st) => planProgress[st.key]?.state === 'failed').length;
-		return { total, finished, current, failed };
+		const failedSteps = planSteps.filter((st) => planProgress[st.key]?.state === 'failed');
+		const alreadyCurrent = planSteps.filter((st) => {
+			const pr = planProgress[st.key];
+			return pr?.state === 'done' && pr.message === 'era deja la zi';
+		}).length;
+		return { total, finished, current, failed: failedSteps.length, failedSteps, alreadyCurrent };
 	});
+
+	/** After the run, failed steps first so they are not lost at the bottom of a long list. */
+	const planStepsShown = $derived(
+		planFinished
+			? [
+					...planSteps.filter((st) => planProgress[st.key]?.state === 'failed'),
+					...planSteps.filter((st) => planProgress[st.key]?.state !== 'failed')
+				]
+			: planSteps
+	);
 
 	/**
 	 * Library rows that can update an installed plugin from here, keyed by
@@ -351,7 +365,9 @@
 					planProgress[key] = result;
 				}
 			);
-			const notes = Object.values(planProgress).some((r) => r.state === 'done' && r.message);
+			const notes = Object.values(planProgress).some(
+				(r) => r.state === 'done' && r.message && r.message !== 'era deja la zi'
+			);
 			if (summary.failed === 0 && summary.blocked === 0) {
 				const msg =
 					steps.length === 1
@@ -360,10 +376,11 @@
 				if (notes) toast.warning(`${msg}, cu observații — vezi detaliile`);
 				else toast.success(msg);
 			} else {
-				toast.error(
-					`${summary.ok} reușite, ${summary.failed} eșuate${summary.blocked ? `, ${summary.blocked} blocate de o bază neactualizată` : ''} — vezi detaliile`,
-					{ duration: 10000 }
-				);
+				const names = steps
+					.filter((st) => planProgress[st.key]?.state === 'failed')
+					.map((st) => st.name)
+					.join(', ');
+				toast.error(`${summary.ok} reușite · eșuate: ${names}`, { duration: 12000 });
 			}
 			selected.clear();
 		} finally {
@@ -1172,7 +1189,7 @@
 
 <!-- Update plan: order (base before PRO), optional backup, live progress per step. -->
 <Dialog bind:open={planOpen}>
-	<DialogContent class="max-w-xl">
+	<DialogContent class="sm:max-w-2xl">
 		<DialogHeader>
 			<DialogTitle>
 				{planFinished ? 'Rezultat update' : planRunning ? 'Se actualizează…' : 'Actualizare plugin-uri'}
@@ -1208,16 +1225,35 @@
 				tone={planOverall.failed > 0 ? 'warning' : 'default'}
 			/>
 		{:else if planFinished}
-			<p class="text-sm font-medium {planOverall.failed > 0 ? 'text-destructive' : 'text-green-700 dark:text-green-400'}">
-				{planOverall.finished - planOverall.failed}/{planOverall.total} reușite{planOverall.failed > 0
-					? `, ${planOverall.failed} eșuate — detaliile sunt la pașii marcați cu roșu`
-					: ''}
-			</p>
+			<div class="space-y-2">
+				<p class="text-sm font-medium {planOverall.failed > 0 ? 'text-destructive' : 'text-green-700 dark:text-green-400'}">
+					{planOverall.finished - planOverall.failed}/{planOverall.total} reușite{planOverall.alreadyCurrent > 0
+						? ` (${planOverall.alreadyCurrent} erau deja la zi)`
+						: ''}{planOverall.failed > 0 ? ` · ${planOverall.failed} eșuate:` : ''}
+				</p>
+				{#if planOverall.failed > 0}
+					<ul class="space-y-1.5 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+						{#each planOverall.failedSteps as st (st.key)}
+							{@const pr = planProgress[st.key]}
+							{@const msg = pr && pr.state === 'failed' ? pr.message : ''}
+							{@const hint = stepErrorHint(msg)}
+							<li class="min-w-0">
+								<span class="font-semibold">{st.name}</span>
+								<span class="break-words text-destructive"> — {msg}</span>
+								{#if hint}
+									<p class="text-xs text-muted-foreground">{hint}</p>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
 		{/if}
 
 		<ol class="max-h-[50vh] space-y-2 overflow-y-auto text-sm">
-			{#each planSteps as step, i (step.key)}
+			{#each planStepsShown as step (step.key)}
 				{@const pr = planProgress[step.key]}
+				{@const i = planSteps.indexOf(step)}
 				<li class="flex items-start gap-2 rounded-md border px-3 py-2">
 					<span class="mt-0.5 shrink-0">
 						{#if pr?.state === 'installing'}
@@ -1243,7 +1279,13 @@
 							</span>
 						</div>
 						{#if pr && pr.state !== 'installing' && pr.message}
-							<p class="mt-0.5 break-words text-xs {pr.state === 'failed' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}">
+							<p
+								class="mt-0.5 break-words text-xs {pr.state === 'failed'
+									? 'text-destructive'
+									: pr.message === 'era deja la zi'
+										? 'text-muted-foreground'
+										: 'text-amber-700 dark:text-amber-400'}"
+							>
 								{pr.message}
 							</p>
 						{/if}
@@ -1284,7 +1326,7 @@
 </Dialog>
 
 <Dialog bind:open={uploadOpen}>
-	<DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto">
+	<DialogContent class="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
 		<DialogHeader>
 			<DialogTitle>Upload plugin-uri</DialogTitle>
 			<DialogDescription>

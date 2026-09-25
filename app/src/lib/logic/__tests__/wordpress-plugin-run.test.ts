@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { runPluginStep, runPlanSteps, type StepResult } from '../wordpress-plugin-run';
+import { runPluginStep, runPlanSteps, stepErrorHint, type StepResult } from '../wordpress-plugin-run';
 import type { PlanStep } from '../wordpress-plugin-plan';
 
 function step(over: Partial<PlanStep> = {}): PlanStep {
@@ -122,5 +122,24 @@ describe('runPlanSteps', () => {
 		);
 		expect(ran).toEqual(['lib:base', 'lib:pro']);
 		expect(summary).toEqual({ ok: 2, failed: 0, blocked: 0 });
+	});
+});
+
+describe('„deja la zi" și explicații', () => {
+	const wp = step({ kind: 'wporg', key: 'wporg:x/x.php', plugin: 'x/x.php' });
+	test('conector ≥ 0.8.2: already_current → reușit, cu notă', async () => {
+		const r = await runPluginStep('/b', wp, fakeFetch(200, { status: 'success', items: [{ success: true, already_current: true, message: 'already_current' }] }));
+		expect(r).toEqual({ state: 'done', toVersion: '4.3.0', message: 'era deja la zi' });
+	});
+	test('conector vechi: mesajul WordPress „latest version" (EN/RO) → tot reușit', async () => {
+		for (const message of ['The plugin is at the latest version.', 'Modulul are o versiune recentă.', 'The theme is at the latest version.']) {
+			const r = await runPluginStep('/b', wp, fakeFetch(200, { status: 'failed', items: [{ success: false, message }] }));
+			expect(r).toEqual({ state: 'done', toVersion: '4.3.0', message: 'era deja la zi' });
+		}
+	});
+	test('explicații pentru eșecurile frecvente', () => {
+		expect(stepErrorHint('Download failed. Forbidden')).toContain('licen');
+		expect(stepErrorHint('The package could not be installed. No valid plugins were found.')).toContain('ZIP');
+		expect(stepErrorHint('ceva necunoscut')).toBeNull();
 	});
 });

@@ -10,6 +10,29 @@ export type StepResult =
 	| { state: 'done'; toVersion: string; message?: string }
 	| { state: 'failed'; message: string; blocked?: boolean };
 
+/** WordPress' "already at the latest version" text, EN + RO (connector < 0.8.2). */
+const ALREADY_CURRENT = /is at the latest version|are o versiune recent/i;
+
+/**
+ * A plain-language cause for the failures seen in practice, or null.
+ * Shown under the raw WordPress message.
+ */
+export function stepErrorHint(message: string): string | null {
+	if (/forbidden|unauthori[sz]ed|licen[cs]e/i.test(message)) {
+		return 'Producătorul refuză descărcarea: licența nu e activă pe acest site. Activează licența în wp-admin sau urcă ZIP-ul în Biblioteca de plugin-uri.';
+	}
+	if (/no valid plugins were found|incompatible archive/i.test(message)) {
+		return 'ZIP-ul nu are forma cerută de WordPress (folderul plugin-ului la rădăcină).';
+	}
+	if (/could not create directory|could not copy file|disk|quota/i.test(message)) {
+		return 'Hostingul nu permite scrierea fișierelor (spațiu sau permisiuni).';
+	}
+	if (/HMAC|HTTP 40[13]/i.test(message)) {
+		return 'Conexiunea cu site-ul a fost refuzată (secret HMAC sau firewall).';
+	}
+	return null;
+}
+
 /**
  * One step on one site. `siteApi` is `/<tenant>/api/wordpress/sites/<siteId>`.
  * Library steps push the ZIP through `library-install` (re-activating only
@@ -33,12 +56,18 @@ export async function runPluginStep(
 				error?: string;
 				items?: Array<{
 					success: boolean;
+					already_current?: boolean;
 					message?: string | null;
 					reactivated?: boolean | null;
 					reactivation_error?: string | null;
 				}>;
 			};
 			const first = body.items?.[0];
+			// WordPress' update cache listed a version that is already installed.
+			// Connector ≥ 0.8.2 says so; older ones pass WordPress' own text.
+			if (first && (first.already_current || ALREADY_CURRENT.test(first.message ?? ''))) {
+				return { state: 'done', toVersion: step.toVersion, message: 'era deja la zi' };
+			}
 			if (!res.ok || body.status === 'failed' || !first?.success) {
 				return { state: 'failed', message: first?.message || body.error || `HTTP ${res.status}` };
 			}

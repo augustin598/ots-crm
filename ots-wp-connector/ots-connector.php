@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.8.1
+ * Version:           0.8.2
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.8.1' );
+define( 'OTS_CONNECTOR_VERSION', '0.8.2' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -320,6 +320,32 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 			}
 		} catch ( \Throwable $e ) {
 			$outcome = new WP_Error( 'upgrader_exception', $e->getMessage() );
+		}
+
+		// WordPress' update cache listed a version that is already installed:
+		// Plugin_Upgrader / Theme_Upgrader bail out with result 'up_to_date'
+		// before touching anything. Not a failure — the site is current.
+		// Matched against the upgrader's own `up_to_date` string, so it works
+		// in every locale (the AJAX skin files it under a generic error code).
+		$up_to_date_text = ( $upgrader && ! empty( $upgrader->strings['up_to_date'] ) ) ? $upgrader->strings['up_to_date'] : null;
+		$skin_errors     = method_exists( $skin, 'get_errors' ) ? $skin->get_errors()->get_error_messages() : [];
+		if (
+			$outcome === false
+			&& (
+				( isset( $skin->result ) && $skin->result === 'up_to_date' ) // bulk_upgrade()
+				|| ( $up_to_date_text && in_array( $up_to_date_text, $skin_errors, true ) ) // upgrade(): same translated string
+			)
+		) {
+			$results[] = [
+				'type'            => $type,
+				'slug'            => $slug,
+				'success'         => true,
+				'already_current' => true,
+				'message'         => 'already_current',
+				'was_active'      => $was_active,
+				'reactivated'     => null,
+			];
+			continue;
 		}
 
 		if ( is_wp_error( $outcome ) ) {
