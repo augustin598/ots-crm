@@ -122,7 +122,10 @@ export default function (options: AdapterOptions = {}): Adapter {
 
 			if (builder.hasServerInstrumentationFile?.()) {
 				builder.instrument?.({
-					entrypoint: `${out}/index.js`,
+					// Șabloanele din files/ sunt .ts (Bun le rulează direct); Dockerfile
+					// pornește `bun build/index.js`, pe care Bun îl rezolvă la index.ts.
+					entrypoint: `${out}/index.ts`,
+					start: `${out}/start.ts`,
 					instrumentation: `${out}/server/instrumentation.server.js`,
 					module: {
 						exports: ['path', 'host', 'port', 'server']

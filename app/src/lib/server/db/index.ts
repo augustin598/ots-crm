@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
+import { tracedLibsql } from '@navitech/otel';
 import * as schema from './schema';
 
 const sqlitePath = env.SQLITE_PATH;
@@ -25,4 +26,5 @@ if (sqlitePath) {
 	throw new Error('Neither SQLITE_PATH nor Turso database URL is set in environment');
 }
 
-export const db = drizzle(client, { schema });
+// Un span per statement (SELECT campaigns…); no-op fără SDK pornit.
+export const db = drizzle(tracedLibsql(client), { schema });

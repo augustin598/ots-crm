@@ -1,5 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import { env } from '$env/dynamic/private';
+import { withSpan } from '@navitech/otel';
+import { schedulerJobs, schedulerJobDuration } from '$lib/server/metrics';
 import { processRecurringInvoices } from './tasks/recurring-invoices';
 import { processRecurringTasksSafety } from './tasks/recurring-tasks-safety';
 import { processTaskReminders } from './tasks/task-reminders';
@@ -247,7 +249,18 @@ function createSchedulerWorker() {
 				throw new Error(`Unknown scheduler job type: ${type}`);
 			}
 
-			return await handler(params || {});
+			// Joburile nu rulează sub o cerere HTTP: fiecare devine propriul trace în Tracely.
+			const started = performance.now();
+			let outcome = 'failed';
+			try {
+				const result = await withSpan(`job ${type}`, () => handler(params || {}), { 'job.type': type, 'job.id': job.id ?? '' });
+				outcome = 'completed';
+				return result;
+			} finally {
+				const attrs = { 'job.type': type, outcome };
+				schedulerJobs.add(1, attrs);
+				schedulerJobDuration.record((performance.now() - started) / 1000, attrs);
+			}
 		},
 		{
 			connection,

@@ -8,7 +8,13 @@ const config = {
 	preprocess: [vitePreprocess()],
 	kit: {
 		adapter: adapter({ precompress: true, isr: false }),
-		experimental: { remoteFunctions: true },
+		experimental: {
+			remoteFunctions: true,
+			// Tracely: span-uri pentru handle, load, actions, remote functions
+			tracing: { server: true },
+			// rulează src/instrumentation.server.ts înaintea aplicației
+			instrumentation: { server: true }
+		},
 		csrf: {
 			trustedOrigins: ['https://crm.navitech.cloud', 'https://localhost:3000']
 		},
