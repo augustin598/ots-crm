@@ -8,7 +8,7 @@
  * Nu se abonează la `task.completed`: `done` vine tot prin
  * `task.status-changed`, altfel am trimite de două ori.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { logWarning } from '$lib/server/logger';
@@ -145,8 +145,32 @@ export async function notifyTaskMentionInGroup(payload: {
 }
 
 /**
+ * A mai fost prezentat task-ul în acest grup? Un anunț expirat sau picat nu
+ * contează: grupul nu l-a primit.
+ */
+async function alreadyAnnouncedInGroup(tenantId: string, taskId: string, groupJid: string): Promise<boolean> {
+	const [row] = await db
+		.select({ id: table.whatsappOutbox.id })
+		.from(table.whatsappOutbox)
+		.where(
+			and(
+				eq(table.whatsappOutbox.tenantId, tenantId),
+				eq(table.whatsappOutbox.taskId, taskId),
+				eq(table.whatsappOutbox.groupJid, groupJid),
+				eq(table.whatsappOutbox.kind, 'task.linked'),
+				inArray(table.whatsappOutbox.status, ['queued', 'sending', 'sent'])
+			)
+		)
+		.limit(1);
+	return !!row;
+}
+
+/**
  * La legarea task-ului de grup: prezentarea lui. Grupul a fost deja validat
  * (bifat) de `setTaskWhatsappGroup`, de aceea primim JID-ul direct.
+ *
+ * O singură dată per task + grup: task-ul legat automat la creare și apoi
+ * dezlegat + relegat de mână de același grup trimitea anunțul de două ori.
  */
 export async function notifyTaskLinkedToGroup(payload: {
 	tenantId: string;
@@ -159,6 +183,7 @@ export async function notifyTaskLinkedToGroup(payload: {
 	actorUserId: string;
 	groupJid: string;
 }): Promise<void> {
+	if (await alreadyAnnouncedInGroup(payload.tenantId, payload.taskId, payload.groupJid)) return;
 	const actorName = await userDisplayName(payload.actorUserId);
 	const body = buildLinkedTaskMessage({
 		taskTitle: payload.taskTitle,

@@ -31,6 +31,8 @@ let linked: {
 	actorLast: string;
 } | null = null;
 let mentionedName = { firstName: 'Ana', lastName: 'Pop' };
+/** Anunțuri „Task nou în grup" deja existente în outbox pentru task + grup. */
+let priorLinkAnnouncements: Array<{ id: string }> = [];
 
 mock.module('$lib/server/db', () => ({
 	db: {
@@ -48,7 +50,9 @@ mock.module('$lib/server/db', () => ({
 							? linked
 								? [{ firstName: linked.actorFirst, lastName: linked.actorLast, email: 'a@b.c' }]
 								: []
-							: []
+							: t.__name === 'whatsapp_outbox'
+								? priorLinkAnnouncements
+								: []
 				})
 			})
 		})
@@ -57,7 +61,16 @@ mock.module('$lib/server/db', () => ({
 mock.module('$lib/server/db/schema', () => ({
 	task: { __name: 'task', id: 'id', tenantId: 'tenant_id', whatsappGroupId: 'wg' },
 	whatsappGroup: { __name: 'whatsapp_group', id: 'id', groupJid: 'jid', watched: 'watched' },
-	user: { __name: 'user', id: 'id', firstName: 'f', lastName: 'l', email: 'e' }
+	user: { __name: 'user', id: 'id', firstName: 'f', lastName: 'l', email: 'e' },
+	whatsappOutbox: {
+		__name: 'whatsapp_outbox',
+		id: 'id',
+		tenantId: 'tenant_id',
+		taskId: 'task_id',
+		groupJid: 'group_jid',
+		kind: 'kind',
+		status: 'status'
+	}
 }));
 
 const { notifyTaskStatusChangedInGroup, notifyTaskMentionInGroup, notifyTaskLinkedToGroup } = await import('./task-notifications');
@@ -77,6 +90,7 @@ const baseEvent = {
 beforeEach(() => {
 	enqueued.length = 0;
 	phones = new Map();
+	priorLinkAnnouncements = [];
 	linked = { groupJid: '123@g.us', watched: true, actorFirst: 'Andrei', actorLast: 'Pop' };
 });
 
@@ -185,5 +199,22 @@ describe('legarea task-ului de grup', () => {
 		expect(enqueued[0].dedupeKey ?? null).toBeNull();
 		expect(String(enqueued[0].body)).toContain('Task nou în grup, adăugat de Andrei Pop');
 		expect(String(enqueued[0].body)).toContain('https://crm.test/client/ots/tasks/t1');
+	});
+
+	it('relegarea aceluiași grup nu anunță task-ul a doua oară', async () => {
+		// Legat automat la creare, apoi „Dezleagă" + „Leagă" pe același grup.
+		priorLinkAnnouncements = [{ id: 'o-prev' }];
+		await notifyTaskLinkedToGroup({
+			tenantId: 'ten',
+			tenantSlug: 'ots',
+			taskId: 't1',
+			taskTitle: 'Raport lunar',
+			status: 'todo',
+			assigneeName: null,
+			dueDate: null,
+			actorUserId: 'u1',
+			groupJid: '123@g.us'
+		});
+		expect(enqueued).toHaveLength(0);
 	});
 });
