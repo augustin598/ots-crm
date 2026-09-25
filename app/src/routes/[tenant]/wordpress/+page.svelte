@@ -41,10 +41,12 @@
 	import LibraryBigIcon from '@lucide/svelte/icons/library-big';
 	import {
 		continueSiteBackup,
-		describeBackupProgress,
+		nextJobView,
 		runSiteBackup,
-		runSiteRestore
+		runSiteRestore,
+		type JobView
 	} from '$lib/logic/wordpress-backup-run';
+	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 
 	type UpdateCounts = {
 		core: number;
@@ -135,8 +137,8 @@
 	let backupsLoading = $state(false);
 	let triggeringBackup = $state(false);
 	// One line of live progress for the backup / restore that is running.
-	let backupProgress = $state<string | null>(null);
-	let restoreProgress = $state<string | null>(null);
+	let backupProgress = $state<JobView | null>(null);
+	let restoreProgress = $state<JobView | null>(null);
 	const deletingBackupIds = new SvelteSet<string>();
 
 	// Restore confirm dialog state
@@ -680,10 +682,10 @@
 		applyResults = null;
 		try {
 			if (backupFirst) {
-				backupProgress = 'Backup înainte de update-uri…';
+				backupProgress = nextJobView(null, {}, 'Backup înainte de update-uri: ');
 				const backup = await runSiteBackup(`${apiBase}/${updatesSite.id}`, {
 					trigger: 'pre_update',
-					onProgress: (p) => (backupProgress = `Backup: ${describeBackupProgress(p)}`)
+					onProgress: (p) => (backupProgress = nextJobView(backupProgress, p, 'Backup: '))
 				});
 				backupProgress = null;
 				if (!backup.ok) {
@@ -755,10 +757,10 @@
 		if (!backupsSite) return;
 		const siteId = backupsSite.id;
 		triggeringBackup = true;
-		backupProgress = 'Pornesc…';
+		backupProgress = nextJobView(null, {});
 		let listed = false;
-		const onProgress = (p: Parameters<typeof describeBackupProgress>[0]) => {
-			backupProgress = describeBackupProgress(p);
+		const onProgress = (p: Parameters<typeof nextJobView>[1]) => {
+			backupProgress = nextJobView(backupProgress, p);
 			// Show the new "running" row as soon as the job exists.
 			if (!listed) {
 				listed = true;
@@ -848,12 +850,12 @@
 			return;
 		}
 		restoring = true;
-		restoreProgress = 'Pornesc…';
+		restoreProgress = nextJobView(null, {});
 		try {
 			const result = await runSiteRestore(
 				`${apiBase}/${restoreTarget.siteId}`,
 				restoreTarget.backupId,
-				{ onProgress: (p) => (restoreProgress = describeBackupProgress(p)) }
+				{ onProgress: (p) => (restoreProgress = nextJobView(restoreProgress, p)) }
 			);
 			if (!result.ok) {
 				toast.error(`Restore eșuat: ${result.error}`, { duration: 15000 });
@@ -1774,10 +1776,7 @@
 				</label>
 			</div>
 			{#if backupProgress && updatesApplying}
-				<p class="flex items-center gap-2 text-xs text-muted-foreground">
-					<RefreshCwIcon class="size-3.5 animate-spin" />
-					{backupProgress}
-				</p>
+				<WpJobProgress {...backupProgress} />
 			{/if}
 
 			<DialogFooter>
@@ -1811,10 +1810,10 @@
 			</DialogDescription>
 		</DialogHeader>
 
+		{#if backupProgress && !updatesApplying}
+			<WpJobProgress {...backupProgress} />
+		{/if}
 		<div class="flex items-center justify-end gap-3">
-			{#if backupProgress}
-				<span class="text-xs text-muted-foreground">{backupProgress}</span>
-			{/if}
 			<Button onclick={() => runBackup()} disabled={triggeringBackup}>
 				{#if triggeringBackup}
 					<RefreshCwIcon class="mr-2 size-4 animate-spin" />
@@ -1929,10 +1928,7 @@
 		</div>
 
 		{#if restoreProgress}
-			<p class="flex items-center gap-2 text-xs text-muted-foreground">
-				<RefreshCwIcon class="size-3.5 animate-spin" />
-				{restoreProgress}
-			</p>
+			<WpJobProgress {...restoreProgress} />
 		{/if}
 
 		<DialogFooter>

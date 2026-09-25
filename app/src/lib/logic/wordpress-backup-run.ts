@@ -183,3 +183,38 @@ export function describeBackupProgress(p: BackupRunProgress): string {
 	if (p.phase === 'db') return `Restaurare bază de date: partea ${pr.dbPart}/${pr.dbParts}`;
 	return `Restaurare fișiere: partea ${pr.filePart}/${pr.fileParts} (${pr.filesWritten} fișiere)`;
 }
+
+/**
+ * Overall completion for the progress bar, or null before the first report.
+ * Backup: database = first 20 %, files = the rest by bytes copied. Restore:
+ * database parts = first half, file parts = second half (a part is only
+ * counted once finished, so the bar never runs ahead of the work).
+ */
+export function backupProgressPercent(p: BackupRunProgress): number | null {
+	const pr = p.progress;
+	if (!pr) return null;
+	if ('tablesTotal' in pr) {
+		if (p.phase === 'finalize' || p.phase === 'done') return 99;
+		if (p.phase === 'db') return Math.round((pr.tablesTotal ? pr.tablesDone / pr.tablesTotal : 0) * 20);
+		if (p.phase === 'scan' || !pr.bytesTotal) return 20;
+		return Math.round(20 + (pr.bytesDone / pr.bytesTotal) * 80);
+	}
+	if (p.phase === 'large' || p.phase === 'done') return 98;
+	if (p.phase === 'db') return Math.round(((pr.dbPart - 1) / Math.max(1, pr.dbParts)) * 50);
+	return Math.round(50 + ((pr.filePart - 1) / Math.max(1, pr.fileParts)) * 50);
+}
+
+/** What the progress banner shows; see WpJobProgress.svelte. */
+export type JobView = { text: string; percent: number | null; tone: 'default' | 'warning' };
+
+/**
+ * Next banner state from a progress report. A retry keeps the previous
+ * percentage (the bar must not jump back to 0) and turns the banner amber.
+ */
+export function nextJobView(prev: JobView | null, p: BackupRunProgress, prefix = ''): JobView {
+	return {
+		text: prefix + describeBackupProgress(p),
+		percent: backupProgressPercent(p) ?? prev?.percent ?? null,
+		tone: p.retrying ? 'warning' : 'default'
+	};
+}

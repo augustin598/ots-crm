@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { runSiteBackup, runSiteRestore, describeBackupProgress } from '../wordpress-backup-run';
+import { runSiteBackup, runSiteRestore, describeBackupProgress, backupProgressPercent } from '../wordpress-backup-run';
 
 type Reply = { status?: number; body?: unknown; throws?: boolean };
 function fakeFetch(replies: Reply[], calls: Array<{ url: string; body: unknown }> = []): typeof fetch {
@@ -124,5 +124,30 @@ describe('describeBackupProgress', () => {
 		expect(describeBackupProgress({ phase: 'files', progress: { dbPart: 3, dbParts: 3, filePart: 2, fileParts: 6, statements: 900, filesWritten: 800 } })).toBe('Restaurare fișiere: partea 2/6 (800 fișiere)');
 		expect(describeBackupProgress({ retrying: 2, error: 'HTTP 503' })).toBe('Reîncerc (2) după: HTTP 503');
 		expect(describeBackupProgress({})).toBe('Pornesc…');
+	});
+});
+
+describe('backupProgressPercent', () => {
+	const bp = (phase: string, o: Partial<{ tablesDone: number; tablesTotal: number; filesDone: number; filesTotal: number; bytesDone: number; bytesTotal: number }>) => ({
+		phase,
+		progress: { tablesDone: 0, tablesTotal: 10, filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, ...o }
+	});
+	test('backup: baza = primele 20%, fișierele după octeți', () => {
+		expect(backupProgressPercent({})).toBeNull();
+		expect(backupProgressPercent(bp('db', { tablesDone: 5 }))).toBe(10);
+		expect(backupProgressPercent(bp('scan', { tablesDone: 10 }))).toBe(20);
+		expect(backupProgressPercent(bp('files', { tablesDone: 10, bytesDone: 50, bytesTotal: 100 }))).toBe(60);
+		expect(backupProgressPercent(bp('finalize', { tablesDone: 10, bytesDone: 100, bytesTotal: 100 }))).toBe(99);
+		expect(backupProgressPercent(bp('files', { tablesDone: 10, bytesDone: 0, bytesTotal: 0 }))).toBe(20);
+	});
+	test('restore: baza = prima jumătate, fișierele a doua', () => {
+		const rp = (phase: string, dbPart: number, filePart: number) => ({
+			phase,
+			progress: { dbPart, dbParts: 4, filePart, fileParts: 10, statements: 0, filesWritten: 0 }
+		});
+		expect(backupProgressPercent(rp('db', 1, 1))).toBe(0);
+		expect(backupProgressPercent(rp('db', 3, 1))).toBe(25);
+		expect(backupProgressPercent(rp('files', 4, 6))).toBe(75);
+		expect(backupProgressPercent(rp('large', 4, 10))).toBe(98);
 	});
 });

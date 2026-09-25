@@ -41,7 +41,8 @@
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
 	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
-	import { describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
+	import { nextJobView, runSiteBackup, type JobView } from '$lib/logic/wordpress-backup-run';
+	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 
 	type WpPlugin = {
 		plugin: string;
@@ -183,6 +184,7 @@
 	let planFinished = $state(false);
 	let backupFirst = $state(true);
 	let backupState = $state<{ state: 'running' | 'ok' | 'failed'; message?: string } | null>(null);
+	let backupView = $state<JobView | null>(null);
 	const selected = new SvelteSet<string>();
 
 	/**
@@ -307,10 +309,12 @@
 		try {
 			if (backupFirst) {
 				backupState = { state: 'running' };
+				backupView = nextJobView(null, {}, 'Backup complet: ');
 				const backup = await runSiteBackup(siteApi, {
 					trigger: 'pre_update',
-					onProgress: (p) => (backupState = { state: 'running', message: describeBackupProgress(p) })
+					onProgress: (p) => (backupView = nextJobView(backupView, p, 'Backup complet: '))
 				});
+				backupView = null;
 				if (!backup.ok) {
 					backupState = { state: 'failed', message: backup.error };
 					toast.error(`Backup eșuat: ${backup.error}. Update-urile nu au rulat.`);
@@ -1164,8 +1168,9 @@
 		{#if backupState}
 			<div class="flex items-center gap-2 text-sm">
 				{#if backupState.state === 'running'}
-					<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
-					<span>Backup complet: {backupState.message ?? 'pornesc…'}</span>
+					<div class="flex-1">
+						<WpJobProgress {...backupView ?? nextJobView(null, {}, 'Backup complet: ')} />
+					</div>
 				{:else if backupState.state === 'ok'}
 					<CheckCircleIcon class="size-4 text-green-600" />
 					<span>Backup făcut</span>

@@ -48,7 +48,7 @@
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
 	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
-	import { describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
+	import { backupProgressPercent, describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
 
 	/* ───────────────────────── types (mirror the API) ───────────────────────── */
 
@@ -171,7 +171,9 @@
 	/** Same safety net as the updates dialog: full backup on the site before the first install. */
 	let backupFirst = $state(true);
 	/** `${siteId}` → backup progress shown in the site row while a run is in flight. */
-	let backups = $state<Record<string, { state: 'running' | 'ok' | 'failed'; message?: string }>>(
+	let backups = $state<
+		Record<string, { state: 'running' | 'ok' | 'failed'; message?: string; percent?: number | null }>
+	>(
 		{}
 	);
 
@@ -437,7 +439,12 @@
 		backups[site.id] = { state: 'running' };
 		const result = await runSiteBackup(`${apiBase}/sites/${site.id}`, {
 			trigger: 'pre_update',
-			onProgress: (p) => (backups[site.id] = { state: 'running', message: describeBackupProgress(p) })
+			onProgress: (p) =>
+				(backups[site.id] = {
+					state: 'running',
+					message: describeBackupProgress(p),
+					percent: backupProgressPercent(p) ?? backups[site.id]?.percent
+				})
 		});
 		backups[site.id] = result.ok ? { state: 'ok' } : { state: 'failed', message: result.error };
 		return result.ok;
@@ -969,7 +976,8 @@
 									{#if backups[site.id]?.state === 'running'}
 										<span class="inline-flex items-center gap-1.5 text-muted-foreground">
 											<LoaderIcon class="size-3.5 animate-spin" />
-											backup: {backups[site.id]?.message ?? 'pornesc…'}
+											backup{backups[site.id]?.percent != null ? ` ${backups[site.id]?.percent}%` : ''}:
+											{backups[site.id]?.message ?? 'pornesc…'}
 										</span>
 									{:else if backups[site.id]?.state === 'failed'}
 										<span
