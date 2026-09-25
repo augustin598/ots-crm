@@ -54,7 +54,12 @@
 		tenant: { slug: string; name: string | null; website?: string | null } | null;
 		tenantUser: { role: string } | null;
 		allTenants: TenantInfo[];
-		user: { firstName?: string | null; lastName?: string | null; email: string } | null;
+		user: {
+			firstName?: string | null;
+			lastName?: string | null;
+			email: string;
+			avatarUrl?: string | null;
+		} | null;
 		initialPins: string[];
 		groups?: NavGroup[];
 		pathPrefix?: string;
@@ -188,6 +193,8 @@
 	// Tenant switcher
 	let switcherOpen = $state(false);
 	let userMenuOpen = $state(false);
+	// URL-ul pozei care a dat eroare (404/stocare) — cădem pe inițiale doar pentru el.
+	let failedAvatarUrl = $state<string | null>(null);
 
 	// Command palette
 	let cmdOpen = $state(false);
@@ -481,7 +488,13 @@
 		</button>
 		<Popover bind:open={userMenuOpen}>
 			<PopoverTrigger class="ots-sb-user">
-				<div class="ots-sb-avatar">{userInitials()}</div>
+				<div class="ots-sb-avatar">
+					{#if user?.avatarUrl && user.avatarUrl !== failedAvatarUrl}
+						<img src={user.avatarUrl} alt="" onerror={() => (failedAvatarUrl = user?.avatarUrl ?? null)} />
+					{:else}
+						{userInitials()}
+					{/if}
+				</div>
 				<div class="ots-sb-user-info">
 					<div class="ots-sb-user-name">{userDisplayName()}</div>
 					<div class="ots-sb-user-mail">{user?.email ?? ''}</div>
@@ -971,7 +984,13 @@
 	.ots-sb :global(.ots-sb-user):hover {
 		background: var(--ots-sb-surface-hover);
 	}
+	.ots-sb-avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
 	.ots-sb-avatar {
+		overflow: hidden;
 		width: 30px;
 		height: 30px;
 		border-radius: 50%;

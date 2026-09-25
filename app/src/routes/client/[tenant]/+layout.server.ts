@@ -8,6 +8,7 @@ import {
 	resolveWhatsappPromptState,
 	type WhatsappPromptState
 } from '$lib/server/whatsapp/phone-prompt';
+import { resolvePortalAvatar } from '$lib/server/portal-avatar';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (
@@ -223,6 +224,18 @@ export const load: LayoutServerLoad = async (event) => {
 		};
 	}
 
+	// Poza din footer-ul sidebar-ului. URL-ul poartă versiunea, ca o poză nouă
+	// să nu rămână în cache-ul browserului.
+	let avatarUrl: string | null = null;
+	if (event.locals.isClientUser && event.locals.user && event.locals.client) {
+		const avatar = await resolvePortalAvatar({
+			tenantId: tenant.id,
+			userId: event.locals.user.id,
+			clientId: event.locals.client.id
+		});
+		if (avatar) avatarUrl = `/client/${tenantSlug}/avatar?v=${avatar.version}`;
+	}
+
 	return {
 		tenant,
 		client: event.locals.client,
@@ -235,7 +248,8 @@ export const load: LayoutServerLoad = async (event) => {
 					id: event.locals.user.id,
 					email: event.locals.user.email,
 					firstName: event.locals.user.firstName,
-					lastName: event.locals.user.lastName
+					lastName: event.locals.user.lastName,
+					avatarUrl
 				}
 			: null,
 		defaultWebsiteUrl,
