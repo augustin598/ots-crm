@@ -37,6 +37,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import {
 		buildBulkSitePlan,
+		compareVersions,
 		type PlanCompareItem,
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
@@ -187,6 +188,18 @@
 	let backupView = $state<JobView | null>(null);
 	const selected = new SvelteSet<string>();
 
+	/** Overall position in the running plan, for the progress banner. */
+	const planOverall = $derived.by(() => {
+		const total = planSteps.length;
+		const finished = planSteps.filter((st) => {
+			const pr = planProgress[st.key];
+			return pr && pr.state !== 'installing';
+		}).length;
+		const current = planSteps.find((st) => planProgress[st.key]?.state === 'installing');
+		const failed = planSteps.filter((st) => planProgress[st.key]?.state === 'failed').length;
+		return { total, finished, current, failed };
+	});
+
 	/**
 	 * Library rows that can update an installed plugin from here, keyed by
 	 * the WP identifier. `wporg`-preferred rows are left to the normal Update
@@ -210,7 +223,12 @@
 	/** Only while the compare still describes what is installed (a WP-side update or upload moves the version). */
 	function libraryUpdateFor(p: WpPlugin): PlanCompareItem | null {
 		const item = libraryByPlugin.get(p.plugin);
-		return item && item.installedVersion === p.version ? item : null;
+		if (!item || item.installedVersion !== p.version) return null;
+		// WordPress offers something newer than the ZIP: its own Update button covers it.
+		if (p.updateAvailable && p.updatePackage && p.newVersion && compareVersions(p.newVersion, item.libraryVersion) > 0) {
+			return null;
+		}
+		return item;
 	}
 
 	async function loadPlugins() {
@@ -1179,6 +1197,22 @@
 					<span class="text-destructive">Backup eșuat: {backupState.message}. Update-urile nu au rulat.</span>
 				{/if}
 			</div>
+		{/if}
+
+		{#if planRunning && backupState?.state !== 'running'}
+			<WpJobProgress
+				text={planOverall.current
+					? `Pasul ${planOverall.finished + 1}/${planOverall.total}: ${planOverall.current.name} → ${planOverall.current.toVersion}`
+					: `${planOverall.finished}/${planOverall.total} gata`}
+				percent={planOverall.total ? Math.round((planOverall.finished / planOverall.total) * 100) : null}
+				tone={planOverall.failed > 0 ? 'warning' : 'default'}
+			/>
+		{:else if planFinished}
+			<p class="text-sm font-medium {planOverall.failed > 0 ? 'text-destructive' : 'text-green-700 dark:text-green-400'}">
+				{planOverall.finished - planOverall.failed}/{planOverall.total} reușite{planOverall.failed > 0
+					? `, ${planOverall.failed} eșuate — detaliile sunt la pașii marcați cu roșu`
+					: ''}
+			</p>
 		{/if}
 
 		<ol class="max-h-[50vh] space-y-2 overflow-y-auto text-sm">

@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.8.0
+ * Version:           0.8.1
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.8.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.8.1' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -331,12 +331,12 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 			];
 			$overall_success = false;
 		} elseif ( $outcome === false || $outcome === null ) {
-			$messages = $skin->get_error_messages();
+			$messages = ots_connector_skin_errors( $skin );
 			$results[] = [
 				'type'    => $type,
 				'slug'    => $slug,
 				'success' => false,
-				'message' => ! empty( $messages ) ? implode( '; ', $messages ) : 'Upgrader returned false',
+				'message' => $messages !== '' ? $messages : 'Upgrader returned false',
 			];
 			$overall_success = false;
 		} else {
@@ -376,6 +376,20 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 		'items'     => $results,
 		'timestamp' => time(),
 	] );
+}
+
+/**
+ * The upgrader skin's error text. WP_Ajax_Upgrader_Skin::get_error_messages()
+ * returns a string (already joined), not an array: implode() on it threw a
+ * TypeError on PHP 8 and replaced the real install error with an HTTP 500
+ * (Product Catalog Feed Pro on stropuva-romania.ro, 2026-09-25).
+ */
+function ots_connector_skin_errors( $skin ): string {
+	$messages = method_exists( $skin, 'get_error_messages' ) ? $skin->get_error_messages() : '';
+	if ( is_array( $messages ) ) {
+		return implode( '; ', array_map( 'strval', $messages ) );
+	}
+	return trim( (string) $messages );
 }
 
 /**
@@ -2457,10 +2471,10 @@ function ots_connector_route_install_plugin( WP_REST_Request $request ) {
 		);
 	}
 	if ( $install_result !== true ) {
-		$messages = $skin->get_error_messages();
+		$messages = ots_connector_skin_errors( $skin );
 		return new WP_Error(
 			'ots_install_failed',
-			! empty( $messages ) ? implode( '; ', $messages ) : 'Upgrader returned false',
+			$messages !== '' ? $messages : 'Upgrader returned false',
 			[ 'status' => 500 ]
 		);
 	}

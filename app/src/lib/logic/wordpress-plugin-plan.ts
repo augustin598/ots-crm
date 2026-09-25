@@ -196,11 +196,42 @@ function wporgStep(p: PlanInstalledPlugin, requiredBy: string | null): PlanStep 
  * installable update it is added (auto-included) and the PRO waits for it,
  * whatever order the operator ticked them in.
  */
+/** Numeric-first version compare ("4.3.2" > "4.3.1", "1.0.279" = "1.0.279"). */
+export function compareVersions(a: string, b: string): number {
+	const pa = a.split(/[.\-+]/);
+	const pb = b.split(/[.\-+]/);
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		const x = pa[i] ?? '0';
+		const y = pb[i] ?? '0';
+		const nx = /^\d+$/.test(x) ? Number(x) : null;
+		const ny = /^\d+$/.test(y) ? Number(y) : null;
+		if (nx !== null && ny !== null) {
+			if (nx !== ny) return nx < ny ? -1 : 1;
+		} else if (x !== y) {
+			return x < y ? -1 : 1;
+		}
+	}
+	return 0;
+}
+
 export function buildBulkSitePlan(
 	items: PlanCompareItem[],
 	installed: PlanInstalledPlugin[],
 	selected: Set<string>
 ): PlanStep[] {
+	const byPluginEarly = new Map(installed.map((p) => [p.plugin, p]));
+	// The library comparison reads WordPress' cached update data (`?light=1`);
+	// the plugins list is fresh. When it shows an installable version newer
+	// than the library ZIP (Elementor 4.3.2 vs 4.3.1), take WordPress'.
+	items = items.map((i) => {
+		const p = i.installedPlugin ? byPluginEarly.get(i.installedPlugin) : undefined;
+		if (!p || !wpInstallable(p) || compareVersions(p.newVersion as string, i.libraryVersion) <= 0) return i;
+		return {
+			...i,
+			preferredSource: 'wporg',
+			wpUpdate: { newVersion: p.newVersion as string, installable: true }
+		};
+	});
 	const selectedLib = new Set(
 		items
 			.filter((i) => i.installedPlugin !== null && selected.has(i.installedPlugin))

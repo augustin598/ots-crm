@@ -212,3 +212,29 @@ describe('buildBulkSitePlan', () => {
 		).toEqual([]);
 	});
 });
+
+describe('buildBulkSitePlan — versiune WordPress mai nouă decât biblioteca', () => {
+	test('lista proaspătă are 4.3.2 instalabil, biblioteca 4.3.1 → pasul merge prin WordPress la 4.3.2', () => {
+		const lib = item({
+			libraryId: 'el',
+			name: 'Elementor',
+			installedPlugin: 'elementor/elementor.php',
+			installedVersion: '4.2.1',
+			libraryVersion: '4.3.1'
+		});
+		const installed = [
+			{ plugin: 'elementor/elementor.php', name: 'Elementor', version: '4.2.1', active: true, updateAvailable: true, newVersion: '4.3.2', updatePackage: 'https://downloads.wordpress.org/x.zip' }
+		];
+		const steps = buildBulkSitePlan([lib], installed, new Set(['elementor/elementor.php']));
+		expect(steps).toHaveLength(1);
+		expect(steps[0]).toMatchObject({ kind: 'wporg', toVersion: '4.3.2', plugin: 'elementor/elementor.php' });
+	});
+
+	test('versiune egală sau mai veche în WordPress → rămâne biblioteca', () => {
+		const lib = item({ libraryId: 'rm', name: 'Rank Math SEO', installedPlugin: 'rm/rm.php', installedVersion: '1.0.275', libraryVersion: '1.0.279' });
+		const installed = [
+			{ plugin: 'rm/rm.php', name: 'Rank Math SEO', version: '1.0.275', active: true, updateAvailable: true, newVersion: '1.0.279', updatePackage: 'https://x' }
+		];
+		expect(buildBulkSitePlan([lib], installed, new Set(['rm/rm.php']))[0]).toMatchObject({ kind: 'library', toVersion: '1.0.279' });
+	});
+});

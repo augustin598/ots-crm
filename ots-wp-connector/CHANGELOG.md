@@ -8,6 +8,14 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.8.1 — 2026-09-25
+
+- Fix: când WordPress refuza instalarea unui plugin (`/plugins/install`) sau
+  un update (`/updates/apply`), conectorul făcea `implode()` pe mesajul de
+  eroare al skin-ului, care e deja un string → TypeError pe PHP 8 și HTTP 500
+  „eroare critică", iar motivul real se pierdea (Product Catalog Feed Pro pe
+  stropuva-romania.ro). Acum mesajul WordPress ajunge în CRM.
+
 ## 0.8.0 — 2026-09-25
 
 Backup și restore pe pași. Backup-ul dintr-o singură cerere pica pe toate

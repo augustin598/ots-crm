@@ -49,6 +49,7 @@
 	} from '$lib/logic/wordpress-plugin-plan';
 	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
 	import { backupProgressPercent, describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
+	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 
 	/* ───────────────────────── types (mirror the API) ───────────────────────── */
 
@@ -425,12 +426,21 @@
 		runConfirmOpen = true;
 	}
 
+	// Overall position of the running bulk update, for the progress banner.
+	let runStepsTotal = $state(0);
+	let runDone = $state(0);
+	let runFailed = $state(0);
+	let runCurrent = $state<string | null>(null);
+
 	/** One plan step (library ZIP or wordpress.org updater), progress kept per site+step. */
 	async function runStepOnSite(site: WpSite, step: PlanStep): Promise<StepResult> {
 		const k = keyOf(site.id, step.key);
 		installs[k] = { state: 'installing' };
+		runCurrent = `${site.name}: ${step.name} → ${step.toVersion}`;
 		const result = await runPluginStep(`${apiBase}/sites/${site.id}`, step);
 		installs[k] = result;
+		runDone++;
+		if (result.state === 'failed') runFailed++;
 		return result;
 	}
 
@@ -456,6 +466,10 @@
 		const targets = runTargets; // snapshot: compare[] changes during the run
 		if (targets.length === 0) return;
 		running = true;
+		runStepsTotal = targets.reduce((n, t) => n + t.steps.length, 0);
+		runDone = 0;
+		runFailed = 0;
+		runCurrent = null;
 		let ok = 0;
 		let failed = 0;
 		let blocked = 0;
@@ -493,6 +507,8 @@
 								// Blocked steps never went through runStepOnSite.
 								if (result.state === 'failed' && result.blocked) {
 									installs[keyOf(t.site.id, key)] = result;
+									runDone++;
+									runFailed++;
 								}
 							}
 						);
@@ -891,6 +907,18 @@
 				{/if}
 			</Button>
 		</div>
+
+		{#if running && runStepsTotal > 0}
+			<div class="px-4 pb-3">
+				<WpJobProgress
+					text={runCurrent
+						? `${runDone + 1}/${runStepsTotal} · ${runCurrent}`
+						: `${runDone}/${runStepsTotal} update-uri`}
+					percent={Math.round((runDone / runStepsTotal) * 100)}
+					tone={runFailed > 0 ? 'warning' : 'default'}
+				/>
+			</div>
+		{/if}
 
 		{#if sitesLoading && sites.length === 0}
 			<div class="p-6 text-sm text-muted-foreground">Se încarcă site-urile…</div>
