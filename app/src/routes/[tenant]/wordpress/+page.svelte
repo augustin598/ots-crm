@@ -48,6 +48,12 @@
 	} from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
+	import WpSiteCheckLine from '$lib/components/wordpress/WpSiteCheckLine.svelte';
+	import {
+		describeSiteCheck,
+		requestSiteCheck,
+		type SiteCheckOutcome
+	} from '$lib/logic/wordpress-site-check';
 	import {
 		interpretApplyItem,
 		stepErrorHint,
@@ -144,6 +150,8 @@
 	let applyResults = $state<ApplyOutcome[] | null>(null);
 	/** Cache purge after applying updates; `outcome` null = running. */
 	let applyCache = $state<{ outcome: CachePurgeOutcome | null } | null>(null);
+	/** Front-end check after applying updates; `outcome` null = running. */
+	let applyCheck = $state<{ outcome: SiteCheckOutcome | null } | null>(null);
 	let backupFirst = $state(true);
 
 	// Backups dialog state
@@ -620,6 +628,7 @@
 		updatesList = [];
 		applyResults = null;
 		applyCache = null;
+		applyCheck = null;
 		selectedUpdateIds.clear();
 		updatesLoading = true;
 		try {
@@ -644,6 +653,7 @@
 		updatesLoading = true;
 		applyResults = null;
 		applyCache = null;
+		applyCheck = null;
 		try {
 			const res = await fetch(`${apiBase}/${updatesSite.id}/updates`, { method: 'POST' });
 			const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -700,6 +710,7 @@
 		updatesApplying = true;
 		applyResults = null;
 		applyCache = null;
+		applyCheck = null;
 		try {
 			if (backupFirst) {
 				backupProgress = nextJobView(null, {}, 'Backup înainte de update-uri: ');
@@ -749,6 +760,11 @@
 			if (outcomes.some((o) => o.result.state === 'done' && o.result.message !== 'era deja la zi')) {
 				applyCache = { outcome: null };
 				applyCache = { outcome: await requestCachePurge(siteApi) };
+				applyCheck = { outcome: null };
+				applyCheck = { outcome: await requestSiteCheck(siteApi) };
+				if (applyCheck.outcome?.ok === false) {
+					toast.error('Site-ul are probleme după update — vezi detaliile', { duration: 15000 });
+				}
 			}
 			// Refresh the counts on the main list.
 			await loadSites();
@@ -903,6 +919,10 @@
 				if (view.tone === 'warning') toast.warning(view.text, { duration: 10000 });
 				else toast.info(view.text);
 			}
+			const check = describeSiteCheck(await requestSiteCheck(`${apiBase}/${restoreTarget.siteId}`));
+			if (check.tone === 'error') toast.error(check.text, { duration: 20000 });
+			else if (check.tone === 'warning') toast.warning(check.text, { duration: 10000 });
+			else toast.success(check.text);
 			restoreOpen = false;
 			restoreTarget = null;
 			restoreConfirmText = '';
@@ -1751,6 +1771,9 @@
 				{/each}
 				{#if applyCache}
 					<WpCachePurgeLine outcome={applyCache.outcome} />
+				{/if}
+				{#if applyCheck}
+					<WpSiteCheckLine outcome={applyCheck.outcome} />
 				{/if}
 			</div>
 			<DialogFooter>

@@ -45,6 +45,12 @@
 	import { nextJobView, runSiteBackup, type JobView } from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
+	import WpSiteCheckLine from '$lib/components/wordpress/WpSiteCheckLine.svelte';
+	import {
+		describeSiteCheck,
+		requestSiteCheck,
+		type SiteCheckOutcome
+	} from '$lib/logic/wordpress-site-check';
 	import {
 		describeCachePurge,
 		requestCachePurge,
@@ -194,6 +200,8 @@
 	let backupView = $state<JobView | null>(null);
 	/** Cache purge after the run; `outcome` null = still running. */
 	let cachePurge = $state<{ outcome: CachePurgeOutcome | null } | null>(null);
+	/** Front-end check after the run (homepage, shop, a product); `outcome` null = running. */
+	let siteCheck = $state<{ outcome: SiteCheckOutcome | null } | null>(null);
 	const selected = new SvelteSet<string>();
 
 	/** Overall position in the running plan, for the progress banner. */
@@ -337,6 +345,7 @@
 		planFinished = false;
 		backupState = null;
 		cachePurge = null;
+		siteCheck = null;
 		planOpen = true;
 	}
 
@@ -397,6 +406,11 @@
 			if (summary.ok > 0) {
 				cachePurge = { outcome: null };
 				cachePurge = { outcome: await requestCachePurge(siteApi) };
+				siteCheck = { outcome: null };
+				siteCheck = { outcome: await requestSiteCheck(siteApi) };
+				if (siteCheck.outcome?.ok === false) {
+					toast.error('Site-ul are probleme după update — vezi detaliile', { duration: 15000 });
+				}
 			}
 		} finally {
 			for (const step of steps) busyPlugins.delete(step.plugin);
@@ -790,13 +804,19 @@
 	 * reactivation server-side; this second pass handles older connectors
 	 * and real transient failures.
 	 */
-	/** Empty the site's caches after a one-off update; the outcome goes to a toast. */
+	/**
+	 * After a one-off update: empty the site's caches, then open it like a
+	 * visitor. Both outcomes go to toasts.
+	 */
 	async function purgeAfterUpdate() {
-		const view = describeCachePurge(
-			await requestCachePurge(`/${tenantSlug}/api/wordpress/sites/${siteId}`)
-		);
+		const siteApi = `/${tenantSlug}/api/wordpress/sites/${siteId}`;
+		const view = describeCachePurge(await requestCachePurge(siteApi));
 		if (view.tone === 'warning') toast.warning(view.text, { duration: 10000 });
 		else toast.info(view.text);
+		const check = describeSiteCheck(await requestSiteCheck(siteApi));
+		if (check.tone === 'error') toast.error(check.text, { duration: 20000 });
+		else if (check.tone === 'warning') toast.warning(check.text, { duration: 10000 });
+		else toast.success(check.text);
 	}
 
 	async function updateSingle(p: WpPlugin) {
@@ -1277,6 +1297,9 @@
 
 		{#if cachePurge}
 			<WpCachePurgeLine outcome={cachePurge.outcome} />
+		{/if}
+		{#if siteCheck}
+			<WpSiteCheckLine outcome={siteCheck.outcome} />
 		{/if}
 
 		<ol class="max-h-[50vh] space-y-2 overflow-y-auto text-sm">

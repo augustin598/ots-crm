@@ -51,6 +51,8 @@
 	import { backupProgressPercent, describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
+	import WpSiteCheckLine from '$lib/components/wordpress/WpSiteCheckLine.svelte';
+	import { requestSiteCheck, type SiteCheckOutcome } from '$lib/logic/wordpress-site-check';
 	import { requestCachePurge, type CachePurgeOutcome } from '$lib/logic/wordpress-cache-purge';
 
 	/* ───────────────────────── types (mirror the API) ───────────────────────── */
@@ -181,6 +183,8 @@
 	);
 	/** `${siteId}` → cache purge after that site's steps; `outcome` null = running. */
 	let cachePurges = $state<Record<string, { outcome: CachePurgeOutcome | null }>>({});
+	/** `${siteId}` → front-end check after the cache purge; `outcome` null = running. */
+	let siteChecks = $state<Record<string, { outcome: SiteCheckOutcome | null }>>({});
 
 	let uploadOpen = $state(false);
 	let uploadQueue = $state<UploadQueueItem[]>([]);
@@ -482,6 +486,7 @@
 				expanded.add(t.site.id);
 				delete backups[t.site.id];
 				delete cachePurges[t.site.id];
+				delete siteChecks[t.site.id];
 				for (const step of t.steps) delete installs[keyOf(t.site.id, step.key)];
 			}
 
@@ -527,6 +532,12 @@
 							cachePurges[t.site.id] = {
 								outcome: await requestCachePurge(`${apiBase}/sites/${t.site.id}`)
 							};
+							siteChecks[t.site.id] = { outcome: null };
+							const check = await requestSiteCheck(`${apiBase}/sites/${t.site.id}`);
+							siteChecks[t.site.id] = { outcome: check };
+							if (check.ok === false) {
+								toast.error(`${t.site.name}: site-ul are probleme după update`, { duration: 15000 });
+							}
 						}
 						// Re-verify so the table shows the versions WP actually reports now.
 						await checkSite(t.site.id);
@@ -1055,6 +1066,11 @@
 									{#if cachePurges[site.id]}
 										<div class="mt-1 text-xs">
 											<WpCachePurgeLine outcome={cachePurges[site.id].outcome} />
+										</div>
+									{/if}
+									{#if siteChecks[site.id]}
+										<div class="mt-1 text-xs">
+											<WpSiteCheckLine outcome={siteChecks[site.id].outcome} />
 										</div>
 									{/if}
 								</TableCell>
