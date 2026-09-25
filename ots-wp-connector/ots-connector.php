@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.8.2
+ * Version:           0.8.3
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.8.2' );
+define( 'OTS_CONNECTOR_VERSION', '0.8.3' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -302,6 +302,15 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 
 		try {
 			if ( $type === 'plugin' ) {
+				// A previous upgrade in this batch (or request) clears the update
+				// cache; if this plugin is missing from it, force a fresh check the
+				// way GET /plugins does, or Plugin_Upgrader answers "up to date"
+				// for a plugin that is not (centrale-pellet.ro, 2026-09-25).
+				$cache = get_site_transient( 'update_plugins' );
+				if ( ! isset( $cache->response[ $slug ] ) ) {
+					delete_site_transient( 'update_plugins' );
+					try { wp_update_plugins(); } catch ( \Throwable $e ) {}
+				}
 				$upgrader = new Plugin_Upgrader( $skin );
 				$outcome  = $upgrader->upgrade( $slug );
 			} elseif ( $type === 'theme' ) {
@@ -336,12 +345,21 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 				|| ( $up_to_date_text && in_array( $up_to_date_text, $skin_errors, true ) ) // upgrade(): same translated string
 			)
 		) {
+			// Report the version really installed: WordPress' "up to date" is only
+			// as good as its cache, so the CRM decides from the version.
+			$installed_version = null;
+			if ( $type === 'plugin' ) {
+				wp_clean_plugins_cache( false );
+				$all = get_plugins();
+				$installed_version = isset( $all[ $slug ]['Version'] ) ? (string) $all[ $slug ]['Version'] : null;
+			}
 			$results[] = [
-				'type'            => $type,
-				'slug'            => $slug,
-				'success'         => true,
-				'already_current' => true,
-				'message'         => 'already_current',
+				'type'              => $type,
+				'slug'              => $slug,
+				'success'           => false,
+				'already_current'   => true,
+				'installed_version' => $installed_version,
+				'message'           => 'already_current',
 				'was_active'      => $was_active,
 				'reactivated'     => null,
 			];

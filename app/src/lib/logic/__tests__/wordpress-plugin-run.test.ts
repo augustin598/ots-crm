@@ -126,20 +126,27 @@ describe('runPlanSteps', () => {
 });
 
 describe('„deja la zi" și explicații', () => {
-	const wp = step({ kind: 'wporg', key: 'wporg:x/x.php', plugin: 'x/x.php' });
-	test('conector ≥ 0.8.2: already_current → reușit, cu notă', async () => {
-		const r = await runPluginStep('/b', wp, fakeFetch(200, { status: 'success', items: [{ success: true, already_current: true, message: 'already_current' }] }));
-		expect(r).toEqual({ state: 'done', toVersion: '4.3.0', message: 'era deja la zi' });
+	const wp = step({ kind: 'wporg', key: 'wporg:x/x.php', plugin: 'x/x.php', fromVersion: '5.116.0', toVersion: '5.122.0' });
+	test('up_to_date + versiunea instalată ≥ țintă → reușit, „era deja la zi"', async () => {
+		const r = await runPluginStep('/b', wp, fakeFetch(200, { status: 'failed', items: [{ success: false, already_current: true, installed_version: '5.122.0', message: 'already_current' }] }));
+		expect(r).toEqual({ state: 'done', toVersion: '5.122.0', message: 'era deja la zi' });
 	});
-	test('conector vechi: mesajul WordPress „latest version" (EN/RO) → tot reușit', async () => {
-		for (const message of ['The plugin is at the latest version.', 'Modulul are o versiune recentă.', 'The theme is at the latest version.']) {
+	test('up_to_date, dar pe site e tot versiunea veche → EȘEC cu motiv clar (centrale-pellet 25 sep)', async () => {
+		const r = await runPluginStep('/b', wp, fakeFetch(200, { status: 'failed', items: [{ success: false, already_current: true, installed_version: '5.116.0', message: 'already_current' }] }));
+		expect(r.state).toBe('failed');
+		expect(r).toMatchObject({ message: expect.stringContaining('v5.116.0') });
+	});
+	test('conector vechi: „is at the latest version" fără versiune → EȘEC, nu reușit', async () => {
+		for (const message of ['The plugin is at the latest version.', 'Modulul are o versiune recentă.']) {
 			const r = await runPluginStep('/b', wp, fakeFetch(200, { status: 'failed', items: [{ success: false, message }] }));
-			expect(r).toEqual({ state: 'done', toVersion: '4.3.0', message: 'era deja la zi' });
+			expect(r.state).toBe('failed');
+			expect(r).toMatchObject({ message: expect.stringContaining('versiunea nu s-a schimbat') });
 		}
 	});
 	test('explicații pentru eșecurile frecvente', () => {
 		expect(stepErrorHint('Download failed. Forbidden')).toContain('licen');
 		expect(stepErrorHint('The package could not be installed. No valid plugins were found.')).toContain('ZIP');
+		expect(stepErrorHint('WordPress spune că plugin-ul e la zi, dar versiunea nu s-a schimbat')).toContain('Reîncearcă');
 		expect(stepErrorHint('ceva necunoscut')).toBeNull();
 	});
 });

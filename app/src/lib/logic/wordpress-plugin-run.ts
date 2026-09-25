@@ -4,7 +4,7 @@
  * plugins page (one plugin + its base), so both apply the same rule: steps
  * run one at a time, base first, and a PRO never runs when its base failed.
  */
-import type { PlanStep } from './wordpress-plugin-plan';
+import { compareVersions, type PlanStep } from './wordpress-plugin-plan';
 
 export type StepResult =
 	| { state: 'done'; toVersion: string; message?: string }
@@ -26,6 +26,9 @@ export function stepErrorHint(message: string): string | null {
 	}
 	if (/could not create directory|could not copy file|disk|quota/i.test(message)) {
 		return 'Hostingul nu permite scrierea fișierelor (spațiu sau permisiuni).';
+	}
+	if (/versiunea nu s-a schimbat/i.test(message)) {
+		return 'Cache-ul de update-uri al WordPress nu avea intrarea în momentul aplicării. Reîncearcă (conectorul 0.8.3+ reîmprospătează cache-ul înainte).';
 	}
 	if (/HMAC|HTTP 40[13]/i.test(message)) {
 		return 'Conexiunea cu site-ul a fost refuzată (secret HMAC sau firewall).';
@@ -57,16 +60,28 @@ export async function runPluginStep(
 				items?: Array<{
 					success: boolean;
 					already_current?: boolean;
+					installed_version?: string | null;
 					message?: string | null;
 					reactivated?: boolean | null;
 					reactivation_error?: string | null;
 				}>;
 			};
 			const first = body.items?.[0];
-			// WordPress' update cache listed a version that is already installed.
-			// Connector ≥ 0.8.2 says so; older ones pass WordPress' own text.
+			// WordPress answered "already at the latest version". Only the version
+			// actually installed decides: on centrale-pellet (2026-09-25) it said so
+			// while the site was still on the old version (its update cache lacked
+			// the entry at apply time). Connector ≥ 0.8.3 sends installed_version.
 			if (first && (first.already_current || ALREADY_CURRENT.test(first.message ?? ''))) {
-				return { state: 'done', toVersion: step.toVersion, message: 'era deja la zi' };
+				const installed = first.installed_version ?? null;
+				if (installed && compareVersions(installed, step.toVersion) >= 0) {
+					return { state: 'done', toVersion: installed, message: 'era deja la zi' };
+				}
+				return {
+					state: 'failed',
+					message: installed
+						? `WordPress spune că plugin-ul e la zi, dar pe site e tot v${installed} (versiunea nu s-a schimbat)`
+						: 'WordPress spune că plugin-ul e la zi, dar versiunea nu s-a schimbat'
+				};
 			}
 			if (!res.ok || body.status === 'failed' || !first?.success) {
 				return { state: 'failed', message: first?.message || body.error || `HTTP ${res.status}` };
