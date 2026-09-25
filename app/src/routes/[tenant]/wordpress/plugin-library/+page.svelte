@@ -48,6 +48,7 @@
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
 	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
+	import { describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
 
 	/* ───────────────────────── types (mirror the API) ───────────────────────── */
 
@@ -431,29 +432,15 @@
 		return result;
 	}
 
-	/** Full backup (SQL + wp-content) through the connector. Minutes on big sites. */
+	/** Full backup (SQL + wp-content) before updating; chunked on connector 0.8.0+. */
 	async function backupSite(site: WpSite): Promise<boolean> {
 		backups[site.id] = { state: 'running' };
-		try {
-			const res = await fetch(`${apiBase}/sites/${site.id}/backup`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ trigger: 'pre_update' })
-			});
-			const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string };
-			if (!res.ok || body.status !== 'success') {
-				backups[site.id] = { state: 'failed', message: body.error ?? `HTTP ${res.status}` };
-				return false;
-			}
-			backups[site.id] = { state: 'ok' };
-			return true;
-		} catch (err) {
-			backups[site.id] = {
-				state: 'failed',
-				message: err instanceof Error ? err.message : 'eroare de rețea'
-			};
-			return false;
-		}
+		const result = await runSiteBackup(`${apiBase}/sites/${site.id}`, {
+			trigger: 'pre_update',
+			onProgress: (p) => (backups[site.id] = { state: 'running', message: describeBackupProgress(p) })
+		});
+		backups[site.id] = result.ok ? { state: 'ok' } : { state: 'failed', message: result.error };
+		return result.ok;
 	}
 
 	async function runUpdates() {
@@ -981,7 +968,8 @@
 								<TableCell class="text-sm">
 									{#if backups[site.id]?.state === 'running'}
 										<span class="inline-flex items-center gap-1.5 text-muted-foreground">
-											<LoaderIcon class="size-3.5 animate-spin" /> backup înainte de update…
+											<LoaderIcon class="size-3.5 animate-spin" />
+											backup: {backups[site.id]?.message ?? 'pornesc…'}
 										</span>
 									{:else if backups[site.id]?.state === 'failed'}
 										<span

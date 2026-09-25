@@ -7,6 +7,7 @@ import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { WpClient } from '$lib/server/wordpress/client';
 import { WpError } from '$lib/server/wordpress/errors';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
+import { isChunkedBackupName } from '$lib/server/wordpress/backup-jobs';
 
 async function loadBackupForTenant(backupId: string, tenantId: string) {
 	const [row] = await db
@@ -51,8 +52,10 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 	const filename = extractFilename(row.backup);
 
 	// If we have a filename + the backup is successful, try to clean up the file.
-	// If the archive was never produced (failed backup) we just drop the DB row.
-	if (filename && row.backup.status === 'success') {
+	// A chunked job leaves a directory on the site even when it failed or was
+	// abandoned half-way, so it is always cleaned up. A legacy backup that
+	// never produced its archive just loses the DB row.
+	if (filename && (row.backup.status === 'success' || isChunkedBackupName(filename))) {
 		let secret: string;
 		try {
 			secret = decrypt(row.site.tenantId, row.site.secretKey);

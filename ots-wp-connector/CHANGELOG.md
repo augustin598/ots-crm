@@ -8,6 +8,41 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.8.0 — 2026-09-25
+
+Backup și restore pe pași. Backup-ul dintr-o singură cerere pica pe toate
+site-urile reale: proxy-ul hostingului taie cererea după 30 s – 2 min
+(HTTP 500/503) sau o retrimite, iar retrimiterea pică fereastra HMAC de
+60 s (HTTP 401). Același principiu ca All-in-One WP Migration (pași de
+~10 s, stare pe disc), fără cererile loopback ale acestuia.
+
+- `POST /backup/start` creează job-ul `uploads/ots-backups/ots-backup-<ts>-<rand8>/`
+  (sau îl întoarce pe cel rămas în curs, `resumed: true`); `POST /backup/step`
+  `{ backup, budgetSec }` avansează ~10 s și salvează cursorul după fiecare
+  felie. Baza de date: `database-NNN.sql.gz`, un statement pe linie, doar
+  tabelele de bază cu prefixul site-ului (fără VIEW-uri), paginare pe cheia
+  primară. Fișierele: `files-NNN.zip` (media stocată, restul deflate),
+  fișierele > 64 MB copiate brut în bucăți de 5 MB (`large-NNNN.bin`).
+  Excluse: cache, upgrade, ots-backups, arhivele altor pluginuri de backup
+  (ai1wm-backups, updraft, duplicator, wpvivid). `manifest.json` la final,
+  cu numărul de rânduri per tabelă.
+- `POST /restore/start` + `POST /restore/step`: baza se importă în tabele
+  `otsr_*`; înainte de swap se verifică numărul de rânduri al fiecărei
+  tabele față de manifest (altfel nimic nu se schimbă și tabelele temporare
+  se șterg), apoi un singur `RENAME TABLE` atomic. Secretul conectorului și
+  activarea lui supraviețuiesc swap-ului, iar folderul lui nu e suprascris
+  cu copia mai veche din backup. Cheile străine (WooCommerce) sunt redenumite
+  și re-țintite pe tabelele temporare.
+- Lock exclusiv per job: un pas retrimis de proxy în timp ce primul rulează
+  primește `busy: true` în loc să ruleze în paralel.
+- Numele de backup nou are un sufix aleator și directorul refuză accesul web
+  (vechile `ots-backup-<ts>.zip` erau ghicibile după timestamp).
+- `DELETE /backup` șterge și directoarele de backup pe pași.
+- Job-urile abandonate (fără manifest, neatinse de 6 h) și fișierele
+  `db-*.sql` rămase de la backup-urile vechi întrerupte se curăță la start.
+- `POST /backup` și `POST /restore` (o singură cerere) rămân pentru CRM-urile
+  vechi și pentru backup-urile `.zip` existente.
+
 ## 0.7.1 — 2026-09-25
 
 - `GET /plugins` acceptă `?light=1`: nu mai șterge transientul

@@ -39,6 +39,12 @@
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import PlugIcon from '@lucide/svelte/icons/plug';
 	import LibraryBigIcon from '@lucide/svelte/icons/library-big';
+	import {
+		continueSiteBackup,
+		describeBackupProgress,
+		runSiteBackup,
+		runSiteRestore
+	} from '$lib/logic/wordpress-backup-run';
 
 	type UpdateCounts = {
 		core: number;
@@ -128,6 +134,9 @@
 	let backupsList = $state<BackupRow[]>([]);
 	let backupsLoading = $state(false);
 	let triggeringBackup = $state(false);
+	// One line of live progress for the backup / restore that is running.
+	let backupProgress = $state<string | null>(null);
+	let restoreProgress = $state<string | null>(null);
 	const deletingBackupIds = new SvelteSet<string>();
 
 	// Restore confirm dialog state
@@ -671,15 +680,14 @@
 		applyResults = null;
 		try {
 			if (backupFirst) {
-				toast.info('Rulez backup înainte de update-uri…');
-				const bres = await fetch(`${apiBase}/${updatesSite.id}/backup`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ trigger: 'pre_update' })
+				backupProgress = 'Backup înainte de update-uri…';
+				const backup = await runSiteBackup(`${apiBase}/${updatesSite.id}`, {
+					trigger: 'pre_update',
+					onProgress: (p) => (backupProgress = `Backup: ${describeBackupProgress(p)}`)
 				});
-				const bbody = (await bres.json().catch(() => ({}))) as { status?: string; error?: string };
-				if (!bres.ok || bbody.status !== 'success') {
-					toast.error(`Backup eșuat: ${bbody.error ?? 'necunoscut'}. Update-urile nu au rulat.`);
+				backupProgress = null;
+				if (!backup.ok) {
+					toast.error(`Backup eșuat: ${backup.error}. Update-urile nu au rulat.`);
 					return;
 				}
 				toast.success('Backup OK. Rulez update-uri…');
@@ -732,30 +740,44 @@
 		}
 	}
 
-	async function runBackup() {
+	async function reloadBackupsList(siteId: string) {
+		const listRes = await fetch(`${apiBase}/${siteId}/backups`);
+		const listBody = (await listRes.json()) as { backups: BackupRow[] };
+		backupsList = listBody.backups;
+	}
+
+	/**
+	 * New backup, or `resumeId` to continue one left running. Chunked on
+	 * connector 0.8.0+ (short steps, live progress); older connectors answer
+	 * in one call.
+	 */
+	async function runBackup(resumeId?: string) {
 		if (!backupsSite) return;
+		const siteId = backupsSite.id;
 		triggeringBackup = true;
-		try {
-			const res = await fetch(`${apiBase}/${backupsSite.id}/backup`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ trigger: 'manual' })
-			});
-			const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string };
-			if (!res.ok || body.status !== 'success') {
-				toast.error(body.error || 'Backup eșuat');
-			} else {
-				toast.success('Backup creat');
+		backupProgress = 'Pornesc…';
+		let listed = false;
+		const onProgress = (p: Parameters<typeof describeBackupProgress>[0]) => {
+			backupProgress = describeBackupProgress(p);
+			// Show the new "running" row as soon as the job exists.
+			if (!listed) {
+				listed = true;
+				void reloadBackupsList(siteId).catch(() => undefined);
 			}
-			// Reload list
-			const listRes = await fetch(`${apiBase}/${backupsSite.id}/backups`);
-			const listBody = (await listRes.json()) as { backups: BackupRow[] };
-			backupsList = listBody.backups;
+		};
+		try {
+			const result = resumeId
+				? await continueSiteBackup(`${apiBase}/${siteId}`, resumeId, { onProgress })
+				: await runSiteBackup(`${apiBase}/${siteId}`, { trigger: 'manual', onProgress });
+			if (result.ok) toast.success(`Backup creat (${formatBytes(result.sizeBytes ?? null)})`);
+			else toast.error(`Backup eșuat: ${result.error}`);
+			await reloadBackupsList(siteId);
 		} catch (err) {
 			toast.error('Eroare de rețea');
 			console.error(err);
 		} finally {
 			triggeringBackup = false;
+			backupProgress = null;
 		}
 	}
 
@@ -826,24 +848,18 @@
 			return;
 		}
 		restoring = true;
+		restoreProgress = 'Pornesc…';
 		try {
-			const res = await fetch(
-				`${apiBase}/${restoreTarget.siteId}/backups/${restoreTarget.backupId}/restore`,
-				{ method: 'POST' }
+			const result = await runSiteRestore(
+				`${apiBase}/${restoreTarget.siteId}`,
+				restoreTarget.backupId,
+				{ onProgress: (p) => (restoreProgress = describeBackupProgress(p)) }
 			);
-			const body = (await res.json().catch(() => ({}))) as {
-				success?: boolean;
-				error?: string;
-				elapsedSec?: number;
-				tablesImported?: number;
-			};
-			if (!res.ok || !body.success) {
-				toast.error(body.error || 'Restore eșuat');
+			if (!result.ok) {
+				toast.error(`Restore eșuat: ${result.error}`, { duration: 15000 });
 				return;
 			}
-			toast.success(
-				`Restore OK — ${body.tablesImported} tabele în ${body.elapsedSec?.toFixed(1) ?? '?'}s`
-			);
+			toast.success(`Restore complet pentru ${restoreTarget.siteName}`);
 			restoreOpen = false;
 			restoreTarget = null;
 			restoreConfirmText = '';
@@ -854,6 +870,7 @@
 			console.error(err);
 		} finally {
 			restoring = false;
+			restoreProgress = null;
 		}
 	}
 
@@ -1756,6 +1773,12 @@
 					<strong>Rulează backup înainte</strong> (recomandat). Dacă backup-ul eșuează, update-urile nu rulează.
 				</label>
 			</div>
+			{#if backupProgress && updatesApplying}
+				<p class="flex items-center gap-2 text-xs text-muted-foreground">
+					<RefreshCwIcon class="size-3.5 animate-spin" />
+					{backupProgress}
+				</p>
+			{/if}
 
 			<DialogFooter>
 				<Button variant="outline" onclick={() => (updatesOpen = false)} disabled={updatesApplying}>
@@ -1783,12 +1806,16 @@
 		<DialogHeader>
 			<DialogTitle>Backup-uri — {backupsSite?.name ?? ''}</DialogTitle>
 			<DialogDescription>
-				Istoric backup-uri pentru acest site. Fiecare backup conține un ZIP cu wp-content + dump SQL complet.
+				Istoric backup-uri pentru acest site: baza de date completă + wp-content. Cu OTS Connector
+				0.8.0+ backup-ul rulează în pași scurți, așa că hostingul nu îl mai întrerupe.
 			</DialogDescription>
 		</DialogHeader>
 
-		<div class="flex justify-end">
-			<Button onclick={runBackup} disabled={triggeringBackup}>
+		<div class="flex items-center justify-end gap-3">
+			{#if backupProgress}
+				<span class="text-xs text-muted-foreground">{backupProgress}</span>
+			{/if}
+			<Button onclick={() => runBackup()} disabled={triggeringBackup}>
 				{#if triggeringBackup}
 					<RefreshCwIcon class="mr-2 size-4 animate-spin" />
 					Se creează…
@@ -1833,6 +1860,12 @@
 										<DownloadIcon class="size-4" />
 									</Button>
 								</a>
+							{/if}
+							{#if b.status === 'running' && !triggeringBackup}
+								<!-- Left running (tab closed, lost connection): the connector kept its cursor. -->
+								<Button variant="outline" size="sm" onclick={() => runBackup(b.id)} title="Continuă backup-ul">
+									<PlayIcon class="size-4" />
+								</Button>
 							{/if}
 							{#if b.status === 'success'}
 								<Button
@@ -1894,6 +1927,13 @@
 				autocomplete="off"
 			/>
 		</div>
+
+		{#if restoreProgress}
+			<p class="flex items-center gap-2 text-xs text-muted-foreground">
+				<RefreshCwIcon class="size-3.5 animate-spin" />
+				{restoreProgress}
+			</p>
+		{/if}
 
 		<DialogFooter>
 			<Button variant="outline" onclick={() => (restoreOpen = false)} disabled={restoring}>

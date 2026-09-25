@@ -31,6 +31,10 @@ Toate necesită semnătură HMAC în header-e:
 | `GET /wp-json/ots-connector/v1/updates` | Listă core + plugin + theme updates (force-refresh) | 2 |
 | `POST /wp-json/ots-connector/v1/updates/apply` | Aplică update-uri (feedback per-item) | 2 |
 | `POST /wp-json/ots-connector/v1/backup` | ZIP wp-content + dump SQL în `uploads/ots-backups/` | 2 |
+| `POST /wp-json/ots-connector/v1/backup/start` | Backup pe pași: creează (sau reia) job-ul `ots-backup-<ts>-<rand>/` | 0.8.0 |
+| `POST /wp-json/ots-connector/v1/backup/step` | Avansează backup-ul ~10 s (`{ backup, budgetSec }`) | 0.8.0 |
+| `POST /wp-json/ots-connector/v1/restore/start` | Restore pe pași dintr-un backup pe pași | 0.8.0 |
+| `POST /wp-json/ots-connector/v1/restore/step` | Avansează restore-ul ~10 s; swap atomic al tabelelor după verificarea rândurilor | 0.8.0 |
 | `GET /wp-json/ots-connector/v1/plugins` | Listă plugin-uri instalate + update-uri; `?light=1` sare peste refresh-ul de update-uri (biblioteca CRM) | 4 |
 | `POST /wp-json/ots-connector/v1/plugins/install` | Instalează / actualizează un plugin din ZIP (base64), păstrează starea activ | 4 |
 

@@ -41,6 +41,7 @@
 		type PlanStep
 	} from '$lib/logic/wordpress-plugin-plan';
 	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
+	import { describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
 
 	type WpPlugin = {
 		plugin: string;
@@ -306,17 +307,13 @@
 		try {
 			if (backupFirst) {
 				backupState = { state: 'running' };
-				const res = await fetch(`${siteApi}/backup`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ trigger: 'pre_update' })
-				}).catch(() => null);
-				const body = res
-					? ((await res.json().catch(() => ({}))) as { status?: string; error?: string })
-					: { error: 'eroare de rețea' };
-				if (!res?.ok || body.status !== 'success') {
-					backupState = { state: 'failed', message: body.error ?? `HTTP ${res?.status}` };
-					toast.error(`Backup eșuat: ${backupState.message}. Update-urile nu au rulat.`);
+				const backup = await runSiteBackup(siteApi, {
+					trigger: 'pre_update',
+					onProgress: (p) => (backupState = { state: 'running', message: describeBackupProgress(p) })
+				});
+				if (!backup.ok) {
+					backupState = { state: 'failed', message: backup.error };
+					toast.error(`Backup eșuat: ${backup.error}. Update-urile nu au rulat.`);
 					return;
 				}
 				backupState = { state: 'ok' };
@@ -1168,7 +1165,7 @@
 			<div class="flex items-center gap-2 text-sm">
 				{#if backupState.state === 'running'}
 					<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
-					<span>Backup complet (poate dura câteva minute)…</span>
+					<span>Backup complet: {backupState.message ?? 'pornesc…'}</span>
 				{:else if backupState.state === 'ok'}
 					<CheckCircleIcon class="size-4 text-green-600" />
 					<span>Backup făcut</span>

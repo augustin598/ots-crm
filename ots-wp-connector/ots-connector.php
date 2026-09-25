@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.7.1
+ * Version:           0.8.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.7.1' );
+define( 'OTS_CONNECTOR_VERSION', '0.8.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -535,6 +535,16 @@ function ots_connector_route_delete_backup( WP_REST_Request $request ) {
 	if ( strpbrk( $filename, "/\\" ) !== false || str_starts_with( $filename, '.' ) ) {
 		return new WP_Error( 'ots_bad_filename', 'Invalid filename', [ 'status' => 400 ] );
 	}
+	// Chunked backups (0.8.0+) are directories.
+	if ( ots_connector_is_chunked_name( $filename ) ) {
+		$upload_dir = wp_upload_dir();
+		$dir        = trailingslashit( $upload_dir['basedir'] ) . 'ots-backups/' . $filename;
+		if ( ! is_dir( $dir ) ) {
+			return rest_ensure_response( [ 'success' => true, 'deleted' => false, 'timestamp' => time() ] );
+		}
+		ots_connector_rrmdir( $dir );
+		return rest_ensure_response( [ 'success' => true, 'deleted' => ! is_dir( $dir ), 'timestamp' => time() ] );
+	}
 	if ( ! preg_match( '/^ots-backup-[0-9\-]+\.zip$/', $filename ) ) {
 		return new WP_Error( 'ots_bad_filename', 'Filename does not match backup pattern', [ 'status' => 400 ] );
 	}
@@ -705,6 +715,978 @@ function ots_connector_rrmdir( string $path ): void {
 	}
 	closedir( $dh );
 	@rmdir( $path );
+}
+
+/* ─────────────────────── Chunked backup / restore (0.8.0) ───────────────────────
+ *
+ * Shared hosts cut long requests: the proxy answers 500/503 after 30 s – 2 min,
+ * or re-sends the request, which then fails the 60 s HMAC window (401). A
+ * one-shot backup of a real site never fits. Here every call does a bounded
+ * slice of work (`budgetSec`, default 10 s) and persists a cursor on disk, so
+ * the CRM drives the job with short, freshly signed requests — the same
+ * approach All-in-One WP Migration uses, without its loopback requests.
+ *
+ * Layout: uploads/ots-backups/ots-backup-<Ymd-His>-<rand8>/
+ *   database-001.sql.gz …   one statement per line, one part per step
+ *   files-001.zip …         wp-content in parts (media stored, rest deflated)
+ *   large-0001.bin …        files > 64 MB, copied raw in 5 MB chunks
+ *   manifest.json           written last; its presence = backup complete
+ *   state.json              cursor while running (removed at the end)
+ * The random suffix makes the name unguessable and the directory denies web
+ * access; nothing in it is meant to be downloaded over HTTP.
+ */
+
+define( 'OTS_CONNECTOR_CHUNK_FORMAT', 'ots-chunked-1' );
+// 10 s per call, like All-in-One WP Migration: short enough for any proxy.
+define( 'OTS_CONNECTOR_STEP_BUDGET', 10 );
+/** Weighted bytes per files part: deflated bytes count fully, stored ones 1/4. */
+define( 'OTS_CONNECTOR_PART_WEIGHT', 150 * 1024 * 1024 );
+define( 'OTS_CONNECTOR_PART_MAX_FILES', 2000 );
+/** Files above this are copied raw in 5 MB chunks across calls (large-NNNN.bin), not zipped. */
+define( 'OTS_CONNECTOR_LARGE_FILE_BYTES', 64 * 1024 * 1024 );
+define( 'OTS_CONNECTOR_COPY_CHUNK', 5 * 1024 * 1024 );
+/** Assumed deflate throughput, used to stop adding files before close() runs out of time. */
+define( 'OTS_CONNECTOR_DEFLATE_BPS', 25 * 1024 * 1024 );
+/** A running job untouched for this long is considered abandoned. */
+define( 'OTS_CONNECTOR_STALE_JOB_SEC', 6 * HOUR_IN_SECONDS );
+/** Temporary table prefix used while a restore imports the database. */
+define( 'OTS_CONNECTOR_RESTORE_TABLE_PREFIX', 'otsr_' );
+
+function ots_connector_backups_root() {
+	$upload_dir = wp_upload_dir();
+	$root       = trailingslashit( $upload_dir['basedir'] ) . 'ots-backups';
+	if ( ! is_dir( $root ) ) {
+		if ( ! wp_mkdir_p( $root ) ) {
+			return new WP_Error( 'ots_mkdir_failed', 'Could not create backup dir', [ 'status' => 500 ] );
+		}
+		@file_put_contents( $root . '/.htaccess', "Options -Indexes\n" );
+	}
+	return $root;
+}
+
+function ots_connector_is_chunked_name( string $name ): bool {
+	return (bool) preg_match( '/^ots-backup-[0-9]{8}-[0-9]{6}-[a-z0-9]{8}$/', $name );
+}
+
+/** Resolve a chunked backup directory from its name, or WP_Error. */
+function ots_connector_chunked_dir( string $name ) {
+	if ( ! ots_connector_is_chunked_name( $name ) ) {
+		return new WP_Error( 'ots_bad_backup', 'Invalid backup name', [ 'status' => 400 ] );
+	}
+	$root = ots_connector_backups_root();
+	if ( is_wp_error( $root ) ) return $root;
+	$dir = $root . '/' . $name;
+	if ( ! is_dir( $dir ) ) {
+		return new WP_Error( 'ots_backup_missing', 'Backup not found on disk', [ 'status' => 404 ] );
+	}
+	return $dir;
+}
+
+function ots_connector_read_json( string $path ) {
+	if ( ! file_exists( $path ) ) return null;
+	$data = json_decode( (string) @file_get_contents( $path ), true );
+	return is_array( $data ) ? $data : null;
+}
+
+/** Atomic write: a step killed mid-way leaves the previous cursor intact. */
+function ots_connector_write_json( string $path, array $data ): bool {
+	$tmp = $path . '.tmp';
+	if ( @file_put_contents( $tmp, wp_json_encode( $data ) ) === false ) return false;
+	return @rename( $tmp, $path );
+}
+
+/**
+ * Exclusive, non-blocking lock on the job. A proxy that re-sends a step
+ * inside the HMAC window must not run the same slice twice in parallel.
+ * Returns the handle (keep it until the end of the request) or null if busy.
+ */
+function ots_connector_lock_job( string $dir ) {
+	$fh = @fopen( $dir . '/.lock', 'c' );
+	if ( ! $fh ) return null;
+	if ( ! flock( $fh, LOCK_EX | LOCK_NB ) ) {
+		fclose( $fh );
+		return null;
+	}
+	return $fh;
+}
+
+function ots_connector_step_budget( WP_REST_Request $request ): float {
+	$body   = $request->get_json_params();
+	$budget = isset( $body['budgetSec'] ) ? (float) $body['budgetSec'] : OTS_CONNECTOR_STEP_BUDGET;
+	return max( 1.0, min( 25.0, $budget ) );
+}
+
+function ots_connector_prepare_long_step( float $budget ): void {
+	// The CRM may give up on the HTTP response; the slice must still finish
+	// and persist its cursor, otherwise the next step redoes it.
+	@ignore_user_abort( true );
+	@set_time_limit( (int) max( 120, $budget * 4 ) );
+}
+
+/**
+ * Base tables of this install only: a shared database may host several
+ * sites, and views are not dumped (their rows belong to other tables).
+ */
+function ots_connector_site_tables(): array {
+	global $wpdb;
+	$like = $wpdb->esc_like( $wpdb->prefix ) . '%';
+	$rows = (array) $wpdb->get_results( $wpdb->prepare( 'SHOW FULL TABLES LIKE %s', $like ), ARRAY_N );
+	$out  = [];
+	foreach ( $rows as $row ) {
+		if ( ( $row[1] ?? '' ) !== 'BASE TABLE' ) continue;
+		if ( strpos( $row[0], OTS_CONNECTOR_RESTORE_TABLE_PREFIX ) === 0 || strpos( $row[0], 'otso_' ) === 0 ) continue;
+		$out[] = $row[0];
+	}
+	return $out;
+}
+
+/** Single-column primary key, used for keyset pagination (OFFSET is O(n²) on big tables). */
+function ots_connector_single_pk( string $table ): ?string {
+	global $wpdb;
+	$keys = $wpdb->get_results( "SHOW KEYS FROM `{$table}` WHERE Key_name = 'PRIMARY'", ARRAY_A );
+	if ( ! is_array( $keys ) || count( $keys ) !== 1 ) return null;
+	return (string) $keys[0]['Column_name'];
+}
+
+/** Directory names never descended into while collecting wp-content. */
+function ots_connector_backup_skip_dirs(): array {
+	return [
+		'cache', 'ots-backups', 'upgrade', 'upgrade-temp-backup',
+		'ai1wm-backups', 'updraft', 'backups-dup-lite', 'backups-dup-pro',
+		'wpvividbackups', 'backwpup-temp', 'et-cache', 'wflogs',
+	];
+}
+
+function ots_connector_is_stored_ext( string $path ): bool {
+	$ext = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
+	return in_array( $ext, [
+		'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'ico',
+		'mp4', 'mov', 'webm', 'm4v', 'avi', 'mkv', 'mp3', 'm4a', 'ogg', 'wav',
+		'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar',
+		'woff', 'woff2', 'pdf',
+	], true );
+}
+
+function ots_connector_backup_progress( array $state ): array {
+	return [
+		'tablesDone' => (int) $state['tableIndex'],
+		'tablesTotal' => count( $state['tables'] ),
+		'filesDone'  => (int) $state['filesDone'],
+		'filesTotal' => (int) $state['filesTotal'],
+		'bytesDone'  => (int) $state['bytesDone'],
+		'bytesTotal' => (int) $state['bytesTotal'],
+	];
+}
+
+function ots_connector_dir_size( string $dir ): int {
+	$total = 0;
+	foreach ( (array) glob( $dir . '/{database-*.sql.gz,files-*.zip,large-*.bin}', GLOB_BRACE ) as $f ) {
+		$total += (int) @filesize( $f );
+	}
+	return $total;
+}
+
+/**
+ * Remove abandoned jobs (no manifest, cursor untouched for hours) and the
+ * temp SQL files a killed legacy backup leaves next to the archives.
+ */
+function ots_connector_cleanup_stale_backups( string $root ): void {
+	$now = time();
+	foreach ( (array) glob( $root . '/ots-backup-*', GLOB_ONLYDIR ) as $dir ) {
+		if ( file_exists( $dir . '/manifest.json' ) ) continue;
+		$state = $dir . '/state.json';
+		$mtime = file_exists( $state ) ? (int) filemtime( $state ) : (int) filemtime( $dir );
+		if ( $now - $mtime > OTS_CONNECTOR_STALE_JOB_SEC ) {
+			ots_connector_rrmdir( $dir );
+		}
+	}
+	foreach ( (array) glob( $root . '/db-*.sql' ) as $sql ) {
+		if ( $now - (int) filemtime( $sql ) > OTS_CONNECTOR_STALE_JOB_SEC ) @unlink( $sql );
+	}
+}
+
+/**
+ * POST /backup/start — create a chunked backup job (or return the one still
+ * running, so a CRM that lost track of it can keep stepping it).
+ */
+function ots_connector_route_backup_start( WP_REST_Request $request ) {
+	if ( ! class_exists( 'ZipArchive' ) ) {
+		return new WP_Error( 'ots_no_zip', 'PHP ZipArchive extension is not installed', [ 'status' => 500 ] );
+	}
+	if ( ! function_exists( 'gzopen' ) ) {
+		return new WP_Error( 'ots_no_zlib', 'PHP zlib extension is not installed', [ 'status' => 500 ] );
+	}
+	$root = ots_connector_backups_root();
+	if ( is_wp_error( $root ) ) return $root;
+	ots_connector_cleanup_stale_backups( $root );
+
+	foreach ( (array) glob( $root . '/ots-backup-*', GLOB_ONLYDIR ) as $dir ) {
+		$state = ots_connector_read_json( $dir . '/state.json' );
+		if ( $state && ! file_exists( $dir . '/manifest.json' ) ) {
+			return rest_ensure_response( [
+				'success'  => true,
+				'backup'   => basename( $dir ),
+				'resumed'  => true,
+				'phase'    => $state['phase'],
+				'progress' => ots_connector_backup_progress( $state ),
+			] );
+		}
+	}
+
+	$name = 'ots-backup-' . gmdate( 'Ymd-His' ) . '-' . strtolower( wp_generate_password( 8, false, false ) );
+	$dir  = $root . '/' . $name;
+	if ( ! wp_mkdir_p( $dir ) ) {
+		return new WP_Error( 'ots_mkdir_failed', 'Could not create backup job dir', [ 'status' => 500 ] );
+	}
+	@file_put_contents( $dir . '/.htaccess', "Require all denied\nDeny from all\n" );
+	@file_put_contents( $dir . '/index.php', "<?php // Silence.\n" );
+
+	$state = [
+		'format'     => OTS_CONNECTOR_CHUNK_FORMAT,
+		'createdAt'  => time(),
+		'phase'      => 'db',
+		'tables'     => ots_connector_site_tables(),
+		'tableIndex' => 0,
+		'rowOffset'  => 0,
+		'lastKey'    => null,
+		'dbPart'     => 0,
+		'filePart'   => 0,
+		'listOffset' => 0,
+		'filesTotal' => 0,
+		'filesDone'  => 0,
+		'bytesTotal' => 0,
+		'bytesDone'  => 0,
+		'skipped'    => [],
+		'large'      => [],
+		'largeCursor' => null,
+		'rows'       => [],
+	];
+	if ( ! ots_connector_write_json( $dir . '/state.json', $state ) ) {
+		ots_connector_rrmdir( $dir );
+		return new WP_Error( 'ots_state_write_failed', 'Could not write backup state', [ 'status' => 500 ] );
+	}
+
+	return rest_ensure_response( [
+		'success'  => true,
+		'backup'   => $name,
+		'resumed'  => false,
+		'phase'    => 'db',
+		'progress' => ots_connector_backup_progress( $state ),
+	] );
+}
+
+/**
+ * Dump rows until the deadline into one new gzip part. One statement per
+ * line (mysqli escaping turns newlines inside values into \n), so the
+ * restore can split on lines and resume at a line index.
+ */
+function ots_connector_backup_db_slice( string $dir, array &$state, float $deadline ) {
+	global $wpdb;
+	$state['dbPart']++;
+	$part = sprintf( '%s/database-%03d.sql.gz', $dir, $state['dbPart'] );
+	$gz   = @gzopen( $part, 'wb6' );
+	if ( ! $gz ) {
+		return new WP_Error( 'ots_dump_open_failed', 'Could not open SQL part for writing', [ 'status' => 500 ] );
+	}
+
+	$tables = $state['tables'];
+	while ( $state['tableIndex'] < count( $tables ) && microtime( true ) < $deadline ) {
+		$table = $tables[ $state['tableIndex'] ];
+
+		if ( $state['rowOffset'] === 0 && $state['lastKey'] === null ) {
+			$create = $wpdb->get_row( "SHOW CREATE TABLE `{$table}`", ARRAY_N );
+			if ( ! $create || empty( $create[1] ) ) {
+				$state['tableIndex']++;
+				continue;
+			}
+			gzwrite( $gz, "DROP TABLE IF EXISTS `{$table}`;\n" );
+			gzwrite( $gz, str_replace( [ "\r", "\n" ], ' ', $create[1] ) . ";\n" );
+		}
+
+		$pk = ots_connector_single_pk( $table );
+		if ( $pk !== null ) {
+			$where = $state['lastKey'] === null ? '' : $wpdb->prepare( " WHERE `{$pk}` > %s", $state['lastKey'] );
+			$rows  = $wpdb->get_results( "SELECT * FROM `{$table}`{$where} ORDER BY `{$pk}` LIMIT 500", ARRAY_A );
+		} else {
+			$rows = $wpdb->get_results( "SELECT * FROM `{$table}` LIMIT {$state['rowOffset']}, 500", ARRAY_A );
+		}
+		if ( $wpdb->last_error ) {
+			gzclose( $gz );
+			return new WP_Error( 'ots_dump_query_failed', "Dump of {$table} failed: {$wpdb->last_error}", [ 'status' => 500 ] );
+		}
+		$rows = is_array( $rows ) ? $rows : [];
+		$state['rows'][ $table ] = (int) ( $state['rows'][ $table ] ?? 0 ) + count( $rows );
+
+		$values = [];
+		$bytes  = 0;
+		foreach ( $rows as $row ) {
+			$cols = [];
+			foreach ( $row as $v ) {
+				$cols[] = $v === null ? 'NULL' : "'" . $wpdb->_escape( (string) $v ) . "'";
+			}
+			$tuple    = '(' . implode( ',', $cols ) . ')';
+			$values[] = $tuple;
+			$bytes   += strlen( $tuple );
+			if ( count( $values ) >= 100 || $bytes >= 512 * 1024 ) {
+				gzwrite( $gz, "INSERT INTO `{$table}` VALUES " . implode( ',', $values ) . ";\n" );
+				$values = [];
+				$bytes  = 0;
+			}
+		}
+		if ( $values ) {
+			gzwrite( $gz, "INSERT INTO `{$table}` VALUES " . implode( ',', $values ) . ";\n" );
+		}
+
+		if ( count( $rows ) < 500 ) {
+			$state['tableIndex']++;
+			$state['rowOffset'] = 0;
+			$state['lastKey']   = null;
+		} elseif ( $pk !== null ) {
+			$last             = end( $rows );
+			$state['lastKey'] = (string) $last[ $pk ];
+			$state['rowOffset'] += count( $rows );
+		} else {
+			$state['rowOffset'] += count( $rows );
+		}
+	}
+	gzclose( $gz );
+
+	if ( $state['tableIndex'] >= count( $tables ) ) {
+		$state['phase'] = 'scan';
+	}
+	return true;
+}
+
+/** List wp-content once (relative path + size per line) for the files phase. */
+function ots_connector_backup_scan( string $dir, array &$state ) {
+	$list = @fopen( $dir . '/files.txt', 'wb' );
+	if ( ! $list ) {
+		return new WP_Error( 'ots_scan_failed', 'Could not write file list', [ 'status' => 500 ] );
+	}
+	$base  = rtrim( WP_CONTENT_DIR, '/\\' );
+	$skip  = ots_connector_backup_skip_dirs();
+	$inner = new RecursiveDirectoryIterator( $base, RecursiveDirectoryIterator::SKIP_DOTS );
+	$filter = new RecursiveCallbackFilterIterator( $inner, function ( $file ) use ( $skip ) {
+		if ( $file->isDir() ) return ! in_array( $file->getFilename(), $skip, true );
+		return true;
+	} );
+	$files = 0;
+	$bytes = 0;
+	foreach ( new RecursiveIteratorIterator( $filter ) as $file ) {
+		if ( ! $file->isFile() || $file->isLink() ) continue;
+		$rel  = ltrim( str_replace( '\\', '/', substr( $file->getPathname(), strlen( $base ) ) ), '/' );
+		$size = (int) $file->getSize();
+		fwrite( $list, $rel . "\t" . $size . "\n" );
+		$files++;
+		$bytes += $size;
+	}
+	fclose( $list );
+	$state['filesTotal'] = $files;
+	$state['bytesTotal'] = $bytes;
+	$state['listOffset'] = 0;
+	$state['phase']      = 'files';
+	return true;
+}
+
+/**
+ * Copy one large file into its own blob, 5 MB at a time, resuming at the
+ * saved offset. Only the size seen at scan time is copied (a growing log
+ * must not keep the job alive forever).
+ */
+function ots_connector_backup_copy_large( string $dir, array &$state, float $deadline ) {
+	$cur  = $state['largeCursor'];
+	$src  = rtrim( WP_CONTENT_DIR, '/\\' ) . '/' . $cur['rel'];
+	$blob = sprintf( '%s/large-%04d.bin', $dir, $cur['blob'] );
+	$in   = @fopen( $src, 'rb' );
+	if ( ! $in ) {
+		$state['skipped'][]    = [ 'path' => 'wp-content/' . $cur['rel'], 'size' => $cur['size'], 'reason' => 'unreadable' ];
+		@unlink( $blob );
+		$state['largeCursor'] = null;
+		$state['filesDone']++;
+		return true;
+	}
+	$out = @fopen( $blob, $cur['offset'] === 0 ? 'wb' : 'r+b' );
+	if ( ! $out ) {
+		fclose( $in );
+		return new WP_Error( 'ots_blob_open_failed', 'Could not write large file blob', [ 'status' => 500 ] );
+	}
+	fseek( $in, $cur['offset'] );
+	fseek( $out, $cur['offset'] );
+	while ( $cur['offset'] < $cur['size'] ) {
+		$data = fread( $in, (int) min( OTS_CONNECTOR_COPY_CHUNK, $cur['size'] - $cur['offset'] ) );
+		if ( $data === false || $data === '' ) break; // shrank since the scan
+		fwrite( $out, $data );
+		$cur['offset'] += strlen( $data );
+		if ( microtime( true ) >= $deadline ) break;
+	}
+	fclose( $in );
+	fclose( $out );
+
+	$state['bytesDone']  += $cur['offset'] - $state['largeCursor']['offset'];
+	$state['largeCursor'] = $cur;
+	$shrunk = $cur['offset'] < $cur['size'] && microtime( true ) < $deadline;
+	if ( $cur['offset'] >= $cur['size'] || $shrunk ) {
+		$state['large'][]     = [ 'path' => 'wp-content/' . $cur['rel'], 'size' => $cur['offset'], 'blob' => $cur['blob'] ];
+		$state['largeCursor'] = null;
+		$state['filesDone']++;
+		if ( $state['listOffset'] >= (int) @filesize( $dir . '/files.txt' ) ) $state['phase'] = 'finalize';
+	}
+	return true;
+}
+
+/**
+ * Add the next batch of listed files to one new ZIP part. A large file ends
+ * the batch and is then copied raw by ots_connector_backup_copy_large().
+ */
+function ots_connector_backup_files_slice( string $dir, array &$state, float $started, float $budget ) {
+	if ( ! empty( $state['largeCursor'] ) ) {
+		return ots_connector_backup_copy_large( $dir, $state, $started + $budget );
+	}
+
+	$list = @fopen( $dir . '/files.txt', 'rb' );
+	if ( ! $list ) {
+		return new WP_Error( 'ots_list_missing', 'File list missing', [ 'status' => 500 ] );
+	}
+	fseek( $list, (int) $state['listOffset'] );
+
+	$base    = rtrim( WP_CONTENT_DIR, '/\\' );
+	$zip     = null;
+	$part    = '';
+	$weight  = 0;
+	$count   = 0;
+	$bytes   = 0;
+	$seen    = 0;
+	$skipped = [];
+	$large   = null;
+	$next_offset = (int) $state['listOffset'];
+	while ( true ) {
+		$line = fgets( $list );
+		if ( $line === false ) break;
+		$line_end = ftell( $list );
+		$line     = rtrim( $line, "\n" );
+		if ( $line === '' ) {
+			$next_offset = $line_end;
+			continue;
+		}
+		list( $rel, $size ) = array_pad( explode( "\t", $line, 2 ), 2, '0' );
+		$size = (int) $size;
+		$abs  = $base . '/' . $rel;
+
+		if ( $size > OTS_CONNECTOR_LARGE_FILE_BYTES ) {
+			// Close the current part first; the large file starts the next slice.
+			if ( $count === 0 ) {
+				$large       = [ 'rel' => $rel, 'size' => $size, 'blob' => count( $state['large'] ) + 1, 'offset' => 0 ];
+				$next_offset = $line_end;
+			}
+			break;
+		}
+
+		$next_offset = $line_end;
+		$seen++;
+		if ( ! is_file( $abs ) || ! is_readable( $abs ) ) {
+			// Deleted or locked since the scan: skip it instead of failing the part on close().
+			$skipped[] = [ 'path' => 'wp-content/' . $rel, 'size' => $size, 'reason' => 'unreadable' ];
+		} else {
+			if ( ! $zip ) {
+				$state['filePart']++;
+				$part = sprintf( '%s/files-%03d.zip', $dir, $state['filePart'] );
+				$zip  = new ZipArchive();
+				if ( $zip->open( $part, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
+					fclose( $list );
+					return new WP_Error( 'ots_zip_open_failed', 'Could not create archive part', [ 'status' => 500 ] );
+				}
+			}
+			$entry = 'wp-content/' . $rel;
+			$zip->addFile( $abs, $entry );
+			// Media is already compressed; storing it keeps close() fast.
+			$stored = ots_connector_is_stored_ext( $rel ) || $size > 16 * 1024 * 1024;
+			if ( $stored && method_exists( $zip, 'setCompressionName' ) ) {
+				$zip->setCompressionName( $entry, ZipArchive::CM_STORE );
+			}
+			$weight += $stored ? (int) ( $size / 4 ) : $size;
+			$bytes  += $size;
+			$count++;
+		}
+
+		// close() does the actual compression: stop while its estimated time still fits.
+		$close_estimate = $weight / OTS_CONNECTOR_DEFLATE_BPS;
+		if (
+			$weight >= OTS_CONNECTOR_PART_WEIGHT
+			|| $count >= OTS_CONNECTOR_PART_MAX_FILES
+			|| ( microtime( true ) - $started ) + $close_estimate >= $budget
+		) {
+			break;
+		}
+	}
+	// EOF only when nothing is left after the last consumed line.
+	$eof = $large === null && $next_offset >= (int) @filesize( $dir . '/files.txt' );
+	fclose( $list );
+
+	if ( $zip && ! $zip->close() ) {
+		$status = $zip->getStatusString();
+		@unlink( $part );
+		$state['filePart']--;
+		return new WP_Error( 'ots_zip_close_failed', "Archive part failed: {$status}", [ 'status' => 500 ] );
+	}
+
+	$state['listOffset'] = $next_offset;
+	$state['filesDone'] += $seen;
+	$state['bytesDone'] += $bytes;
+	if ( $skipped ) $state['skipped'] = array_merge( $state['skipped'], $skipped );
+	if ( $large ) {
+		$state['largeCursor'] = $large;
+		if ( microtime( true ) < $started + $budget ) {
+			return ots_connector_backup_copy_large( $dir, $state, $started + $budget );
+		}
+	} elseif ( $eof ) {
+		$state['phase'] = 'finalize';
+	}
+	return true;
+}
+
+/** POST /backup/step — advance a chunked backup by one time slice. */
+function ots_connector_route_backup_step( WP_REST_Request $request ) {
+	$started = microtime( true );
+	$body    = $request->get_json_params();
+	$dir     = ots_connector_chunked_dir( (string) ( $body['backup'] ?? '' ) );
+	if ( is_wp_error( $dir ) ) return $dir;
+	$name = basename( $dir );
+
+	if ( file_exists( $dir . '/manifest.json' ) ) {
+		$manifest = ots_connector_read_json( $dir . '/manifest.json' );
+		return rest_ensure_response( [
+			'success'   => true,
+			'backup'    => $name,
+			'phase'     => 'done',
+			'done'      => true,
+			'sizeBytes' => (int) ( $manifest['sizeBytes'] ?? 0 ),
+			'manifest'  => $manifest,
+		] );
+	}
+
+	$lock = ots_connector_lock_job( $dir );
+	if ( ! $lock ) {
+		return rest_ensure_response( [ 'success' => true, 'backup' => $name, 'busy' => true, 'done' => false ] );
+	}
+
+	$state = ots_connector_read_json( $dir . '/state.json' );
+	if ( ! $state ) {
+		return new WP_Error( 'ots_state_missing', 'Backup state missing or corrupt', [ 'status' => 500 ] );
+	}
+
+	$budget = ots_connector_step_budget( $request );
+	ots_connector_prepare_long_step( $budget );
+	$deadline = $started + $budget;
+
+	$result = true;
+	while ( ! is_wp_error( $result ) && microtime( true ) < $deadline && $state['phase'] !== 'finalize' ) {
+		if ( $state['phase'] === 'db' ) {
+			$result = ots_connector_backup_db_slice( $dir, $state, $deadline );
+		} elseif ( $state['phase'] === 'scan' ) {
+			$result = ots_connector_backup_scan( $dir, $state );
+		} elseif ( $state['phase'] === 'files' ) {
+			$result = ots_connector_backup_files_slice( $dir, $state, $started, $budget );
+		} else {
+			break;
+		}
+		// Persist after every slice: a killed request loses at most one slice.
+		if ( ! is_wp_error( $result ) ) ots_connector_write_json( $dir . '/state.json', $state );
+	}
+	if ( is_wp_error( $result ) ) {
+		flock( $lock, LOCK_UN );
+		fclose( $lock );
+		return $result;
+	}
+
+	$done = false;
+	if ( $state['phase'] === 'finalize' ) {
+		global $wp_version;
+		$manifest = [
+			'format'           => OTS_CONNECTOR_CHUNK_FORMAT,
+			'createdAt'        => (int) $state['createdAt'],
+			'finishedAt'       => time(),
+			'wpVersion'        => $wp_version,
+			'connectorVersion' => OTS_CONNECTOR_VERSION,
+			'tablePrefix'      => $GLOBALS['wpdb']->prefix,
+			'tables'           => $state['tables'],
+			// Rows dumped per table: the restore refuses to swap in anything else.
+			'rows'             => $state['rows'],
+			'dbParts'          => (int) $state['dbPart'],
+			'fileParts'        => (int) $state['filePart'],
+			'large'            => $state['large'],
+			'files'            => (int) $state['filesDone'] - count( $state['skipped'] ),
+			'bytes'            => (int) $state['bytesDone'],
+			'skipped'          => $state['skipped'],
+			'sizeBytes'        => ots_connector_dir_size( $dir ),
+		];
+		ots_connector_write_json( $dir . '/manifest.json', $manifest );
+		@unlink( $dir . '/files.txt' );
+		@unlink( $dir . '/state.json' );
+		$done = true;
+	}
+
+	flock( $lock, LOCK_UN );
+	fclose( $lock );
+
+	return rest_ensure_response( [
+		'success'    => true,
+		'backup'     => $name,
+		'phase'      => $done ? 'done' : $state['phase'],
+		'done'       => $done,
+		'progress'   => ots_connector_backup_progress( $state ),
+		'sizeBytes'  => ots_connector_dir_size( $dir ),
+		'skipped'    => count( $state['skipped'] ),
+		'elapsedSec' => round( microtime( true ) - $started, 2 ),
+	] );
+}
+
+/* ── Chunked restore ──
+ * The database is imported into `otsr_`-prefixed copies and swapped in with a
+ * single atomic RENAME TABLE, so the live site (and this plugin, which serves
+ * the next steps) keeps working while the import runs. The connector's own
+ * secret and activation survive the swap, and its folder is never overwritten
+ * by the older copy inside the backup.
+ */
+
+function ots_connector_restore_target_table( string $table ): string {
+	return OTS_CONNECTOR_RESTORE_TABLE_PREFIX . $table;
+}
+
+/**
+ * Point one dump statement at the staged table. Null = not a statement we
+ * write. In CREATE TABLE, foreign keys are renamed (constraint names are
+ * unique per database and the live table still holds the originals) and
+ * re-pointed at the staged parents, so they follow the swap.
+ */
+function ots_connector_restore_rewrite( string $statement, array $tables ): ?string {
+	if ( ! preg_match( '/^(DROP TABLE IF EXISTS|CREATE TABLE|INSERT INTO) `([^`]+)`(.*)$/s', $statement, $m ) ) {
+		return null;
+	}
+	$rest = $m[3];
+	if ( $m[1] === 'CREATE TABLE' ) {
+		$rest = preg_replace_callback( '/CONSTRAINT `([^`]+)`/', function ( $c ) {
+			return 'CONSTRAINT `' . substr( 'otsr' . substr( md5( $c[1] . microtime() ), 0, 6 ) . '_' . $c[1], 0, 64 ) . '`';
+		}, $rest );
+		$rest = preg_replace_callback( '/REFERENCES `([^`]+)`/', function ( $r ) use ( $tables ) {
+			return in_array( $r[1], $tables, true )
+				? 'REFERENCES `' . ots_connector_restore_target_table( $r[1] ) . '`'
+				: $r[0];
+		}, $rest );
+	}
+	return $m[1] . ' `' . ots_connector_restore_target_table( $m[2] ) . '`' . $rest;
+}
+
+/** POST /restore/start — validate a chunked backup and create the restore cursor. */
+function ots_connector_route_restore_start( WP_REST_Request $request ) {
+	$body = $request->get_json_params();
+	$dir  = ots_connector_chunked_dir( (string) ( $body['backup'] ?? '' ) );
+	if ( is_wp_error( $dir ) ) return $dir;
+
+	$manifest = ots_connector_read_json( $dir . '/manifest.json' );
+	if ( ! $manifest || ( $manifest['format'] ?? '' ) !== OTS_CONNECTOR_CHUNK_FORMAT ) {
+		return new WP_Error( 'ots_backup_incomplete', 'Backup is incomplete (no manifest)', [ 'status' => 409 ] );
+	}
+	if ( empty( $manifest['rows'] ) ) {
+		return new WP_Error( 'ots_restore_unverifiable', 'Backup has no row counts (made by a pre-release 0.8.0); take a new backup', [ 'status' => 409 ] );
+	}
+	foreach ( (array) $manifest['tables'] as $table ) {
+		if ( strlen( ots_connector_restore_target_table( $table ) ) > 64 ) {
+			return new WP_Error( 'ots_table_name_too_long', "Table name too long for a staged restore: {$table}", [ 'status' => 409 ] );
+		}
+	}
+
+	$state = [
+		'createdAt' => time(),
+		'phase'     => 'db',
+		'dbPart'    => 1,
+		'line'      => 0,
+		'filePart'  => 1,
+		'entry'     => 0,
+		'largeIndex'  => 0,
+		'largeOffset' => 0,
+		'large'     => (array) ( $manifest['large'] ?? [] ),
+		'dbParts'   => (int) $manifest['dbParts'],
+		'fileParts' => (int) $manifest['fileParts'],
+		'tables'    => (array) $manifest['tables'],
+		'rows'      => (array) ( $manifest['rows'] ?? [] ),
+		// Kept across the swap: the backup may carry an older secret, and the
+		// CRM signs the next steps with the current one.
+		'secret'    => (string) get_option( OTS_CONNECTOR_SECRET_OPTION, '' ),
+		'statements' => 0,
+		'filesWritten' => 0,
+	];
+	if ( ! ots_connector_write_json( $dir . '/restore-state.json', $state ) ) {
+		return new WP_Error( 'ots_state_write_failed', 'Could not write restore state', [ 'status' => 500 ] );
+	}
+	return rest_ensure_response( [
+		'success' => true,
+		'backup'  => basename( $dir ),
+		'phase'   => 'db',
+		'progress' => ots_connector_restore_progress( $state ),
+	] );
+}
+
+function ots_connector_restore_progress( array $state ): array {
+	return [
+		'dbPart'       => min( (int) $state['dbPart'], (int) $state['dbParts'] ),
+		'dbParts'      => (int) $state['dbParts'],
+		'filePart'     => min( (int) $state['filePart'], (int) $state['fileParts'] ),
+		'fileParts'    => (int) $state['fileParts'],
+		'statements'   => (int) $state['statements'],
+		'filesWritten' => (int) $state['filesWritten'],
+	];
+}
+
+function ots_connector_restore_db_slice( string $dir, array &$state, float $deadline ) {
+	global $wpdb;
+	$wpdb->query( 'SET FOREIGN_KEY_CHECKS=0' );
+	$wpdb->query( 'SET NAMES utf8mb4' );
+
+	while ( $state['dbPart'] <= $state['dbParts'] && microtime( true ) < $deadline ) {
+		$part = sprintf( '%s/database-%03d.sql.gz', $dir, $state['dbPart'] );
+		$gz   = @gzopen( $part, 'rb' );
+		if ( ! $gz ) {
+			return new WP_Error( 'ots_sql_part_missing', 'Missing ' . basename( $part ), [ 'status' => 500 ] );
+		}
+		$line_no  = 0;
+		$finished = false;
+		while ( true ) {
+			$line = gzgets( $gz, 64 * 1024 * 1024 );
+			if ( $line === false ) {
+				// The only way a part counts as imported: the reader ran out of lines.
+				$finished = true;
+				break;
+			}
+			if ( $line_no++ < $state['line'] ) continue;
+			$sql = ots_connector_restore_rewrite( rtrim( $line, "\r\n;" ), $state['tables'] );
+			if ( $sql !== null ) {
+				if ( $wpdb->query( $sql ) === false ) {
+					gzclose( $gz );
+					return new WP_Error( 'ots_sql_import_failed', 'Import failed in ' . basename( $part ) . " line {$line_no}: {$wpdb->last_error}", [ 'status' => 500 ] );
+				}
+				$state['statements']++;
+			}
+			$state['line'] = $line_no;
+			if ( microtime( true ) >= $deadline ) break;
+		}
+		gzclose( $gz );
+		if ( ! $finished ) return true;
+		$state['dbPart']++;
+		$state['line'] = 0;
+	}
+
+	if ( $state['dbPart'] > $state['dbParts'] ) {
+		$swap = ots_connector_restore_swap_tables( $state );
+		if ( is_wp_error( $swap ) ) return $swap;
+		$state['phase'] = 'files';
+	}
+	return true;
+}
+
+/** Drop the staged copies of a failed/abandoned restore (they can be as big as the site's DB). */
+function ots_connector_restore_drop_staged( array $tables ): void {
+	global $wpdb;
+	foreach ( $tables as $table ) {
+		$staged = ots_connector_restore_target_table( $table );
+		$wpdb->query( "DROP TABLE IF EXISTS `{$staged}`" );
+	}
+}
+
+/**
+ * Atomically swap the staged tables in, then re-apply what the connector
+ * needs. Every staged table must exist and hold exactly the rows the backup
+ * dumped; otherwise nothing is swapped and the live site stays untouched.
+ */
+function ots_connector_restore_swap_tables( array $state ) {
+	global $wpdb;
+	if ( empty( $state['rows'] ) ) {
+		return new WP_Error( 'ots_restore_unverifiable', 'Backup has no row counts; refusing to swap tables', [ 'status' => 409 ] );
+	}
+	foreach ( $state['tables'] as $table ) {
+		$staged   = ots_connector_restore_target_table( $table );
+		$expected = (int) ( $state['rows'][ $table ] ?? -1 );
+		$exists   = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $staged ) ) );
+		$actual   = $exists ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$staged}`" ) : -1;
+		if ( $actual !== $expected ) {
+			ots_connector_restore_drop_staged( $state['tables'] );
+			return new WP_Error(
+				'ots_restore_verify_failed',
+				"Staged {$table} has {$actual} rows, backup has {$expected}; live site left untouched",
+				[ 'status' => 500 ]
+			);
+		}
+	}
+	$pairs = [];
+	$old   = [];
+	foreach ( $state['tables'] as $table ) {
+		$staged = ots_connector_restore_target_table( $table );
+		if ( ! $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $staged ) ) ) ) continue;
+		$backup_of_live = substr( 'otso_' . $table, 0, 64 );
+		$wpdb->query( "DROP TABLE IF EXISTS `{$backup_of_live}`" );
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) ) {
+			$pairs[] = "`{$table}` TO `{$backup_of_live}`";
+			$old[]   = $backup_of_live;
+		}
+		$pairs[] = "`{$staged}` TO `{$table}`";
+	}
+	if ( $pairs && $wpdb->query( 'RENAME TABLE ' . implode( ', ', $pairs ) ) === false ) {
+		return new WP_Error( 'ots_swap_failed', "Table swap failed: {$wpdb->last_error}", [ 'status' => 500 ] );
+	}
+	foreach ( $old as $t ) $wpdb->query( "DROP TABLE IF EXISTS `{$t}`" );
+
+	// The options table is now the backup's: drop stale caches, keep the
+	// CRM's secret and keep this plugin active for the remaining steps.
+	wp_cache_flush();
+	if ( $state['secret'] !== '' ) {
+		update_option( OTS_CONNECTOR_SECRET_OPTION, $state['secret'], false );
+	}
+	$active = (array) get_option( 'active_plugins', [] );
+	$self   = plugin_basename( __FILE__ );
+	if ( ! in_array( $self, $active, true ) ) {
+		$active[] = $self;
+		update_option( 'active_plugins', $active );
+	}
+	return true;
+}
+
+/** Write wp-content entries of the current ZIP part straight into place. */
+function ots_connector_restore_files_slice( string $dir, array &$state, float $deadline ) {
+	$self_dir = 'plugins/' . dirname( plugin_basename( __FILE__ ) ) . '/';
+	$target   = rtrim( WP_CONTENT_DIR, '/\\' ) . '/';
+
+	while ( $state['filePart'] <= $state['fileParts'] && microtime( true ) < $deadline ) {
+		$part = sprintf( '%s/files-%03d.zip', $dir, $state['filePart'] );
+		$zip  = new ZipArchive();
+		if ( $zip->open( $part ) !== true ) {
+			return new WP_Error( 'ots_zip_part_missing', 'Cannot open ' . basename( $part ), [ 'status' => 500 ] );
+		}
+		for ( $i = (int) $state['entry']; $i < $zip->numFiles; $i++ ) {
+			$name = (string) $zip->getNameIndex( $i );
+			$state['entry'] = $i + 1;
+			if ( strpos( $name, 'wp-content/' ) !== 0 || substr( $name, -1 ) === '/' ) continue;
+			$rel = substr( $name, strlen( 'wp-content/' ) );
+			if ( $rel === '' || strpos( $rel, '..' ) !== false || strpos( $rel, $self_dir ) === 0 ) continue;
+
+			$dest = $target . $rel;
+			if ( ! is_dir( dirname( $dest ) ) ) wp_mkdir_p( dirname( $dest ) );
+			$in  = $zip->getStream( $name );
+			$out = $in ? @fopen( $dest, 'wb' ) : false;
+			if ( ! $in || ! $out ) {
+				if ( $in ) fclose( $in );
+				$zip->close();
+				return new WP_Error( 'ots_restore_write_failed', "Cannot write {$rel}", [ 'status' => 500 ] );
+			}
+			stream_copy_to_stream( $in, $out );
+			fclose( $in );
+			fclose( $out );
+			$state['filesWritten']++;
+			if ( microtime( true ) >= $deadline ) break;
+		}
+		$finished = $state['entry'] >= $zip->numFiles;
+		$zip->close();
+		if ( ! $finished ) return true;
+		$state['filePart']++;
+		$state['entry'] = 0;
+	}
+	if ( $state['filePart'] > $state['fileParts'] ) $state['phase'] = 'large';
+	return true;
+}
+
+/** Copy large-file blobs back into wp-content, 5 MB at a time. */
+function ots_connector_restore_large_slice( string $dir, array &$state, float $deadline ) {
+	$self_dir = 'plugins/' . dirname( plugin_basename( __FILE__ ) ) . '/';
+	$target   = rtrim( WP_CONTENT_DIR, '/\\' ) . '/';
+	while ( $state['largeIndex'] < count( $state['large'] ) && microtime( true ) < $deadline ) {
+		$item = $state['large'][ $state['largeIndex'] ];
+		$rel  = substr( (string) $item['path'], strlen( 'wp-content/' ) );
+		if ( $rel === '' || strpos( $rel, '..' ) !== false || strpos( $rel, $self_dir ) === 0 ) {
+			$state['largeIndex']++;
+			$state['largeOffset'] = 0;
+			continue;
+		}
+		$blob = sprintf( '%s/large-%04d.bin', $dir, (int) $item['blob'] );
+		$dest = $target . $rel;
+		if ( ! is_dir( dirname( $dest ) ) ) wp_mkdir_p( dirname( $dest ) );
+		$in  = @fopen( $blob, 'rb' );
+		$out = @fopen( $dest, $state['largeOffset'] === 0 ? 'wb' : 'r+b' );
+		if ( ! $in || ! $out ) {
+			if ( $in ) fclose( $in );
+			if ( $out ) fclose( $out );
+			return new WP_Error( 'ots_restore_write_failed', "Cannot restore {$rel}", [ 'status' => 500 ] );
+		}
+		fseek( $in, $state['largeOffset'] );
+		fseek( $out, $state['largeOffset'] );
+		while ( $state['largeOffset'] < (int) $item['size'] ) {
+			$data = fread( $in, (int) min( OTS_CONNECTOR_COPY_CHUNK, (int) $item['size'] - $state['largeOffset'] ) );
+			if ( $data === false || $data === '' ) break;
+			fwrite( $out, $data );
+			$state['largeOffset'] += strlen( $data );
+			if ( microtime( true ) >= $deadline ) break;
+		}
+		fclose( $in );
+		fclose( $out );
+		if ( $state['largeOffset'] < (int) $item['size'] ) return true;
+		$state['filesWritten']++;
+		$state['largeIndex']++;
+		$state['largeOffset'] = 0;
+	}
+	if ( $state['largeIndex'] >= count( $state['large'] ) ) $state['phase'] = 'done';
+	return true;
+}
+
+/** POST /restore/step — advance a chunked restore by one time slice. */
+function ots_connector_route_restore_step( WP_REST_Request $request ) {
+	$started = microtime( true );
+	$body    = $request->get_json_params();
+	$dir     = ots_connector_chunked_dir( (string) ( $body['backup'] ?? '' ) );
+	if ( is_wp_error( $dir ) ) return $dir;
+	$name = basename( $dir );
+
+	$lock = ots_connector_lock_job( $dir );
+	if ( ! $lock ) {
+		return rest_ensure_response( [ 'success' => true, 'backup' => $name, 'busy' => true, 'done' => false ] );
+	}
+	$state = ots_connector_read_json( $dir . '/restore-state.json' );
+	if ( ! $state ) {
+		flock( $lock, LOCK_UN );
+		fclose( $lock );
+		return new WP_Error( 'ots_restore_not_started', 'No restore in progress for this backup', [ 'status' => 409 ] );
+	}
+
+	$budget = ots_connector_step_budget( $request );
+	ots_connector_prepare_long_step( $budget );
+	$deadline = $started + $budget;
+
+	$result = true;
+	if ( $state['phase'] === 'db' ) {
+		$result = ots_connector_restore_db_slice( $dir, $state, $deadline );
+	}
+	if ( ! is_wp_error( $result ) && $state['phase'] === 'files' && microtime( true ) < $deadline ) {
+		$result = ots_connector_restore_files_slice( $dir, $state, $deadline );
+	}
+	if ( ! is_wp_error( $result ) && $state['phase'] === 'large' && microtime( true ) < $deadline ) {
+		$result = ots_connector_restore_large_slice( $dir, $state, $deadline );
+	}
+
+	$done = ! is_wp_error( $result ) && $state['phase'] === 'done';
+	if ( $done ) {
+		@unlink( $dir . '/restore-state.json' );
+		wp_cache_flush();
+	} elseif ( ! is_wp_error( $result ) ) {
+		ots_connector_write_json( $dir . '/restore-state.json', $state );
+	}
+	flock( $lock, LOCK_UN );
+	fclose( $lock );
+	if ( is_wp_error( $result ) ) return $result;
+
+	return rest_ensure_response( [
+		'success'    => true,
+		'backup'     => $name,
+		'phase'      => $state['phase'],
+		'done'       => $done,
+		'progress'   => ots_connector_restore_progress( $state ),
+		'elapsedSec' => round( microtime( true ) - $started, 2 ),
+	] );
 }
 
 /* ─────────────────────────── Posts + Media ─────────────────────────── */
@@ -1631,6 +2613,30 @@ add_action( 'rest_api_init', function () {
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/backup/start', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_backup_start',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/backup/step', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_backup_step',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/restore/start', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_restore_start',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/restore/step', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_restore_step',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/posts', [
 		'methods'             => WP_REST_Server::READABLE,
 		'callback'            => 'ots_connector_route_list_posts',
@@ -1814,6 +2820,8 @@ function ots_connector_render_admin_page(): void {
 			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/updates</code> — listă update-uri disponibile</li>
 			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/updates/apply</code> — aplică update-uri</li>
 			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/backup</code> — creează backup ZIP + SQL</li>
+			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/backup/start</code> + <code>/backup/step</code> — backup pe pași de ~10 s</li>
+			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/restore/start</code> + <code>/restore/step</code> — restore pe pași</li>
 			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/plugins</code> — listă plugin-uri instalate (<code>?light=1</code> = fără refresh de update-uri)</li>
 			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/plugins/install</code> — instalează / actualizează un plugin din ZIP</li>
 		</ul>

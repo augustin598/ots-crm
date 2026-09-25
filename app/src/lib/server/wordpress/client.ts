@@ -57,6 +57,51 @@ export interface WpBackupResponse {
 	timestamp: number;
 }
 
+/** Progress of a chunked backup (connector ≥ 0.8.0). */
+export interface WpBackupJobProgress {
+	tablesDone: number;
+	tablesTotal: number;
+	filesDone: number;
+	filesTotal: number;
+	bytesDone: number;
+	bytesTotal: number;
+}
+
+export interface WpBackupJobResponse {
+	success: boolean;
+	/** Directory name of the job, e.g. `ots-backup-20260925-181229-zq8sdywc`. */
+	backup: string;
+	/** Another step of the same job is still running (lock held); retry shortly. */
+	busy?: boolean;
+	resumed?: boolean;
+	phase?: 'db' | 'scan' | 'files' | 'finalize' | 'done';
+	done?: boolean;
+	progress?: WpBackupJobProgress;
+	sizeBytes?: number;
+	skipped?: number;
+	elapsedSec?: number;
+}
+
+/** Progress of a chunked restore (connector ≥ 0.8.0). */
+export interface WpRestoreJobProgress {
+	dbPart: number;
+	dbParts: number;
+	filePart: number;
+	fileParts: number;
+	statements: number;
+	filesWritten: number;
+}
+
+export interface WpRestoreJobResponse {
+	success: boolean;
+	backup: string;
+	busy?: boolean;
+	phase?: 'db' | 'files' | 'large' | 'done';
+	done?: boolean;
+	progress?: WpRestoreJobProgress;
+	elapsedSec?: number;
+}
+
 /** Post shape returned by the plugin for list & single. */
 export interface WpPostCategory {
 	id: number;
@@ -235,6 +280,60 @@ export class WpClient {
 			path: '/backup',
 			body: {},
 			timeoutMs: opts?.timeoutMs ?? 600_000, // 10 min for big sites
+			siteId: opts?.siteId
+		});
+	}
+
+	/**
+	 * Chunked backup (connector ≥ 0.8.0): create the job, or get back the one
+	 * still running. Each `backupStep` then does ~`budgetSec` of work, so no
+	 * request outlives the host's proxy timeout or the 60 s HMAC window.
+	 */
+	async backupStart(opts?: { siteId?: string }): Promise<WpBackupJobResponse> {
+		return this.request<WpBackupJobResponse>({
+			method: 'POST',
+			path: '/backup/start',
+			body: {},
+			timeoutMs: 30_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async backupStep(
+		backup: string,
+		opts?: { budgetSec?: number; siteId?: string }
+	): Promise<WpBackupJobResponse> {
+		const budgetSec = opts?.budgetSec ?? 10;
+		return this.request<WpBackupJobResponse>({
+			method: 'POST',
+			path: '/backup/step',
+			body: { backup, budgetSec },
+			timeoutMs: (budgetSec + 35) * 1000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/** Chunked restore (connector ≥ 0.8.0) of a chunked backup. DESTRUCTIVE once it completes. */
+	async restoreStart(backup: string, opts?: { siteId?: string }): Promise<WpRestoreJobResponse> {
+		return this.request<WpRestoreJobResponse>({
+			method: 'POST',
+			path: '/restore/start',
+			body: { backup },
+			timeoutMs: 30_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	async restoreStep(
+		backup: string,
+		opts?: { budgetSec?: number; siteId?: string }
+	): Promise<WpRestoreJobResponse> {
+		const budgetSec = opts?.budgetSec ?? 10;
+		return this.request<WpRestoreJobResponse>({
+			method: 'POST',
+			path: '/restore/step',
+			body: { backup, budgetSec },
+			timeoutMs: (budgetSec + 35) * 1000,
 			siteId: opts?.siteId
 		});
 	}
@@ -487,7 +586,9 @@ export class WpClient {
 			response = await fetch(url, {
 				method,
 				headers,
-				body: method === 'GET' || method === 'DELETE' ? undefined : bodyString,
+				// DELETE carries a body when one is signed (DELETE /backup needs the
+				// filename); sending none made the signature mismatch → HTTP 401.
+				body: method === 'GET' || (method === 'DELETE' && body === undefined) ? undefined : bodyString,
 				signal: AbortSignal.timeout(timeoutMs),
 				redirect: 'follow'
 			});
