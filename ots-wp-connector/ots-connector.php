@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.7.0
+ * Version:           0.7.1
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.7.0' );
+define( 'OTS_CONNECTOR_VERSION', '0.7.1' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -1034,32 +1034,42 @@ function ots_connector_route_list_plugins( WP_REST_Request $request ) {
 	// not just the one we're listing. For multisite we use the per-site
 	// `delete_transient()` instead. Single-site installs behave identically
 	// either way, but the explicit branch documents the intent.
-	if ( is_multisite() ) {
-		delete_transient( 'update_plugins' );
-	} else {
-		delete_site_transient( 'update_plugins' );
-	}
+	// `?light=1` (CRM plugin library, connector 0.7.1+): the caller only
+	// needs the INSTALLED versions, so skip the update-cache refresh below —
+	// a round-trip to api.wordpress.org plus every licence-gated vendor's own
+	// check — and answer from whatever WP already has cached. `updateAvailable`
+	// may then be stale; the CRM ignores it in that mode. Without the param
+	// the behaviour is unchanged (older CRMs never send it).
+	$light = ! empty( $request->get_param( 'light' ) );
 
-	// Best-effort update-cache refresh. We wrap each step individually and
-	// swallow Throwables — a misbehaving third-party plugin must not take
-	// down the plugin LIST response (which is all most operators need).
-	//
-	// Historical context: an earlier release defined `WP_ADMIN` here to
-	// coax license-gated plugins into populating update info. That
-	// constant leaks across PHP-FPM requests, so even after we removed
-	// the `define()`, workers that handled the old version still have
-	// WP_ADMIN set — and some plugins' admin hooks fatal in REST context.
-	// Defensive try/catch keeps the endpoint usable until those workers
-	// cycle out.
-	//
-	// We also do NOT call `do_action('load-plugins.php')` anymore. That
-	// hook is the biggest offender — many plugins register admin-screen
-	// init here and explode when the REST context doesn't match their
-	// assumptions. Licence-gated plugins we actually care about
-	// (`site_transient_update_plugins` filter) still fire via
-	// `wp_update_plugins()` below.
-	try { do_action( 'wp_update_plugins' ); } catch ( \Throwable $e ) {}
-	try { wp_update_plugins(); } catch ( \Throwable $e ) {}
+	if ( ! $light ) {
+		if ( is_multisite() ) {
+			delete_transient( 'update_plugins' );
+		} else {
+			delete_site_transient( 'update_plugins' );
+		}
+
+		// Best-effort update-cache refresh. We wrap each step individually and
+		// swallow Throwables — a misbehaving third-party plugin must not take
+		// down the plugin LIST response (which is all most operators need).
+		//
+		// Historical context: an earlier release defined `WP_ADMIN` here to
+		// coax license-gated plugins into populating update info. That
+		// constant leaks across PHP-FPM requests, so even after we removed
+		// the `define()`, workers that handled the old version still have
+		// WP_ADMIN set — and some plugins' admin hooks fatal in REST context.
+		// Defensive try/catch keeps the endpoint usable until those workers
+		// cycle out.
+		//
+		// We also do NOT call `do_action('load-plugins.php')` anymore. That
+		// hook is the biggest offender — many plugins register admin-screen
+		// init here and explode when the REST context doesn't match their
+		// assumptions. Licence-gated plugins we actually care about
+		// (`site_transient_update_plugins` filter) still fire via
+		// `wp_update_plugins()` below.
+		try { do_action( 'wp_update_plugins' ); } catch ( \Throwable $e ) {}
+		try { wp_update_plugins(); } catch ( \Throwable $e ) {}
+	}
 
 	$all          = get_plugins();
 	// get_plugin_updates() can internally call update_plugins hooks that
@@ -1146,6 +1156,7 @@ function ots_connector_route_list_plugins( WP_REST_Request $request ) {
 			'requiresPhp'    => (string) ( $data['RequiresPHP'] ?? '' ),
 			'textDomain'     => (string) ( $data['TextDomain'] ?? '' ),
 			'updateUri'      => (string) ( $data['UpdateURI'] ?? '' ),
+			'requiresPlugins'=> (string) ( $data['RequiresPlugins'] ?? '' ), // WP 6.5+ header, comma-separated slugs
 			'network'        => (bool) ( $data['Network'] ?? false ),
 			'active'         => is_plugin_active( $plugin_file ),
 			'autoUpdate'     => in_array( $plugin_file, $auto_updates, true ),
@@ -1803,6 +1814,8 @@ function ots_connector_render_admin_page(): void {
 			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/updates</code> — listă update-uri disponibile</li>
 			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/updates/apply</code> — aplică update-uri</li>
 			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/backup</code> — creează backup ZIP + SQL</li>
+			<li><code>GET <?php echo $site_url; ?>/wp-json/ots-connector/v1/plugins</code> — listă plugin-uri instalate (<code>?light=1</code> = fără refresh de update-uri)</li>
+			<li><code>POST <?php echo $site_url; ?>/wp-json/ots-connector/v1/plugins/install</code> — instalează / actualizează un plugin din ZIP</li>
 		</ul>
 		<p><em>Toate endpoint-urile necesită semnătură HMAC (header-e X-OTS-Timestamp + X-OTS-Signature).</em></p>
 

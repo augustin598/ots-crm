@@ -1,0 +1,22 @@
+CREATE TABLE `wordpress_plugin_library` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL REFERENCES `tenant`(`id`),
+	`slug` text NOT NULL,
+	`plugin_file` text NOT NULL,
+	`name` text NOT NULL,
+	`version` text NOT NULL,
+	`description` text NOT NULL DEFAULT '',
+	`author` text NOT NULL DEFAULT '',
+	`text_domain` text NOT NULL DEFAULT '',
+	`plugin_uri` text NOT NULL DEFAULT '',
+	`update_uri` text NOT NULL DEFAULT '',
+	`requires_wp` text NOT NULL DEFAULT '',
+	`requires_php` text NOT NULL DEFAULT '',
+	`filename` text NOT NULL,
+	`size_bytes` integer NOT NULL,
+	`sha256` text NOT NULL,
+	`object_key` text NOT NULL,
+	`uploaded_by` text REFERENCES `user`(`id`),
+	`created_at` timestamp NOT NULL DEFAULT current_timestamp,
+	`updated_at` timestamp NOT NULL DEFAULT current_timestamp
+);

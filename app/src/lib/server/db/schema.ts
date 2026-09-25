@@ -5448,6 +5448,57 @@ export const wordpressPostRelations = relations(wordpressPost, ({ one }) => ({
 	})
 }));
 
+// Tenant-wide library of plugin ZIPs (premium plugins that don't update via
+// wordpress.org). One row per slug = the newest version the operator uploaded;
+// the ZIP itself lives in MinIO at `objectKey`. Compared against each site's
+// installed plugins by `$lib/server/wordpress/plugin-library-compare.ts` and
+// pushed to sites through the connector's `/plugins/install`.
+export const wordpressPluginLibrary = sqliteTable(
+	'wordpress_plugin_library',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		slug: text('slug').notNull(), // plugin folder, e.g. 'astra-addon'
+		pluginFile: text('plugin_file').notNull(), // WP identifier, e.g. 'astra-addon/astra-addon.php'
+		name: text('name').notNull(),
+		version: text('version').notNull(),
+		description: text('description').notNull().default(''),
+		author: text('author').notNull().default(''),
+		textDomain: text('text_domain').notNull().default(''),
+		pluginUri: text('plugin_uri').notNull().default(''),
+		updateUri: text('update_uri').notNull().default(''),
+		requiresWp: text('requires_wp').notNull().default(''),
+		requiresPhp: text('requires_php').notNull().default(''),
+		filename: text('filename').notNull(), // sanitized upload name, sent to WP on install
+		sizeBytes: integer('size_bytes').notNull(),
+		sha256: text('sha256').notNull(),
+		objectKey: text('object_key').notNull(), // MinIO key; a fresh key per upload (never overwritten)
+		uploadedBy: text('uploaded_by').references(() => user.id),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`),
+		updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantSlugUidx: uniqueIndex('wordpress_plugin_library_tenant_slug_uidx').on(t.tenantId, t.slug)
+	})
+);
+
+export const wordpressPluginLibraryRelations = relations(wordpressPluginLibrary, ({ one }) => ({
+	tenant: one(tenant, {
+		fields: [wordpressPluginLibrary.tenantId],
+		references: [tenant.id]
+	}),
+	uploader: one(user, {
+		fields: [wordpressPluginLibrary.uploadedBy],
+		references: [user.id]
+	})
+}));
+
 // ============================================================================
 // WHMCS Integration (receiver-side connector; replaces legacy keez_integration PHP module)
 // Plan: docs/whmcs-integration.md

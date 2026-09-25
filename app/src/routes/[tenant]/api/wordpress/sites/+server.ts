@@ -36,6 +36,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 			lastUptimePingAt: table.wordpressSite.lastUptimePingAt,
 			lastUpdatesCheckAt: table.wordpressSite.lastUpdatesCheckAt,
 			lastError: table.wordpressSite.lastError,
+			consecutiveFailures: table.wordpressSite.consecutiveFailures,
 			clientId: table.wordpressSite.clientId,
 			clientName: table.client.name,
 			paused: table.wordpressSite.paused,
@@ -177,9 +178,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		updatedAt: now
 	});
 
-	// Fire an initial health check so the UI shows real status on reload.
-	// Swallow failure — the user will see the error state on the list.
-	syncHealth(id).catch(() => undefined);
+	// Initial health check, awaited so the list the UI reloads right after
+	// shows the real status instead of "pending" (bounded by the client's 10s
+	// health timeout). Failures are persisted on the row by syncHealth.
+	await syncHealth(id).catch(() => undefined);
 
 	return json(
 		{

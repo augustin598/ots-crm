@@ -3940,6 +3940,20 @@
       "when": 1788786476915026,
       "tag": "0565_client_secondary_email_receives_invoice_emails_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 566,
+      "version": "6",
+      "when": 1788786476916026,
+      "tag": "0566_wordpress_plugin_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 567,
+      "version": "6",
+      "when": 1788786476917026,
+      "tag": "0567_wordpress_plugin_library_tenant_slug_uidx",
+      "breakpoints": true
     }
   ]
 }

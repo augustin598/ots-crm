@@ -139,6 +139,8 @@ export interface WpPluginInfo {
 	textDomain?: string;
 	/** Update URI hint — authoritative identifier when set. */
 	updateUri?: string;
+	/** `Requires Plugins` header, comma-separated slugs (connector ≥ 0.7.1, WP ≥ 6.5). */
+	requiresPlugins?: string;
 	network: boolean;
 	active: boolean;
 	autoUpdate: boolean;
@@ -342,10 +344,22 @@ export class WpClient {
 
 	/* ─────────────────────── Plugins ─────────────────────── */
 
-	async listPlugins(opts?: { timeoutMs?: number; siteId?: string }): Promise<WpPluginListResponse> {
+	/**
+	 * List every installed plugin. `light: true` asks the connector (≥0.7.1)
+	 * to skip the update-transient refresh — the round-trip to
+	 * api.wordpress.org plus every licence-gated vendor's own check — and
+	 * answer from WP's existing cache. Use it when only the installed
+	 * versions matter (plugin library comparison); older connectors ignore
+	 * the flag and simply take longer.
+	 */
+	async listPlugins(opts?: {
+		timeoutMs?: number;
+		siteId?: string;
+		light?: boolean;
+	}): Promise<WpPluginListResponse> {
 		return this.request<WpPluginListResponse>({
 			method: 'GET',
-			path: '/plugins',
+			path: opts?.light ? '/plugins?light=1' : '/plugins',
 			timeoutMs: opts?.timeoutMs ?? 30_000,
 			siteId: opts?.siteId
 		});

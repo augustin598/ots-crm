@@ -38,6 +38,7 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import PlugIcon from '@lucide/svelte/icons/plug';
+	import LibraryBigIcon from '@lucide/svelte/icons/library-big';
 
 	type UpdateCounts = {
 		core: number;
@@ -60,6 +61,7 @@
 		lastUptimePingAt: string | null;
 		lastUpdatesCheckAt: string | null;
 		lastError: string | null;
+		consecutiveFailures: number;
 		clientId: string | null;
 		clientName: string | null;
 		paused: number; // 1 = scheduler skips this site
@@ -136,6 +138,21 @@
 
 	// Pausing state — used to disable the toggle while the PATCH is in-flight
 	const pausingIds = new SvelteSet<string>();
+
+	// Live /health sweep that runs once when the page opens, so the badges
+	// show the connection as it is now, not the last cron/refresh result.
+	let checkingHealth = $state(false);
+
+	// Plugins with a newer ZIP in the plugin library, per site. WordPress'
+	// own pending updates (site.updates) never include these, so without
+	// this count a site could read "La zi" while its plugins page lists
+	// library updates.
+	let libraryUpdates = $state<Record<string, number>>({});
+
+	// Delete-site confirm dialog state
+	let deleteOpen = $state(false);
+	let deleteTarget = $state<WpSite | null>(null);
+	let deleting = $state(false);
 
 	// Connector-update state — tracks which sites are mid-push so the icon
 	// shows a spinner. `connectorLatest` is fetched once on mount; UI
@@ -241,8 +258,10 @@
 		sites.reduce((sum, s) => sum + (s.updates?.security ?? 0), 0)
 	);
 
+	// `loading` starts true and only gates the first render; later reloads
+	// (after a refresh, the live health sweep, a delete) swap the data in place
+	// instead of blanking the list.
 	async function loadSites() {
-		loading = true;
 		try {
 			const res = await fetch(apiBase);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -406,10 +425,101 @@
 		}
 	}
 
+	/**
+	 * Signed /health on every unpaused site (server persists the outcome),
+	 * then reload the list. The DB state is rendered first so the page is
+	 * usable immediately; badges switch to the live result when this ends.
+	 */
+	async function checkAllHealth() {
+		checkingHealth = true;
+		try {
+			const res = await fetch(`${apiBase}/health-check`, { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await loadSites();
+		} catch (err) {
+			toast.error('Verificarea conexiunilor a eșuat');
+			console.error(err);
+		} finally {
+			checkingHealth = false;
+		}
+		await loadLibraryUpdates();
+	}
+
+	/**
+	 * Same comparison the plugins page runs, for every connected site (3 at a
+	 * time). Counts what that page offers as "Update (bibliotecă)" (newer
+	 * library version, same folder, not already covered by wordpress.org)
+	 * and WordPress itself does not report yet.
+	 */
+	async function loadLibraryUpdates() {
+		const targets = sites.filter((s) => s.status === 'connected' && !s.paused);
+		const next: Record<string, number> = {};
+		const queue = [...targets];
+		const worker = async () => {
+			for (let site = queue.shift(); site; site = queue.shift()) {
+				try {
+					const res = await fetch(`${apiBase}/${site.id}/plugins/library-compare`);
+					if (!res.ok) continue;
+					const body = (await res.json()) as {
+						items?: Array<{
+							status: string;
+							folderMismatch: boolean;
+							preferredSource: string;
+							wpUpdate: unknown;
+						}>;
+					};
+					// Plugins WordPress already reports (wpUpdate set) are in site.updates;
+					// count only the ones the library adds on top.
+					next[site.id] = (body.items ?? []).filter(
+						(i) =>
+							i.status === 'update_available' &&
+							!i.folderMismatch &&
+							i.preferredSource === 'library' &&
+							!i.wpUpdate
+					).length;
+				} catch {
+					// A site that can't be listed keeps its WordPress-side count only.
+				}
+			}
+		};
+		await Promise.all([worker(), worker(), worker()]);
+		libraryUpdates = next;
+	}
+
 	onMount(() => {
-		void loadSites();
+		void loadSites().then(() => {
+			if (sites.length > 0) void checkAllHealth();
+		});
 		void loadConnectorLatest();
 	});
+
+	function openDelete(site: WpSite) {
+		deleteTarget = site;
+		deleteOpen = true;
+	}
+
+	async function confirmDelete() {
+		const site = deleteTarget;
+		if (!site) return;
+		deleting = true;
+		try {
+			const res = await fetch(`${apiBase}/${site.id}`, { method: 'DELETE' });
+			const body = (await res.json().catch(() => ({}))) as { error?: string };
+			if (!res.ok) {
+				toast.error(body.error || `Ștergerea a eșuat (HTTP ${res.status})`);
+				return;
+			}
+			toast.success(`${site.name} a fost șters din CRM`);
+			deleteOpen = false;
+			deleteTarget = null;
+			await loadSites();
+		} catch (err) {
+			toast.error('Eroare de rețea');
+			console.error(err);
+		} finally {
+			deleting = false;
+		}
+	}
 
 	async function addSite() {
 		if (!addForm.name.trim() || !addForm.siteUrl.trim()) {
@@ -807,15 +917,24 @@
 		}
 	}
 
-	function statusBadgeVariant(
-		status: WpSite['status']
-	): 'default' | 'secondary' | 'destructive' | 'outline' {
-		if (status === 'connected') return 'default';
-		if (status === 'error') return 'destructive';
+	/**
+	 * `connected` survives up to 2 network failures in a row (the 3-strike
+	 * rule absorbs blips for the cron), but the operator should still see
+	 * that the last check did not get through.
+	 */
+	function isFailing(site: WpSite): boolean {
+		return site.status === 'connected' && site.consecutiveFailures > 0;
+	}
+
+	function statusBadgeVariant(site: WpSite): 'default' | 'secondary' | 'destructive' | 'outline' {
+		if (isFailing(site)) return 'outline';
+		if (site.status === 'connected') return 'default';
+		if (site.status === 'error' || site.status === 'disconnected') return 'destructive';
 		return 'secondary';
 	}
 
-	function statusLabel(status: WpSite['status']): string {
+	function statusLabel(site: WpSite): string {
+		if (isFailing(site)) return 'Nu răspunde';
 		return (
 			{
 				connected: 'Conectat',
@@ -823,7 +942,17 @@
 				error: 'Eroare',
 				pending: 'În așteptare'
 			} as const
-		)[status];
+		)[site.status];
+	}
+
+	/** Plain-language cause + what to do, for the known connector errors. */
+	function errorHint(lastError: string | null): string | null {
+		if (!lastError) return null;
+		if (lastError.startsWith('wp_auth_error'))
+			return 'Secretul HMAC nu mai corespunde cu cel din plugin — resincronizează-l din butonul cu cheie.';
+		if (lastError.startsWith('wp_plugin_missing'))
+			return 'OTS Connector nu mai răspunde pe site — verifică dacă plugin-ul e instalat și activ.';
+		return null;
 	}
 </script>
 
@@ -840,12 +969,24 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
+			{#if checkingHealth}
+				<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+					<RefreshCwIcon class="size-3.5 animate-spin" />
+					Se verifică conexiunile…
+				</span>
+			{/if}
 			{#if totalSecurityUpdates > 0}
 				<Badge variant="destructive" class="flex items-center gap-1 text-sm">
 					<ShieldAlertIcon class="size-4" />
 					{totalSecurityUpdates} update-uri de securitate în total
 				</Badge>
 			{/if}
+			<a href="/{tenantSlug}/wordpress/plugin-library">
+				<Button variant="outline" title="ZIP-uri de plugin-uri premium: compară versiunile și actualizează în lot">
+					<LibraryBigIcon class="mr-2 size-4" />
+					Bibliotecă plugin-uri
+				</Button>
+			</a>
 			<a href="/{tenantSlug}/wordpress/diagnostics">
 				<Button variant="outline" title="Dashboard live cu status per site">
 					<ServerIcon class="mr-2 size-4" />
@@ -902,6 +1043,7 @@
 	{:else}
 		<div class="space-y-4">
 			{#each sites as site (site.id)}
+				{@const libCount = libraryUpdates[site.id] ?? 0}
 				<Card class="group relative overflow-hidden border-2 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20 hover:-translate-y-0.5">
 					<!-- Modern gradient accent bar -->
 					<div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary via-primary/80 to-primary/60"></div>
@@ -945,10 +1087,12 @@
 										{/if}
 									</div>
 									<Badge
-										variant={statusBadgeVariant(site.status)}
-										class="text-xs font-semibold px-2 py-0.5 shadow-sm"
+										variant={statusBadgeVariant(site)}
+										class="text-xs font-semibold px-2 py-0.5 shadow-sm {isFailing(site)
+											? 'border-amber-500/50 text-amber-700 dark:text-amber-400'
+											: ''}"
 									>
-										{statusLabel(site.status)}
+										{statusLabel(site)}
 									</Badge>
 									{#if site.paused}
 										<Badge variant="secondary" class="flex items-center gap-1 text-xs px-2 py-0.5">
@@ -1004,24 +1148,41 @@
 										</p>
 									</div>
 
-									<!-- Updates pending (clickable if any) -->
+									<!-- Updates pending: WordPress-side (opens the dialog) + plugin library (links to the plugins page) -->
 									{#if site.updates && site.updates.total > 0}
-										<button
-											type="button"
-											onclick={() => openUpdates(site)}
-											class="p-3 rounded-lg text-left bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15 hover:border-amber-500/40 transition-all"
+										<div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15 hover:border-amber-500/40 transition-all">
+											<button type="button" onclick={() => openUpdates(site)} class="w-full text-left">
+												<div class="flex items-center gap-1.5 mb-1.5">
+													<ArrowUpCircleIcon class="h-3.5 w-3.5 text-amber-600/70" />
+													<p class="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Updates</p>
+												</div>
+												<p class="text-sm font-semibold text-amber-700 dark:text-amber-400">
+													{site.updates.total}
+													<span class="ml-1 text-xs font-normal text-amber-600/70 dark:text-amber-500/80">
+														({site.updates.core}c · {site.updates.plugins}p · {site.updates.themes}t)
+													</span>
+												</p>
+											</button>
+											{#if libCount > 0}
+												<a href="/{tenantSlug}/wordpress/{site.id}/plugins" class="mt-1 block text-xs font-medium text-violet-700 hover:underline dark:text-violet-400">
+													+{libCount} din bibliotecă →
+												</a>
+											{/if}
+										</div>
+									{:else if libCount > 0}
+										<a
+											href="/{tenantSlug}/wordpress/{site.id}/plugins"
+											class="p-3 rounded-lg text-left bg-violet-500/10 border border-violet-500/20 hover:bg-violet-500/15 hover:border-violet-500/40 transition-all"
 										>
 											<div class="flex items-center gap-1.5 mb-1.5">
-												<ArrowUpCircleIcon class="h-3.5 w-3.5 text-amber-600/70" />
-												<p class="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Updates</p>
+												<LibraryBigIcon class="h-3.5 w-3.5 text-violet-600/70" />
+												<p class="text-xs font-semibold text-violet-700 dark:text-violet-400 uppercase tracking-wide">Updates</p>
 											</div>
-											<p class="text-sm font-semibold text-amber-700 dark:text-amber-400">
-												{site.updates.total}
-												<span class="ml-1 text-xs font-normal text-amber-600/70 dark:text-amber-500/80">
-													({site.updates.core}c · {site.updates.plugins}p · {site.updates.themes}t)
-												</span>
+											<p class="text-sm font-semibold text-violet-700 dark:text-violet-400">
+												{libCount}
+												<span class="ml-1 text-xs font-normal text-violet-600/80 dark:text-violet-400/80">din bibliotecă</span>
 											</p>
-										</button>
+										</a>
 									{:else}
 										<div class="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
 											<div class="flex items-center gap-1.5 mb-1.5">
@@ -1046,10 +1207,16 @@
 									</div>
 								</div>
 
-								{#if site.lastError && site.status === 'error'}
+								{#if site.lastError && (site.status === 'error' || site.status === 'disconnected' || isFailing(site))}
+									{@const hint = errorHint(site.lastError)}
 									<div class="mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/20 p-2.5 text-xs text-destructive">
 										<CircleAlertIcon class="size-4 shrink-0 mt-0.5" />
-										<span class="break-words">{site.lastError}</span>
+										<div class="min-w-0 space-y-0.5">
+											{#if hint}
+												<p class="font-semibold">{hint}</p>
+											{/if}
+											<p class="break-words {hint ? 'opacity-80' : ''}">{site.lastError}</p>
+										</div>
 									</div>
 								{/if}
 							</div>
@@ -1157,6 +1324,15 @@
 								>
 									<KeyIcon class="h-3.5 w-3.5" />
 								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									class="h-8 w-8 border-2 text-destructive hover:border-destructive/50 hover:bg-destructive/5 hover:text-destructive transition-all"
+									onclick={() => openDelete(site)}
+									title="Șterge site-ul din CRM"
+								>
+									<Trash2Icon class="h-3.5 w-3.5" />
+								</Button>
 							</div>
 						</div>
 					</div>
@@ -1165,6 +1341,34 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Delete site confirm dialog -->
+<Dialog bind:open={deleteOpen}>
+	<DialogContent>
+		<DialogHeader>
+			<DialogTitle>Ștergi {deleteTarget?.name}?</DialogTitle>
+			<DialogDescription>
+				Site-ul dispare din CRM împreună cu update-urile, istoricul de backup și postările
+				sincronizate. Website-urile și articolele din Content legate de el rămân fără țintă
+				WordPress. Instalarea WordPress nu este atinsă: OTS Connector rămâne pe site până îl
+				dezinstalezi manual.
+			</DialogDescription>
+		</DialogHeader>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (deleteOpen = false)} disabled={deleting}>
+				Anulează
+			</Button>
+			<Button variant="destructive" onclick={confirmDelete} disabled={deleting}>
+				{#if deleting}
+					<RefreshCwIcon class="mr-2 size-4 animate-spin" />
+				{:else}
+					<Trash2Icon class="mr-2 size-4" />
+				{/if}
+				Șterge
+			</Button>
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
 
 <!-- Add site dialog -->
 <Dialog bind:open={addOpen}>

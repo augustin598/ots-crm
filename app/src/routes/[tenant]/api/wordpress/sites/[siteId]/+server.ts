@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { deleteWordpressSite } from '$lib/server/wordpress/site-admin';
 
 async function loadSiteForTenant(siteId: string, tenantId: string) {
 	const [site] = await db
@@ -118,18 +119,16 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	return json({ success: true });
 };
 
-/** DELETE — removes the site from the CRM. Does NOT touch the WordPress
- * install itself; the plugin continues running there until the user removes
- * it manually. */
+/** DELETE — removes the site from the CRM (and unlinks it from websites and
+ * content articles). Does NOT touch the WordPress install itself; the plugin
+ * continues running there until the user removes it manually. */
 export const DELETE: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user || !locals.tenant) {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	const site = await loadSiteForTenant(params.siteId, locals.tenant.id);
-	if (!site) return json({ error: 'Nu a fost găsit' }, { status: 404 });
-
-	await db.delete(table.wordpressSite).where(eq(table.wordpressSite.id, site.id));
+	const deleted = await deleteWordpressSite(locals.tenant.id, params.siteId);
+	if (!deleted) return json({ error: 'Nu a fost găsit' }, { status: 404 });
 
 	return json({ success: true });
 };

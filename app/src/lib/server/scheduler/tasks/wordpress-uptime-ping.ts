@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { and, eq, ne } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { pingUptime } from '$lib/server/wordpress/sync';
 import { WpError } from '$lib/server/wordpress/errors';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
@@ -34,12 +34,9 @@ export async function processWordpressUptimePing(_params: Record<string, unknown
 			siteUrl: table.wordpressSite.siteUrl
 		})
 		.from(table.wordpressSite)
-		.where(
-			and(
-				ne(table.wordpressSite.status, 'disconnected'),
-				eq(table.wordpressSite.paused, 0)
-			)
-		);
+		// Disconnected sites are pinged too: the HEAD request doesn't need the
+		// connector, and skipping them froze their uptime icon at the last value.
+		.where(eq(table.wordpressSite.paused, 0));
 
 	if (sites.length === 0) {
 		return { success: true, checked: 0, up: 0, down: 0 };

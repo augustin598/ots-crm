@@ -31,10 +31,14 @@ Toate necesită semnătură HMAC în header-e:
 | `GET /wp-json/ots-connector/v1/updates` | Listă core + plugin + theme updates (force-refresh) | 2 |
 | `POST /wp-json/ots-connector/v1/updates/apply` | Aplică update-uri (feedback per-item) | 2 |
 | `POST /wp-json/ots-connector/v1/backup` | ZIP wp-content + dump SQL în `uploads/ots-backups/` | 2 |
+| `GET /wp-json/ots-connector/v1/plugins` | Listă plugin-uri instalate + update-uri; `?light=1` sare peste refresh-ul de update-uri (biblioteca CRM) | 4 |
+| `POST /wp-json/ots-connector/v1/plugins/install` | Instalează / actualizează un plugin din ZIP (base64), păstrează starea activ | 4 |
 
 ## Roadmap
 
 - **Faza 3**: `/posts` CRUD, `/media` upload, featured image
+- **Faza 4**: plugin-uri (list / activate / deactivate / delete / install) + biblioteca de
+  ZIP-uri din CRM care compară versiunile și împinge update-uri în lot prin `/plugins/install`
 
 ## Securitate
 

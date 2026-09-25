@@ -8,6 +8,21 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.7.1 — 2026-09-25
+
+- `GET /plugins` acceptă `?light=1`: nu mai șterge transientul
+  `update_plugins` și nu mai forțează `wp_update_plugins()` (apelul la
+  api.wordpress.org). Răspunsul vine din cache-ul existent al WP; filtrele
+  `site_transient_update_plugins` ale vendorilor cu licență pot totuși
+  rula dacă propriul lor cache a expirat. Folosit de biblioteca de
+  plugin-uri din CRM (`/wordpress/plugin-library`), care are nevoie în
+  primul rând de versiunile instalate. Fără parametru comportamentul e
+  neschimbat; CRM-urile mai vechi nu îl trimit.
+- `GET /plugins` întoarce și `requiresPlugins` (header-ul `Requires Plugins`
+  din WordPress 6.5+). CRM-ul îl folosește ca să actualizeze plugin-ul de
+  bază înaintea celui PRO.
+- Pagina de admin listează și rutele `/plugins` + `/plugins/install`.
+
 ## 0.7.0 — 2026-07-24
 
 - `GET /posts` și `GET /posts/{id}` includ acum `categories`

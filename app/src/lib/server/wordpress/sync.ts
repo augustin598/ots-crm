@@ -55,8 +55,9 @@ async function loadSiteAndClient(siteId: string) {
 
 /**
  * Call the plugin's /health endpoint and update the row with the returned
- * metadata. Marks the site `connected` on success, `error` after 3
- * consecutive failures. Returns a result summary suitable for UI/scheduler.
+ * metadata. Marks the site `connected` on success, `disconnected` as soon as
+ * the signature is rejected or the connector is missing, and `error` after
+ * 3 consecutive network/5xx failures. Returns a summary for UI/scheduler.
  */
 export async function syncHealth(siteId: string): Promise<{
 	ok: boolean;
@@ -114,7 +115,17 @@ export async function syncHealth(siteId: string): Promise<{
 		const { message, stack } = serializeError(err);
 		const code = WpError.isWpError(err) ? err.code : 'unknown_error';
 		const nextFailures = (site.consecutiveFailures ?? 0) + 1;
-		const nextStatus = nextFailures >= 3 ? 'error' : site.status ?? 'pending';
+		// A rejected signature or a missing connector is deterministic, not a
+		// blip: the site cannot be managed until the secret is re-synced or the
+		// plugin reinstalled. Flip to `disconnected` on the first such failure
+		// instead of showing "connected" for weeks (Meduza, 2026-09-06 → 09-25).
+		// Network/5xx failures keep the 3-strike rule: they usually recover.
+		const deterministic = code === 'wp_auth_error' || code === 'wp_plugin_missing';
+		const nextStatus = deterministic
+			? 'disconnected'
+			: nextFailures >= 3
+				? 'error'
+				: (site.status ?? 'pending');
 		const now = new Date();
 
 		await db

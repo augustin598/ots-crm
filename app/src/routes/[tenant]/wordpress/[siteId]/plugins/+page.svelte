@@ -32,6 +32,15 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import ArrowUpCircleIcon from '@lucide/svelte/icons/arrow-up-circle';
+	import LibraryBigIcon from '@lucide/svelte/icons/library-big';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import {
+		buildBulkSitePlan,
+		type PlanCompareItem,
+		type PlanStep
+	} from '$lib/logic/wordpress-plugin-plan';
+	import { runPlanSteps, runPluginStep, type StepResult } from '$lib/logic/wordpress-plugin-run';
 
 	type WpPlugin = {
 		plugin: string;
@@ -56,6 +65,8 @@
 		updateUrl?: string | null;
 		/** Vendor's "activate license" notice when we can't auto-update. */
 		updateMessage?: string | null;
+		/** Raw `Requires Plugins` header (connector ≥ 0.7.1); used for base→PRO ordering. */
+		requiresPlugins?: string;
 	};
 
 	const tenantSlug = $derived(page.params.tenant);
@@ -142,7 +153,7 @@
 		return plugins.filter((p) => {
 			if (statusFilter === 'active' && !p.active) return false;
 			if (statusFilter === 'inactive' && p.active) return false;
-			if (statusFilter === 'updates' && !p.updateAvailable) return false;
+			if (statusFilter === 'updates' && !p.updateAvailable && !libraryUpdateFor(p)) return false;
 			if (query) {
 				const hay = `${p.name} ${p.description} ${p.author} ${p.plugin}`.toLowerCase();
 				if (!hay.includes(query)) return false;
@@ -152,7 +163,52 @@
 	});
 
 	const activeCount = $derived(plugins.filter((p) => p.active).length);
-	const updatesCount = $derived(plugins.filter((p) => p.updateAvailable).length);
+	const updatesCount = $derived(
+		plugins.filter((p) => p.updateAvailable || libraryUpdateFor(p)).length
+	);
+
+	/* ── Plugin library: ZIPs uploaded once in /wordpress/plugin-library ── */
+
+	const libraryCount = $derived(plugins.filter((p) => libraryUpdateFor(p)).length);
+
+	let libraryItems = $state<PlanCompareItem[]>([]);
+
+	// Update plan panel (library and/or WordPress updates, one or many plugins).
+	type StepProgress = { state: 'installing' } | StepResult;
+	let planOpen = $state(false);
+	let planSteps = $state<PlanStep[]>([]);
+	let planProgress = $state<Record<string, StepProgress>>({});
+	let planRunning = $state(false);
+	let planFinished = $state(false);
+	let backupFirst = $state(true);
+	let backupState = $state<{ state: 'running' | 'ok' | 'failed'; message?: string } | null>(null);
+	const selected = new SvelteSet<string>();
+
+	/**
+	 * Library rows that can update an installed plugin from here, keyed by
+	 * the WP identifier. `wporg`-preferred rows are left to the normal Update
+	 * button (wordpress.org already has something newer than the ZIP), and
+	 * folder mismatches are refused by the install endpoint anyway.
+	 */
+	const libraryByPlugin = $derived(
+		new Map(
+			libraryItems
+				.filter(
+					(i) =>
+						i.status === 'update_available' &&
+						!i.folderMismatch &&
+						i.preferredSource === 'library' &&
+						i.installedPlugin !== null
+				)
+				.map((i) => [i.installedPlugin as string, i])
+		)
+	);
+
+	/** Only while the compare still describes what is installed (a WP-side update or upload moves the version). */
+	function libraryUpdateFor(p: WpPlugin): PlanCompareItem | null {
+		const item = libraryByPlugin.get(p.plugin);
+		return item && item.installedVersion === p.version ? item : null;
+	}
 
 	async function loadPlugins() {
 		loading = true;
@@ -179,7 +235,125 @@
 		}
 	}
 
-	onMount(loadPlugins);
+	async function loadLibraryCompare() {
+		try {
+			const res = await fetch(`${apiBase}/library-compare`);
+			const body = (await res.json().catch(() => ({}))) as {
+				items?: PlanCompareItem[];
+				error?: string;
+			};
+			if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+			libraryItems = Array.isArray(body.items) ? body.items : [];
+		} catch (err) {
+			// The list itself still works; only the library buttons are missing.
+			libraryItems = [];
+			console.warn('library-compare failed', err);
+		}
+	}
+
+	function reloadAll() {
+		return Promise.all([loadPlugins(), loadLibraryCompare()]);
+	}
+
+	onMount(reloadAll);
+
+	/** Anything this page can update without a licence: a newer library ZIP or a WP package. */
+	function canUpdate(p: WpPlugin): boolean {
+		return libraryUpdateFor(p) !== null || (p.updateAvailable && Boolean(p.updatePackage));
+	}
+
+	const updatablePlugins = $derived(plugins.filter(canUpdate));
+	const selectedCount = $derived(updatablePlugins.filter((p) => selected.has(p.plugin)).length);
+	const allSelected = $derived(
+		updatablePlugins.length > 0 && selectedCount === updatablePlugins.length
+	);
+
+	function toggleSelectAll(on: boolean) {
+		selected.clear();
+		if (on) for (const p of updatablePlugins) selected.add(p.plugin);
+	}
+
+	/**
+	 * Build the plan for the given plugins and show it. Same planner rules as
+	 * the library page: base before PRO (the base is pulled in when needed),
+	 * a PRO never runs when its base failed. Nothing runs until the operator
+	 * confirms in the panel.
+	 */
+	function openPlan(pluginIds: Iterable<string>) {
+		const fresh = libraryItems.filter((i) => {
+			const p = plugins.find((x) => x.plugin === i.installedPlugin);
+			return !p || i.installedVersion === p.version;
+		});
+		const steps = buildBulkSitePlan(fresh, plugins, new Set(pluginIds));
+		if (steps.length === 0) {
+			toast.info('Nimic de actualizat fără licență în selecție');
+			return;
+		}
+		planSteps = steps;
+		planProgress = {};
+		planFinished = false;
+		backupState = null;
+		planOpen = true;
+	}
+
+	async function runPlan() {
+		const steps = planSteps;
+		if (planRunning || steps.length === 0) return;
+		planRunning = true;
+		planProgress = {};
+		for (const step of steps) busyPlugins.add(step.plugin);
+		const siteApi = `/${tenantSlug}/api/wordpress/sites/${siteId}`;
+		try {
+			if (backupFirst) {
+				backupState = { state: 'running' };
+				const res = await fetch(`${siteApi}/backup`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ trigger: 'pre_update' })
+				}).catch(() => null);
+				const body = res
+					? ((await res.json().catch(() => ({}))) as { status?: string; error?: string })
+					: { error: 'eroare de rețea' };
+				if (!res?.ok || body.status !== 'success') {
+					backupState = { state: 'failed', message: body.error ?? `HTTP ${res?.status}` };
+					toast.error(`Backup eșuat: ${backupState.message}. Update-urile nu au rulat.`);
+					return;
+				}
+				backupState = { state: 'ok' };
+			}
+
+			const summary = await runPlanSteps(
+				steps,
+				async (step) => {
+					planProgress[step.key] = { state: 'installing' };
+					return runPluginStep(siteApi, step);
+				},
+				(key, result) => {
+					planProgress[key] = result;
+				}
+			);
+			const notes = Object.values(planProgress).some((r) => r.state === 'done' && r.message);
+			if (summary.failed === 0 && summary.blocked === 0) {
+				const msg =
+					steps.length === 1
+						? `${steps[0].name} actualizat la ${steps[0].toVersion}`
+						: `${summary.ok} plugin-uri actualizate`;
+				if (notes) toast.warning(`${msg}, cu observații — vezi detaliile`);
+				else toast.success(msg);
+			} else {
+				toast.error(
+					`${summary.ok} reușite, ${summary.failed} eșuate${summary.blocked ? `, ${summary.blocked} blocate de o bază neactualizată` : ''} — vezi detaliile`,
+					{ duration: 10000 }
+				);
+			}
+			selected.clear();
+		} finally {
+			for (const step of steps) busyPlugins.delete(step.plugin);
+			planRunning = false;
+			planFinished = true;
+			await reloadAll();
+		}
+	}
 
 	function fileToBase64(file: File): Promise<string> {
 		return new Promise((resolve, reject) => {
@@ -699,6 +873,9 @@
 				{plugins.length} plugin-uri instalate · {activeCount} active
 				{#if updatesCount > 0}
 					· <span class="text-amber-600 font-medium">{updatesCount} update-uri disponibile</span>
+					{#if libraryCount > 0}
+						<span class="text-violet-700 dark:text-violet-400">({libraryCount} din bibliotecă)</span>
+					{/if}
 				{/if}
 			</p>
 		</div>
@@ -707,7 +884,7 @@
 				<UploadIcon class="mr-2 size-4" />
 				Upload plugin-uri (ZIP)
 			</Button>
-			<Button variant="outline" onclick={loadPlugins} disabled={loading} title="Refresh">
+			<Button variant="outline" onclick={reloadAll} disabled={loading} title="Refresh">
 				<RefreshCwIcon class="mr-2 size-4 {loading ? 'animate-spin' : ''}" />
 				Refresh
 			</Button>
@@ -741,6 +918,25 @@
 				<SelectItem value="updates">Cu update disponibil</SelectItem>
 			</SelectContent>
 		</Select>
+		{#if updatablePlugins.length > 0}
+			<div class="ml-auto flex items-center gap-3">
+				<label class="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+					<Checkbox
+						checked={allSelected}
+						onCheckedChange={(v) => toggleSelectAll(v === true)}
+						disabled={planRunning}
+					/>
+					Selectează toate ({updatablePlugins.length})
+				</label>
+				<Button
+					disabled={selectedCount === 0 || planRunning}
+					onclick={() => openPlan(updatablePlugins.filter((p) => selected.has(p.plugin)).map((p) => p.plugin))}
+				>
+					<ArrowUpCircleIcon class="mr-2 size-4" />
+					Actualizează selectate ({selectedCount})
+				</Button>
+			</div>
+		{/if}
 	</div>
 
 	{#if loading && plugins.length === 0}
@@ -760,6 +956,7 @@
 	{:else}
 		<div class="space-y-3">
 			{#each filtered as p (p.plugin)}
+				{@const lib = libraryUpdateFor(p)}
 				<Card
 					class="group relative overflow-hidden border-2 transition-all duration-300 hover:shadow-md {p.active
 						? 'hover:border-primary/20'
@@ -774,6 +971,17 @@
 						<div class="flex items-start justify-between gap-4">
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2 flex-wrap mb-2">
+									{#if canUpdate(p)}
+										<Checkbox
+											checked={selected.has(p.plugin)}
+											onCheckedChange={(v) => {
+												if (v === true) selected.add(p.plugin);
+												else selected.delete(p.plugin);
+											}}
+											disabled={planRunning}
+											aria-label="Selectează {p.name} pentru update"
+										/>
+									{/if}
 									<div class="p-1.5 rounded-lg {p.active ? 'bg-primary/10' : 'bg-muted'}">
 										<PlugIcon class="h-3.5 w-3.5 {p.active ? 'text-primary' : 'text-muted-foreground'}" />
 									</div>
@@ -832,6 +1040,25 @@
 							</div>
 
 							<div class="flex shrink-0 items-center gap-1.5">
+								{#if lib}
+									<!-- Newer ZIP in the plugin library: install it over the current one. -->
+									<Button
+										size="sm"
+										class="bg-violet-600 hover:bg-violet-700 text-white border-violet-600"
+										disabled={busyPlugins.has(p.plugin) || planRunning}
+										onclick={() => openPlan([p.plugin])}
+										title="Actualizează din biblioteca de plugin-uri: {p.version} → {lib.libraryVersion}{lib.dependsOn
+											? ` (după baza ${lib.dependsOn.name})`
+											: ''}"
+									>
+										{#if busyPlugins.has(p.plugin)}
+											<LoaderIcon class="mr-2 size-3.5 animate-spin" />
+										{:else}
+											<LibraryBigIcon class="mr-2 size-3.5" />
+										{/if}
+										Update {lib.libraryVersion} (bibliotecă)
+									</Button>
+								{/if}
 								{#if p.updateAvailable && p.updatePackage}
 									<!-- Update is auto-installable via Plugin_Upgrader. -->
 									<Button
@@ -848,7 +1075,7 @@
 										{/if}
 										Update {p.newVersion}
 									</Button>
-								{:else if p.updateAvailable && !p.updatePackage}
+								{:else if p.updateAvailable && !p.updatePackage && !lib}
 									<!-- Update known but license-gated. Offer a clear manual path:
 									     upload ZIP manually via the dialog, or click for details. -->
 									<Tooltip.Root>
@@ -923,6 +1150,102 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Update plan: order (base before PRO), optional backup, live progress per step. -->
+<Dialog bind:open={planOpen}>
+	<DialogContent class="max-w-xl">
+		<DialogHeader>
+			<DialogTitle>
+				{planFinished ? 'Rezultat update' : planRunning ? 'Se actualizează…' : 'Actualizare plugin-uri'}
+			</DialogTitle>
+			<DialogDescription>
+				Rulează pe rând, în ordinea de mai jos: baza înaintea PRO-ului, iar un PRO nu rulează dacă
+				baza lui a eșuat.
+			</DialogDescription>
+		</DialogHeader>
+
+		{#if backupState}
+			<div class="flex items-center gap-2 text-sm">
+				{#if backupState.state === 'running'}
+					<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
+					<span>Backup complet (poate dura câteva minute)…</span>
+				{:else if backupState.state === 'ok'}
+					<CheckCircleIcon class="size-4 text-green-600" />
+					<span>Backup făcut</span>
+				{:else}
+					<XCircleIcon class="size-4 text-destructive" />
+					<span class="text-destructive">Backup eșuat: {backupState.message}. Update-urile nu au rulat.</span>
+				{/if}
+			</div>
+		{/if}
+
+		<ol class="max-h-[50vh] space-y-2 overflow-y-auto text-sm">
+			{#each planSteps as step, i (step.key)}
+				{@const pr = planProgress[step.key]}
+				<li class="flex items-start gap-2 rounded-md border px-3 py-2">
+					<span class="mt-0.5 shrink-0">
+						{#if pr?.state === 'installing'}
+							<LoaderIcon class="size-4 animate-spin text-amber-600" />
+						{:else if pr?.state === 'done'}
+							<CheckCircleIcon class="size-4 text-green-600" />
+						{:else if pr?.state === 'failed'}
+							<XCircleIcon class="size-4 text-destructive" />
+						{:else}
+							<span class="inline-block w-4 text-center text-xs text-muted-foreground">{i + 1}</span>
+						{/if}
+					</span>
+					<div class="min-w-0 flex-1">
+						<div class="flex flex-wrap items-baseline gap-x-2">
+							<span class="font-medium">{step.name}</span>
+							<span class="font-mono text-xs text-muted-foreground">
+								{step.fromVersion ?? '?'} → {pr?.state === 'done' ? pr.toVersion : step.toVersion}
+							</span>
+							<span class="text-xs text-muted-foreground">
+								({step.kind === 'wporg' ? 'WordPress' : 'bibliotecă'}{step.autoIncluded && step.requiredBy
+									? `, bază pentru ${step.requiredBy}`
+									: ''})
+							</span>
+						</div>
+						{#if pr && pr.state !== 'installing' && pr.message}
+							<p class="mt-0.5 break-words text-xs {pr.state === 'failed' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}">
+								{pr.message}
+							</p>
+						{/if}
+					</div>
+				</li>
+			{/each}
+		</ol>
+
+		{#if !planRunning && !planFinished}
+			<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+				<Checkbox checked={backupFirst} onCheckedChange={(v) => (backupFirst = v === true)} />
+				Backup complet înainte (recomandat; durează câteva minute)
+			</label>
+		{/if}
+
+		<DialogFooter>
+			{#if planFinished}
+				<Button onclick={() => (planOpen = false)}>
+					<CheckIcon class="mr-2 size-4" />
+					Închide
+				</Button>
+			{:else}
+				<Button variant="outline" onclick={() => (planOpen = false)} disabled={planRunning}>
+					Anulează
+				</Button>
+				<Button onclick={runPlan} disabled={planRunning}>
+					{#if planRunning}
+						<LoaderIcon class="mr-2 size-4 animate-spin" />
+						Se actualizează…
+					{:else}
+						<ArrowUpCircleIcon class="mr-2 size-4" />
+						Actualizează {planSteps.length === 1 ? '' : `(${planSteps.length})`}
+					{/if}
+				</Button>
+			{/if}
+		</DialogFooter>
+	</DialogContent>
+</Dialog>
 
 <Dialog bind:open={uploadOpen}>
 	<DialogContent class="max-w-2xl max-h-[80vh] overflow-y-auto">
