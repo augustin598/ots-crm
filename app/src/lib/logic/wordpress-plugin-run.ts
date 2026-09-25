@@ -36,6 +36,46 @@ export function stepErrorHint(message: string): string | null {
 	return null;
 }
 
+/** One item of `/updates/apply`'s answer, as the connector sends it. */
+export type ApplyItem = {
+	success: boolean;
+	already_current?: boolean;
+	installed_version?: string | null;
+	message?: string | null;
+	reactivated?: boolean | null;
+	reactivation_error?: string | null;
+};
+
+/**
+ * What one `/updates/apply` item really means. WordPress' "already at the
+ * latest version" is only as good as its update cache: on centrale-pellet
+ * (2026-09-25) it said so while the site was still on the old version. Only
+ * the version actually installed decides (connector ≥ 0.8.3 sends it).
+ * Shared by the plan runner and the updates dialog on the sites list.
+ */
+export function interpretApplyItem(item: ApplyItem, toVersion: string): StepResult {
+	if (item.already_current || ALREADY_CURRENT.test(item.message ?? '')) {
+		const installed = item.installed_version ?? null;
+		if (installed && compareVersions(installed, toVersion) >= 0) {
+			return { state: 'done', toVersion: installed, message: 'era deja la zi' };
+		}
+		return {
+			state: 'failed',
+			message: installed
+				? `WordPress spune că plugin-ul e la zi, dar pe site e tot v${installed} (versiunea nu s-a schimbat)`
+				: 'WordPress spune că plugin-ul e la zi, dar versiunea nu s-a schimbat'
+		};
+	}
+	if (!item.success) return { state: 'failed', message: item.message || 'Update eșuat' };
+	return item.reactivated === false
+		? {
+				state: 'done',
+				toVersion,
+				message: `reactivarea a eșuat${item.reactivation_error ? `: ${item.reactivation_error}` : ''}`
+			}
+		: { state: 'done', toVersion };
+}
+
 /**
  * One step on one site. `siteApi` is `/<tenant>/api/wordpress/sites/<siteId>`.
  * Library steps push the ZIP through `library-install` (re-activating only
@@ -55,44 +95,12 @@ export async function runPluginStep(
 				body: JSON.stringify({ items: [{ type: 'plugin', slug: step.plugin }] })
 			});
 			const body = (await res.json().catch(() => ({}))) as {
-				status?: 'success' | 'partial' | 'failed';
 				error?: string;
-				items?: Array<{
-					success: boolean;
-					already_current?: boolean;
-					installed_version?: string | null;
-					message?: string | null;
-					reactivated?: boolean | null;
-					reactivation_error?: string | null;
-				}>;
+				items?: ApplyItem[];
 			};
 			const first = body.items?.[0];
-			// WordPress answered "already at the latest version". Only the version
-			// actually installed decides: on centrale-pellet (2026-09-25) it said so
-			// while the site was still on the old version (its update cache lacked
-			// the entry at apply time). Connector ≥ 0.8.3 sends installed_version.
-			if (first && (first.already_current || ALREADY_CURRENT.test(first.message ?? ''))) {
-				const installed = first.installed_version ?? null;
-				if (installed && compareVersions(installed, step.toVersion) >= 0) {
-					return { state: 'done', toVersion: installed, message: 'era deja la zi' };
-				}
-				return {
-					state: 'failed',
-					message: installed
-						? `WordPress spune că plugin-ul e la zi, dar pe site e tot v${installed} (versiunea nu s-a schimbat)`
-						: 'WordPress spune că plugin-ul e la zi, dar versiunea nu s-a schimbat'
-				};
-			}
-			if (!res.ok || body.status === 'failed' || !first?.success) {
-				return { state: 'failed', message: first?.message || body.error || `HTTP ${res.status}` };
-			}
-			return first.reactivated === false
-				? {
-						state: 'done',
-						toVersion: step.toVersion,
-						message: `reactivarea a eșuat${first.reactivation_error ? `: ${first.reactivation_error}` : ''}`
-					}
-				: { state: 'done', toVersion: step.toVersion };
+			if (!first) return { state: 'failed', message: body.error || `HTTP ${res.status}` };
+			return interpretApplyItem(first, step.toVersion);
 		}
 
 		const res = await fetchFn(`${siteApi}/plugins/library-install`, {

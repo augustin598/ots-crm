@@ -1,5 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import { runPluginStep, runPlanSteps, stepErrorHint, type StepResult } from '../wordpress-plugin-run';
+import {
+	interpretApplyItem,
+	runPluginStep,
+	runPlanSteps,
+	stepErrorHint,
+	type StepResult
+} from '../wordpress-plugin-run';
 import type { PlanStep } from '../wordpress-plugin-plan';
 
 function step(over: Partial<PlanStep> = {}): PlanStep {
@@ -148,5 +154,48 @@ describe('„deja la zi" și explicații', () => {
 		expect(stepErrorHint('The package could not be installed. No valid plugins were found.')).toContain('ZIP');
 		expect(stepErrorHint('WordPress spune că plugin-ul e la zi, dar versiunea nu s-a schimbat')).toContain('Reîncearcă');
 		expect(stepErrorHint('ceva necunoscut')).toBeNull();
+	});
+});
+
+describe('interpretApplyItem', () => {
+	test('reușit → done cu versiunea așteptată', () => {
+		expect(interpretApplyItem({ success: true, message: 'ok' }, '2.0.3')).toEqual({
+			state: 'done',
+			toVersion: '2.0.3'
+		});
+	});
+
+	test('„deja la zi" și versiunea de pe site e cea nouă → done, era deja la zi', () => {
+		expect(
+			interpretApplyItem(
+				{ success: false, already_current: true, installed_version: '2.0.3', message: 'already_current' },
+				'2.0.3'
+			)
+		).toEqual({ state: 'done', toVersion: '2.0.3', message: 'era deja la zi' });
+	});
+
+	test('„deja la zi" dar pe site e tot versiunea veche → failed (centrale-pellet)', () => {
+		expect(
+			interpretApplyItem(
+				{ success: false, already_current: true, installed_version: '2.0.0.2', message: 'already_current' },
+				'2.0.3'
+			)
+		).toEqual({
+			state: 'failed',
+			message: 'WordPress spune că plugin-ul e la zi, dar pe site e tot v2.0.0.2 (versiunea nu s-a schimbat)'
+		});
+	});
+
+	test('eșec WordPress → failed cu mesajul lui', () => {
+		expect(interpretApplyItem({ success: false, message: 'Download failed. Forbidden' }, '1.0')).toEqual({
+			state: 'failed',
+			message: 'Download failed. Forbidden'
+		});
+	});
+
+	test('reactivare eșuată → done cu notă', () => {
+		expect(
+			interpretApplyItem({ success: true, reactivated: false, reactivation_error: 'fatal' }, '1.0')
+		).toEqual({ state: 'done', toVersion: '1.0', message: 'reactivarea a eșuat: fatal' });
 	});
 });

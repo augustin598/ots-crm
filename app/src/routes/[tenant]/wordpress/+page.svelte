@@ -49,6 +49,12 @@
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
 	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
 	import {
+		interpretApplyItem,
+		stepErrorHint,
+		type ApplyItem,
+		type StepResult
+	} from '$lib/logic/wordpress-plugin-run';
+	import {
 		describeCachePurge,
 		requestCachePurge,
 		type CachePurgeOutcome
@@ -106,7 +112,9 @@
 		createdAt: string;
 	};
 
-	type ApplyResultItem = { type: string; slug: string; success: boolean; message: string };
+	type ApplyResultItem = ApplyItem & { type: string; slug: string };
+	/** One applied update as shown in the dialog, judged by the version really installed. */
+	type ApplyOutcome = { key: string; label: string; result: StepResult };
 
 	const tenantSlug = $derived(page.params.tenant);
 	const apiBase = $derived(`/${tenantSlug}/api/wordpress/sites`);
@@ -133,7 +141,7 @@
 	let updatesLoading = $state(false);
 	let updatesApplying = $state(false);
 	const selectedUpdateIds = new SvelteSet<string>();
-	let applyResults = $state<ApplyResultItem[] | null>(null);
+	let applyResults = $state<ApplyOutcome[] | null>(null);
 	/** Cache purge after applying updates; `outcome` null = running. */
 	let applyCache = $state<{ outcome: CachePurgeOutcome | null } | null>(null);
 	let backupFirst = $state(true);
@@ -717,17 +725,28 @@
 				error?: string;
 				items?: ApplyResultItem[];
 			};
+			const outcomes = (body.items ?? []).map((item): ApplyOutcome => {
+				const pending = updatesList.find((u) => u.type === item.type && u.slug === item.slug);
+				return {
+					key: `${item.type}:${item.slug}`,
+					label: pending?.name ?? `${item.type} · ${item.slug}`,
+					result: interpretApplyItem(item, pending?.newVersion ?? '')
+				};
+			});
 			if (!res.ok) {
 				toast.error(body.error || 'Update-urile au eșuat');
-				applyResults = body.items ?? null;
+				applyResults = outcomes.length > 0 ? outcomes : null;
 				return;
 			}
-			applyResults = body.items ?? [];
-			if (body.status === 'success') toast.success('Toate update-urile au reușit');
-			else if (body.status === 'partial') toast.warning('Unele update-uri au eșuat');
+			applyResults = outcomes;
+			// The connector's own `success` counts "up to date" as neither;
+			// judge by the version really installed.
+			const failedCount = outcomes.filter((o) => o.result.state === 'failed').length;
+			if (failedCount === 0) toast.success('Toate update-urile au reușit');
+			else if (failedCount < outcomes.length) toast.warning(`${failedCount} update-uri au eșuat`);
 			else toast.error('Update-urile au eșuat');
 			// Pages cached before the update keep the old CSS/JS until emptied.
-			if (applyResults.some((r) => r.success)) {
+			if (outcomes.some((o) => o.result.state === 'done' && o.result.message !== 'era deja la zi')) {
 				applyCache = { outcome: null };
 				applyCache = { outcome: await requestCachePurge(siteApi) };
 			}
@@ -1707,16 +1726,26 @@
 		{#if applyResults}
 			<div class="flex flex-col gap-2">
 				<h3 class="text-sm font-semibold">Rezultat</h3>
-				{#each applyResults as r (r.slug + r.type)}
+				{#each applyResults as r (r.key)}
+					{@const hint = r.result.state === 'failed' ? stepErrorHint(r.result.message) : null}
 					<div class="flex items-start gap-2 rounded-md border border-border p-2 text-xs">
-						{#if r.success}
+						{#if r.result.state === 'done'}
 							<CircleCheckIcon class="mt-0.5 size-4 shrink-0 text-green-600" />
 						{:else}
 							<CircleXIcon class="mt-0.5 size-4 shrink-0 text-red-600" />
 						{/if}
 						<div class="min-w-0 flex-1">
-							<div class="font-medium">{r.type} · {r.slug}</div>
-							<div class="truncate text-muted-foreground">{r.message}</div>
+							<div class="font-medium">{r.label}</div>
+							{#if r.result.state === 'done'}
+								<div class="break-words text-muted-foreground">
+									{r.result.toVersion ? `v${r.result.toVersion}` : 'actualizat'}{r.result.message
+										? ` · ${r.result.message}`
+										: ''}
+								</div>
+							{:else}
+								<div class="break-words text-destructive">{r.result.message}</div>
+								{#if hint}<p class="text-muted-foreground">{hint}</p>{/if}
+							{/if}
 						</div>
 					</div>
 				{/each}
