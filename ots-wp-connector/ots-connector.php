@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.8.3
+ * Version:           0.8.4
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.8.3' );
+define( 'OTS_CONNECTOR_VERSION', '0.8.4' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -1747,6 +1747,229 @@ function ots_connector_route_restore_step( WP_REST_Request $request ) {
 	] );
 }
 
+/* ─────────────────────────── Cache purge ─────────────────────────── */
+
+/**
+ * Fire a cache plugin's purge hook. Some plugins register theirs only in
+ * wp-admin or renamed it between versions; a hook nobody listens to must
+ * not be reported as a purge.
+ */
+function ots_connector_purge_via_hook( string $hook, ...$args ) {
+	if ( ! has_action( $hook ) ) {
+		return "hook-ul {$hook} nu e înregistrat în cererile REST";
+	}
+	do_action( $hook, ...$args );
+	return true;
+}
+
+/**
+ * Every cache the connector knows how to empty. `detect` says whether it is
+ * present on this site; `purge` empties it and returns true, or a string
+ * with the reason it could not. Only the public API of each plugin is used
+ * (the same calls their "Purge all" buttons make), so an update of the
+ * cache plugin does not break this.
+ *
+ * `restore_only` targets run only after a restore: a plugin upgrade already
+ * invalidates the PHP files it writes, and flushing a Redis / Memcached
+ * object cache without a per-site prefix empties every site on that server.
+ */
+function ots_connector_cache_targets(): array {
+	return [
+		[
+			'id'     => 'litespeed',
+			'name'   => 'LiteSpeed Cache',
+			'detect' => function () { return defined( 'LSCWP_V' ) || class_exists( 'LiteSpeed\Core' ); },
+			'purge'  => function () { return ots_connector_purge_via_hook( 'litespeed_purge_all' ); },
+		],
+		[
+			'id'     => 'wp-rocket',
+			'name'   => 'WP Rocket',
+			'detect' => function () { return function_exists( 'rocket_clean_domain' ); },
+			'purge'  => function () {
+				rocket_clean_domain();
+				if ( function_exists( 'rocket_clean_minify' ) ) rocket_clean_minify();
+				return true;
+			},
+		],
+		[
+			'id'     => 'w3tc',
+			'name'   => 'W3 Total Cache',
+			'detect' => function () { return function_exists( 'w3tc_flush_all' ); },
+			'purge'  => function () { w3tc_flush_all(); return true; },
+		],
+		[
+			'id'     => 'wp-super-cache',
+			'name'   => 'WP Super Cache',
+			'detect' => function () { return function_exists( 'wp_cache_clear_cache' ); },
+			'purge'  => function () { wp_cache_clear_cache(); return true; },
+		],
+		[
+			'id'     => 'wp-fastest-cache',
+			'name'   => 'WP Fastest Cache',
+			'detect' => function () { return class_exists( 'WpFastestCache' ); },
+			// `true` = also the minified CSS/JS.
+			'purge'  => function () { return ots_connector_purge_via_hook( 'wpfc_clear_all_cache', true ); },
+		],
+		[
+			'id'     => 'sg-optimizer',
+			'name'   => 'SiteGround Optimizer',
+			'detect' => function () { return function_exists( 'sg_cachepress_purge_everything' ) || function_exists( 'sg_cachepress_purge_cache' ); },
+			'purge'  => function () {
+				if ( function_exists( 'sg_cachepress_purge_everything' ) ) sg_cachepress_purge_everything();
+				else sg_cachepress_purge_cache();
+				return true;
+			},
+		],
+		[
+			'id'     => 'breeze',
+			'name'   => 'Breeze',
+			'detect' => function () { return defined( 'BREEZE_VERSION' ); },
+			'purge'  => function () { return ots_connector_purge_via_hook( 'breeze_clear_all_cache' ); },
+		],
+		[
+			'id'     => 'cache-enabler',
+			'name'   => 'Cache Enabler',
+			'detect' => function () { return class_exists( 'Cache_Enabler' ); },
+			'purge'  => function () {
+				if ( method_exists( 'Cache_Enabler', 'clear_complete_cache' ) ) { Cache_Enabler::clear_complete_cache(); return true; }
+				if ( method_exists( 'Cache_Enabler', 'clear_total_cache' ) ) { Cache_Enabler::clear_total_cache(); return true; }
+				return 'versiune necunoscută';
+			},
+		],
+		[
+			'id'     => 'hummingbird',
+			'name'   => 'Hummingbird',
+			// The hook exists only while its page cache module is on; with the
+			// module off there is nothing to empty.
+			'detect' => function () { return defined( 'WPHB_VERSION' ) && has_action( 'wphb_clear_page_cache' ); },
+			'purge'  => function () { return ots_connector_purge_via_hook( 'wphb_clear_page_cache' ); },
+		],
+		[
+			'id'     => 'nginx-helper',
+			'name'   => 'Nginx Helper',
+			'detect' => function () { return class_exists( 'Nginx_Helper' ); },
+			'purge'  => function () { return ots_connector_purge_via_hook( 'rt_nginx_helper_purge_all' ); },
+		],
+		[
+			'id'     => 'autoptimize',
+			'name'   => 'Autoptimize',
+			'detect' => function () { return class_exists( 'autoptimizeCache' ); },
+			'purge'  => function () { autoptimizeCache::clearall(); return true; },
+		],
+		[
+			// Perfmatters has no page cache, but "Remove Unused CSS" keeps a
+			// per-page stylesheet built from the old plugin markup.
+			'id'     => 'perfmatters',
+			'name'   => 'Perfmatters (CSS folosit)',
+			'detect' => function () { return defined( 'PERFMATTERS_VERSION' ); },
+			'purge'  => function () {
+				if ( class_exists( 'Perfmatters\CSS' ) && method_exists( 'Perfmatters\CSS', 'clear_used_css' ) ) {
+					Perfmatters\CSS::clear_used_css();
+					return true;
+				}
+				return 'Perfmatters\CSS::clear_used_css lipsește în această versiune';
+			},
+		],
+		[
+			// Generated post CSS still points at the old widget styles after
+			// an Elementor / Elementor Pro update.
+			'id'     => 'elementor',
+			'name'   => 'Elementor (CSS generat)',
+			'detect' => function () { return did_action( 'elementor/loaded' ) && class_exists( '\Elementor\Plugin' ); },
+			'purge'  => function () {
+				$plugin = \Elementor\Plugin::$instance;
+				if ( ! $plugin || empty( $plugin->files_manager ) ) return 'files_manager indisponibil';
+				$plugin->files_manager->clear_cache();
+				return true;
+			},
+		],
+		[
+			'id'           => 'object-cache',
+			'restore_only' => true,
+			'name'         => 'Object cache',
+			'detect' => function () { return function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache(); },
+			'purge'  => function () { return wp_cache_flush() ? true : 'wp_cache_flush a întors false'; },
+		],
+		[
+			// WordPress invalidates the files an upgrade writes, but not the
+			// ones a restore copies back.
+			'id'           => 'opcache',
+			'restore_only' => true,
+			'name'         => 'OPcache (PHP)',
+			'detect' => function () {
+				return extension_loaded( 'Zend OPcache' ) && (int) @ini_get( 'opcache.enable' ) === 1 && function_exists( 'opcache_reset' );
+			},
+			'purge'  => function () {
+				if ( @opcache_reset() ) return true;
+				// A reset earlier in this request (LiteSpeed's purge-all does one)
+				// leaves a restart pending, and a second call answers false.
+				$status = function_exists( 'opcache_get_status' ) ? @opcache_get_status( false ) : false;
+				if ( is_array( $status ) && ! empty( $status['restart_pending'] ) ) return true;
+				return 'opcache_reset refuzat (opcache.restrict_api?)';
+			},
+		],
+	];
+}
+
+/**
+ * Run every detected purge for `$scope` ('update' | 'restore'). Each one is
+ * isolated: its output is discarded (some echo notices, and `class_exists()`
+ * in `detect` may autoload a file that prints) and a Throwable is reported
+ * for that cache only.
+ */
+function ots_connector_purge_caches( string $scope = 'update' ): array {
+	$purged = [];
+	foreach ( ots_connector_cache_targets() as $target ) {
+		if ( ! empty( $target['restore_only'] ) && $scope !== 'restore' ) continue;
+		$level = ob_get_level();
+		ob_start();
+		try {
+			$present = (bool) call_user_func( $target['detect'] );
+		} catch ( \Throwable $e ) {
+			$present = false;
+		}
+		if ( ! $present ) {
+			while ( ob_get_level() > $level ) ob_end_clean();
+			continue;
+		}
+		try {
+			$result = call_user_func( $target['purge'] );
+			$error  = $result === true ? null : (string) $result;
+		} catch ( \Throwable $e ) {
+			$error = ots_connector_snip( $e->getMessage(), 300 );
+		}
+		while ( ob_get_level() > $level ) ob_end_clean();
+		$purged[] = [
+			'id'    => $target['id'],
+			'name'  => $target['name'],
+			'ok'    => $error === null,
+			'error' => $error,
+		];
+	}
+	return $purged;
+}
+
+/**
+ * POST /cache/purge — body `{ scope?: 'update' | 'restore' }`. Empty the
+ * site's caches. The CRM calls it once after a batch of updates and after a
+ * restore; the answer lists what was found and whether it was emptied
+ * (`purged: []` = no known cache on the site).
+ */
+function ots_connector_route_cache_purge( WP_REST_Request $request ) {
+	// Deleting a large file cache (WP Rocket, W3TC, WP Super Cache) can
+	// outlast a 30 s max_execution_time; a fatal there loses the whole report.
+	@ignore_user_abort( true );
+	@set_time_limit( 120 );
+	$body  = $request->get_json_params();
+	$scope = ( is_array( $body ) && ( $body['scope'] ?? '' ) === 'restore' ) ? 'restore' : 'update';
+	return rest_ensure_response( [
+		'success'   => true,
+		'scope'     => $scope,
+		'purged'    => ots_connector_purge_caches( $scope ),
+		'timestamp' => time(),
+	] );
+}
+
 /* ─────────────────────────── Posts + Media ─────────────────────────── */
 
 /**
@@ -2692,6 +2915,12 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/restore/step', [
 		'methods'             => WP_REST_Server::CREATABLE,
 		'callback'            => 'ots_connector_route_restore_step',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/cache/purge', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_cache_purge',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 

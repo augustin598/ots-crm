@@ -8,6 +8,21 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.8.4 — 2026-09-25
+
+- Rută nouă `POST /cache/purge`: golește cache-urile găsite pe site
+  (LiteSpeed Cache, WP Rocket, W3 Total Cache, WP Super Cache, WP Fastest
+  Cache, SiteGround Optimizer, Breeze, Cache Enabler, Hummingbird, Nginx
+  Helper, Autoptimize, CSS-ul folosit din Perfmatters, CSS-ul generat de
+  Elementor) și întoarce, pentru fiecare, dacă a reușit. Cu
+  `{ "scope": "restore" }` golește în plus object cache-ul și OPcache (după
+  un update nu: WordPress invalidează deja fișierele scrise, iar un Redis
+  fără prefix per site ar goli toate site-urile de pe server). CRM-ul o
+  apelează o dată după fiecare lot de update-uri și după un restore —
+  altfel paginile rămâneau servite din cache-ul construit înainte.
+  Un plugin de cache al cărui hook nu e înregistrat în cererile REST e
+  raportat ca negolit, nu ca golit.
+
 ## 0.8.3 — 2026-09-25
 
 - Corectează 0.8.2: „up to date" NU mai e raportat ca reușit. Pe

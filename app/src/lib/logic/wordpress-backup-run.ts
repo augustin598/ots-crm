@@ -6,6 +6,7 @@
  * never starts. Shared by the sites list, the plugins page and the plugin
  * library (pre-update backups).
  */
+import { requestCachePurge, type CachePurgeOutcome } from './wordpress-cache-purge';
 
 type BackupJobProgress = {
 	tablesDone: number;
@@ -148,8 +149,15 @@ export async function runSiteRestore(
 	siteApi: string,
 	backupId: string,
 	opts: RunOpts = {}
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; cache: CachePurgeOutcome } | { ok: false; error: string }> {
 	const fetchFn = opts.fetchFn ?? fetch;
+	// Pages cached before the restore show the replaced content; empty the
+	// caches (object cache + OPcache too) in a request of its own, so a slow
+	// purge cannot turn a completed restore into a gateway timeout.
+	const done = async () => {
+		opts.onProgress?.({ phase: 'cache' });
+		return { ok: true as const, cache: await requestCachePurge(siteApi, { scope: 'restore', fetchFn }) };
+	};
 	let first: { ok: boolean; status: number; body: StepBody };
 	try {
 		first = await post(fetchFn, `${siteApi}/backups/${backupId}/restore`, {});
@@ -159,11 +167,11 @@ export async function runSiteRestore(
 	if (!first.ok || first.body.status === 'failed') {
 		return { ok: false, error: first.body.error || `HTTP ${first.status}` };
 	}
-	if (first.body.status === 'success') return { ok: true };
+	if (first.body.status === 'success') return done();
 	opts.onProgress?.({ phase: first.body.phase, progress: first.body.progress });
 
 	const r = await loopSteps(`${siteApi}/backups/${backupId}/restore/step`, opts);
-	return r.ok ? { ok: true } : { ok: false, error: r.error };
+	return r.ok ? done() : { ok: false, error: r.error };
 }
 
 function mb(bytes: number): string {
@@ -173,6 +181,7 @@ function mb(bytes: number): string {
 /** One line of Romanian for the progress area. */
 export function describeBackupProgress(p: BackupRunProgress): string {
 	if (p.retrying) return `Reîncerc (${p.retrying}) după: ${p.error ?? 'eroare'}`;
+	if (p.phase === 'cache') return 'Golesc cache-ul site-ului…';
 	const pr = p.progress;
 	if (!pr) return 'Pornesc…';
 	if ('tablesTotal' in pr) {

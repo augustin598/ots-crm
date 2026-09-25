@@ -50,6 +50,8 @@
 	import { runPlanSteps, runPluginStep, stepErrorHint, type StepResult } from '$lib/logic/wordpress-plugin-run';
 	import { backupProgressPercent, describeBackupProgress, runSiteBackup } from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
+	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
+	import { requestCachePurge, type CachePurgeOutcome } from '$lib/logic/wordpress-cache-purge';
 
 	/* ───────────────────────── types (mirror the API) ───────────────────────── */
 
@@ -177,6 +179,8 @@
 	>(
 		{}
 	);
+	/** `${siteId}` → cache purge after that site's steps; `outcome` null = running. */
+	let cachePurges = $state<Record<string, { outcome: CachePurgeOutcome | null }>>({});
 
 	let uploadOpen = $state(false);
 	let uploadQueue = $state<UploadQueueItem[]>([]);
@@ -477,6 +481,7 @@
 			for (const t of targets) {
 				expanded.add(t.site.id);
 				delete backups[t.site.id];
+				delete cachePurges[t.site.id];
 				for (const step of t.steps) delete installs[keyOf(t.site.id, step.key)];
 			}
 
@@ -515,6 +520,14 @@
 						ok += summary.ok;
 						failed += summary.failed;
 						blocked += summary.blocked;
+						// Once per site, after its last step: pages cached before the
+						// update keep the old CSS/JS until the caches are emptied.
+						if (summary.ok > 0) {
+							cachePurges[t.site.id] = { outcome: null };
+							cachePurges[t.site.id] = {
+								outcome: await requestCachePurge(`${apiBase}/sites/${t.site.id}`)
+							};
+						}
 						// Re-verify so the table shows the versions WP actually reports now.
 						await checkSite(t.site.id);
 					})
@@ -1039,6 +1052,11 @@
 									{:else}
 										<span class="text-muted-foreground">neverificat</span>
 									{/if}
+									{#if cachePurges[site.id]}
+										<div class="mt-1 text-xs">
+											<WpCachePurgeLine outcome={cachePurges[site.id].outcome} />
+										</div>
+									{/if}
 								</TableCell>
 								<TableCell class="text-sm">
 									{#if c?.status === 'checked'}
@@ -1307,7 +1325,7 @@
 																			<span class="break-all">{shorten(progress.message, 160)}</span
 																			>
 																		</span>
-																		{@const hint = stepErrorHint(progress.message)}
+																		{@const hint = stepErrorHint(progress.message ?? '')}
 																		{#if hint}
 																			<p class="text-xs text-muted-foreground">{hint}</p>
 																		{/if}

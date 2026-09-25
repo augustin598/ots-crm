@@ -47,6 +47,12 @@
 		type JobView
 	} from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
+	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
+	import {
+		describeCachePurge,
+		requestCachePurge,
+		type CachePurgeOutcome
+	} from '$lib/logic/wordpress-cache-purge';
 
 	type UpdateCounts = {
 		core: number;
@@ -128,6 +134,8 @@
 	let updatesApplying = $state(false);
 	const selectedUpdateIds = new SvelteSet<string>();
 	let applyResults = $state<ApplyResultItem[] | null>(null);
+	/** Cache purge after applying updates; `outcome` null = running. */
+	let applyCache = $state<{ outcome: CachePurgeOutcome | null } | null>(null);
 	let backupFirst = $state(true);
 
 	// Backups dialog state
@@ -603,6 +611,7 @@
 		updatesOpen = true;
 		updatesList = [];
 		applyResults = null;
+		applyCache = null;
 		selectedUpdateIds.clear();
 		updatesLoading = true;
 		try {
@@ -626,6 +635,7 @@
 		if (!updatesSite) return;
 		updatesLoading = true;
 		applyResults = null;
+		applyCache = null;
 		try {
 			const res = await fetch(`${apiBase}/${updatesSite.id}/updates`, { method: 'POST' });
 			const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -677,9 +687,11 @@
 			.filter((u) => selectedUpdateIds.has(u.id))
 			.map((u) => ({ type: u.type, slug: u.slug }));
 		if (items.length === 0) return;
+		const siteApi = `${apiBase}/${updatesSite.id}`;
 
 		updatesApplying = true;
 		applyResults = null;
+		applyCache = null;
 		try {
 			if (backupFirst) {
 				backupProgress = nextJobView(null, {}, 'Backup înainte de update-uri: ');
@@ -714,6 +726,11 @@
 			if (body.status === 'success') toast.success('Toate update-urile au reușit');
 			else if (body.status === 'partial') toast.warning('Unele update-uri au eșuat');
 			else toast.error('Update-urile au eșuat');
+			// Pages cached before the update keep the old CSS/JS until emptied.
+			if (applyResults.some((r) => r.success)) {
+				applyCache = { outcome: null };
+				applyCache = { outcome: await requestCachePurge(siteApi) };
+			}
 			// Refresh the counts on the main list.
 			await loadSites();
 		} catch (err) {
@@ -862,6 +879,11 @@
 				return;
 			}
 			toast.success(`Restore complet pentru ${restoreTarget.siteName}`);
+			if (result.cache) {
+				const view = describeCachePurge(result.cache);
+				if (view.tone === 'warning') toast.warning(view.text, { duration: 10000 });
+				else toast.info(view.text);
+			}
 			restoreOpen = false;
 			restoreTarget = null;
 			restoreConfirmText = '';
@@ -1698,6 +1720,9 @@
 						</div>
 					</div>
 				{/each}
+				{#if applyCache}
+					<WpCachePurgeLine outcome={applyCache.outcome} />
+				{/if}
 			</div>
 			<DialogFooter>
 				<Button variant="outline" onclick={() => (applyResults = null)}>Înapoi la listă</Button>

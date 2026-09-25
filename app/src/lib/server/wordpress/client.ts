@@ -7,6 +7,13 @@ import {
 	WpProtocolError,
 	WpSiteDownError
 } from './errors';
+import type { CachePurgeItem, CachePurgeScope } from '$lib/logic/wordpress-cache-purge';
+
+/** `POST /cache/purge` (connector ≥ 0.8.4): one entry per cache found on the site. */
+export interface WpCachePurgeResponse {
+	success: boolean;
+	purged: CachePurgeItem[];
+}
 
 /** Shape returned by the plugin's `/health` endpoint. */
 export interface WpHealth {
@@ -334,6 +341,25 @@ export class WpClient {
 			path: '/restore/step',
 			body: { backup, budgetSec },
 			timeoutMs: (budgetSec + 35) * 1000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/**
+	 * Empty every page / asset cache the connector recognises on the site
+	 * (connector ≥ 0.8.4); `restore` also flushes the object cache and OPcache.
+	 * Deleting a big file cache takes a while on a slow host, hence 60 s.
+	 */
+	async purgeCache(opts?: {
+		scope?: CachePurgeScope;
+		timeoutMs?: number;
+		siteId?: string;
+	}): Promise<WpCachePurgeResponse> {
+		return this.request<WpCachePurgeResponse>({
+			method: 'POST',
+			path: '/cache/purge',
+			body: { scope: opts?.scope ?? 'update' },
+			timeoutMs: opts?.timeoutMs ?? 60_000,
 			siteId: opts?.siteId
 		});
 	}

@@ -98,13 +98,49 @@ describe('runSiteRestore', () => {
 		const calls: Array<{ url: string; body: unknown }> = [];
 		const r = await runSiteRestore('/api/s1', 'b1', {
 			fetchFn: fakeFetch(
-				[{ body: { status: 'running', phase: 'db' } }, { body: { status: 'success' } }],
+				[{ body: { status: 'running', phase: 'db' } }, { body: { status: 'success' } }, { body: { status: 'nothing' } }],
 				calls
 			),
 			sleep: noSleep
 		});
-		expect(r).toEqual({ ok: true });
-		expect(calls.map((c) => c.url)).toEqual(['/api/s1/backups/b1/restore', '/api/s1/backups/b1/restore/step']);
+		expect(r).toEqual({ ok: true, cache: { status: 'nothing' } });
+		expect(calls.map((c) => c.url)).toEqual([
+			'/api/s1/backups/b1/restore',
+			'/api/s1/backups/b1/restore/step',
+			'/api/s1/cache-purge'
+		]);
+	});
+
+	test('după restore golește cache-ul (scope restore) și întoarce rezultatul', async () => {
+		const calls: Array<{ url: string; body: unknown }> = [];
+		const phases: Array<string | undefined> = [];
+		const cache = { status: 'purged' as const, items: [{ id: 'opcache', name: 'OPcache (PHP)', ok: true }] };
+		const r = await runSiteRestore('/api/s1', 'b1', {
+			fetchFn: fakeFetch(
+				[{ body: { status: 'running', phase: 'db' } }, { body: { status: 'success' } }, { body: cache }],
+				calls
+			),
+			sleep: noSleep,
+			onProgress: (p) => phases.push(p.phase)
+		});
+		expect(r).toEqual({ ok: true, cache });
+		expect(calls.map((c) => c.url)).toEqual([
+			'/api/s1/backups/b1/restore',
+			'/api/s1/backups/b1/restore/step',
+			'/api/s1/cache-purge'
+		]);
+		expect(calls[2].body).toEqual({ scope: 'restore' });
+		expect(phases.at(-1)).toBe('cache');
+	});
+
+	test('restore sincron (backup .zip vechi) → tot golește cache-ul', async () => {
+		const calls: Array<{ url: string; body: unknown }> = [];
+		const r = await runSiteRestore('/api/s1', 'b1', {
+			fetchFn: fakeFetch([{ body: { status: 'success' } }, { body: { status: 'nothing' } }], calls),
+			sleep: noSleep
+		});
+		expect(r).toEqual({ ok: true, cache: { status: 'nothing' } });
+		expect(calls.map((c) => c.url)).toEqual(['/api/s1/backups/b1/restore', '/api/s1/cache-purge']);
 	});
 
 	test('eșec → eroarea', async () => {

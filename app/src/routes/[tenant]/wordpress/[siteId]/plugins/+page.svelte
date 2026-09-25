@@ -44,6 +44,12 @@
 	import { runPlanSteps, runPluginStep, stepErrorHint, type StepResult } from '$lib/logic/wordpress-plugin-run';
 	import { nextJobView, runSiteBackup, type JobView } from '$lib/logic/wordpress-backup-run';
 	import WpJobProgress from '$lib/components/wordpress/WpJobProgress.svelte';
+	import WpCachePurgeLine from '$lib/components/wordpress/WpCachePurgeLine.svelte';
+	import {
+		describeCachePurge,
+		requestCachePurge,
+		type CachePurgeOutcome
+	} from '$lib/logic/wordpress-cache-purge';
 
 	type WpPlugin = {
 		plugin: string;
@@ -186,6 +192,8 @@
 	let backupFirst = $state(true);
 	let backupState = $state<{ state: 'running' | 'ok' | 'failed'; message?: string } | null>(null);
 	let backupView = $state<JobView | null>(null);
+	/** Cache purge after the run; `outcome` null = still running. */
+	let cachePurge = $state<{ outcome: CachePurgeOutcome | null } | null>(null);
 	const selected = new SvelteSet<string>();
 
 	/** Overall position in the running plan, for the progress banner. */
@@ -328,6 +336,7 @@
 		planProgress = {};
 		planFinished = false;
 		backupState = null;
+		cachePurge = null;
 		planOpen = true;
 	}
 
@@ -383,6 +392,12 @@
 				toast.error(`${summary.ok} reușite · eșuate: ${names}`, { duration: 12000 });
 			}
 			selected.clear();
+			// Once per run, after the last step: pages cached before the
+			// update keep the old CSS/JS until the caches are emptied.
+			if (summary.ok > 0) {
+				cachePurge = { outcome: null };
+				cachePurge = { outcome: await requestCachePurge(siteApi) };
+			}
 		} finally {
 			for (const step of steps) busyPlugins.delete(step.plugin);
 			planRunning = false;
@@ -775,6 +790,15 @@
 	 * reactivation server-side; this second pass handles older connectors
 	 * and real transient failures.
 	 */
+	/** Empty the site's caches after a one-off update; the outcome goes to a toast. */
+	async function purgeAfterUpdate() {
+		const view = describeCachePurge(
+			await requestCachePurge(`/${tenantSlug}/api/wordpress/sites/${siteId}`)
+		);
+		if (view.tone === 'warning') toast.warning(view.text, { duration: 10000 });
+		else toast.info(view.text);
+	}
+
 	async function updateSingle(p: WpPlugin) {
 		if (!p.updateAvailable) return;
 		const wasActive = p.active;
@@ -846,6 +870,7 @@
 			} else {
 				toast.success(`${p.name} actualizat la ${p.newVersion}`);
 			}
+			await purgeAfterUpdate();
 		} catch (err) {
 			toast.error('Eroare de rețea la update');
 			console.error(err);
@@ -1248,6 +1273,10 @@
 					</ul>
 				{/if}
 			</div>
+		{/if}
+
+		{#if cachePurge}
+			<WpCachePurgeLine outcome={cachePurge.outcome} />
 		{/if}
 
 		<ol class="max-h-[50vh] space-y-2 overflow-y-auto text-sm">
