@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.8.4
+ * Version:           0.8.5
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.8.4' );
+define( 'OTS_CONNECTOR_VERSION', '0.8.5' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -166,7 +166,71 @@ function ots_connector_probe_ssl_expiry( string $host, int $port ): ?string {
  * Uses the WP core functions that populate the Dashboard → Updates screen.
  * We force-refresh transients so results aren't cached for 12 hours.
  */
+/**
+ * "Disable all updates" plugins (ASE's Disable All Updates, Disable All
+ * WordPress Updates, …) answer every read of WordPress' update lists with an
+ * empty one, so neither wp-admin nor the CRM ever sees an update
+ * (centrale-seminee.ro: WordPress 6.9.4 and every plugin "up to date",
+ * 2026-09-25). The CRM is the one that manages updates on these sites, so
+ * its own routes lift that block for the current request only; wp-admin
+ * stays locked as the site owner configured it.
+ *
+ * Read short-circuits (`pre_[site_]transient_update_*`) are removed outright:
+ * nothing else has a reason to fake the whole list. On writes
+ * (`pre_set_site_transient_update_*`) only the disabling callbacks go —
+ * premium plugins add their own updates through that hook.
+ *
+ * Returns the names of the callbacks removed (empty = nothing was blocking).
+ */
+function ots_connector_bypass_update_blockers(): array {
+	global $wp_filter;
+	$removed = [];
+	foreach ( [ 'core', 'plugins', 'themes' ] as $what ) {
+		foreach ( [ "pre_site_transient_update_{$what}", "pre_transient_update_{$what}" ] as $hook ) {
+			if ( empty( $wp_filter[ $hook ] ) ) continue;
+			foreach ( $wp_filter[ $hook ]->callbacks as $callbacks ) {
+				foreach ( $callbacks as $cb ) {
+					$removed[] = ots_connector_callback_name( $cb['function'] );
+				}
+			}
+			remove_all_filters( $hook );
+		}
+		$hook = "pre_set_site_transient_update_{$what}";
+		if ( empty( $wp_filter[ $hook ] ) ) continue;
+		foreach ( $wp_filter[ $hook ]->callbacks as $priority => $callbacks ) {
+			foreach ( $callbacks as $cb ) {
+				$name = ots_connector_callback_name( $cb['function'] );
+				if ( preg_match( '/disable.?(all.?)?(wordpress.?|wp.?)?updates|override_version_check_info/i', $name ) ) {
+					remove_filter( $hook, $cb['function'], $priority );
+					$removed[] = $name;
+				}
+			}
+		}
+	}
+	$removed = array_values( array_unique( $removed ) );
+	if ( ! empty( $removed ) ) {
+		// What they left in the database is their empty stand-in (stamped
+		// "checked just now", so WordPress would not re-check for 12 h).
+		delete_site_transient( 'update_plugins' );
+		delete_site_transient( 'update_themes' );
+		delete_site_transient( 'update_core' );
+	}
+	return $removed;
+}
+
+/** "Class::method" / "function" / "closure" for a hook callback. */
+function ots_connector_callback_name( $fn ): string {
+	if ( is_string( $fn ) ) return $fn;
+	if ( is_array( $fn ) && count( $fn ) === 2 ) {
+		$cls = is_object( $fn[0] ) ? get_class( $fn[0] ) : (string) $fn[0];
+		return $cls . '::' . (string) $fn[1];
+	}
+	if ( $fn instanceof \Closure ) return 'closure';
+	return is_object( $fn ) ? get_class( $fn ) : 'callable';
+}
+
 function ots_connector_route_updates( WP_REST_Request $request ) {
+	$blockers = ots_connector_bypass_update_blockers();
 	// Force-refresh update transients so we return current data instead of
 	// whatever was cached the last time an admin loaded the Updates page.
 	wp_version_check( [], true );
@@ -243,8 +307,9 @@ function ots_connector_route_updates( WP_REST_Request $request ) {
 	}
 
 	return rest_ensure_response( [
-		'items'     => $items,
-		'timestamp' => time(),
+		'items'                => $items,
+		'updateBlockersBypassed' => $blockers,
+		'timestamp'            => time(),
 	] );
 }
 
@@ -260,12 +325,19 @@ function ots_connector_route_apply_updates( WP_REST_Request $request ) {
 		return new WP_Error( 'ots_empty_items', 'No items to apply', [ 'status' => 400 ] );
 	}
 
+	// A core or big plugin upgrade can outlast the host proxy; if it cuts
+	// the connection, the upgrade must still finish rather than stop halfway.
+	@ignore_user_abort( true );
+	@set_time_limit( 600 );
+
 	// The upgrader classes aren't loaded on REST requests; pull them in.
 	require_once ABSPATH . 'wp-admin/includes/file.php';
 	require_once ABSPATH . 'wp-admin/includes/misc.php';
 	require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 	require_once ABSPATH . 'wp-admin/includes/update.php';
 	require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+	ots_connector_bypass_update_blockers();
 
 	// Refresh update caches so upgraders see the latest metadata.
 	wp_version_check( [], true );
@@ -2304,6 +2376,9 @@ function ots_connector_route_list_plugins( WP_REST_Request $request ) {
 	// may then be stale; the CRM ignores it in that mode. Without the param
 	// the behaviour is unchanged (older CRMs never send it).
 	$light = ! empty( $request->get_param( 'light' ) );
+	if ( ! $light ) {
+		ots_connector_bypass_update_blockers();
+	}
 
 	if ( ! $light ) {
 		if ( is_multisite() ) {

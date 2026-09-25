@@ -8,6 +8,18 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.8.5 — 2026-09-25
+
+- Plugin-urile care opresc toate update-urile (ASE „Disable All Updates",
+  Disable All WordPress Updates etc.) nu mai ascund update-urile de CRM:
+  `/updates`, `/updates/apply` și `/plugins` le ocolesc doar în cererea lor
+  (wp-admin rămâne blocat cum l-a configurat proprietarul). Pe
+  centrale-seminee.ro WordPress 6.9.4 și toate plugin-urile apăreau „la zi".
+  `/updates` raportează în `updateBlockersBypassed` ce a ocolit.
+- `/updates/apply` continuă și dacă proxy-ul hostingului închide conexiunea
+  (`ignore_user_abort`, limită 600 s) — un update de core nu mai rămâne
+  la jumătate.
+
 ## 0.8.4 — 2026-09-25
 
 - Rută nouă `POST /cache/purge`: golește cache-urile găsite pe site
