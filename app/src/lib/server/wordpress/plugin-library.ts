@@ -10,8 +10,8 @@ import {
 	inspectPluginZip,
 	listNestedZips,
 	MAX_PLUGIN_ZIP_BYTES,
+	normalizePluginZip,
 	PluginZipError,
-	repackAtSlugRoot,
 	type PluginZipErrorCode,
 	type PluginZipInfo
 } from './plugin-zip';
@@ -188,14 +188,12 @@ export async function addLibraryPlugin(input: {
 	const maxBytes = input.maxBytes ?? MAX_PLUGIN_ZIP_BYTES;
 	if (input.buffer.length > maxBytes) throw tooLarge(input.buffer.length, maxBytes);
 
-	let buffer = input.buffer;
-	let info = await inspectPluginZip(buffer);
-	if (info.rootPrefix !== '') {
-		// Vendor wrapper folder: store the archive the way WordPress needs it.
-		buffer = await repackAtSlugRoot(buffer, info.rootPrefix, info.slug);
-		info = await inspectPluginZip(buffer);
-		if (buffer.length > maxBytes) throw tooLarge(buffer.length, maxBytes);
-	}
+	// Vendor wrapper folder or stray files next to the plugin folder: store
+	// the archive the way WordPress needs it.
+	const normalized = await normalizePluginZip(input.buffer);
+	const buffer = normalized.buffer;
+	const info = normalized.info;
+	if (normalized.repacked && buffer.length > maxBytes) throw tooLarge(buffer.length, maxBytes);
 
 	const [existing] = await db
 		.select()

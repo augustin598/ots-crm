@@ -7,6 +7,7 @@ import { decrypt, DecryptionError } from '$lib/server/plugins/smartbill/crypto';
 import { WpClient } from '$lib/server/wordpress/client';
 import { WpError } from '$lib/server/wordpress/errors';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
+import { normalizePluginZip } from '$lib/server/wordpress/plugin-zip';
 
 async function loadSiteAndClient(siteId: string, tenantId: string) {
 	const [site] = await db
@@ -76,12 +77,24 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		);
 	}
 
+	// Wrapper folders / stray files next to the plugin folder make
+	// Plugin_Upgrader answer "No valid plugins were found"; send the archive
+	// in the shape it accepts. Anything unreadable goes as-is and WordPress
+	// reports its own error.
+	let dataBase64 = body.dataBase64;
+	try {
+		const normalized = await normalizePluginZip(Buffer.from(body.dataBase64, 'base64'));
+		if (normalized.repacked) dataBase64 = normalized.buffer.toString('base64');
+	} catch {
+		// keep the original payload
+	}
+
 	try {
 		const result = await ctx.client.installPlugin(
 			{
 				filename: body.filename,
 				mimeType: body.mimeType || 'application/zip',
-				dataBase64: body.dataBase64,
+				dataBase64,
 				activate: body.activate ?? true
 			},
 			{ siteId: ctx.site.id }

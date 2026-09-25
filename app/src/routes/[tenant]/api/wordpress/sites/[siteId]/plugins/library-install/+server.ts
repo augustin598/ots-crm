@@ -11,6 +11,7 @@ import type { WpClient } from '$lib/server/wordpress/client';
 import { loadSiteAndClient } from '$lib/server/wordpress/site-client';
 import { fetchLibraryPluginZip, getLibraryPlugin } from '$lib/server/wordpress/plugin-library';
 import { compareWpVersions } from '$lib/server/wordpress/plugin-match';
+import { normalizePluginZip } from '$lib/server/wordpress/plugin-zip';
 import { syncUpdates } from '$lib/server/wordpress/sync';
 import { pluginFolder } from '$lib/logic/wordpress-plugin-dependencies';
 
@@ -137,6 +138,15 @@ export const POST: RequestHandler = async (event) => {
 			metadata: { siteId: ctx.site.id, libraryPluginId: row.id, reason: message, jobId }
 		});
 		return json({ error: `Nu am putut citi arhiva din MinIO: ${message}`, jobId }, { status: 500 });
+	}
+
+	// Archives stored before stray-entry detection (e.g. Product Catalog Feed
+	// Pro with a bonus woocommerce-pip.zip at the root) fail in WordPress with
+	// "No valid plugins were found"; send the normalized archive instead.
+	try {
+		zipBuffer = (await normalizePluginZip(zipBuffer)).buffer;
+	} catch {
+		// Unreadable here too: let WordPress report its own error.
 	}
 
 	const started = Date.now();

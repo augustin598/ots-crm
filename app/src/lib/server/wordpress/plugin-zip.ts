@@ -21,6 +21,14 @@ export type PluginZipInfo = {
 	 * wrapped ZIP must be re-packed with `repackAtSlugRoot` before install.
 	 */
 	rootPrefix: string;
+	/**
+	 * Files outside the plugin folder (a vendor's bonus .zip, readmes next to
+	 * the folder). With anything besides the folder at the archive root,
+	 * Plugin_Upgrader looks for the plugin file in the root itself and fails
+	 * with "No valid plugins were found" (Product Catalog Feed Pro 5.9.2 ships
+	 * `woocommerce-pip.zip` next to its folder). `normalizePluginZip` drops them.
+	 */
+	strayEntries: number;
 	name: string;
 	version: string;
 	description: string;
@@ -175,11 +183,17 @@ export async function inspectPluginZip(binary: Buffer | Uint8Array): Promise<Plu
 	}
 
 	const basename = found.file.name.split('/').filter(Boolean).pop() ?? '';
+	const folder = `${found.rootPrefix}${found.slug}/`;
+	let strayEntries = 0;
+	zip.forEach((relativePath, entry) => {
+		if (!entry.dir && !relativePath.startsWith(folder)) strayEntries++;
+	});
 
 	return {
 		slug: found.slug,
 		pluginFile: `${found.slug}/${basename}`,
 		rootPrefix: found.rootPrefix,
+		strayEntries,
 		name: snip(header.name ?? found.slug, 200),
 		version: snip(header.version, 50),
 		description: snip(header.description ?? '', 500),
@@ -283,4 +297,20 @@ export async function repackAtSlugRoot(
 		out.file(name, await entry.async('nodebuffer'), { date: entry.date });
 	}
 	return out.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+}
+
+/**
+ * The archive exactly as Plugin_Upgrader needs it: the plugin folder at the
+ * root and nothing else. Wrapper folders and stray files are re-packed away;
+ * a standard ZIP is returned untouched (same buffer).
+ */
+export async function normalizePluginZip(
+	binary: Buffer
+): Promise<{ buffer: Buffer; info: PluginZipInfo; repacked: boolean }> {
+	const info = await inspectPluginZip(binary);
+	if (info.rootPrefix === '' && info.strayEntries === 0) {
+		return { buffer: binary, info, repacked: false };
+	}
+	const buffer = await repackAtSlugRoot(binary, info.rootPrefix, info.slug);
+	return { buffer, info: await inspectPluginZip(buffer), repacked: true };
 }

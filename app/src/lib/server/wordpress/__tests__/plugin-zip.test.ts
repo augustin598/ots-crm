@@ -5,6 +5,7 @@ import {
 	listNestedZips,
 	parsePluginHeader,
 	repackAtSlugRoot,
+	normalizePluginZip,
 	PluginZipError,
 	type PluginZipErrorCode
 } from '../plugin-zip';
@@ -174,5 +175,50 @@ describe('review fixes', () => {
 		expect(nested.map((n) => n.filename)).toEqual(['huge.zip', 'small.zip']);
 		expect(nested.find((n) => n.filename === 'huge.zip')?.skipped).toMatch(/2000/);
 		expect(nested.find((n) => n.filename === 'small.zip')?.buffer?.length).toBeGreaterThan(0);
+	});
+});
+
+describe('normalizePluginZip — fișiere în plus lângă folderul plugin-ului', () => {
+	test('ZIP de vendor cu un .zip bonus la rădăcină (Product Catalog Feed Pro) → rămâne doar folderul', async () => {
+		const buf = await buildZip({
+			'product-catalog-feed-pro/product-catalog-feed-pro.php': HEADER,
+			'product-catalog-feed-pro/inc/a.php': '<?php // a',
+			'woocommerce-pip.zip': 'PK-bonus'
+		});
+		const before = await inspectPluginZip(buf);
+		expect(before.strayEntries).toBe(1);
+
+		const out = await normalizePluginZip(buf);
+		expect(out.repacked).toBe(true);
+		expect(out.info.strayEntries).toBe(0);
+		const zip = await JSZip.loadAsync(out.buffer);
+		expect(Object.keys(zip.files).filter((n) => !zip.files[n].dir).sort()).toEqual([
+			'product-catalog-feed-pro/inc/a.php',
+			'product-catalog-feed-pro/product-catalog-feed-pro.php'
+		]);
+	});
+
+	test('wrapper + fișiere în plus → folderul ajunge la rădăcină, restul dispare', async () => {
+		const buf = await buildZip({
+			'download/astra-addon/astra-addon.php': HEADER,
+			'download/licence.txt': 'x',
+			'readme.html': 'x'
+		});
+		const out = await normalizePluginZip(buf);
+		expect(out.repacked).toBe(true);
+		expect(out.info).toMatchObject({ rootPrefix: '', strayEntries: 0, pluginFile: 'astra-addon/astra-addon.php' });
+	});
+
+	test('ZIP standard → neatins (același buffer)', async () => {
+		const buf = await buildZip({ 'astra-addon/astra-addon.php': HEADER, 'astra-addon/readme.txt': 'x' });
+		const out = await normalizePluginZip(buf);
+		expect(out.repacked).toBe(false);
+		expect(out.buffer).toBe(buf);
+	});
+
+	test('intrările __MACOSX nu contează ca fișiere în plus', async () => {
+		const buf = await buildZip({ 'astra-addon/astra-addon.php': HEADER, '__MACOSX/astra-addon/._astra-addon.php': 'x' });
+		expect((await inspectPluginZip(buf)).strayEntries).toBe(1);
+		expect((await normalizePluginZip(buf)).repacked).toBe(true);
 	});
 });
