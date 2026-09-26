@@ -31,8 +31,38 @@ const dbPath = join(tmpdir(), `ots-hour-credits-${crypto.randomUUID()}.db`);
 // conexiunea comună cu o instrucțiune neterminată, iar TOATE testele următoare pică
 // la curățare. `createClient` nu expune opțiunea, deci construim clientul direct.
 // Pe Turso remote (prod) scrierile sunt serializate de server — artefact de test.
+//
+// Un BUSY lasă însă instrucțiunea picată neterminată pe conexiunea comună a
+// clientului: tranzacția următoare de pe ea pică la COMMIT („SQL statements in
+// progress"), iar conexiunea ține un lock până o eliberează GC-ul — secunde în
+// care orice scriere, inclusiv curățarea din `beforeEach` al testului următor,
+// pică cu SQLITE_BUSY (eșecul intermitent din suita completă, după cursele
+// „două Done/reopen simultane"). Deci la BUSY înlocuim conexiunea comună
+// (`reconnect` o închide pe cea stricată) și lăsăm eroarea să ajungă la
+// retry-ul aplicației, ca pe Turso.
+class TestSqlite3Client extends Sqlite3Client {
+	async #replaceOnBusy<T>(run: () => Promise<T>): Promise<T> {
+		try {
+			return await run();
+		} catch (err) {
+			if (/SQLITE_BUSY/.test(`${(err as { code?: string })?.code ?? ''} ${String(err)}`)) {
+				await this.reconnect();
+			}
+			throw err;
+		}
+	}
+	override execute(...args: Parameters<Sqlite3Client['execute']>) {
+		return this.#replaceOnBusy(() => super.execute(...args));
+	}
+	override batch(...args: Parameters<Sqlite3Client['batch']>) {
+		return this.#replaceOnBusy(() => super.batch(...args));
+	}
+	override transaction(...args: Parameters<Sqlite3Client['transaction']>) {
+		return this.#replaceOnBusy(() => super.transaction(...args));
+	}
+}
 const localDb = new LibsqlDatabase(dbPath, { timeout: 5 });
-const client = new Sqlite3Client(dbPath, { timeout: 5 }, localDb, 'number');
+const client = new TestSqlite3Client(dbPath, { timeout: 5 }, localDb, 'number');
 const testDb = drizzle(client);
 
 mock.module('$lib/server/db', () => ({ db: testDb }));
