@@ -9,9 +9,13 @@
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
-	let { isPrimary, tenantSlug }: { isPrimary: boolean; tenantSlug: string } = $props();
+	let {
+		isPrimary,
+		tenantSlug,
+		portalScope = 'full'
+	}: { isPrimary: boolean; tenantSlug: string; portalScope?: string } = $props();
 
-	const items = $derived(getChecklistItems(isPrimary));
+	const items = $derived(getChecklistItems(isPrimary, portalScope));
 	const prefsQuery = getClientUserPreferences();
 	const prefs = $derived(prefsQuery.current);
 

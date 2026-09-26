@@ -7,10 +7,14 @@
 	import { tourState, tourActions } from '$lib/stores/onboarding-store.svelte';
 	import { getClientUserPreferences, updateClientUserPreferences } from '$lib/remotes/client-user-preferences.remote';
 
-	let { isPrimary, tenantSlug }: { isPrimary: boolean; tenantSlug: string } = $props();
+	let {
+		isPrimary,
+		tenantSlug,
+		portalScope = 'full'
+	}: { isPrimary: boolean; tenantSlug: string; portalScope?: string } = $props();
 
-	const steps = $derived(getTourSteps(isPrimary));
-	const checklistItems = $derived(getChecklistItems(isPrimary));
+	const steps = $derived(getTourSteps(isPrimary, portalScope));
+	const checklistItems = $derived(getChecklistItems(isPrimary, portalScope));
 	let showCard = $state(false);
 	let navigating = $state(false);
 

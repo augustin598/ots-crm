@@ -5,11 +5,12 @@
 	 * Starea („modal", „banner" sau nimic) e decisă pe server, în layoutul
 	 * portalului, ca să se randeze din prima. Modalul apare o dată pe sesiune;
 	 * după trei amânări rămâne doar bannerul.
+	 *
+	 * Vizual, modalul urmează foaia albă a checkout-ului din /pachete-hosting
+	 * (bară de sus, corp, subsol gri) — stilurile `co-*` nu sunt încărcate în
+	 * portal, deci le reproducem local, cu aceleași valori.
 	 */
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
 	import IconWhatsapp from '$lib/components/marketing/icon-whatsapp.svelte';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { untrack } from 'svelte';
@@ -134,68 +135,301 @@
 		if (!next) closeWithoutCounting();
 	}}
 >
-	<Dialog.Content class="sm:max-w-md">
-		<div class="flex items-start gap-3.5">
+	<Dialog.Content
+		class="wa-sheet"
+		showCloseButton={false}
+		onOpenAutoFocus={(e) => {
+			// Focusul pe câmpul de telefon, nu pe „Închide" (primul element tabbabil).
+			e.preventDefault();
+			document.getElementById('wa-phone')?.focus();
+		}}
+	>
+		<div class="wa-top">
 			<div class="wa-badge">
-				<IconWhatsapp class="size-6" />
+				<IconWhatsapp class="size-5" />
 			</div>
-			<div class="min-w-0">
-				<Dialog.Title class="text-[17px] leading-snug font-extrabold text-balance">
-					Care e numărul tău de WhatsApp?
-				</Dialog.Title>
-				<Dialog.Description class="mt-1 text-[13.5px] leading-relaxed">
-					Când apare ceva urgent la proiectul tău, cel mai rapid te găsim pe WhatsApp. Lasă-ne
-					numărul tău de mobil și echipa <span class="font-semibold text-foreground">{tenantName}</span>
-					îți scrie direct acolo, în loc să trimită un e-mail pe care-l vezi a doua zi.
-				</Dialog.Description>
+			<Dialog.Title class="wa-title">Care e numărul tău de WhatsApp?</Dialog.Title>
+			<button type="button" class="wa-close" onclick={closeWithoutCounting} disabled={saving}>
+				<XIcon class="size-3.5" /> Închide
+			</button>
+		</div>
+
+		<div class="wa-body">
+			<Dialog.Description class="wa-sub">
+				Când apare ceva urgent la proiectul tău, cel mai rapid te găsim pe WhatsApp. Lasă-ne
+				numărul de mobil și echipa <strong>{tenantName}</strong> îți scrie direct acolo, în loc să
+				trimită un e-mail pe care-l vezi a doua zi.
+			</Dialog.Description>
+
+			<div class="wa-field">
+				<label class="wa-label" for="wa-phone">Numărul tău de mobil</label>
+				<input
+					id="wa-phone"
+					class="wa-input"
+					class:wa-input-error={!!error}
+					type="tel"
+					inputmode="tel"
+					autocomplete="tel"
+					placeholder="+40 7xx xxx xxx"
+					bind:value={phone}
+					disabled={saving}
+					aria-invalid={error ? 'true' : undefined}
+					aria-describedby={error ? 'wa-phone-error' : 'wa-phone-hint'}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') void save();
+					}}
+				/>
+				{#if error}
+					<p id="wa-phone-error" class="wa-hint wa-hint-err">{error}</p>
+				{:else}
+					<p id="wa-phone-hint" class="wa-hint">
+						Îl folosim doar ca să vorbim cu tine despre proiectele tale. Îl poți schimba sau șterge
+						oricând din Setări.
+					</p>
+				{/if}
 			</div>
 		</div>
 
-		<div class="flex flex-col gap-1.5">
-			<Label for="wa-phone">Numărul tău de mobil</Label>
-			<Input
-				id="wa-phone"
-				type="tel"
-				inputmode="tel"
-				autocomplete="tel"
-				placeholder="+40 7xx xxx xxx"
-				bind:value={phone}
-				disabled={saving}
-				aria-invalid={error ? 'true' : undefined}
-				aria-describedby={error ? 'wa-phone-error' : 'wa-phone-hint'}
-				onkeydown={(e) => {
-					if (e.key === 'Enter') void save();
-				}}
-			/>
-			{#if error}
-				<p id="wa-phone-error" class="text-xs font-medium text-destructive">{error}</p>
-			{:else}
-				<p id="wa-phone-hint" class="text-xs text-muted-foreground">
-					Îl folosim doar ca să vorbim cu tine despre proiectele tale. Îl poți schimba sau șterge
-					oricând din Setări.
-				</p>
-			{/if}
-		</div>
-
-		<Dialog.Footer>
-			<Button variant="ghost" onclick={dismiss} disabled={saving}>Nu acum</Button>
-			<Button onclick={save} disabled={saving || !phone.trim()}>
+		<div class="wa-foot">
+			<button type="button" class="wa-btn-ghost" onclick={dismiss} disabled={saving}>Nu acum</button>
+			<div class="wa-foot-meta">Durează zece secunde</div>
+			<button type="button" class="wa-btn-primary" onclick={save} disabled={saving || !phone.trim()}>
 				{saving ? 'Se verifică…' : 'Salvează numărul'}
-			</Button>
-		</Dialog.Footer>
+			</button>
+		</div>
 	</Dialog.Content>
 </Dialog.Root>
 
 <style>
+	/* Aceleași valori ca foaia checkout-ului (/pachete-hosting); în dark mode
+	   cad pe tokenii portalului. */
+	:global(.wa-sheet) {
+		--wa-bg: #ffffff;
+		--wa-soft: #f7f8fa;
+		--wa-top: linear-gradient(180deg, #fafbfd, #ffffff);
+		--wa-ink: #0b1220;
+		--wa-ink2: #475569;
+		--wa-muted: #94a3b8;
+		--wa-border: #e5e9f0;
+		--wa-accent: #1877f2;
+		--wa-accent-dark: #0d5cc7;
+		max-width: 520px;
+		padding: 0;
+		gap: 0;
+		overflow: hidden;
+		border: 0;
+		border-radius: 20px;
+		background: var(--wa-bg);
+		color: var(--wa-ink);
+		box-shadow:
+			0 40px 80px rgba(11, 18, 32, 0.4),
+			0 12px 32px rgba(11, 18, 32, 0.2);
+	}
+	:global(.dark .wa-sheet) {
+		--wa-bg: var(--card);
+		--wa-soft: var(--muted);
+		--wa-top: var(--card);
+		--wa-ink: var(--foreground);
+		--wa-ink2: var(--muted-foreground);
+		--wa-muted: var(--muted-foreground);
+		--wa-border: var(--border);
+	}
+
+	.wa-top {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 16px 20px 16px 24px;
+		border-bottom: 1px solid var(--wa-border);
+		background: var(--wa-top);
+	}
 	.wa-badge {
-		width: 44px;
-		height: 44px;
+		width: 40px;
+		height: 40px;
 		border-radius: 12px;
 		flex-shrink: 0;
 		display: grid;
 		place-items: center;
-		background: color-mix(in oklch, #25d366 14%, transparent);
+		color: #16a34a;
+		background: rgba(37, 211, 102, 0.14);
 	}
+	:global(.wa-title) {
+		flex: 1;
+		min-width: 0;
+		margin: 0;
+		font-size: 17px;
+		font-weight: 800;
+		letter-spacing: -0.01em;
+		line-height: 1.25;
+		color: var(--wa-ink);
+	}
+	.wa-close {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 12px;
+		border-radius: 8px;
+		background: transparent;
+		border: 1px solid var(--wa-border);
+		font: inherit;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--wa-ink2);
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+	.wa-close:hover {
+		background: var(--wa-soft);
+		color: var(--wa-ink);
+	}
+
+	.wa-body {
+		padding: 22px 24px 24px;
+	}
+	:global(.wa-sub) {
+		margin: 0 0 18px;
+		font-size: 14px;
+		line-height: 1.55;
+		color: var(--wa-ink2);
+	}
+	:global(.wa-sub strong) {
+		color: var(--wa-ink);
+		font-weight: 700;
+	}
+	.wa-field {
+		display: flex;
+		flex-direction: column;
+	}
+	.wa-label {
+		display: block;
+		margin-bottom: 6px;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--wa-ink2);
+	}
+	.wa-input {
+		width: 100%;
+		padding: 11px 14px;
+		background: var(--wa-bg);
+		border: 1.5px solid var(--wa-border);
+		border-radius: 9px;
+		font: inherit;
+		font-size: 14px;
+		color: var(--wa-ink);
+		outline: none;
+		transition:
+			border-color 0.12s,
+			box-shadow 0.12s;
+	}
+	.wa-input::placeholder {
+		color: var(--wa-muted);
+	}
+	.wa-input:focus {
+		border-color: var(--wa-accent);
+		box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.12);
+	}
+	.wa-input:disabled {
+		opacity: 0.6;
+	}
+	.wa-input-error,
+	.wa-input-error:focus {
+		border-color: #ef4444;
+		box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+	}
+	.wa-hint {
+		margin: 6px 0 0;
+		font-size: 11.5px;
+		line-height: 1.45;
+		color: var(--wa-muted);
+	}
+	.wa-hint-err {
+		color: #b91c1c;
+		font-weight: 500;
+	}
+
+	.wa-foot {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 14px 24px;
+		border-top: 1px solid var(--wa-border);
+		background: var(--wa-soft);
+	}
+	.wa-foot-meta {
+		flex: 1;
+		text-align: center;
+		font-size: 12px;
+		color: var(--wa-muted);
+	}
+	.wa-btn-primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 11px 20px;
+		border-radius: 10px;
+		border: 0;
+		background: var(--wa-accent);
+		color: #fff;
+		font: inherit;
+		font-size: 14px;
+		font-weight: 700;
+		cursor: pointer;
+		transition:
+			background 0.12s,
+			transform 0.12s,
+			box-shadow 0.12s;
+	}
+	.wa-btn-primary:not(:disabled):hover {
+		background: var(--wa-accent-dark);
+		transform: translateY(-1px);
+		box-shadow: 0 6px 16px rgba(24, 119, 242, 0.25);
+	}
+	.wa-btn-primary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+	.wa-btn-ghost {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		border-radius: 9px;
+		background: transparent;
+		border: 1px solid var(--wa-border);
+		font: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--wa-ink2);
+		cursor: pointer;
+	}
+	.wa-btn-ghost:not(:disabled):hover {
+		background: var(--wa-bg);
+		color: var(--wa-ink);
+	}
+	.wa-btn-ghost:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	@media (max-width: 520px) {
+		.wa-top {
+			padding: 14px 16px;
+		}
+		.wa-body {
+			padding: 18px 16px 20px;
+		}
+		.wa-foot {
+			padding: 12px 16px;
+			flex-wrap: wrap;
+		}
+		.wa-foot-meta {
+			display: none;
+		}
+		.wa-btn-primary {
+			margin-left: auto;
+		}
+	}
+
 	.wa-banner {
 		display: flex;
 		align-items: center;

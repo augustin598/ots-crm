@@ -17,6 +17,8 @@
 
 	const tenantSlug = $derived(page.params.tenant as string);
 	const isPrimary = $derived((page.data as any)?.isClientUserPrimary ?? true);
+	// 'hosting' = cont de self-signup: checklist-ul listează doar secțiunile accesibile.
+	const portalScope = $derived(((page.data as any)?.portalScope as string | undefined) ?? 'full');
 	const clientId = $derived((page.data as any)?.client?.id as string);
 
 	function getInvoiceStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' {
@@ -307,7 +309,7 @@
 		</div>
 	</div>
 
-	<DashboardChecklist {isPrimary} {tenantSlug} />
+	<DashboardChecklist {isPrimary} {tenantSlug} {portalScope} />
 </div>
 
 <style>

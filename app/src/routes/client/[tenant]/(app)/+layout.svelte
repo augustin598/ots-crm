@@ -393,7 +393,11 @@
 		</main>
 	</SidebarInset>
 </SidebarProvider>
-<OnboardingTour isPrimary={data.isClientUserPrimary ?? true} tenantSlug={tenantSlug ?? ''} />
+<OnboardingTour
+	isPrimary={data.isClientUserPrimary ?? true}
+	tenantSlug={tenantSlug ?? ''}
+	portalScope={data.portalScope}
+/>
 {#if browser}
 	<Toaster />
 {/if}

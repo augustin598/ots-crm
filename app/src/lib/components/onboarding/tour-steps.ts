@@ -46,6 +46,14 @@ const ALL_STEPS: TourStep[] = [
 		primaryOnly: true
 	},
 	{
+		id: 'hosting',
+		path: 'hosting',
+		sidebarKey: 'hosting',
+		title: 'Hosting',
+		description: 'Conturile tale de hosting, pachetele disponibile și reînnoirile.',
+		primaryOnly: true
+	},
+	{
 		id: 'budgets',
 		path: 'budgets',
 		sidebarKey: 'budgets',
@@ -97,13 +105,29 @@ const ALL_STEPS: TourStep[] = [
 	}
 ];
 
-export function getTourSteps(isPrimary: boolean): TourStep[] {
-	if (isPrimary) return ALL_STEPS;
-	return ALL_STEPS.filter((s) => !s.primaryOnly);
+/**
+ * Cont de hosting (self-signup de pe /pachete-hosting): portalul se reduce la
+ * Dashboard, Hosting, Facturi, Setări — turul și checklist-ul la fel, altfel ar
+ * trimite omul spre secțiuni pe care nu le poate deschide (403).
+ */
+const HOSTING_SCOPE_STEP_IDS = new Set(['dashboard', 'hosting', 'invoices', 'settings']);
+const HOSTING_SCOPE_DESCRIPTIONS: Record<string, string> = {
+	dashboard: 'Aici ai o privire de ansamblu: conturile tale de hosting și facturile recente.',
+	invoices: 'Facturile de hosting: descarcă PDF-uri și plătește online.'
+};
+
+export function getTourSteps(isPrimary: boolean, portalScope: string = 'full'): TourStep[] {
+	let steps = isPrimary ? ALL_STEPS : ALL_STEPS.filter((s) => !s.primaryOnly);
+	if (portalScope === 'hosting') {
+		steps = steps
+			.filter((s) => HOSTING_SCOPE_STEP_IDS.has(s.id))
+			.map((s) => ({ ...s, description: HOSTING_SCOPE_DESCRIPTIONS[s.id] ?? s.description }));
+	}
+	return steps;
 }
 
-export function getChecklistItems(isPrimary: boolean) {
-	return getTourSteps(isPrimary).map((s) => ({
+export function getChecklistItems(isPrimary: boolean, portalScope: string = 'full') {
+	return getTourSteps(isPrimary, portalScope).map((s) => ({
 		id: s.id,
 		label: s.title,
 		path: s.path
