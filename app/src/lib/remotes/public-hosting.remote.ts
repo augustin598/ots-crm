@@ -24,6 +24,9 @@ import { withTursoBusyRetry } from '$lib/server/plugins/keez/db-retry';
 import { decrypt } from '$lib/server/plugins/smartbill/crypto';
 import { rateLimit } from '$lib/server/redis';
 import { insertHostingOrder } from '$lib/server/hosting/insert-order';
+import { PUBLIC_TENANT_SLUG, resolvePublicTenantId } from '$lib/server/public-page-access';
+import { resolvePortalClientForUser } from '$lib/server/portal-signup';
+import { buildBillingUpdateFromOrder, type OrderBillingInput } from '$lib/server/hosting/billing-from-order';
 
 /**
  * Public hosting pages — accessible without authentication.
@@ -39,46 +42,37 @@ import { insertHostingOrder } from '$lib/server/hosting/insert-order';
  *  - NEVER expose internal fields (daUsername, daServerId, credentials).
  */
 
-const PUBLIC_TENANT_SLUG = env.PUBLIC_HOSTING_TENANT_SLUG ?? 'ots';
-
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 }
 
 /**
- * Resolve the owner tenant for the public site. Cached for 5 minutes — a slug
- * rename or tenant deletion can't take the public site offline for the full
- * pod lifetime (Audit MED-8 — previously cached for process lifetime, which
- * meant any tenant table change required a restart).
+ * Clientul logat comandă pe contul lui: îi scriem datele de facturare din
+ * checkout pe rândul existent (contul de self-signup n-are CUI/adresă) și
+ * întoarcem rândul proaspăt, ca restul fluxului (Stripe Customer, inquiry) să
+ * vadă datele noi.
  */
-const TENANT_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedTenantId: string | null = null;
-let cachedTenantAt = 0;
-function invalidateTenantCache(): void {
-	cachedTenantId = null;
-	cachedTenantAt = 0;
-}
-async function resolvePublicTenantId(): Promise<string> {
-	if (cachedTenantId && Date.now() - cachedTenantAt < TENANT_CACHE_TTL_MS) {
-		return cachedTenantId;
-	}
-	const [t] = await db
-		.select({ id: table.tenant.id })
-		.from(table.tenant)
-		.where(eq(table.tenant.slug, PUBLIC_TENANT_SLUG))
+async function applyBillingToPortalClient(
+	tenantId: string,
+	clientId: string,
+	billing: OrderBillingInput,
+	now: Date
+): Promise<typeof table.client.$inferSelect> {
+	await withTursoBusyRetry(
+		() =>
+			db
+				.update(table.client)
+				.set({ ...buildBillingUpdateFromOrder(billing), updatedAt: now })
+				.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId))),
+		{ tenantId, label: 'public-hosting/updateBillingOnPortalClient' }
+	);
+	const [row] = await db
+		.select()
+		.from(table.client)
+		.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId)))
 		.limit(1);
-	if (!t) {
-		// Don't poison the cache when the tenant is missing — let the next call
-		// re-attempt (e.g. tenant being created via admin while public site is up).
-		cachedTenantId = null;
-		cachedTenantAt = 0;
-		throw new Error(
-			`PUBLIC_HOSTING_TENANT_SLUG="${PUBLIC_TENANT_SLUG}" not found in tenant table`
-		);
-	}
-	cachedTenantId = t.id;
-	cachedTenantAt = Date.now();
-	return t.id;
+	if (!row) throw error(500, 'Contul tău nu a putut fi actualizat. Încearcă din nou.');
+	return row;
 }
 
 /**
@@ -166,7 +160,9 @@ export const getPublicHostingPackages = query(async () => {
 	// off the perceived "step 3 loading" time on first visits.
 	const publishableKey = await getPublishableKeyForTenant(tenantId);
 
-	return { packages, vatRate, tenantInfo: tenantInfo ?? null, publishableKey };
+	// Slug-ul tenantului public: pagina construiește din el linkurile către portalul
+	// de client (/client/<slug>/login, Google sign-in) fără să-l hardcodeze.
+	return { packages, vatRate, tenantInfo: tenantInfo ?? null, publishableKey, tenantSlug: PUBLIC_TENANT_SLUG };
 });
 
 // ====================== Rate limit (Redis-backed, multi-replica safe) ======
@@ -788,6 +784,31 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 	const normalizedEmail = data.email.trim().toLowerCase();
 	const billingType = data.billingType ?? 'company';
 
+	// Client logat în portal care comandă cu emailul lui: comanda merge pe contul
+	// lui și îi completăm datele de facturare (contul de self-signup n-are
+	// CUI/adresă). Pe rutele publice hooks nu setează locals.client, deci îl
+	// rezolvăm din user. Anonimii cu un email existent rămân pe calea de azi
+	// (atașare fără modificarea rândului — anti-enumerare + anti-tampering).
+	const portalClient = event?.locals.user
+		? await resolvePortalClientForUser(tenantId, event.locals.user.id)
+		: null;
+	const ordersOnOwnAccount =
+		!!portalClient && (portalClient.email ?? '').toLowerCase() === normalizedEmail;
+	const billingInput: OrderBillingInput = {
+		billingType,
+		cui: data.cui,
+		vatPayer: data.vatPayer,
+		companyName: data.companyName,
+		registrationNumber: data.registrationNumber,
+		firstName: data.firstName,
+		lastName: data.lastName,
+		phone: data.phone,
+		address: data.address,
+		city: data.city,
+		county: data.county,
+		postalCode: data.postalCode
+	};
+
 	// Validate product belongs to tenant + is public
 	const [product] = await db
 		.select()
@@ -871,8 +892,22 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				tenantId,
 				metadata: { cui: cleanCui, clientId: existingClient.id, submittedEmail: normalizedEmail }
 			});
-			clientRow = existingClient;
+			if (ordersOnOwnAccount && portalClient && existingClient.id === portalClient.id) {
+				// Propriul cont, cu CUI deja setat: reîmprospătăm datele din formular.
+				clientRow = await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now);
+			} else {
+				if (ordersOnOwnAccount && portalClient) {
+					logInfo('directadmin', 'Logged-in client ordered with a CUI owned by another client — attached to the CUI owner', {
+						tenantId,
+						metadata: { cui: cleanCui, portalClientId: portalClient.id, cuiOwnerId: existingClient.id }
+					});
+				}
+				clientRow = existingClient;
+			}
 			clientId = existingClient.id;
+		} else if (ordersOnOwnAccount && portalClient) {
+			clientRow = await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now);
+			clientId = clientRow.id;
 		} else {
 			try {
 				const inserted = await withTursoBusyRetry(
@@ -966,7 +1001,10 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				tenantId,
 				metadata: { clientId: existingByEmail.id, email: normalizedEmail }
 			});
-			clientRow = existingByEmail;
+			clientRow =
+				ordersOnOwnAccount && portalClient && existingByEmail.id === portalClient.id
+					? await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now)
+					: existingByEmail;
 			clientId = existingByEmail.id;
 		} else {
 			try {

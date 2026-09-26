@@ -73,8 +73,17 @@
 		priceCents,
 		bankInfo,
 		preloadedPublishableKey = null,
+		initialEmail = null,
+		lockEmail = false,
+		portalTenantSlug = 'ots',
 		onClose
 	}: {
+		// Client logat în portal: emailul vine precompletat și blocat, ca să nu
+		// comande accidental pe alt cont; comanda se leagă de contul lui.
+		initialEmail?: string | null;
+		lockEmail?: boolean;
+		// Slug-ul tenantului public — pentru linkurile către /client/<slug>/login.
+		portalTenantSlug?: string;
 		plan: Plan;
 		period: Period;
 		vatRate: number;
@@ -360,7 +369,9 @@
 	}
 
 	// Account
-	let email = $state('');
+	// Valoare inițială, intenționat: modalul e recreat la fiecare deschidere ({#if checkoutPkg}).
+	// svelte-ignore state_referenced_locally
+	let email = $state(initialEmail ?? '');
 	// password state removed — account is provisioned silently post-payment.
 	let newAccount = $state(true);
 
@@ -1529,6 +1540,7 @@
 									type="email"
 									placeholder="contact@firma.ro"
 									autocomplete="email"
+									readonly={lockEmail}
 									value={email}
 									oninput={(e) => (email = (e.currentTarget as HTMLInputElement).value)}
 									onblur={() => {
@@ -1537,7 +1549,11 @@
 										if (!validateEmail(email)) runEmailCrmCheck(email);
 									}}
 								/>
-								{#if emailFormatError}
+								{#if lockEmail}
+									<div class="co-hint co-hint-ok">
+										<CheckIcon size={12} /> Comanda se leagă de contul tău.
+									</div>
+								{:else if emailFormatError}
 									<div class="co-hint co-hint-err">{emailFormatError}</div>
 								{:else if isPersonalEmailWarn}
 									<div class="co-hint co-hint-warn">
@@ -1555,7 +1571,7 @@
 											Dacă ai deja cont OTS,
 											<a
 												class="co-hint-link"
-												href="/login?email={encodeURIComponent(normalizeEmail(email))}"
+												href="/client/{portalTenantSlug}/login?email={encodeURIComponent(normalizeEmail(email))}"
 												target="_blank"
 												rel="noopener">autentifică-te</a
 											>
@@ -2112,7 +2128,7 @@
 						<p class="co-sub" style="text-align: center; max-width: 520px; margin: 0 auto 28px;">
 							{#if isExistingClient}
 								Cererea ta este vizibilă la noi pentru contul existent asociat cu
-								<strong>{email}</strong>. Autentifică-te pe <a href="/login?email={encodeURIComponent(email)}" target="_blank" rel="noopener">/login</a>
+								<strong>{email}</strong>. Autentifică-te în <a href="/client/{portalTenantSlug}/login?email={encodeURIComponent(email)}" target="_blank" rel="noopener">portalul de client</a>
 								sau așteaptă să te contacteze echipa OTS pentru continuare.
 							{:else}
 								Comanda a fost înregistrată cu emailul <strong>{email}</strong>. Stripe îți va trimite chitanța plății, iar echipa OTS te contactează cu accesul la cont după confirmarea încasării.
@@ -2215,7 +2231,7 @@
 							<button type="button" class="co-btn-ghost" onclick={onClose}>
 								Înapoi la pachete
 							</button>
-							<a class="co-btn-primary" href="/login" style="text-decoration: none;">
+							<a class="co-btn-primary" href="/client/{portalTenantSlug}/login" style="text-decoration: none;">
 								Intră în contul tău <ArrowUpRightIcon size={13} />
 							</a>
 						</div>
