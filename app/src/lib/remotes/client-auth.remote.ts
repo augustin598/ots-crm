@@ -14,8 +14,52 @@ import { logInfo } from '$lib/server/logger';
 import { requireStaff } from '$lib/server/get-actor';
 import { env as publicEnv } from '$env/dynamic/public';
 import { getAppBaseUrl } from '$lib/server/app-url';
+import {
+	HostingSignupSchema,
+	findOrCreateHostingSignupClient,
+	issueMagicLink
+} from '$lib/server/portal-signup';
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
+
+/**
+ * Cont nou de hosting — de pe /pachete-hosting sau /client/[tenant]/signup. Public.
+ * Răspunsul e mereu același (anti-enumerare, ca la requestMagicLink): dacă emailul
+ * e deja al unui client, primește doar linkul de login; dacă nu, creăm clientul
+ * (scope 'hosting', fără CUI) și trimitem linkul de activare. Datele de facturare
+ * vin la prima comandă.
+ */
+export const hostingSignup = command(HostingSignupSchema, async (data) => {
+	const GENERIC = {
+		success: true as const,
+		message: 'Dacă adresa e validă, ai primit pe email linkul de activare.'
+	};
+	try {
+		const event = getRequestEvent();
+		const clientIp = event ? event.getClientAddress() : null;
+		if (checkAuthRateLimit(data.email, clientIp)) return GENERIC;
+
+		const [tenant] = await db
+			.select({ id: table.tenant.id, slug: table.tenant.slug })
+			.from(table.tenant)
+			.where(eq(table.tenant.slug, data.tenantSlug))
+			.limit(1);
+		if (!tenant) return GENERIC;
+
+		const { clients } = await findOrCreateHostingSignupClient({
+			tenantId: tenant.id,
+			name: data.name,
+			email: data.email,
+			phone: data.phone ?? null
+		});
+		await issueMagicLink(tenant, data.email, clients);
+		return GENERIC;
+	} catch (err) {
+		// SECURITY: nu scurgem detalii interne și nu semnalăm dacă emailul există.
+		console.error('hostingSignup error:', err);
+		return GENERIC;
+	}
+});
 
 function generateMagicLinkToken(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
