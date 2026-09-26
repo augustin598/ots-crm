@@ -68,7 +68,7 @@ function generateCookieSecret(): string {
  * `/pachete-hosting`. Cache 5 minute — un rename de slug nu trebuie să țină
  * pagina publică jos până la următorul restart.
  */
-const PUBLIC_TENANT_SLUG = env.PUBLIC_SITE_TENANT_SLUG ?? env.PUBLIC_HOSTING_TENANT_SLUG ?? 'ots';
+export const PUBLIC_TENANT_SLUG = env.PUBLIC_SITE_TENANT_SLUG ?? env.PUBLIC_HOSTING_TENANT_SLUG ?? 'ots';
 const TENANT_CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedTenantId: string | null = null;
 let cachedTenantAt = 0;
