@@ -47,7 +47,11 @@
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
 	import UsersIcon from '@lucide/svelte/icons/users';
-	import { getClientsRestrictionStatus, setClientRestriction } from '$lib/remotes/client-restrictions.remote';
+	import {
+		getClientsRestrictionStatus,
+		setClientRestriction,
+		setClientPortalScope
+	} from '$lib/remotes/client-restrictions.remote';
 	import { toast } from 'svelte-sonner';
 	import { clientLogger } from '$lib/client-logger';
 
@@ -194,6 +198,16 @@
 			)
 			: clientsRestriction
 	);
+
+	async function handleSetScope(clientId: string, value: string) {
+		try {
+			const portalScope = value === 'hosting' ? 'hosting' : 'full';
+			await setClientPortalScope({ clientId, portalScope }).updates(clientRestrictionsQuery);
+			toast.success(portalScope === 'hosting' ? 'Clientul vede doar hosting.' : 'Clientul vede portalul complet.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Nu am putut schimba portalul clientului.');
+		}
+	}
 
 	async function handleSetRestriction(clientId: string, value: string) {
 		try {
@@ -1018,8 +1032,21 @@
 													{:else}
 														<Badge variant="outline">Automat</Badge>
 													{/if}
+													{#if client.portalScope === 'hosting'}
+														<Badge variant="secondary">Doar hosting</Badge>
+													{/if}
 												</div>
 											</div>
+											<!-- Cât din portal vede clientul (conturile de self-signup pornesc pe „doar hosting"). -->
+											<Select type="single" value={client.portalScope} onValueChange={(val) => handleSetScope(client.id, val)}>
+												<SelectTrigger class="w-[150px] mr-2" aria-label="Portal vizibil">
+													{client.portalScope === 'hosting' ? 'Doar hosting' : 'Portal complet'}
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="full">Portal complet</SelectItem>
+													<SelectItem value="hosting">Doar hosting</SelectItem>
+												</SelectContent>
+											</Select>
 											<Select type="single" value={client.restrictedAccess ?? 'auto'} onValueChange={(val) => handleSetRestriction(client.id, val)}>
 												<SelectTrigger class="w-[160px]">
 													{#if client.restrictedAccess === 'forced'}
