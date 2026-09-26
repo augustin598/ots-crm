@@ -49,11 +49,13 @@ async function resolveContactName(clientId: string, normalizedEmail: string, isP
 		if (fullClient?.legalRepresentative) {
 			return fullClient.legalRepresentative.trim();
 		}
-		// Persoană fizică / cont creat singur de pe /pachete-hosting: `name` E numele
-		// persoanei (nu al firmei), deci e un nume de contact valid.
+		// Persoană fizică / cont creat singur de pe /pachete-hosting care încă n-are
+		// firmă: `name` E numele persoanei (nu al firmei), deci e un nume de contact
+		// valid. După ce contul primește CUI (a comandat pe firmă), name = firma.
 		if (
 			fullClient?.name &&
-			(fullClient.legalType === 'pf' || fullClient.signupSource === 'hosting-signup')
+			(fullClient.legalType === 'pf' ||
+				(fullClient.signupSource === 'hosting-signup' && !fullClient.cui))
 		) {
 			return fullClient.name.trim();
 		}

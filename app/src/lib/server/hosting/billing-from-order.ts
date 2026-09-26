@@ -41,6 +41,52 @@ export type ClientBillingUpdate = {
 
 const ADDRESS_FIELDS = ['phone', 'address', 'city', 'county', 'postalCode'] as const;
 
+/** Doar câmpurile de contact/adresă — fără identitatea fiscală. */
+export type ClientAddressUpdate = Pick<ClientBillingUpdate, (typeof ADDRESS_FIELDS)[number]>;
+
+/** Ce știm despre clientul logat când judecăm o comandă. */
+export type PortalOrderContext = {
+	isPrimary: boolean;
+	email: string | null;
+	cui: string | null;
+};
+
+/**
+ * Cine e la tastatură și ce are voie să schimbe pe rândul clientului.
+ *
+ * - `ordersOnOwnAccount`: contactul PRIMAR al clientului, logat, comandă cu
+ *   emailul contului → comanda se leagă de rândul lui. Un contact secundar
+ *   (email diferit de al clientului, sau isPrimary=false) rămâne pe calea
+ *   anonimă: atașare fără să atingem rândul.
+ * - `canPatchIdentity`: identitatea fiscală (nume, firmă, CUI, formă juridică)
+ *   se scrie doar pe conturile care încă n-au CUI (self-signup / PF). Un client
+ *   cu CUI deja setat — de regulă cu facturi și partener Keez — nu-și poate
+ *   rescrie identitatea din checkout; primește doar adresa/telefonul.
+ */
+export function decideOrderOwnership(
+	portalClient: PortalOrderContext | null,
+	submittedEmail: string
+): { ordersOnOwnAccount: boolean; canPatchIdentity: boolean } {
+	const email = submittedEmail.trim().toLowerCase();
+	const ordersOnOwnAccount =
+		!!portalClient &&
+		portalClient.isPrimary &&
+		email.length > 0 &&
+		(portalClient.email ?? '').trim().toLowerCase() === email;
+	const canPatchIdentity = ordersOnOwnAccount && !(portalClient?.cui ?? '').trim();
+	return { ordersOnOwnAccount, canPatchIdentity };
+}
+
+/** Doar adresa/telefonul din comandă (pentru clienții cu identitate fiscală deja setată). */
+export function buildAddressUpdateFromOrder(data: OrderBillingInput): ClientAddressUpdate {
+	const out: ClientAddressUpdate = {};
+	for (const key of ADDRESS_FIELDS) {
+		const value = data[key]?.trim();
+		if (value) out[key] = value;
+	}
+	return out;
+}
+
 export function buildBillingUpdateFromOrder(data: OrderBillingInput): ClientBillingUpdate {
 	let out: ClientBillingUpdate;
 	if (data.billingType === 'company') {
@@ -67,9 +113,6 @@ export function buildBillingUpdateFromOrder(data: OrderBillingInput): ClientBill
 			country: 'RO'
 		};
 	}
-	for (const key of ADDRESS_FIELDS) {
-		const value = data[key]?.trim();
-		if (value) out[key] = value;
-	}
+	Object.assign(out, buildAddressUpdateFromOrder(data));
 	return out;
 }

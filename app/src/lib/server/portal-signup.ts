@@ -129,6 +129,8 @@ export async function resolvePortalClientForUser(tenantId: string, userId: strin
 			name: table.client.name,
 			email: table.client.email,
 			portalScope: table.client.portalScope,
+			// Doar contactul primar poate comanda „pe contul lui” și modifica rândul.
+			isPrimary: table.clientUser.isPrimary,
 			// Datele de facturare deja cunoscute — checkout-ul le precompletează.
 			businessName: table.client.businessName,
 			legalType: table.client.legalType,

@@ -7,6 +7,8 @@ export type PortalClientSummary = {
 	id: string;
 	name: string;
 	email: string | null;
+	/** Contact primar (poate comanda pe contul lui); secundarii comandă ca anonimi. */
+	isPrimary: boolean;
 	billing: {
 		businessName: string | null;
 		legalType: string | null;

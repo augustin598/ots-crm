@@ -3,7 +3,59 @@ import { describe, test, expect, mock } from 'bun:test';
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
 
-const { buildBillingUpdateFromOrder } = await import('../hosting/billing-from-order');
+const { buildBillingUpdateFromOrder, buildAddressUpdateFromOrder, decideOrderOwnership } = await import(
+	'../hosting/billing-from-order'
+);
+
+describe('decideOrderOwnership', () => {
+	const primaryNoCui = { isPrimary: true, email: 'Ion@Firma.ro', cui: null };
+
+	test('anonim → nu e contul lui, nu se scrie nimic', () => {
+		expect(decideOrderOwnership(null, 'ion@firma.ro')).toEqual({ ordersOnOwnAccount: false, canPatchIdentity: false });
+	});
+
+	test('contact primar fără CUI, cu emailul contului (case-insensitive) → poate scrie și identitatea', () => {
+		expect(decideOrderOwnership(primaryNoCui, ' ION@firma.RO ')).toEqual({ ordersOnOwnAccount: true, canPatchIdentity: true });
+	});
+
+	test('contact primar, dar cu alt email decât al contului → cale anonimă', () => {
+		expect(decideOrderOwnership(primaryNoCui, 'altcineva@firma.ro').ordersOnOwnAccount).toBe(false);
+	});
+
+	test('contact secundar cu emailul clientului → cale anonimă (nu-i rescrie firma)', () => {
+		expect(decideOrderOwnership({ ...primaryNoCui, isPrimary: false }, 'ion@firma.ro')).toEqual({
+			ordersOnOwnAccount: false,
+			canPatchIdentity: false
+		});
+	});
+
+	test('client cu CUI deja setat → comanda e a lui, dar identitatea fiscală rămâne', () => {
+		expect(decideOrderOwnership({ ...primaryNoCui, cui: '11774376' }, 'ion@firma.ro')).toEqual({
+			ordersOnOwnAccount: true,
+			canPatchIdentity: false
+		});
+	});
+
+	test('cont fără email sau email gol → niciodată al lui', () => {
+		expect(decideOrderOwnership({ ...primaryNoCui, email: null }, '').ordersOnOwnAccount).toBe(false);
+	});
+});
+
+describe('buildAddressUpdateFromOrder', () => {
+	test('doar adresa/telefonul, fără nume/CUI/formă juridică', () => {
+		const r = buildAddressUpdateFromOrder({
+			billingType: 'company',
+			cui: '12345678',
+			companyName: 'Firma SRL',
+			phone: '0722 123 456',
+			city: 'Suceava',
+			address: ''
+		});
+		expect(r).toEqual({ phone: '0722 123 456', city: 'Suceava' });
+		expect('cui' in r).toBe(false);
+		expect('name' in r).toBe(false);
+	});
+});
 
 const ADDRESS = {
 	phone: '0722 123 456',

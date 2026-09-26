@@ -18,6 +18,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 				id: c.id,
 				name: c.name,
 				email: c.email,
+				isPrimary: c.isPrimary,
 				billing: {
 					businessName: c.businessName,
 					legalType: c.legalType,

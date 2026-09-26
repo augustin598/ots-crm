@@ -26,7 +26,12 @@ import { rateLimit } from '$lib/server/redis';
 import { insertHostingOrder } from '$lib/server/hosting/insert-order';
 import { PUBLIC_TENANT_SLUG, resolvePublicTenantId } from '$lib/server/public-page-access';
 import { resolvePortalClientForUser } from '$lib/server/portal-signup';
-import { buildBillingUpdateFromOrder, type OrderBillingInput } from '$lib/server/hosting/billing-from-order';
+import {
+	buildAddressUpdateFromOrder,
+	buildBillingUpdateFromOrder,
+	decideOrderOwnership,
+	type OrderBillingInput
+} from '$lib/server/hosting/billing-from-order';
 
 /**
  * Public hosting pages — accessible without authentication.
@@ -47,22 +52,25 @@ function generateId(): string {
 }
 
 /**
- * Clientul logat comandă pe contul lui: îi scriem datele de facturare din
- * checkout pe rândul existent (contul de self-signup n-are CUI/adresă) și
- * întoarcem rândul proaspăt, ca restul fluxului (Stripe Customer, inquiry) să
- * vadă datele noi.
+ * Clientul logat comandă pe contul lui: îi scriem datele din checkout pe rândul
+ * existent și întoarcem rândul proaspăt, ca restul fluxului (Stripe Customer,
+ * inquiry) să vadă datele noi. `identity` = și identitatea fiscală (nume, firmă,
+ * CUI, formă juridică) — doar pentru conturile fără CUI (self-signup); altfel
+ * doar adresa/telefonul (vezi decideOrderOwnership).
  */
 async function applyBillingToPortalClient(
 	tenantId: string,
 	clientId: string,
 	billing: OrderBillingInput,
-	now: Date
+	now: Date,
+	identity: boolean
 ): Promise<typeof table.client.$inferSelect> {
+	const patch = identity ? buildBillingUpdateFromOrder(billing) : buildAddressUpdateFromOrder(billing);
 	await withTursoBusyRetry(
 		() =>
 			db
 				.update(table.client)
-				.set({ ...buildBillingUpdateFromOrder(billing), updatedAt: now })
+				.set({ ...patch, updatedAt: now })
 				.where(and(eq(table.client.id, clientId), eq(table.client.tenantId, tenantId))),
 		{ tenantId, label: 'public-hosting/updateBillingOnPortalClient' }
 	);
@@ -792,8 +800,9 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 	const portalClient = event?.locals.user
 		? await resolvePortalClientForUser(tenantId, event.locals.user.id)
 		: null;
-	const ordersOnOwnAccount =
-		!!portalClient && (portalClient.email ?? '').toLowerCase() === normalizedEmail;
+	// Doar contactul primar, cu emailul contului; identitatea fiscală se scrie doar
+	// dacă contul n-are încă CUI (un client cu CUI nu și-o poate rescrie din checkout).
+	const { ordersOnOwnAccount, canPatchIdentity } = decideOrderOwnership(portalClient, normalizedEmail);
 	const billingInput: OrderBillingInput = {
 		billingType,
 		cui: data.cui,
@@ -893,8 +902,8 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 				metadata: { cui: cleanCui, clientId: existingClient.id, submittedEmail: normalizedEmail }
 			});
 			if (ordersOnOwnAccount && portalClient && existingClient.id === portalClient.id) {
-				// Propriul cont, cu CUI deja setat: reîmprospătăm datele din formular.
-				clientRow = await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now);
+				// Propriul cont, cu CUI-ul lui: reîmprospătăm doar adresa/telefonul.
+				clientRow = await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now, canPatchIdentity);
 			} else {
 				if (ordersOnOwnAccount && portalClient) {
 					logInfo('directadmin', 'Logged-in client ordered with a CUI owned by another client — attached to the CUI owner', {
@@ -906,7 +915,15 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			}
 			clientId = existingClient.id;
 		} else if (ordersOnOwnAccount && portalClient) {
-			clientRow = await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now);
+			if (!canPatchIdentity) {
+				// Client cu alt CUI deja setat care comandă pe o firmă nouă: comanda rămâne pe
+				// contul lui (datele firmei noi stau în inquiry), rândul primește doar adresa.
+				logInfo('directadmin', 'Logged-in client ordered with a new CUI while its row already has one — identity kept', {
+					tenantId,
+					metadata: { portalClientId: portalClient.id, existingCui: portalClient.cui, orderCui: cleanCui }
+				});
+			}
+			clientRow = await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now, canPatchIdentity);
 			clientId = clientRow.id;
 		} else {
 			try {
@@ -1003,7 +1020,7 @@ export const submitHostingOrder = command(OrderSchema, async (data) => {
 			});
 			clientRow =
 				ordersOnOwnAccount && portalClient && existingByEmail.id === portalClient.id
-					? await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now)
+					? await applyBillingToPortalClient(tenantId, portalClient.id, billingInput, now, canPatchIdentity)
 					: existingByEmail;
 			clientId = existingByEmail.id;
 		} else {

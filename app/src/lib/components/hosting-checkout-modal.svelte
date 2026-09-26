@@ -374,6 +374,8 @@
 	// Un cont de self-signup n-are CUI/firmă → e persoană fizică, iar `name` e
 	// numele persoanei; un client cu firmă are businessName/CUI → juridică.
 	const pc = untrack(() => portalClient);
+	// Fără email pe cont (edge case) arătăm totuși secțiunea de cont, altfel pasul 2 n-ar putea trece.
+	const hasAccount = $derived(!!portalClient?.email);
 	const pcBilling = pc?.billing ?? null;
 	const pcIsPerson =
 		!!pc && (pcBilling?.legalType === 'pf' || (!pcBilling?.cui && !pcBilling?.businessName));
@@ -1291,7 +1293,7 @@
 
 		{#if step < 4}
 			<div class="co-stepper">
-				{#each [{ n: 1, label: 'Domeniu' }, { n: 2, label: portalClient ? 'Facturare' : 'Date & cont' }, { n: 3, label: 'Plată' }] as s, i (s.n)}
+				{#each [{ n: 1, label: 'Domeniu' }, { n: 2, label: hasAccount ? 'Facturare' : 'Date & cont' }, { n: 3, label: 'Plată' }] as s, i (s.n)}
 					<div
 						class="co-step {step === s.n ? 'active' : ''} {step > s.n ? 'done' : ''}"
 					>
@@ -1516,12 +1518,12 @@
 						</div>
 					{/if}
 				{:else if step === 2}
-					{#if portalClient}
+					{#if hasAccount}
 						<!-- Client logat: fără pasul de cont — comanda merge pe contul lui, iar
 						     facturarea e precompletată din datele contului. -->
 						<h2 class="co-h2">Date de facturare</h2>
 						<p class="co-sub">
-							Comanzi din contul <strong>{portalClient.email}</strong>. Verifică datele de mai
+							Comanzi din contul <strong>{portalClient?.email}</strong>. Verifică datele de mai
 							jos — apar pe factură.
 						</p>
 					{:else}
