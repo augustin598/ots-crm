@@ -22,7 +22,8 @@ export const GET: RequestHandler = async (event) => {
 		tenantId,
 		clientId,
 		userEmail: event.locals.user.email,
-		isPrimary: event.locals.clientUser?.isPrimary ?? false
+		isPrimary: event.locals.clientUser?.isPrimary ?? false,
+		portalScope: event.locals.client.portalScope
 	});
 	if (!flags.invoices) throw error(403, 'Nu ai acces la facturi.');
 

@@ -126,7 +126,8 @@ export const load: LayoutServerLoad = async (event) => {
 			tenantId: tenant.id,
 			clientId: event.locals.client.id,
 			userEmail: event.locals.user.email,
-			isPrimary: event.locals.clientUser?.isPrimary ?? false
+			isPrimary: event.locals.clientUser?.isPrimary ?? false,
+			portalScope: event.locals.client.portalScope
 		});
 	} else if (!event.locals.isClientUser) {
 		// Admin viewing client portal (rare) — give full access.
@@ -256,6 +257,9 @@ export const load: LayoutServerLoad = async (event) => {
 		invoiceLogo: invoiceSettingsRow?.invoiceLogo ?? null,
 		accessRestriction,
 		accessFlags,
+		// 'hosting' = cont creat singur de pe /pachete-hosting: meniul și rutele
+		// se reduc la Dashboard, Hosting, Facturi, Setări (vezi portal-access.ts).
+		portalScope: (event.locals.client?.portalScope ?? 'full') as 'full' | 'hosting',
 		contentEnabled,
 		interviuriEnabled
 	};

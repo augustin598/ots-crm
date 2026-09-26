@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
-import { routeRequiresAccess } from '$lib/server/portal-access';
+import { routeRequiresAccess, routeBlockedByPortalScope } from '$lib/server/portal-access';
 
 /**
  * Server-side gate for per-user portal access. Reads `accessFlags` from the
@@ -16,6 +16,10 @@ export const load: LayoutServerLoad = async (event) => {
 	const required = routeRequiresAccess(event.url.pathname, tenantSlug);
 	if (required && !parent.accessFlags[required]) {
 		throw error(403, 'Nu ai acces la această secțiune.');
+	}
+	// Rutele fără categorie (Servicii & Oferte, Echipa mea) sub scope-ul 'hosting'.
+	if (routeBlockedByPortalScope(event.url.pathname, tenantSlug, parent.portalScope)) {
+		throw error(403, 'Contul tău de hosting nu include această secțiune.');
 	}
 	return {};
 };

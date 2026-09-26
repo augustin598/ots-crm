@@ -48,7 +48,8 @@ async function requireReadCtx() {
 			tenantId: event.locals.tenant!.id,
 			clientId: event.locals.client.id,
 			userEmail: event.locals.user!.email,
-			isPrimary: event.locals.clientUser?.isPrimary ?? false
+			isPrimary: event.locals.clientUser?.isPrimary ?? false,
+			portalScope: event.locals.client.portalScope
 		});
 		if (!flags.interviuri) throw new Error('Nu ai acces la interviuri');
 		return { event, clientScopeId: event.locals.client.id as string };

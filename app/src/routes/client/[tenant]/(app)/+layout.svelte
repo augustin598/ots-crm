@@ -28,6 +28,8 @@
 	const pathPrefix = $derived(`/client/${tenantSlug}`);
 	const currentPath = $derived(page.url.pathname);
 	const access = $derived(data.accessFlags);
+	// Cont de hosting (self-signup): fără Servicii & Oferte, Echipa mea și facturile de ads.
+	const hostingOnly = $derived(data.portalScope === 'hosting');
 
 	// Serviciile livrate — blurate când contul e restricționat (factură restantă). Modulele
 	// SEO noi (hub, PageSpeed, Rank Tracker) intră la fel ca Backlinks și Content.
@@ -73,7 +75,9 @@
 				label: 'Workspace',
 				items: [
 					{ id: 'dashboard', label: 'Dashboard', icon: 'dashboard' as const, href: '/dashboard' },
-					{ id: 'services', label: 'Servicii & Oferte', icon: 'services' as const, href: '/services' },
+					...(hostingOnly
+						? []
+						: [{ id: 'services', label: 'Servicii & Oferte', icon: 'services' as const, href: '/services' }]),
 					...(access.tasks
 						? [{ id: 'tasks', label: 'Tasks', icon: 'tasks' as const, href: '/tasks' }]
 						: [])
@@ -100,7 +104,9 @@
 									label: 'Invoices',
 									icon: 'invoices' as const,
 									href: '/invoices',
-									children: [
+									children: hostingOnly
+										? undefined
+										: [
 										{
 											id: 'inv-services',
 											label: 'Facturi Servicii',
@@ -277,7 +283,7 @@
 								}
 							]
 						: []),
-					...(data.isClientUserPrimary
+					...(data.isClientUserPrimary && !hostingOnly
 						? [
 								{
 									id: 'team',

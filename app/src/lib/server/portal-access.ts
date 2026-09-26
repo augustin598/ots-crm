@@ -189,18 +189,14 @@ export async function getRequestAccessFlags(opts: {
 	clientId: string;
 	userEmail: string | null | undefined;
 	isPrimary: boolean;
-	/** `client.portalScope`, dacă apelantul îl are deja (layout-ul); altfel îl citim noi. */
-	portalScope?: string | null;
+	/**
+	 * `event.locals.client.portalScope` — rândul e deja încărcat de hooks pe orice
+	 * rută de portal, deci nu mai facem un select. Obligatoriu (nu opțional) ca
+	 * niciun apelant nou să nu uite scope-ul; null/undefined = 'full'.
+	 */
+	portalScope: string | null | undefined;
 }): Promise<AccessFlags> {
-	let scope = opts.portalScope;
-	if (scope === undefined) {
-		const [row] = await db
-			.select({ portalScope: table.client.portalScope })
-			.from(table.client)
-			.where(and(eq(table.client.id, opts.clientId), eq(table.client.tenantId, opts.tenantId)))
-			.limit(1);
-		scope = row?.portalScope ?? 'full';
-	}
+	const scope = opts.portalScope;
 	if (opts.isPrimary) return applyPortalScope({ ...ALL_ACCESS_TRUE }, scope);
 	const email = opts.userEmail?.toLowerCase() ?? '';
 	if (!email) return { ...NO_ACCESS };

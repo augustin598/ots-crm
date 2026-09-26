@@ -33,7 +33,8 @@ export async function contentAuth(
 			tenantId: event.locals.tenant.id,
 			clientId: event.locals.client.id,
 			userEmail: event.locals.user.email,
-			isPrimary: event.locals.clientUser?.isPrimary ?? false
+			isPrimary: event.locals.clientUser?.isPrimary ?? false,
+			portalScope: event.locals.client.portalScope
 		});
 		if (!flags.content) svelteError(403, 'Nu ai acces la modulul Content.');
 		return { isClient: true, clientId: event.locals.client.id };

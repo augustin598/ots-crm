@@ -22,7 +22,8 @@ export const getMyHourCredit = query(async () => {
 		tenantId: client.tenantId,
 		clientId: client.id,
 		userEmail: event.locals.user.email,
-		isPrimary: event.locals.clientUser?.isPrimary ?? false
+		isPrimary: event.locals.clientUser?.isPrimary ?? false,
+		portalScope: event.locals.client.portalScope
 	});
 	if (!flags.hourCredits) throw error(403, 'Nu ai acces la creditul de ore.');
 	const [view, catalog, reserved] = await Promise.all([

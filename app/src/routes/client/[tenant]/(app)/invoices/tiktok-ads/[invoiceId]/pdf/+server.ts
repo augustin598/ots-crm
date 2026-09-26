@@ -32,7 +32,8 @@ export const GET: RequestHandler = async (event) => {
 			tenantId,
 			clientId: event.locals.client.id,
 			userEmail: event.locals.user.email,
-			isPrimary: event.locals.clientUser?.isPrimary ?? false
+			isPrimary: event.locals.clientUser?.isPrimary ?? false,
+			portalScope: event.locals.client.portalScope
 		});
 		if (!flags.invoices) throw error(403, 'Nu ai acces la facturi.');
 		conditions = and(conditions, eq(table.tiktokAdsSpending.clientId, event.locals.client.id));
