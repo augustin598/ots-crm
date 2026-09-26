@@ -1,268 +1,175 @@
 <script lang="ts">
-	import { getAvailableHostingPackages } from '$lib/remotes/portal-hosting.remote';
+	/**
+	 * Portal → Hosting → Pachete: aceleași carduri și același checkout ca pe
+	 * /pachete-hosting. Clientul e deja logat, deci checkout-ul sare peste pasul de
+	 * cont și leagă comanda de contul lui (vezi HostingCheckoutModal.portalClient).
+	 */
+	import { getPublicHostingPackages } from '$lib/remotes/public-hosting.remote';
 	import { resolveVatPercent } from '$lib/utils/vat';
-	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
 	import { page } from '$app/state';
-	import PackageIcon from '@lucide/svelte/icons/package';
+	import { toast } from 'svelte-sonner';
+	import { Button } from '$lib/components/ui/button';
+	import HostingPlanCards, {
+		type HostingPlanCard
+	} from '$lib/components/hosting/hosting-plan-cards.svelte';
+	import HostingBillingToggle from '$lib/components/hosting/hosting-billing-toggle.svelte';
+	import HostingCheckoutModal from '$lib/components/hosting-checkout-modal.svelte';
+	import type { PortalClientSummary } from '$lib/components/checkout/portal-client';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
-	import CheckIcon from '@lucide/svelte/icons/check';
-	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
-	import ActivityIcon from '@lucide/svelte/icons/activity';
-	import MailIcon from '@lucide/svelte/icons/mail';
-	import DatabaseIcon from '@lucide/svelte/icons/database';
-	import GlobeIcon from '@lucide/svelte/icons/globe';
 
-	const packagesQuery = getAvailableHostingPackages();
-	const packages = $derived(packagesQuery.current?.packages ?? []);
+	const tenantSlug = $derived(page.params.tenant ?? '');
+	const layoutData = $derived(page.data as Record<string, any>);
+
+	// Pachetele publice (cele comandabile online) — aceeași sursă ca pagina publică.
+	const packagesQuery = getPublicHostingPackages();
+	const packages = $derived((packagesQuery.current?.packages ?? []) as HostingPlanCard[]);
 	const vatRate = $derived(resolveVatPercent(packagesQuery.current?.vatRate));
+	const tenantInfo = $derived(packagesQuery.current?.tenantInfo ?? null);
+	const publishableKey = $derived(packagesQuery.current?.publishableKey ?? null);
 	const loading = $derived(packagesQuery.loading && !packagesQuery.current);
-	const tenantSlug = $derived(page.params.tenant);
+	// Checkout-ul public comandă pe tenantul site-ului public; în alt tenant nu avem comandă online.
+	const canOrderOnline = $derived(
+		!packagesQuery.current || packagesQuery.current.tenantSlug === tenantSlug
+	);
 
-	function priceWithVat(netCents: number): number {
-		// vatRate stocat ca procent integer (21 = 21%)
-		return Math.round(netCents * (1 + vatRate / 100));
-	}
+	let yearly = $state(true);
+	let checkoutPkg = $state<HostingPlanCard | null>(null);
 
-	function billingCycleLabel(cycle: string): string {
-		switch (cycle) {
-			case 'monthly':
-				return 'lunar';
-			case 'quarterly':
-				return 'trimestrial';
-			case 'semiannually':
-			case 'biannually':
-				return 'semestrial';
-			case 'annually':
-				return 'anual';
-			case 'triennially':
-				return 'la 3 ani';
-			case 'one_time':
-				return 'plată unică';
-			default:
-				return cycle;
+	// Clientul activ din portal → checkout fără pas de cont, facturare precompletată.
+	const portalClient = $derived.by<PortalClientSummary | null>(() => {
+		const c = layoutData.client;
+		if (!c) return null;
+		return {
+			id: c.id,
+			name: c.name,
+			email: c.email ?? null,
+			isPrimary: layoutData.isClientUserPrimary ?? false,
+			billing: {
+				businessName: c.businessName ?? null,
+				legalType: c.legalType ?? null,
+				cui: c.cui ?? null,
+				vatNumber: c.vatNumber ?? null,
+				registrationNumber: c.registrationNumber ?? null,
+				phone: c.phone ?? null,
+				address: c.address ?? null,
+				city: c.city ?? null,
+				county: c.county ?? null,
+				postalCode: c.postalCode ?? null
+			}
+		};
+	});
+
+	function order(pkg: HostingPlanCard) {
+		if (!canOrderOnline) {
+			toast.info('Pentru acest pachet scrie-ne la office@onetopsolution.ro și îl activăm noi.');
+			return;
 		}
-	}
-
-	function fmtPrice(cents: number, currency: string): string {
-		const value = (cents / 100).toLocaleString('ro-RO', {
-			minimumFractionDigits: 2,
-			maximumFractionDigits: 2
-		});
-		return `${value} ${currency}`;
-	}
-
-	function fmtLimit(value: number | null | undefined, unit?: string): string {
-		if (value === null || value === undefined) return 'Nelimitat';
-		const formatted = value.toLocaleString('ro-RO');
-		return unit ? `${formatted} ${unit}` : formatted;
-	}
-
-	function hasLimits(p: {
-		quota: number | null;
-		bandwidth: number | null;
-		maxEmailAccounts: number | null;
-		maxDatabases: number | null;
-		maxDomains: number | null;
-		maxSubdomains: number | null;
-	}): boolean {
-		return (
-			p.quota !== null ||
-			p.bandwidth !== null ||
-			p.maxEmailAccounts !== null ||
-			p.maxDatabases !== null ||
-			p.maxDomains !== null ||
-			p.maxSubdomains !== null
-		);
-	}
-
-	// Track which package cards have "Vezi mai mult" expanded
-	let expandedIds = $state(new Set<string>());
-	function toggleExpand(id: string) {
-		if (expandedIds.has(id)) expandedIds.delete(id);
-		else expandedIds.add(id);
-		expandedIds = new Set(expandedIds);
+		checkoutPkg = pkg;
 	}
 </script>
 
-<div class="space-y-6">
+<div class="pp-page">
 	<Button variant="ghost" size="sm" href="/client/{tenantSlug}/hosting">
 		<ArrowLeftIcon class="h-4 w-4" />
-		Înapoi
+		Conturile mele
 	</Button>
 
-	<div>
-		<h1 class="text-2xl font-bold flex items-center gap-2">
-			<PackageIcon class="h-6 w-6" />
-			Pachete hosting disponibile
-		</h1>
-		<p class="text-muted-foreground">
-			Lista pachetelor active. Toate prețurile sunt afișate <strong>fără TVA</strong>; TVA {vatRate}% se adaugă la checkout.
+	<header class="pp-head">
+		<h1 class="pp-title">Pachete hosting</h1>
+		<p class="pp-sub">
+			Hosting administrat pe servere NVMe, cu SSL, backup zilnic și suport în limba română.
 		</p>
-	</div>
-
-	{#if loading}
-		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-			{#each Array(3) as _}
-				<Card class="animate-pulse">
-					<CardHeader><div class="h-6 w-32 bg-muted rounded"></div></CardHeader>
-					<CardContent><div class="h-40 bg-muted rounded"></div></CardContent>
-				</Card>
-			{/each}
+		<div class="pp-toggle">
+			<HostingBillingToggle bind:yearly />
 		</div>
-	{:else if packages.length === 0}
-		<Card>
-			<CardContent class="py-10 text-center text-muted-foreground">
-				Nu există pachete configurate momentan.
-			</CardContent>
-		</Card>
-	{:else}
-		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-			{#each packages as pkg (pkg.id)}
-				<Card class="relative {pkg.highlightBadge ? 'border-primary/40 shadow-md' : ''}">
-					{#if pkg.highlightBadge}
-						<div
-							class="absolute -top-2 right-4 rounded-full bg-primary px-3 py-0.5 text-xs font-medium text-primary-foreground"
-						>
-							{pkg.highlightBadge}
-						</div>
-					{/if}
-					<CardHeader>
-						<CardTitle>{pkg.name}</CardTitle>
-						{#if pkg.description}
-							<p class="text-sm text-muted-foreground">{pkg.description}</p>
-						{/if}
-					</CardHeader>
-					<CardContent class="space-y-4">
-						<div>
-							<p class="text-2xl font-bold">{fmtPrice(pkg.price, pkg.currency)}</p>
-							<p class="text-xs text-muted-foreground">
-								{billingCycleLabel(pkg.billingCycle)}
-								{#if pkg.setupFee && pkg.setupFee > 0}
-									· instalare {fmtPrice(pkg.setupFee, pkg.currency)}
-								{/if}
-							</p>
-							<p class="text-xs text-muted-foreground/80 mt-0.5">
-								Preț fără TVA · cu TVA {vatRate}%: <strong>{fmtPrice(priceWithVat(pkg.price), pkg.currency)}</strong>
-							</p>
-						</div>
+	</header>
 
-						{#if hasLimits(pkg)}
-							<div class="space-y-1.5 rounded-md bg-muted/40 p-3 text-sm">
-								{#if pkg.quota !== null}
-									<div class="flex items-center gap-2">
-										<HardDriveIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-										<span>Spațiu: <strong>{fmtLimit(pkg.quota, 'MB')}</strong></span>
-									</div>
-								{/if}
-								{#if pkg.bandwidth !== null}
-									<div class="flex items-center gap-2">
-										<ActivityIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-										<span>Trafic: <strong>{fmtLimit(pkg.bandwidth, 'MB')}/lună</strong></span>
-									</div>
-								{/if}
-								{#if pkg.maxEmailAccounts !== null}
-									<div class="flex items-center gap-2">
-										<MailIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-										<span>Conturi email: <strong>{fmtLimit(pkg.maxEmailAccounts)}</strong></span>
-									</div>
-								{/if}
-								{#if pkg.maxDatabases !== null}
-									<div class="flex items-center gap-2">
-										<DatabaseIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-										<span>Baze de date: <strong>{fmtLimit(pkg.maxDatabases)}</strong></span>
-									</div>
-								{/if}
-								{#if pkg.maxDomains !== null}
-									<div class="flex items-center gap-2">
-										<GlobeIcon class="h-4 w-4 text-muted-foreground shrink-0" />
-										<span>Domenii: <strong>{fmtLimit(pkg.maxDomains)}</strong></span>
-									</div>
-								{/if}
-							</div>
-						{/if}
+	<HostingPlanCards {packages} {loading} {yearly} onOrder={order}>
+		{#snippet empty()}
+			Nu există pachete disponibile momentan. Scrie-ne la
+			<a href="mailto:office@onetopsolution.ro">office@onetopsolution.ro</a>.
+		{/snippet}
+	</HostingPlanCards>
 
-						{#if pkg.features && pkg.features.length > 0}
-							<ul class="space-y-1.5 text-sm">
-								{#each pkg.features as feat}
-									<li class="flex items-start gap-2">
-										<CheckIcon class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
-										<span>{feat}</span>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-
-						<!-- Toggle "Vezi mai mult" — afișează limits extra + flag-uri tehnice -->
-						{#if hasLimits(pkg)}
-							<button
-								type="button"
-								onclick={() => toggleExpand(pkg.id)}
-								class="w-full text-sm text-primary hover:underline text-left"
-							>
-								{expandedIds.has(pkg.id) ? '↑ Mai puțin' : '↓ Vezi mai mult'}
-							</button>
-
-							{#if expandedIds.has(pkg.id)}
-								<div class="space-y-3 rounded-md border bg-background p-3 text-sm">
-									<!-- Limits suplimentare -->
-									<div class="grid grid-cols-2 gap-2 text-xs">
-										{#if pkg.maxSubdomains !== null}
-											<div class="text-muted-foreground">
-												Subdomenii: <strong class="text-foreground">{fmtLimit(pkg.maxSubdomains)}</strong>
-											</div>
-										{/if}
-										{#if pkg.maxFtpAccounts !== null}
-											<div class="text-muted-foreground">
-												Conturi FTP: <strong class="text-foreground">{fmtLimit(pkg.maxFtpAccounts)}</strong>
-											</div>
-										{/if}
-										{#if pkg.maxEmailForwarders !== null}
-											<div class="text-muted-foreground">
-												Redirecționări email: <strong class="text-foreground">{fmtLimit(pkg.maxEmailForwarders)}</strong>
-											</div>
-										{/if}
-										{#if pkg.maxMailingLists !== null}
-											<div class="text-muted-foreground">
-												Liste mailing: <strong class="text-foreground">{fmtLimit(pkg.maxMailingLists)}</strong>
-											</div>
-										{/if}
-										{#if pkg.maxAutoresponders !== null}
-											<div class="text-muted-foreground">
-												Autoresponders: <strong class="text-foreground">{fmtLimit(pkg.maxAutoresponders)}</strong>
-											</div>
-										{/if}
-										{#if pkg.maxInodes !== null}
-											<div class="text-muted-foreground">
-												Inode: <strong class="text-foreground">{fmtLimit(pkg.maxInodes)}</strong>
-											</div>
-										{/if}
-									</div>
-
-									<!-- Flag-uri tehnice -->
-									<div class="flex flex-wrap gap-1 text-xs">
-										{#each [['SSL', pkg.ssl], ['SSH', pkg.ssh], ['Cron', pkg.cron], ['PHP', pkg.php], ['WordPress', pkg.wordpress], ['Git', pkg.git], ['ClamAV', pkg.clamav], ['SpamAssassin', pkg.spam], ['Redis', pkg.redis], ['DNS Control', pkg.dnsControl]] as [label, enabled]}
-											{#if enabled}
-												<span class="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-green-700 dark:bg-green-900/20 dark:text-green-300">
-													<CheckIcon class="h-3 w-3" />
-													{label}
-												</span>
-											{/if}
-										{/each}
-									</div>
-								</div>
-							{/if}
-						{/if}
-					</CardContent>
-				</Card>
-			{/each}
-		</div>
+	{#if !loading && packages.length > 0}
+		<p class="pp-foot">
+			Toate prețurile sunt afișate <strong>fără TVA</strong>; TVA {vatRate}% se adaugă la checkout.
+			Ai nevoie de mai mult? Scrie-ne la
+			<a href="mailto:office@onetopsolution.ro">office@onetopsolution.ro</a>.
+		</p>
 	{/if}
-
-	<Card class="border-muted bg-muted/30">
-		<CardContent class="py-4 text-sm text-muted-foreground">
-			Pentru detalii suplimentare sau achiziție, contactează-ne la
-			<a href="mailto:office@onetopsolution.ro" class="underline">office@onetopsolution.ro</a>.
-		</CardContent>
-	</Card>
 </div>
+
+{#if checkoutPkg}
+	<HostingCheckoutModal
+		plan={{
+			id: checkoutPkg.id,
+			name: checkoutPkg.name,
+			currency: checkoutPkg.currency,
+			billingCycle: checkoutPkg.billingCycle
+		}}
+		period={yearly ? 'yearly' : 'monthly'}
+		{vatRate}
+		priceCents={checkoutPkg.price}
+		bankInfo={{
+			name: tenantInfo?.name ?? null,
+			bankName: tenantInfo?.bankName ?? null,
+			iban: tenantInfo?.iban ?? null,
+			ibanEuro: tenantInfo?.ibanEuro ?? null,
+			cui: tenantInfo?.cui ?? null,
+			vatNumber: tenantInfo?.vatNumber ?? null,
+			phone: tenantInfo?.phone ?? null,
+			email: tenantInfo?.email ?? null
+		}}
+		preloadedPublishableKey={publishableKey}
+		portalClient={portalClient?.isPrimary ? portalClient : null}
+		portalTenantSlug={tenantSlug}
+		onClose={() => (checkoutPkg = null)}
+	/>
+{/if}
+
+<style>
+	.pp-page {
+		display: flex;
+		flex-direction: column;
+		gap: 24px;
+		align-items: stretch;
+	}
+	.pp-page > :global(:first-child) {
+		align-self: flex-start;
+	}
+	.pp-head {
+		text-align: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+	}
+	.pp-title {
+		margin: 0;
+		font-size: 28px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+	}
+	.pp-sub {
+		margin: 0;
+		max-width: 560px;
+		font-size: 14px;
+		color: var(--muted-foreground);
+	}
+	.pp-toggle {
+		margin-top: 12px;
+	}
+	.pp-foot {
+		margin: 0;
+		text-align: center;
+		font-size: 13px;
+		color: var(--muted-foreground);
+	}
+	.pp-foot a,
+	.pp-page :global(.hp-empty a) {
+		color: var(--primary);
+		font-weight: 600;
+		text-decoration: underline;
+	}
+</style>

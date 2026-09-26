@@ -9,6 +9,15 @@
 	import { tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import HostingCheckoutModal from '$lib/components/hosting-checkout-modal.svelte';
+	import HostingPlanCards from '$lib/components/hosting/hosting-plan-cards.svelte';
+	import HostingBillingToggle from '$lib/components/hosting/hosting-billing-toggle.svelte';
+	import {
+		monthlyBilledRon,
+		mbToGb,
+		mbToGbNumber,
+		fmtCount,
+		isPopular
+	} from '$lib/utils/hosting-plan-pricing';
 	import { hostingSignup } from '$lib/remotes/client-auth.remote';
 	import type { PageData } from './$types';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
@@ -278,60 +287,8 @@
 		}
 	}
 
-	// ===== Price math — normalize across billingCycle =====
-	// Marketing toggle is display-only: we estimate "monthly" and "yearly with -2 months"
-	// off whichever cycle the admin configured. Checkout still bills the actual cycle.
-	function monthlyEquivalentRon(pkg: Pkg): number {
-		const ron = pkg.price / 100;
-		switch (pkg.billingCycle) {
-			case 'annually':
-				return Math.round((ron * 12) / 120);
-			case 'biennially':
-				return Math.round((ron * 12) / 240);
-			case 'triennially':
-				return Math.round((ron * 12) / 360);
-			case 'biannually':
-			case 'semiannually':
-				return Math.round((ron * 12) / 60);
-			case 'quarterly':
-				return Math.round((ron * 12) / 36);
-			case 'monthly':
-			default:
-				return Math.round(ron);
-		}
-	}
-	function yearlyTotalRon(pkg: Pkg): number {
-		const monthly = monthlyEquivalentRon(pkg);
-		return monthly * 10;
-	}
-	function monthlyBilledRon(pkg: Pkg): number {
-		const ron = pkg.price / 100;
-		return pkg.billingCycle === 'monthly' ? Math.round(ron) : monthlyEquivalentRon(pkg);
-	}
-
-	function mbToGb(mb: number | null | undefined): string {
-		if (mb === null || mb === undefined) return 'Nelimitat';
-		if (mb < 1024) return `${mb} MB`;
-		return `${Math.round(mb / 1024).toLocaleString('ro-RO')} GB`;
-	}
-	function mbToGbNumber(mb: number | null | undefined): number | null {
-		if (mb === null || mb === undefined) return null;
-		return Math.round(mb / 1024);
-	}
-	function fmtCount(v: number | null | undefined): string {
-		if (v === null || v === undefined) return 'Nelimitat';
-		return v.toLocaleString('ro-RO');
-	}
-	function isPopular(p: Pkg): boolean {
-		return !!(p.highlightBadge && p.highlightBadge.trim().length > 0);
-	}
-	function tagFor(p: Pkg): string {
-		return (p.description ?? '').trim() || 'Hosting administrat, optimizat pentru WordPress și WooCommerce.';
-	}
-	function backupHint(p: Pkg): string {
-		const found = (p.features ?? []).find((f) => /backup/i.test(f));
-		return found ?? 'zilnic';
-	}
+	// Calculele de preț și formatarea resurselor: $lib/utils/hosting-plan-pricing
+	// (comune cu portalul — Hosting → Pachete).
 
 	function comandaHref(pkgId: string): string {
 		const period = yearly ? 'yearly' : 'monthly';
@@ -458,146 +415,22 @@
 			</div>
 		</div>
 
-		<div class="ph-billing-toggle">
-			<button type="button" class={yearly ? '' : 'active'} onclick={() => (yearly = false)}>
-				Plătit lunar
-			</button>
-			<button type="button" class={yearly ? 'active' : ''} onclick={() => (yearly = true)}>
-				Plătit anual
-				<span class="ph-billing-save">−2 luni</span>
-			</button>
+		<div class="ph-billing-wrap">
+			<HostingBillingToggle bind:yearly />
 		</div>
 	</section>
 
 	<!-- Pricing -->
 	<section id="pachete" class="ph-pricing">
-		{#if loading}
-			{#each Array.from({ length: 4 }) as _, i (i)}
-				<div class="ph-plan ph-skeleton" aria-hidden="true">
-					<div class="ph-sk-line ph-sk-w-32"></div>
-					<div class="ph-sk-line ph-sk-w-60"></div>
-					<div class="ph-sk-block"></div>
-					<div class="ph-sk-block-tall"></div>
-				</div>
-			{/each}
-		{:else if packages.length === 0}
-			<div class="ph-empty">
+		<HostingPlanCards {packages} {loading} {yearly} onOrder={(pkg) => openCheckout(pkg as Pkg)}>
+			{#snippet empty()}
 				Pachetele sunt în curs de actualizare. <button
 					type="button"
 					class="ph-link"
 					onclick={() => openInquiry(null, null)}>Contactează-ne</button
 				> pentru o ofertă personalizată.
-			</div>
-		{:else}
-			{#each packages as pkg (pkg.id)}
-				{@const monthly = monthlyEquivalentRon(pkg)}
-				{@const yearTotal = yearlyTotalRon(pkg)}
-				{@const monthlyBilled = monthlyBilledRon(pkg)}
-				{@const price = yearly ? Math.round(yearTotal / 12) : monthlyBilled}
-				{@const popular = isPopular(pkg)}
-				<div class={popular ? 'ph-plan popular' : 'ph-plan'}>
-					{#if popular}
-						<span class="ph-plan-badge">{pkg.highlightBadge}</span>
-					{/if}
-					<div class="ph-plan-name">{pkg.name}</div>
-					<div class="ph-plan-tag">{tagFor(pkg)}</div>
-
-					<div class="ph-plan-price">
-						<span class="ph-plan-price-val">{price}</span>
-						<span class="ph-plan-price-cur">{pkg.currency}</span>
-						<span class="ph-plan-price-per">/ lună</span>
-					</div>
-					<div class="ph-plan-price-orig">
-						{#if yearly}
-							{yearTotal.toLocaleString('ro-RO')} {pkg.currency} / an (echivalent {monthlyBilled} {pkg.currency}/lună
-							lunar)
-						{:else}
-							sau {yearTotal.toLocaleString('ro-RO')} {pkg.currency} anual ({Math.round(
-								(1 - yearTotal / (monthlyBilled * 12)) * 100
-							)}% reducere)
-						{/if}
-					</div>
-
-					<button type="button" class="ph-plan-cta" onclick={() => openCheckout(pkg)}>
-						Comandă {pkg.name}
-					</button>
-
-					<div class="ph-plan-divider">Include</div>
-					<ul class="ph-plan-features">
-						{#if pkg.quota !== null && pkg.quota !== undefined}
-							<li>
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<polyline points="20 6 9 17 4 12"></polyline>
-								</svg>
-								<span><strong>{mbToGb(pkg.quota)}</strong> spațiu SSD NVMe</span>
-							</li>
-						{/if}
-						{#if pkg.bandwidth !== null && pkg.bandwidth !== undefined}
-							<li>
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<polyline points="20 6 9 17 4 12"></polyline>
-								</svg>
-								<span><strong>{mbToGb(pkg.bandwidth)}</strong> trafic / lună</span>
-							</li>
-						{/if}
-						<li>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<polyline points="20 6 9 17 4 12"></polyline>
-							</svg>
-							<span><strong>{fmtCount(pkg.maxDomains)}</strong> domenii găzduite</span>
-						</li>
-						<li>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<polyline points="20 6 9 17 4 12"></polyline>
-							</svg>
-							<span><strong>{fmtCount(pkg.maxDatabases)}</strong> baze de date MySQL</span>
-						</li>
-						<li>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<polyline points="20 6 9 17 4 12"></polyline>
-							</svg>
-							<span><strong>{fmtCount(pkg.maxEmailAccounts)}</strong> conturi email</span>
-						</li>
-						{#if pkg.ssl}
-							<li>
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<polyline points="20 6 9 17 4 12"></polyline>
-								</svg>
-								<span>SSL Let's Encrypt gratuit</span>
-							</li>
-						{/if}
-						<li>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<polyline points="20 6 9 17 4 12"></polyline>
-							</svg>
-							<span>Backup {backupHint(pkg)}</span>
-						</li>
-						<li>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<polyline points="20 6 9 17 4 12"></polyline>
-							</svg>
-							<span>PHP 8.3 + alegere versiune</span>
-						</li>
-						<li>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<polyline points="20 6 9 17 4 12"></polyline>
-							</svg>
-							<span>Panou administrare · Instalare aplicații cu un click</span>
-						</li>
-						{#if pkg.features && pkg.features.length > 0}
-							{#each pkg.features.slice(0, 3) as feat (feat)}
-								<li>
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-										<polyline points="20 6 9 17 4 12"></polyline>
-									</svg>
-									<span>{feat}</span>
-								</li>
-							{/each}
-						{/if}
-					</ul>
-				</div>
-			{/each}
-		{/if}
+			{/snippet}
+		</HostingPlanCards>
 	</section>
 
 	{#if !loading && packages.length > 0}
@@ -1597,193 +1430,16 @@
 	}
 
 	/* ===== Billing toggle ===== */
-	.ph-billing-toggle {
-		margin: 40px auto 0;
-		display: inline-flex;
-		padding: 4px;
-		background: var(--bg-soft);
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		position: relative;
-	}
-	.ph-billing-toggle button {
-		padding: 10px 22px;
-		border-radius: 8px;
-		background: transparent;
-		border: none;
-		font-family: inherit;
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--ink2);
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-	}
-	.ph-billing-toggle button.active {
-		background: white;
-		color: var(--ink);
-		box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-	}
-	.ph-billing-save {
-		background: rgba(16, 185, 129, 0.12);
-		color: var(--success);
-		font-size: 10px;
-		font-weight: 700;
-		padding: 2px 7px;
-		border-radius: 999px;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+	.ph-billing-wrap {
+		margin-top: 40px;
 	}
 
 	/* ===== Pricing ===== */
+	/* Cardurile: $lib/components/hosting/hosting-plan-cards.svelte. */
 	.ph-pricing {
 		max-width: 1200px;
 		margin: 50px auto 0;
 		padding: 0 24px;
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 16px;
-	}
-	.ph-plan {
-		background: white;
-		border: 1px solid var(--border);
-		border-radius: 18px;
-		padding: 28px 24px 24px;
-		display: flex;
-		flex-direction: column;
-		position: relative;
-		transition: all 0.2s;
-	}
-	.ph-plan:hover {
-		transform: translateY(-3px);
-		box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-	}
-	.ph-plan.popular {
-		border-color: var(--accent);
-		box-shadow: 0 12px 32px rgba(24, 119, 242, 0.14);
-		background: linear-gradient(180deg, #f6faff 0%, white 60%);
-	}
-	.ph-plan-badge {
-		position: absolute;
-		top: -12px;
-		left: 24px;
-		background: linear-gradient(135deg, #1877f2, #0d5cc7);
-		color: white;
-		font-size: 11px;
-		font-weight: 700;
-		padding: 5px 12px;
-		border-radius: 999px;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		box-shadow: 0 4px 12px rgba(24, 119, 242, 0.25);
-	}
-	.ph-plan-name {
-		font-size: 14px;
-		font-weight: 700;
-		color: var(--accent);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		margin-bottom: 6px;
-	}
-	.ph-plan-tag {
-		font-size: 13px;
-		color: var(--ink2);
-		margin-bottom: 22px;
-		min-height: 38px;
-	}
-	.ph-plan-price {
-		display: flex;
-		align-items: baseline;
-		gap: 4px;
-		margin-bottom: 4px;
-	}
-	.ph-plan-price-val {
-		font-size: 44px;
-		font-weight: 800;
-		letter-spacing: -0.03em;
-		line-height: 1;
-		color: var(--ink);
-	}
-	.ph-plan-price-cur {
-		font-size: 16px;
-		font-weight: 600;
-		color: var(--ink2);
-	}
-	.ph-plan-price-per {
-		font-size: 13px;
-		color: var(--muted);
-		margin-left: 6px;
-	}
-	.ph-plan-price-orig {
-		font-size: 12px;
-		color: var(--muted);
-		margin-top: 4px;
-		min-height: 16px;
-	}
-	.ph-plan-cta {
-		display: block;
-		width: 100%;
-		padding: 13px 16px;
-		border-radius: 10px;
-		background: var(--bg-soft);
-		color: var(--ink);
-		border: 1px solid var(--border);
-		font-family: inherit;
-		font-size: 13px;
-		font-weight: 700;
-		text-decoration: none;
-		text-align: center;
-		cursor: pointer;
-		margin: 18px 0 22px;
-		transition: all 0.15s;
-	}
-	.ph-plan-cta:hover {
-		background: var(--ink);
-		color: white;
-		border-color: var(--ink);
-	}
-	.ph-plan.popular .ph-plan-cta {
-		background: var(--accent);
-		color: white;
-		border-color: var(--accent);
-	}
-	.ph-plan.popular .ph-plan-cta:hover {
-		background: var(--accent-dark);
-		border-color: var(--accent-dark);
-	}
-	.ph-plan-divider {
-		font-size: 10px;
-		font-weight: 700;
-		color: var(--muted);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		margin-bottom: 12px;
-	}
-	.ph-plan-features {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		flex: 1;
-	}
-	.ph-plan-features li {
-		display: flex;
-		align-items: flex-start;
-		gap: 10px;
-		font-size: 13.5px;
-		color: var(--ink2);
-		padding: 6px 0;
-	}
-	.ph-plan-features li strong {
-		color: var(--ink);
-		font-weight: 600;
-	}
-	.ph-plan-features svg {
-		flex-shrink: 0;
-		color: var(--success);
-		margin-top: 2px;
-		width: 14px;
-		height: 14px;
 	}
 
 	.ph-pricing-foot {
@@ -1807,52 +1463,6 @@
 	}
 	.ph-link:hover {
 		color: var(--accent-dark);
-	}
-
-	/* Skeleton loaders */
-	.ph-skeleton {
-		gap: 14px;
-	}
-	.ph-sk-line,
-	.ph-sk-block,
-	.ph-sk-block-tall {
-		background: #e8edf3;
-		border-radius: 8px;
-		animation: phPulse 1.4s ease-in-out infinite;
-	}
-	.ph-sk-line {
-		height: 18px;
-	}
-	.ph-sk-w-32 {
-		width: 60%;
-	}
-	.ph-sk-w-60 {
-		width: 90%;
-	}
-	.ph-sk-block {
-		height: 56px;
-	}
-	.ph-sk-block-tall {
-		height: 200px;
-	}
-	@keyframes phPulse {
-		0%,
-		100% {
-			opacity: 1;
-		}
-		50% {
-			opacity: 0.55;
-		}
-	}
-
-	.ph-empty {
-		grid-column: 1 / -1;
-		text-align: center;
-		padding: 60px 24px;
-		color: var(--ink2);
-		background: var(--bg-soft);
-		border: 1px solid var(--border);
-		border-radius: 16px;
 	}
 
 	/* ===== Features ===== */
@@ -2394,9 +2004,6 @@
 	}
 
 	@media (max-width: 960px) {
-		.ph-pricing {
-			grid-template-columns: repeat(2, 1fr);
-		}
 		.ph-features-grid {
 			grid-template-columns: 1fr 1fr;
 		}
@@ -2408,9 +2015,6 @@
 		}
 	}
 	@media (max-width: 620px) {
-		.ph-pricing {
-			grid-template-columns: 1fr;
-		}
 		.ph-features-grid {
 			grid-template-columns: 1fr;
 		}
