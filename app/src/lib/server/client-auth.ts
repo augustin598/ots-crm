@@ -49,6 +49,14 @@ async function resolveContactName(clientId: string, normalizedEmail: string, isP
 		if (fullClient?.legalRepresentative) {
 			return fullClient.legalRepresentative.trim();
 		}
+		// Persoană fizică / cont creat singur de pe /pachete-hosting: `name` E numele
+		// persoanei (nu al firmei), deci e un nume de contact valid.
+		if (
+			fullClient?.name &&
+			(fullClient.legalType === 'pf' || fullClient.signupSource === 'hosting-signup')
+		) {
+			return fullClient.name.trim();
+		}
 	}
 	return '';
 }
@@ -411,6 +419,24 @@ async function findOrCreateClientUserSession(
 				isPrimary
 			});
 		}
+	}
+
+	// Cont creat singur de pe /pachete-hosting: primul login (magic link sau Google)
+	// dovedește emailul → onboarding activ. Doar pentru contactul primar și doar
+	// pentru self-signup; clienții din checkout-ul public trec pe activ la plată.
+	for (const { client: cli, isPrimary } of authorized) {
+		if (!isPrimary) continue;
+		await db
+			.update(table.client)
+			.set({ onboardingStatus: 'active', updatedAt: new Date() })
+			.where(
+				and(
+					eq(table.client.id, cli.id),
+					eq(table.client.tenantId, tenant.id),
+					eq(table.client.onboardingStatus, 'pending_email'),
+					eq(table.client.signupSource, 'hosting-signup')
+				)
+			);
 	}
 
 	// Determine which client is "active" right after login. Prefer the most
