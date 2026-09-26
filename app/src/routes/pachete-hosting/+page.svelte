@@ -4,17 +4,21 @@
 		submitHostingInquiry,
 		validateCuiAndFetch
 	} from '$lib/remotes/public-hosting.remote';
-	import * as Dialog from '$lib/components/ui/dialog';
 	import { resolveVatPercent } from '$lib/utils/vat';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Textarea } from '$lib/components/ui/textarea';
+	import { focusTrap } from '$lib/actions/focus-trap';
 	import { toast } from 'svelte-sonner';
 	import HostingCheckoutModal from '$lib/components/hosting-checkout-modal.svelte';
+	import { hostingSignup } from '$lib/remotes/client-auth.remote';
+	import type { PageData } from './$types';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import MailIcon from '@lucide/svelte/icons/mail';
+	import XIcon from '@lucide/svelte/icons/x';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import SendIcon from '@lucide/svelte/icons/send';
+	import LogInIcon from '@lucide/svelte/icons/log-in';
+	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
 	type Pkg = {
 		id: string;
@@ -39,7 +43,18 @@
 		cron: boolean | null;
 	};
 
+	let { data }: { data: PageData } = $props();
+	// Client logat în portal (din +page.server.ts): nav-ul arată „Contul meu", iar
+	// checkout-ul leagă comanda de contul lui. null pentru vizitatori.
+	const portalClient = $derived(data.portalClient);
+
 	const packagesQuery = getPublicHostingPackages();
+	// Slug-ul tenantului public — linkurile către portal (/client/<slug>/…) și Google.
+	const tenantSlug = $derived(packagesQuery.current?.tenantSlug ?? data.tenantSlug);
+	const portalLoginHref = $derived(`/client/${tenantSlug}/login`);
+	const googleSignupHref = $derived(
+		`/api/client-auth/google?tenant=${encodeURIComponent(tenantSlug)}&mode=signup&returnTo=${encodeURIComponent(`/client/${tenantSlug}/hosting/packages`)}`
+	);
 	const packages = $derived<Pkg[]>((packagesQuery.current?.packages ?? []) as Pkg[]);
 	const vatRate = $derived(resolveVatPercent(packagesQuery.current?.vatRate));
 	const tenantInfo = $derived(packagesQuery.current?.tenantInfo ?? null);
@@ -117,6 +132,72 @@
 		modalOpen = true;
 		resetAnaf();
 	}
+
+	function closeInquiry() {
+		if (submitting) return;
+		modalOpen = false;
+	}
+
+	// ===== Cont nou (self-signup, ca la Hostico: nume + email, facturarea la prima comandă) =====
+	let signupOpen = $state(false);
+	let signup = $state({ name: '', email: '', phone: '', consent: false });
+	let signupSubmitting = $state(false);
+	// Emailul la care s-a trimis linkul de activare — comută modalul pe ecranul de confirmare.
+	let signupSentTo = $state<string | null>(null);
+
+	function openSignup() {
+		signup = { name: '', email: '', phone: '', consent: false };
+		signupSentTo = null;
+		signupOpen = true;
+	}
+	function closeSignup() {
+		if (signupSubmitting) return;
+		signupOpen = false;
+	}
+
+	async function handleSignup(e: SubmitEvent) {
+		e.preventDefault();
+		const name = signup.name.trim();
+		const email = signup.email.trim();
+		if (name.length < 3) {
+			toast.error('Scrie numele complet.');
+			return;
+		}
+		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+			toast.error('Adresa de email nu e validă.');
+			return;
+		}
+		if (!signup.consent) {
+			toast.error('Bifează termenii și condițiile.');
+			return;
+		}
+		signupSubmitting = true;
+		try {
+			await hostingSignup({
+				tenantSlug,
+				name,
+				email,
+				phone: signup.phone.trim() || undefined,
+				consentTerms: true
+			});
+			// Răspunsul e generic by design (nu spune dacă emailul exista) — arătăm confirmarea.
+			signupSentTo = email;
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Nu am putut trimite emailul. Încearcă din nou.');
+		} finally {
+			signupSubmitting = false;
+		}
+	}
+
+	// Same scroll lock as the checkout modal: the page behind stays put.
+	$effect(() => {
+		if (!modalOpen && !signupOpen) return;
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.body.style.overflow = prev;
+		};
+	});
 
 	async function lookupAnaf() {
 		anafError = null;
@@ -306,14 +387,24 @@
 				<a href="#faq">Support</a>
 			</div>
 			<div class="ph-nav-spacer"></div>
-			<a class="ph-nav-secondary" href="/login">Autentificare</a>
-			<button type="button" class="ph-nav-cta" onclick={() => openInquiry(null, null)}>
-				Cont nou
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-					<line x1="7" y1="17" x2="17" y2="7"></line>
-					<polyline points="7 7 17 7 17 17"></polyline>
-				</svg>
-			</button>
+			{#if portalClient}
+				<a class="ph-nav-cta" href="/client/{tenantSlug}/dashboard">
+					Contul meu
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<line x1="7" y1="17" x2="17" y2="7"></line>
+						<polyline points="7 7 17 7 17 17"></polyline>
+					</svg>
+				</a>
+			{:else}
+				<a class="ph-nav-secondary" href={portalLoginHref}>Autentificare</a>
+				<button type="button" class="ph-nav-cta" onclick={openSignup}>
+					Cont nou
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<line x1="7" y1="17" x2="17" y2="7"></line>
+						<polyline points="7 7 17 7 17 17"></polyline>
+					</svg>
+				</button>
+			{/if}
 		</div>
 	</nav>
 
@@ -818,7 +909,7 @@
 				<a href="#features">Despre noi</a>
 				<a href="#features">Datacentere</a>
 				<a href="#faq">Support</a>
-				<a href="/login">Cont client</a>
+				<a href={portalLoginHref}>Cont client</a>
 			</div>
 			<div>
 				<h4>Legal</h4>
@@ -868,114 +959,440 @@
 			email: tenantInfo?.email ?? null
 		}}
 		preloadedPublishableKey={stripePublishableKey}
+		{portalClient}
+		portalTenantSlug={tenantSlug}
 		onClose={closeCheckout}
 	/>
 {/if}
 
-<!-- Inquiry modal (fallback for "Cere o ofertă personalizată" / "Vorbește cu un consultant") -->
-<Dialog.Root bind:open={modalOpen}>
-	<Dialog.Content class="max-w-md">
-		<Dialog.Header>
-			<Dialog.Title>
-				{selectedPackage ? `Cere ofertă pentru ${selectedPackage.name}` : 'Cere o ofertă'}
-			</Dialog.Title>
-			<Dialog.Description>
-				Te contactăm în maxim 24h cu detaliile complete și activarea contului.
-			</Dialog.Description>
-		</Dialog.Header>
-
-		<form onsubmit={handleSubmit} class="space-y-3">
-			<div>
-				<Label for="contactName">Nume complet *</Label>
-				<Input id="contactName" bind:value={form.contactName} required placeholder="Ion Popescu" />
-			</div>
-			<div>
-				<Label for="contactEmail">Email *</Label>
-				<Input
-					id="contactEmail"
-					type="email"
-					bind:value={form.contactEmail}
-					required
-					placeholder="ion@firma.ro"
-				/>
-			</div>
-			<div>
-				<Label for="contactPhone">Telefon</Label>
-				<Input id="contactPhone" bind:value={form.contactPhone} placeholder="07XX XXX XXX" />
-			</div>
-			<div>
-				<Label for="vatNumber">CUI</Label>
-				<div class="ph-cui-row">
-					<Input
-						id="vatNumber"
-						bind:value={form.vatNumber}
-						placeholder="RO12345678 sau 12345678"
-						onblur={() => {
-							if (form.vatNumber.trim() && !anafData && !anafLoading) lookupAnaf();
-						}}
-					/>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						disabled={anafLoading || !form.vatNumber.trim()}
-						onclick={lookupAnaf}
-					>
-						{anafLoading ? 'Verifică…' : 'Verifică ANAF'}
-					</Button>
+<!-- Cont nou (self-signup). Același schelet co-* ca checkout-ul; formular minimal,
+     ca la Hostico — datele de facturare vin la prima comandă. Emailul trimite un
+     magic link; Google loghează pe loc (mode=signup creează contul la nevoie). -->
+{#if signupOpen}
+	<div
+		class="co-overlay"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="signup-title"
+		tabindex="-1"
+		use:focusTrap={{ initialFocus: '#su-name', onEscape: closeSignup }}
+		onclick={(e) => {
+			if (e.target === e.currentTarget) closeSignup();
+		}}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' && e.target === e.currentTarget) closeSignup();
+		}}
+	>
+		<div class="co-sheet ph-iq-sheet">
+			<div class="co-topbar">
+				<div class="co-logo">
+					<img src="/onetop-logo.png" alt="One Top Solution" />
 				</div>
-				{#if anafError}
-					<p class="ph-cui-err">{anafError}</p>
-				{:else if anafData}
-					<div class="ph-cui-ok">
-						<strong>{anafData.denumire}</strong>
-						{#if anafData.adresa}<span>{anafData.adresa}</span>{/if}
-						<span class="ph-cui-tags">
-							{#if anafData.platitorTva}
-								<span class="ph-cui-tag">Plătitor TVA</span>
-							{/if}
-							{#if anafData.eFacturaActiv}
-								<span class="ph-cui-tag">e-Factura activ</span>
-							{/if}
-							{#if anafData.nrRegCom}
-								<span class="ph-cui-tag">{anafData.nrRegCom}</span>
-							{/if}
-						</span>
+				<div class="co-secure">
+					<MailIcon size={13} />
+					<span>Fără parolă · link pe email</span>
+				</div>
+				<button type="button" class="co-close" onclick={closeSignup} disabled={signupSubmitting}>
+					<XIcon size={14} /> Închide
+				</button>
+			</div>
+
+			<div class="co-body ph-iq-body">
+				<div class="co-content">
+					{#if signupSentTo}
+						<div class="co-success ph-su-success">
+							<div class="co-success-icon"><MailIcon size={30} /></div>
+							<h2 class="co-h2" id="signup-title">Verifică emailul</h2>
+							<p class="co-sub">
+								Ți-am trimis un link de activare la <strong>{signupSentTo}</strong>. Linkul e valabil
+								24 de ore. Dacă aveai deja cont, același link te loghează.
+							</p>
+							<p class="co-hint">
+								Nu găsești emailul? Verifică folderul Spam sau
+								<button type="button" class="ph-link" onclick={() => (signupSentTo = null)}>
+									trimite din nou
+								</button>.
+							</p>
+						</div>
+					{:else}
+						<h2 class="co-h2" id="signup-title">Creează-ți contul</h2>
+						<p class="co-sub">
+							Îți trimitem pe email un link de activare — fără parolă de ținut minte. Datele de
+							facturare le completezi la prima comandă.
+						</p>
+
+						<a class="co-btn-ghost ph-google-btn" href={googleSignupHref}>
+							<svg class="ph-google-icon" viewBox="0 0 24 24" aria-hidden="true">
+								<path
+									d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+									fill="#4285F4"
+								/>
+								<path
+									d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+									fill="#34A853"
+								/>
+								<path
+									d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+									fill="#FBBC05"
+								/>
+								<path
+									d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+									fill="#EA4335"
+								/>
+							</svg>
+							Continuă cu Google
+						</a>
+
+						<div class="ph-or" aria-hidden="true">sau cu email</div>
+
+						<form id="signup-form" onsubmit={handleSignup}>
+							<section class="co-form-section">
+								<div class="co-form-section-head">
+									<h3>Datele tale</h3>
+								</div>
+								<div class="co-grid-2">
+									<div class="co-field co-span-2">
+										<label class="co-label" for="su-name">Nume complet *</label>
+										<input
+											id="su-name"
+											class="co-input"
+											bind:value={signup.name}
+											required
+											autocomplete="name"
+											placeholder="Ion Popescu"
+										/>
+									</div>
+									<div class="co-field">
+										<label class="co-label" for="su-email">Email *</label>
+										<input
+											id="su-email"
+											class="co-input"
+											type="email"
+											bind:value={signup.email}
+											required
+											autocomplete="email"
+											placeholder="ion@firma.ro"
+										/>
+									</div>
+									<div class="co-field">
+										<label class="co-label" for="su-phone">Telefon</label>
+										<input
+											id="su-phone"
+											class="co-input"
+											type="tel"
+											bind:value={signup.phone}
+											autocomplete="tel"
+											placeholder="07XX XXX XXX"
+										/>
+									</div>
+								</div>
+								<label class="ph-consent">
+									<input type="checkbox" bind:checked={signup.consent} required />
+									<span>
+										Sunt de acord cu
+										<a href="/termeni" target="_blank" rel="noopener">termenii și condițiile</a>
+										și cu prelucrarea datelor pentru crearea contului.
+									</span>
+								</label>
+							</section>
+						</form>
+					{/if}
+				</div>
+
+				<aside class="co-summary">
+					<div class="co-summary-head">Ce urmează</div>
+					<ol class="ph-iq-steps">
+						<li>
+							<strong>Activezi contul din email</strong>
+							<span>Un click pe link și ești logat — fără parolă.</span>
+						</li>
+						<li>
+							<strong>Alegi pachetul și plătești</strong>
+							<span>Card, Apple Pay sau Google Pay; factura vine automat.</span>
+						</li>
+						<li>
+							<strong>Hostingul e creat pe loc</strong>
+							<span>Primești accesul la panou și instrucțiunile DNS pe email.</span>
+						</li>
+					</ol>
+
+					<div class="co-trust">
+						<div class="co-trust-row">
+							<CheckIcon size={12} /> 30 zile garanție returnare
+						</div>
+						<div class="co-trust-row">
+							<CheckIcon size={12} /> Migrare gratuită din alt panou
+						</div>
+						<div class="co-trust-row">
+							<CheckIcon size={12} /> Suport 24/7 în limba română
+						</div>
 					</div>
+
+					<div class="ph-iq-contact">
+						<div class="co-summary-head">Ai deja cont?</div>
+						<a href={portalLoginHref}>
+							<LogInIcon size={13} />
+							Intră în contul tău
+						</a>
+					</div>
+				</aside>
+			</div>
+
+			<div class="co-foot">
+				{#if signupSentTo}
+					<div></div>
+					<div class="co-foot-meta">Poți închide fereastra — continui din email.</div>
+					<button type="button" class="co-btn-primary" onclick={closeSignup}>Am înțeles</button>
 				{:else}
-					<p class="ph-cui-hint">
-						Introdu CUI-ul, apoi click „Verifică ANAF" — completăm denumirea și adresa
-						automat.
-					</p>
+					<button type="button" class="co-btn-ghost" onclick={closeSignup} disabled={signupSubmitting}>
+						Anulează
+					</button>
+					<div class="co-foot-meta">Fără parolă · fără obligații</div>
+					<button type="submit" form="signup-form" class="co-btn-primary" disabled={signupSubmitting}>
+						{#if signupSubmitting}
+							Se trimite…
+						{:else}
+							Creează contul <ArrowRightIcon size={13} />
+						{/if}
+					</button>
 				{/if}
 			</div>
-			<div>
-				<Label for="companyName">Companie</Label>
-				<Input
-					id="companyName"
-					bind:value={form.companyName}
-					placeholder="SC Firma SRL"
-				/>
-			</div>
-			<div>
-				<Label for="message">Mesaj (opțional)</Label>
-				<Textarea
-					id="message"
-					bind:value={form.message}
-					rows={3}
-					placeholder="Detalii suplimentare, domeniu existent, migrare etc."
-				/>
+		</div>
+	</div>
+{/if}
+
+<!-- Inquiry modal (fallback for "Cere o ofertă personalizată" / "Vorbește cu un consultant").
+     Reuses the checkout modal's global `co-*` styles so both modals look the same —
+     those styles ship with HostingCheckoutModal, imported statically above. -->
+{#if modalOpen}
+	<div
+		class="co-overlay"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="inquiry-title"
+		tabindex="-1"
+		use:focusTrap={{ initialFocus: '#contactName', onEscape: closeInquiry }}
+		onclick={(e) => {
+			if (e.target === e.currentTarget) closeInquiry();
+		}}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' && e.target === e.currentTarget) closeInquiry();
+		}}
+	>
+		<div class="co-sheet ph-iq-sheet">
+			<div class="co-topbar">
+				<div class="co-logo">
+					<img src="/onetop-logo.png" alt="One Top Solution" />
+				</div>
+				<div class="co-secure">
+					<ClockIcon size={13} />
+					<span>Răspuns în maxim 24h</span>
+				</div>
+				<button type="button" class="co-close" onclick={closeInquiry}>
+					<XIcon size={14} /> Închide
+				</button>
 			</div>
 
-			<div class="flex justify-end gap-2 pt-2">
-				<Button type="button" variant="outline" onclick={() => (modalOpen = false)}>Anulează</Button>
-				<Button type="submit" disabled={submitting}>
-					{submitting ? 'Se trimite...' : 'Trimite cererea'}
-				</Button>
+			<div class="co-body ph-iq-body">
+				<div class="co-content">
+					<h2 class="co-h2" id="inquiry-title">
+						{selectedPackage ? `Cere ofertă pentru ${selectedPackage.name}` : 'Cere o ofertă'}
+					</h2>
+					<p class="co-sub">
+						Te contactăm în maxim 24h cu detaliile complete și activarea contului.
+					</p>
+
+					<form id="inquiry-form" onsubmit={handleSubmit}>
+						<section class="co-form-section">
+							<div class="co-form-section-head">
+								<h3>Date de contact</h3>
+							</div>
+							<div class="co-grid-2">
+								<div class="co-field co-span-2">
+									<label class="co-label" for="contactName">Nume complet *</label>
+									<input
+										id="contactName"
+										class="co-input"
+										bind:value={form.contactName}
+										required
+										autocomplete="name"
+										placeholder="Ion Popescu"
+									/>
+								</div>
+								<div class="co-field">
+									<label class="co-label" for="contactEmail">Email *</label>
+									<input
+										id="contactEmail"
+										class="co-input"
+										type="email"
+										bind:value={form.contactEmail}
+										required
+										autocomplete="email"
+										placeholder="ion@firma.ro"
+									/>
+								</div>
+								<div class="co-field">
+									<label class="co-label" for="contactPhone">Telefon</label>
+									<input
+										id="contactPhone"
+										class="co-input"
+										type="tel"
+										bind:value={form.contactPhone}
+										autocomplete="tel"
+										placeholder="07XX XXX XXX"
+									/>
+								</div>
+							</div>
+						</section>
+
+						<section class="co-form-section">
+							<div class="co-form-section-head">
+								<h3>Date firmă <span class="ph-iq-optional">(opțional)</span></h3>
+							</div>
+							<div class="co-grid-2">
+								<div class="co-field co-span-2">
+									<label class="co-label" for="vatNumber">CUI</label>
+									<div class="co-cui-row">
+										<input
+											id="vatNumber"
+											class="co-input"
+											class:co-input-error={!!anafError}
+											class:co-input-success={!!anafData}
+											bind:value={form.vatNumber}
+											placeholder="RO12345678 sau 12345678"
+											onblur={() => {
+												if (form.vatNumber.trim() && !anafData && !anafLoading) lookupAnaf();
+											}}
+										/>
+										<button
+											type="button"
+											class="co-btn-ghost"
+											disabled={anafLoading || !form.vatNumber.trim()}
+											onclick={lookupAnaf}
+										>
+											{anafLoading ? 'Verifică…' : 'Verifică ANAF'}
+										</button>
+									</div>
+									{#if anafError}
+										<div class="co-hint co-hint-err">{anafError}</div>
+									{:else if anafLoading}
+										<div class="co-hint co-hint-loading">
+											<span class="co-spin" aria-hidden="true"></span>
+											Verificăm la ANAF…
+										</div>
+									{:else if anafData}
+										<div class="ph-cui-ok">
+											<strong>{anafData.denumire}</strong>
+											{#if anafData.adresa}<span>{anafData.adresa}</span>{/if}
+											<span class="ph-cui-tags">
+												{#if anafData.platitorTva}
+													<span class="ph-cui-tag">Plătitor TVA</span>
+												{/if}
+												{#if anafData.eFacturaActiv}
+													<span class="ph-cui-tag">e-Factura activ</span>
+												{/if}
+												{#if anafData.nrRegCom}
+													<span class="ph-cui-tag">{anafData.nrRegCom}</span>
+												{/if}
+											</span>
+										</div>
+									{:else}
+										<div class="co-hint">
+											Introdu CUI-ul, apoi click „Verifică ANAF" — completăm denumirea automat.
+										</div>
+									{/if}
+								</div>
+								<div class="co-field co-span-2">
+									<label class="co-label" for="companyName">Companie</label>
+									<input
+										id="companyName"
+										class="co-input"
+										bind:value={form.companyName}
+										autocomplete="organization"
+										placeholder="SC Firma SRL"
+									/>
+								</div>
+							</div>
+						</section>
+
+						<div class="co-field">
+							<label class="co-label" for="message">Mesaj (opțional)</label>
+							<textarea
+								id="message"
+								class="co-input"
+								bind:value={form.message}
+								rows={3}
+								placeholder="Detalii suplimentare, domeniu existent, migrare etc."
+							></textarea>
+						</div>
+					</form>
+				</div>
+
+				<aside class="co-summary">
+					<div class="co-summary-head">Ce urmează</div>
+					<ol class="ph-iq-steps">
+						<li>
+							<strong>Analizăm cererea</strong>
+							<span>Verificăm ce pachet și ce resurse ți se potrivesc.</span>
+						</li>
+						<li>
+							<strong>Te contactăm în 24h</strong>
+							<span>Primești oferta completă pe email sau telefonic.</span>
+						</li>
+						<li>
+							<strong>Activăm contul</strong>
+							<span>Migrăm gratuit site-ul existent, fără timp de nefuncționare.</span>
+						</li>
+					</ol>
+
+					<div class="co-trust">
+						<div class="co-trust-row">
+							<CheckIcon size={12} /> 30 zile garanție returnare
+						</div>
+						<div class="co-trust-row">
+							<CheckIcon size={12} /> Migrare gratuită din alt panou
+						</div>
+						<div class="co-trust-row">
+							<CheckIcon size={12} /> Suport 24/7 în limba română
+						</div>
+					</div>
+
+					{#if tenantInfo?.phone || tenantInfo?.email}
+						<div class="ph-iq-contact">
+							<div class="co-summary-head">Preferi direct?</div>
+							{#if tenantInfo.phone}
+								<a href="tel:{tenantInfo.phone.replace(/\s+/g, '')}">
+									<PhoneIcon size={13} />
+									{tenantInfo.phone}
+								</a>
+							{/if}
+							{#if tenantInfo.email}
+								<a href="mailto:{tenantInfo.email}">
+									<MailIcon size={13} />
+									{tenantInfo.email}
+								</a>
+							{/if}
+						</div>
+					{/if}
+				</aside>
 			</div>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+
+			<div class="co-foot">
+				<button type="button" class="co-btn-ghost" onclick={closeInquiry} disabled={submitting}>
+					Anulează
+				</button>
+				<div class="co-foot-meta">Fără obligații · răspuns în maxim 24h</div>
+				<button type="submit" form="inquiry-form" class="co-btn-primary" disabled={submitting}>
+					{#if submitting}
+						Se trimite…
+					{:else}
+						Trimite cererea <SendIcon size={13} />
+					{/if}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.ph-page {
@@ -1728,28 +2145,167 @@
 		text-decoration: underline;
 	}
 
-	/* ===== ANAF lookup row (rendered in dialog portal — needs :global) ===== */
-	:global(.ph-cui-row) {
+	/* ===== Cont nou — pe scheletul co-* al checkout-ului (culori hex: modalul stă în
+	   afara .ph-page, deci tokenii --accent nu ajung la el) ===== */
+	/* Ca <a> („Contul meu") ar lua culoarea linkurilor din pagină — o fixăm pe alb. */
+	.ph-page .ph-nav-inner a.ph-nav-cta,
+	.ph-page .ph-nav-inner a.ph-nav-cta:hover {
+		color: #ffffff;
+		text-decoration: none;
+	}
+	.ph-google-btn {
+		width: 100%;
+		justify-content: center;
+		gap: 10px;
+		padding: 12px 16px;
+		font-size: 14px;
+		color: #0b1220;
+		background: white;
+		text-decoration: none;
+	}
+	.ph-google-btn:hover {
+		border-color: #cbd5e1;
+		background: #f7f8fa;
+	}
+	.ph-google-icon {
+		width: 18px;
+		height: 18px;
+		flex-shrink: 0;
+	}
+	.ph-or {
 		display: flex;
-		gap: 8px;
-		align-items: stretch;
+		align-items: center;
+		gap: 12px;
+		margin: 18px 0;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #94a3b8;
 	}
-	:global(.ph-cui-row > :first-child) {
+	.ph-or::before,
+	.ph-or::after {
+		content: '';
 		flex: 1;
+		height: 1px;
+		background: #e5e9f0;
 	}
-	:global(.ph-cui-hint) {
-		margin: 6px 0 0;
-		font-size: 11.5px;
-		color: #64748b;
+	.ph-consent {
+		display: flex;
+		gap: 10px;
+		align-items: flex-start;
+		margin-top: 14px;
+		font-size: 13px;
+		line-height: 1.45;
+		color: #475569;
+		cursor: pointer;
 	}
-	:global(.ph-cui-err) {
-		margin: 6px 0 0;
+	.ph-consent input {
+		margin-top: 3px;
+		width: 16px;
+		height: 16px;
+		flex-shrink: 0;
+		accent-color: #1877f2;
+	}
+	.ph-consent a {
+		color: #1877f2;
+		font-weight: 600;
+	}
+	.ph-su-success {
+		text-align: center;
+		padding-top: 8px;
+	}
+	.ph-su-success .co-sub {
+		margin-left: auto;
+		margin-right: auto;
+	}
+	.ph-su-success .co-hint {
 		font-size: 12.5px;
-		color: #b91c1c;
-		background: rgba(239, 68, 68, 0.06);
-		border: 1px solid rgba(239, 68, 68, 0.2);
-		border-radius: 8px;
-		padding: 8px 12px;
+	}
+	/* .ph-link ia culoarea din .ph-page (tokeni care nu ajung în modal) — o fixăm aici. */
+	.ph-su-success .ph-link {
+		color: #1877f2;
+		font-weight: 600;
+		font-size: inherit;
+	}
+
+	/* ===== Inquiry modal — layout on top of the checkout's `co-*` styles ===== */
+	.ph-iq-sheet {
+		max-width: 940px;
+	}
+	.ph-iq-body {
+		grid-template-columns: 1fr 320px;
+		min-height: 0;
+	}
+	.ph-iq-optional {
+		font-weight: 500;
+		color: #94a3b8;
+		font-size: 12px;
+	}
+	.ph-iq-steps {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		counter-reset: iq;
+	}
+	.ph-iq-steps li {
+		position: relative;
+		padding-left: 36px;
+		counter-increment: iq;
+	}
+	.ph-iq-steps li::before {
+		content: counter(iq);
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #1877f2;
+		color: white;
+		font-size: 12px;
+		font-weight: 700;
+		display: grid;
+		place-items: center;
+	}
+	.ph-iq-steps strong {
+		display: block;
+		font-size: 13.5px;
+		color: #0b1220;
+	}
+	.ph-iq-steps span {
+		display: block;
+		margin-top: 2px;
+		font-size: 12px;
+		color: #475569;
+	}
+	.ph-iq-contact {
+		margin-top: 4px;
+		padding-top: 14px;
+		border-top: 1px solid #e5e9f0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.ph-iq-contact a {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+		font-weight: 600;
+		color: #1877f2;
+		text-decoration: none;
+	}
+	.ph-iq-contact a:hover {
+		text-decoration: underline;
+	}
+	@media (max-width: 880px) {
+		.ph-iq-body {
+			grid-template-columns: 1fr;
+		}
 	}
 	:global(.ph-cui-ok) {
 		margin-top: 8px;

@@ -23,6 +23,8 @@
 	import { COUNTIES, parseAnafAddress } from '$lib/components/checkout/anaf-address';
 	import { computeVatBreakdown } from '$lib/utils/vat';
 	import { focusTrap } from '$lib/actions/focus-trap';
+	import { untrack } from 'svelte';
+	import type { PortalClientSummary } from '$lib/components/checkout/portal-client';
 	import { toast } from 'svelte-sonner';
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -73,15 +75,13 @@
 		priceCents,
 		bankInfo,
 		preloadedPublishableKey = null,
-		initialEmail = null,
-		lockEmail = false,
+		portalClient = null,
 		portalTenantSlug = 'ots',
 		onClose
 	}: {
-		// Client logat în portal: emailul vine precompletat și blocat, ca să nu
-		// comande accidental pe alt cont; comanda se leagă de contul lui.
-		initialEmail?: string | null;
-		lockEmail?: boolean;
+		// Client logat în portal: sare peste pasul de cont (emailul e al contului,
+		// comanda se leagă de el) și pornește cu facturarea precompletată din cont.
+		portalClient?: PortalClientSummary | null;
 		// Slug-ul tenantului public — pentru linkurile către /client/<slug>/login.
 		portalTenantSlug?: string;
 		plan: Plan;
@@ -369,25 +369,33 @@
 	}
 
 	// Account
-	// Valoare inițială, intenționat: modalul e recreat la fiecare deschidere ({#if checkoutPkg}).
-	// svelte-ignore state_referenced_locally
-	let email = $state(initialEmail ?? '');
+	// Client logat: pornim cu emailul și facturarea din cont. Citire unică,
+	// intenționată (modalul e recreat la fiecare deschidere), de aici untrack.
+	// Un cont de self-signup n-are CUI/firmă → e persoană fizică, iar `name` e
+	// numele persoanei; un client cu firmă are businessName/CUI → juridică.
+	const pc = untrack(() => portalClient);
+	const pcBilling = pc?.billing ?? null;
+	const pcIsPerson =
+		!!pc && (pcBilling?.legalType === 'pf' || (!pcBilling?.cui && !pcBilling?.businessName));
+	const [pcFirstName = '', ...pcLastNameParts] = (pc?.name ?? '').trim().split(/\s+/);
+
+	let email = $state(pc?.email ?? '');
 	// password state removed — account is provisioned silently post-payment.
-	let newAccount = $state(true);
+	let newAccount = $state(!pc);
 
 	// Billing
-	let billingType = $state<'person' | 'company'>('company');
-	let firstName = $state('');
-	let lastName = $state('');
-	let companyName = $state('');
-	let cui = $state('');
-	let regCom = $state('');
-	let address = $state('');
-	let city = $state('');
-	let county = $state('');
-	let postalCode = $state('');
-	let phone = $state('');
-	let vatPayer = $state(false);
+	let billingType = $state<'person' | 'company'>(pcIsPerson ? 'person' : 'company');
+	let firstName = $state(pcIsPerson ? pcFirstName : '');
+	let lastName = $state(pcIsPerson ? pcLastNameParts.join(' ') : '');
+	let companyName = $state(pc && !pcIsPerson ? (pcBilling?.businessName ?? pc.name) : '');
+	let cui = $state(pcBilling?.cui ?? '');
+	let regCom = $state(pcBilling?.registrationNumber ?? '');
+	let address = $state(pcBilling?.address ?? '');
+	let city = $state(pcBilling?.city ?? '');
+	let county = $state(pcBilling?.county ?? '');
+	let postalCode = $state(pcBilling?.postalCode ?? '');
+	let phone = $state(pcBilling?.phone ?? '');
+	let vatPayer = $state(/^RO/i.test(pcBilling?.vatNumber ?? ''));
 
 	// Per-field derived errors. Each returns null|string. null means OK
 	// (or not-yet-touched — we keep the field neutral in that case).
@@ -1283,7 +1291,7 @@
 
 		{#if step < 4}
 			<div class="co-stepper">
-				{#each [{ n: 1, label: 'Domeniu' }, { n: 2, label: 'Date & cont' }, { n: 3, label: 'Plată' }] as s, i (s.n)}
+				{#each [{ n: 1, label: 'Domeniu' }, { n: 2, label: portalClient ? 'Facturare' : 'Date & cont' }, { n: 3, label: 'Plată' }] as s, i (s.n)}
 					<div
 						class="co-step {step === s.n ? 'active' : ''} {step > s.n ? 'done' : ''}"
 					>
@@ -1508,6 +1516,15 @@
 						</div>
 					{/if}
 				{:else if step === 2}
+					{#if portalClient}
+						<!-- Client logat: fără pasul de cont — comanda merge pe contul lui, iar
+						     facturarea e precompletată din datele contului. -->
+						<h2 class="co-h2">Date de facturare</h2>
+						<p class="co-sub">
+							Comanzi din contul <strong>{portalClient.email}</strong>. Verifică datele de mai
+							jos — apar pe factură.
+						</p>
+					{:else}
 					<h2 class="co-h2">Date de contact &amp; cont</h2>
 					<p class="co-sub">
 						Avem nevoie de un email pentru a-ți trimite acces la panoul tău + factura.
@@ -1540,7 +1557,6 @@
 									type="email"
 									placeholder="contact@firma.ro"
 									autocomplete="email"
-									readonly={lockEmail}
 									value={email}
 									oninput={(e) => (email = (e.currentTarget as HTMLInputElement).value)}
 									onblur={() => {
@@ -1549,11 +1565,7 @@
 										if (!validateEmail(email)) runEmailCrmCheck(email);
 									}}
 								/>
-								{#if lockEmail}
-									<div class="co-hint co-hint-ok">
-										<CheckIcon size={12} /> Comanda se leagă de contul tău.
-									</div>
-								{:else if emailFormatError}
+								{#if emailFormatError}
 									<div class="co-hint co-hint-err">{emailFormatError}</div>
 								{:else if isPersonalEmailWarn}
 									<div class="co-hint co-hint-warn">
@@ -1587,6 +1599,7 @@
 								 Reintroducerea câmpului doar dacă wire-uim payload-ul prin OrderSchema. -->
 						</div>
 					</section>
+					{/if}
 
 					<section class="co-form-section">
 						<div class="co-form-section-head">

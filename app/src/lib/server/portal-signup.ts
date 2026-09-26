@@ -128,7 +128,18 @@ export async function resolvePortalClientForUser(tenantId: string, userId: strin
 			id: table.client.id,
 			name: table.client.name,
 			email: table.client.email,
-			portalScope: table.client.portalScope
+			portalScope: table.client.portalScope,
+			// Datele de facturare deja cunoscute — checkout-ul le precompletează.
+			businessName: table.client.businessName,
+			legalType: table.client.legalType,
+			cui: table.client.cui,
+			vatNumber: table.client.vatNumber,
+			registrationNumber: table.client.registrationNumber,
+			phone: table.client.phone,
+			address: table.client.address,
+			city: table.client.city,
+			county: table.client.county,
+			postalCode: table.client.postalCode
 		})
 		.from(table.clientUser)
 		.innerJoin(table.client, eq(table.clientUser.clientId, table.client.id))
