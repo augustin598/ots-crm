@@ -1,0 +1,1 @@
+ALTER TABLE `client` ADD `portal_scope` text DEFAULT 'full' NOT NULL;

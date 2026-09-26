@@ -176,12 +176,18 @@ export const client = sqliteTable('client', {
 	/** Forma juridică detectată din ANAF sau setată manual. */
 	legalType: text('legal_type'), // 'srl' | 'pfa' | 'pf' | 'ong' | null
 	/** Cum a fost creat clientul (audit + analytics). */
-	signupSource: text('signup_source'), // 'public-form' | 'admin-created' | 'whmcs-imported' | 'magic-link'
+	signupSource: text('signup_source'), // 'public-form' | 'admin-created' | 'whmcs-imported' | 'magic-link' | 'hosting-signup'
 	/** Stare onboarding pentru clienții auto-create din /pachete-hosting. */
 	onboardingStatus: text('onboarding_status').notNull().default('active'),
 	// 'pending_email' | 'pending_payment' | 'active' | 'churned'
 	/** Stripe Customer ID — cache-uit la prima checkout pentru a evita customers duplicați. */
 	stripeCustomerId: text('stripe_customer_id'),
+	/**
+	 * Cât din portal vede clientul: 'full' (tot ce permit flag-urile de acces) sau
+	 * 'hosting' (doar Dashboard, Hosting, Facturi, Setări). Conturile create singure
+	 * de pe /pachete-hosting pornesc pe 'hosting'; adminul le trece pe 'full' din Setări.
+	 */
+	portalScope: text('portal_scope').notNull().default('full'),
 	// === Hosting grouped-by-client redesign (HOST pack) ===
 	/** Optional human-set "client since" date (YYYY-MM-DD). Falls back to created_at in UI. */
 	clientSince: text('client_since'),
