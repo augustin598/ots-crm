@@ -180,7 +180,7 @@
 					}}
 				/>
 				{#if error}
-					<p id="wa-phone-error" class="wa-hint wa-hint-err">{error}</p>
+					<p id="wa-phone-error" class="wa-hint wa-hint-err" role="alert">{error}</p>
 				{:else}
 					<p id="wa-phone-hint" class="wa-hint">
 						Îl folosim doar ca să vorbim cu tine despre proiectele tale. Îl poți schimba sau șterge
@@ -213,6 +213,7 @@
 		--wa-border: #e5e9f0;
 		--wa-accent: #1877f2;
 		--wa-accent-dark: #0d5cc7;
+		--wa-err: #b91c1c;
 		max-width: 520px;
 		padding: 0;
 		gap: 0;
@@ -233,6 +234,7 @@
 		--wa-ink2: var(--muted-foreground);
 		--wa-muted: var(--muted-foreground);
 		--wa-border: var(--border);
+		--wa-err: #fca5a5;
 	}
 
 	.wa-top {
@@ -268,6 +270,7 @@
 		align-items: center;
 		gap: 6px;
 		padding: 7px 12px;
+		min-height: 36px;
 		border-radius: 8px;
 		background: transparent;
 		border: 1px solid var(--wa-border);
@@ -340,10 +343,11 @@
 		margin: 6px 0 0;
 		font-size: 11.5px;
 		line-height: 1.45;
-		color: var(--wa-muted);
+		/* Text de citit, nu placeholder: #475569 ține 4.5:1 pe alb. */
+		color: var(--wa-ink2);
 	}
 	.wa-hint-err {
-		color: #b91c1c;
+		color: var(--wa-err);
 		font-weight: 500;
 	}
 
@@ -359,7 +363,7 @@
 		flex: 1;
 		text-align: center;
 		font-size: 12px;
-		color: var(--wa-muted);
+		color: var(--wa-ink2);
 	}
 	.wa-btn-primary {
 		display: inline-flex;
@@ -451,11 +455,11 @@
 		text-underline-offset: 2px;
 	}
 	.wa-banner-close {
-		margin-left: auto;
+		margin: -6px -6px -6px auto;
 		display: grid;
 		place-items: center;
-		width: 24px;
-		height: 24px;
+		width: 36px;
+		height: 36px;
 		border: 0;
 		border-radius: 6px;
 		background: none;

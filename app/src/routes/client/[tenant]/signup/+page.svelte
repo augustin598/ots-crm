@@ -115,7 +115,7 @@
 			</div>
 			<button
 				type="button"
-				class="mt-4 text-sm font-medium text-primary hover:underline"
+				class="mt-4 py-2 text-sm font-medium text-primary hover:underline"
 				onclick={() => (sentTo = null)}
 			>
 				Nu ai primit nimic? Trimite din nou
@@ -218,6 +218,7 @@
 				{#if error}
 					<div
 						class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950"
+						role="alert"
 					>
 						<p class="text-sm text-red-700 dark:text-red-300">{error}</p>
 					</div>
@@ -230,7 +231,7 @@
 
 			<button
 				type="button"
-				class="mt-5 text-sm text-muted-foreground hover:text-foreground hover:underline"
+				class="mt-5 py-2 text-sm text-muted-foreground hover:text-foreground hover:underline"
 				onclick={() => switchMode('existing')}
 			>
 				Sunt deja client OTS — vreau acces cu CUI
@@ -280,6 +281,7 @@
 				{#if error}
 					<div
 						class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950"
+						role="alert"
 					>
 						<p class="text-sm text-red-700 dark:text-red-300">{error}</p>
 					</div>
@@ -292,7 +294,7 @@
 
 			<button
 				type="button"
-				class="mt-5 text-sm text-muted-foreground hover:text-foreground hover:underline"
+				class="mt-5 py-2 text-sm text-muted-foreground hover:text-foreground hover:underline"
 				onclick={() => switchMode('new')}
 			>
 				← Înapoi la cont nou

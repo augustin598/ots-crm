@@ -6,6 +6,7 @@
 	} from '$lib/remotes/public-hosting.remote';
 	import { resolveVatPercent } from '$lib/utils/vat';
 	import { focusTrap } from '$lib/actions/focus-trap';
+	import { tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import HostingCheckoutModal from '$lib/components/hosting-checkout-modal.svelte';
 	import { hostingSignup } from '$lib/remotes/client-auth.remote';
@@ -182,11 +183,25 @@
 			});
 			// Răspunsul e generic by design (nu spune dacă emailul exista) — arătăm confirmarea.
 			signupSentTo = email;
+			// Formularul (cu butonul focusat) dispare din DOM: mutăm focusul pe titlul
+			// confirmării, altfel Tab-ul următor sare în pagina din spatele modalului.
+			await tick();
+			document.getElementById('signup-title')?.focus();
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : 'Nu am putut trimite emailul. Încearcă din nou.');
 		} finally {
 			signupSubmitting = false;
+			if (!signupSentTo) {
+				await tick();
+				document.getElementById('su-submit')?.focus();
+			}
 		}
+	}
+
+	async function retrySignup() {
+		signupSentTo = null;
+		await tick();
+		document.getElementById('su-name')?.focus();
 	}
 
 	// Same scroll lock as the checkout modal: the page behind stays put.
@@ -959,7 +974,7 @@
 			email: tenantInfo?.email ?? null
 		}}
 		preloadedPublishableKey={stripePublishableKey}
-		{portalClient}
+		portalClient={portalClient?.isPrimary ? portalClient : null}
 		portalTenantSlug={tenantSlug}
 		onClose={closeCheckout}
 	/>
@@ -1002,14 +1017,14 @@
 					{#if signupSentTo}
 						<div class="co-success ph-su-success">
 							<div class="co-success-icon"><MailIcon size={30} /></div>
-							<h2 class="co-h2" id="signup-title">Verifică emailul</h2>
+							<h2 class="co-h2" id="signup-title" tabindex="-1">Verifică emailul</h2>
 							<p class="co-sub">
 								Ți-am trimis un link de activare la <strong>{signupSentTo}</strong>. Linkul e valabil
 								24 de ore. Dacă aveai deja cont, același link te loghează.
 							</p>
 							<p class="co-hint">
 								Nu găsești emailul? Verifică folderul Spam sau
-								<button type="button" class="ph-link" onclick={() => (signupSentTo = null)}>
+								<button type="button" class="ph-link" onclick={retrySignup}>
 									trimite din nou
 								</button>.
 							</p>
@@ -1148,7 +1163,13 @@
 						Anulează
 					</button>
 					<div class="co-foot-meta">Fără parolă · fără obligații</div>
-					<button type="submit" form="signup-form" class="co-btn-primary" disabled={signupSubmitting}>
+					<button
+						id="su-submit"
+						type="submit"
+						form="signup-form"
+						class="co-btn-primary"
+						disabled={signupSubmitting}
+					>
 						{#if signupSubmitting}
 							Se trimite…
 						{:else}
@@ -1496,6 +1517,8 @@
 		font-size: 13px;
 		color: var(--ink2);
 		text-decoration: none;
+		/* Țintă de atins ≥ 40px pe touch. */
+		padding: 10px 8px;
 	}
 
 	/* ===== Hero ===== */
@@ -2181,7 +2204,7 @@
 		font-weight: 700;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #94a3b8;
+		color: #64748b;
 	}
 	.ph-or::before,
 	.ph-or::after {
@@ -2207,8 +2230,9 @@
 		flex-shrink: 0;
 		accent-color: #1877f2;
 	}
+	/* Linkurile mici (13px) pe fundal deschis: #0d5cc7 dă 6:1, #1877f2 doar 4.2:1. */
 	.ph-consent a {
-		color: #1877f2;
+		color: #0d5cc7;
 		font-weight: 600;
 	}
 	.ph-su-success {
@@ -2221,10 +2245,11 @@
 	}
 	.ph-su-success .co-hint {
 		font-size: 12.5px;
+		color: #64748b;
 	}
 	/* .ph-link ia culoarea din .ph-page (tokeni care nu ajung în modal) — o fixăm aici. */
 	.ph-su-success .ph-link {
-		color: #1877f2;
+		color: #0d5cc7;
 		font-weight: 600;
 		font-size: inherit;
 	}
@@ -2296,7 +2321,7 @@
 		gap: 8px;
 		font-size: 13px;
 		font-weight: 600;
-		color: #1877f2;
+		color: #0d5cc7;
 		text-decoration: none;
 	}
 	.ph-iq-contact a:hover {
@@ -2305,6 +2330,30 @@
 	@media (max-width: 880px) {
 		.ph-iq-body {
 			grid-template-columns: 1fr;
+		}
+	}
+	@media (max-width: 620px) {
+		/* Logo + Autentificare + Cont nou nu încap în 390px cu spațierea de desktop. */
+		.ph-nav-inner {
+			gap: 12px;
+			padding-left: 16px;
+			padding-right: 16px;
+		}
+	}
+	@media (max-width: 520px) {
+		/* Pe telefon textul din mijlocul subsolului împinge butonul principal pe două
+		   rânduri, iar pastila din bara de sus se rupe pe trei. */
+		.ph-iq-sheet .co-foot-meta,
+		.ph-iq-sheet .co-secure {
+			display: none;
+		}
+		.ph-iq-sheet .co-foot {
+			justify-content: space-between;
+		}
+		.ph-iq-sheet .co-topbar,
+		.ph-iq-sheet .co-foot {
+			padding-left: 16px;
+			padding-right: 16px;
 		}
 	}
 	:global(.ph-cui-ok) {
