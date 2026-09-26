@@ -95,6 +95,44 @@ type SecondaryEmailAccessRow = {
 	notifyContracts?: boolean | null;
 };
 
+/**
+ * Cât din portal vede clientul. 'hosting' = cont creat singur de pe /pachete-hosting
+ * (Dashboard, Hosting, Facturi, Setări); adminul îl poate trece pe 'full' din Setări.
+ */
+export type PortalScope = 'full' | 'hosting';
+export const PORTAL_SCOPES: readonly PortalScope[] = ['full', 'hosting'] as const;
+
+/** Categoriile pe care le păstrează scope-ul 'hosting'; restul cad pe false. */
+const HOSTING_SCOPE_CATEGORIES: readonly AccessCategory[] = ['hosting', 'invoices'];
+
+/**
+ * Restrânge flag-urile la scope-ul clientului. Nu acordă nimic în plus — un
+ * contact secundar fără `invoices` rămâne fără `invoices` și sub 'hosting'.
+ * Orice altă valoare decât 'hosting' (inclusiv null la clienții vechi) = full.
+ */
+export function applyPortalScope(flags: AccessFlags, scope: string | null | undefined): AccessFlags {
+	if (scope !== 'hosting') return flags;
+	const out: AccessFlags = { ...NO_ACCESS };
+	for (const c of HOSTING_SCOPE_CATEGORIES) out[c] = flags[c];
+	return out;
+}
+
+/**
+ * Rutele fără categorie de acces (Servicii & Oferte, Echipa mea) pe care scope-ul
+ * 'hosting' le închide. Dashboard și Setări rămân deschise pentru oricine.
+ */
+export function routeBlockedByPortalScope(
+	pathname: string,
+	tenantSlug: string,
+	scope: string | null | undefined
+): boolean {
+	if (scope !== 'hosting') return false;
+	const prefix = `/client/${tenantSlug}`;
+	if (!pathname.startsWith(prefix)) return false;
+	const rest = pathname.slice(prefix.length);
+	return rest.startsWith('/services') || rest.startsWith('/team');
+}
+
 export function parseAccessFlags(raw: string | null | undefined): AccessFlags | null {
 	if (!raw) return null;
 	try {
@@ -151,8 +189,19 @@ export async function getRequestAccessFlags(opts: {
 	clientId: string;
 	userEmail: string | null | undefined;
 	isPrimary: boolean;
+	/** `client.portalScope`, dacă apelantul îl are deja (layout-ul); altfel îl citim noi. */
+	portalScope?: string | null;
 }): Promise<AccessFlags> {
-	if (opts.isPrimary) return { ...ALL_ACCESS_TRUE };
+	let scope = opts.portalScope;
+	if (scope === undefined) {
+		const [row] = await db
+			.select({ portalScope: table.client.portalScope })
+			.from(table.client)
+			.where(and(eq(table.client.id, opts.clientId), eq(table.client.tenantId, opts.tenantId)))
+			.limit(1);
+		scope = row?.portalScope ?? 'full';
+	}
+	if (opts.isPrimary) return applyPortalScope({ ...ALL_ACCESS_TRUE }, scope);
 	const email = opts.userEmail?.toLowerCase() ?? '';
 	if (!email) return { ...NO_ACCESS };
 	const [secondary] = await db
@@ -171,7 +220,10 @@ export async function getRequestAccessFlags(opts: {
 			)
 		)
 		.limit(1);
-	return resolveAccessFlags({ isPrimary: false, secondaryEmail: secondary ?? null });
+	return applyPortalScope(
+		resolveAccessFlags({ isPrimary: false, secondaryEmail: secondary ?? null }),
+		scope
+	);
 }
 
 /**
