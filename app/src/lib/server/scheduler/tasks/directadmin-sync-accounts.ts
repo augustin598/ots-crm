@@ -4,6 +4,7 @@ import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { logInfo, logError, logWarning, serializeError } from '$lib/server/logger';
 import { createDAClient } from '$lib/server/plugins/directadmin/factory';
 import { runWithAudit } from '$lib/server/plugins/directadmin/audit';
+import { daAuthRejectedLastError } from '$lib/server/plugins/directadmin/error-message';
 import { getPluginRegistry } from '$lib/server/plugins/registry';
 import pLimit from 'p-limit';
 
@@ -112,6 +113,30 @@ export async function processDirectAdminSyncAccounts(): Promise<{
 				useHttps: server.useHttps ?? false
 			} as Parameters<typeof createDAClient>[1]);
 
+			// Pre-flight: one call proves the credential before we fan out 2 requests per
+			// account. With a rejected credential (Server1, Sep 2026: 2FA on `admin`) the
+			// fan-out was 78 failed logins every 6h — LFD flagged the CRM as brute force.
+			const ping = await daClient.ping();
+			if (!ping.online && ping.kind === 'not_authenticated') {
+				const lastError = daAuthRejectedLastError(ping.error);
+				logError('scheduler', `DA sync: ${server.hostname} — ${lastError}`, {
+					tenantId: tenant.id,
+					metadata: { serverId: server.id, accounts: accounts.length }
+				});
+				await db
+					.update(table.daServer)
+					.set({ lastCheckedAt: new Date().toISOString(), lastError })
+					.where(eq(table.daServer.id, server.id));
+				results.push({
+					tenantId: tenant.id,
+					serverId: server.id,
+					synced: 0,
+					failed: 0,
+					skipped: accounts.length
+				});
+				continue;
+			}
+
 			const limit = pLimit(PER_SERVER_CONCURRENCY);
 			let synced = 0;
 			let failed = 0;
@@ -131,12 +156,14 @@ export async function processDirectAdminSyncAccounts(): Promise<{
 								async () => {
 									// Mirror the steps from syncOneAccount but using a single shared DA client
 									// per server (small efficiency win — we avoid decrypting credentials per account).
-									const [config, usage] = await Promise.all([
-										daClient.getUserConfig(acc.daUsername).catch(() => null),
-										daClient.getUserUsage(acc.daUsername).catch(() => null)
+									const [configRes, usageRes] = await Promise.allSettled([
+										daClient.getUserConfig(acc.daUsername),
+										daClient.getUserUsage(acc.daUsername)
 									]);
+									const config = configRes.status === 'fulfilled' ? configRes.value : null;
+									const usage = usageRes.status === 'fulfilled' ? usageRes.value : null;
 
-									if (!config && !usage) {
+									if (configRes.status === 'rejected' && usageRes.status === 'rejected') {
 										// Both calls failed. This is AMBIGUOUS: the account may have been
 										// deleted on DA, OR the DA box had a transient hiccup / brief outage.
 										// INVARIANT (user rule): the CRM must NEVER auto-`terminate` — only an
@@ -146,13 +173,11 @@ export async function processDirectAdminSyncAccounts(): Promise<{
 										// We DON'T mutate status or daSyncStatus here: a real deletion is confirmed
 										// manually, not inferred from one failed poll, and the richer daSyncStatus
 										// signals (orphan/zombie_on_da/suspended_on_da) belong to reconcileHostingWithDA.
-										// Just warn so staff can investigate a genuinely missing account.
-										logWarning(
-											'scheduler',
-											`DA sync: both getUserConfig + getUserUsage failed for ${acc.daUsername}@${server.hostname} — account may be deleted on DA or DA had a transient outage; status left unchanged`,
-											{ tenantId: tenant.id, metadata: { hostingAccountId: acc.id } }
-										);
-										return;
+										// Throw DA's own error (status untouched): the account counts as failed, the
+										// audit row records the reason, and an all-failed server keeps its lastError.
+										// A plain `return` here counted it as synced and wiped lastError, which hid a
+										// dead credential behind a green "ONLINE" for 19 days (Server1, Sep 2026).
+										throw configRes.reason;
 									}
 
 									const updates: Partial<typeof table.hostingAccount.$inferInsert> = {

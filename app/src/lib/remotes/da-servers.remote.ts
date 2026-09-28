@@ -1,4 +1,5 @@
 import { query, command, getRequestEvent } from '$app/server';
+import { error as svelteError } from '@sveltejs/kit';
 import * as v from 'valibot';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
@@ -18,6 +19,10 @@ import { logInfo, logError, serializeError } from '$lib/server/logger';
 import type { Actor } from '$lib/server/access';
 import { defaultPackageInput, type PackageInput } from '$lib/server/plugins/directadmin/package-serializer';
 import { DirectAdminApiError } from '$lib/server/plugins/directadmin/errors';
+import {
+	DA_AUTH_REJECTED_PREFIX,
+	daAuthRejectedLastError
+} from '$lib/server/plugins/directadmin/error-message';
 
 /**
  * Redact `lastError` for viewers without server-manage capability.
@@ -148,8 +153,17 @@ export type LiveMetrics = {
 	daOs: string | null;
 	daDistro: string | null;
 };
-const METRICS_CACHE = new Map<string, { value: LiveMetrics | null; expiresAt: number }>();
+type MetricsResult = { value: LiveMetrics | null; authError: string | null };
+const METRICS_CACHE = new Map<string, MetricsResult & { expiresAt: number }>();
 const METRICS_TTL_MS = 60_000;
+// A refused credential is cached longer: each page view with it is a failed
+// login in DA's LFD, which blocks after 5/hour. Editing or testing the server
+// drops the entry, so a new key is picked up immediately.
+const METRICS_AUTH_FAIL_TTL_MS = 10 * 60_000;
+
+function forgetMetrics(tenantId: string, serverId: string): void {
+	METRICS_CACHE.delete(`${tenantId}:${serverId}`);
+}
 
 /**
  * Pick the most representative disk partition. DirectAdmin servers typically
@@ -176,21 +190,37 @@ function pickPrimaryFs(
 async function fetchLiveMetrics(
 	tenantId: string,
 	server: typeof table.daServer.$inferSelect
-): Promise<LiveMetrics | null> {
+): Promise<MetricsResult> {
 	const cacheKey = `${tenantId}:${server.id}`;
 	const cached = METRICS_CACHE.get(cacheKey);
-	if (cached && cached.expiresAt > Date.now()) return cached.value;
+	if (cached && cached.expiresAt > Date.now()) return cached;
+	const remember = (r: MetricsResult, ttlMs = METRICS_TTL_MS): MetricsResult => {
+		METRICS_CACHE.set(cacheKey, { ...r, expiresAt: Date.now() + ttlMs });
+		return r;
+	};
 
 	try {
 		// 4s timeout — page-load fetch shouldn't stall on dead servers. The
 		// caller swallows errors per-server so one bad host doesn't break the
 		// whole list.
 		const client = createDAClient(tenantId, server, { timeoutMs: 4_000 });
-		const [sysCpu, sysMem, sysFs, sysLoad, admin, version] = await Promise.allSettled([
+		// Probe alone first: with a refused credential the 6-way fan-out below
+		// was 6 failed logins per page view (LFD blocked the CRM's IP on one refresh).
+		const [sysLoad] = await Promise.allSettled([client.getSystemInfoLoad()]);
+		if (
+			sysLoad.status === 'rejected' &&
+			sysLoad.reason instanceof DirectAdminApiError &&
+			sysLoad.reason.kind === 'not_authenticated'
+		) {
+			return remember(
+				{ value: null, authError: sysLoad.reason.message },
+				METRICS_AUTH_FAIL_TTL_MS
+			);
+		}
+		const [sysCpu, sysMem, sysFs, admin, version] = await Promise.allSettled([
 			client.getSystemInfoCpu(),
 			client.getSystemInfoMemory(),
 			client.getSystemInfoFs(),
-			client.getSystemInfoLoad(),
 			client.getAdminUsage(),
 			client.getVersion()
 		]);
@@ -229,8 +259,7 @@ async function fetchLiveMetrics(
 		// If we couldn't fetch any system-info endpoint, the server is unreachable.
 		// Treat that as "no metrics" rather than returning all zeros.
 		if (sysCpu.status !== 'fulfilled' && sysMem.status !== 'fulfilled' && sysFs.status !== 'fulfilled') {
-			METRICS_CACHE.set(cacheKey, { value: null, expiresAt: Date.now() + METRICS_TTL_MS });
-			return null;
+			return remember({ value: null, authError: null });
 		}
 
 		// DA version + update detection.
@@ -258,11 +287,9 @@ async function fetchLiveMetrics(
 			daOs: v?.os ?? null,
 			daDistro: v?.distro ?? null
 		};
-		METRICS_CACHE.set(cacheKey, { value, expiresAt: Date.now() + METRICS_TTL_MS });
-		return value;
+		return remember({ value, authError: null });
 	} catch {
-		METRICS_CACHE.set(cacheKey, { value: null, expiresAt: Date.now() + METRICS_TTL_MS });
-		return null;
+		return remember({ value: null, authError: null });
 	}
 }
 
@@ -321,7 +348,26 @@ export const getDAServersWithStats = query(async () => {
 	const metricsList = await Promise.all(
 		fullRows.map((row) => fetchLiveMetrics(tenantId, row))
 	);
-	const metricsBySrv = new Map(fullRows.map((r, i) => [r.id, metricsList[i]]));
+	const metricsBySrv = new Map(fullRows.map((r, i) => [r.id, metricsList[i].value]));
+
+	// Keep `lastError` honest from the live probe: the status pill reads it, and
+	// before this a refused credential sat behind "ONLINE" until someone clicked
+	// "Testează". Only auth errors are written/cleared here — other lastError
+	// sources (cron all-failed, ping timeouts) stay owned by their writers.
+	await Promise.all(
+		fullRows.map(async (r, i) => {
+			const { value, authError } = metricsList[i];
+			let next = r.lastError;
+			if (authError) next = daAuthRejectedLastError(authError);
+			else if (value && r.lastError?.startsWith(DA_AUTH_REJECTED_PREFIX)) next = null;
+			if (next === r.lastError) return;
+			r.lastError = next;
+			await db
+				.update(table.daServer)
+				.set({ lastError: next, lastCheckedAt: new Date().toISOString() })
+				.where(and(eq(table.daServer.id, r.id), eq(table.daServer.tenantId, tenantId)));
+		})
+	);
 
 	return fullRows.map((r) => ({
 		id: r.id,
@@ -505,6 +551,8 @@ export const updateDAServer = command(UpdateServerSchema, async (params) => {
 		.update(table.daServer)
 		.set(updates)
 		.where(and(eq(table.daServer.id, params.id), eq(table.daServer.tenantId, tenantId)));
+	// A new login key must not wait out the 10-min "credential refused" cache.
+	forgetMetrics(tenantId, params.id);
 
 	return { success: true };
 });
@@ -541,6 +589,7 @@ export const testDAServer = command(IdSchema, async (serverId) => {
 		.where(and(eq(table.daServer.id, serverId), eq(table.daServer.tenantId, tenantId)))
 		.limit(1);
 	if (!server) throw new Error('Server not found');
+	forgetMetrics(tenantId, serverId);
 
 	try {
 		const daClient = createDAClient(tenantId, server);
@@ -548,20 +597,24 @@ export const testDAServer = command(IdSchema, async (serverId) => {
 			{ tenantId, daServerId: serverId, action: 'test', trigger: 'manual' },
 			() => daClient.ping()
 		);
+		const errorText =
+			result.kind === 'not_authenticated'
+				? daAuthRejectedLastError(result.error)
+				: result.error ?? 'Connection failed';
 		await db
 			.update(table.daServer)
 			.set({
 				lastCheckedAt: new Date().toISOString(),
 				// Keep DA's wording ("Not logged in", "Unauthorized", …) — a generic
 				// "Connection failed" made a refused credential look like downtime.
-				lastError: result.online ? null : result.error ?? 'Connection failed',
+				lastError: result.online ? null : errorText,
 				updatedAt: new Date()
 			})
 			.where(eq(table.daServer.id, serverId));
 		return {
 			online: result.online,
 			responseMs: result.responseMs,
-			...(result.online ? {} : { error: result.error ?? 'Connection failed' })
+			...(result.online ? {} : { error: errorText })
 		};
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
@@ -580,7 +633,14 @@ export const syncDAPackages = command(IdSchema, async (serverId) => {
 	assertCan(actor, 'admin.hosting.servers.manage');
 
 	const tenantId = event.locals.tenant.id;
-	const result = await syncDAPackagesForServer(tenantId, serverId, 'manual');
+	let result: Awaited<ReturnType<typeof syncDAPackagesForServer>>;
+	try {
+		result = await syncDAPackagesForServer(tenantId, serverId, 'manual');
+	} catch (e) {
+		// A bare throw is redacted to "A aparut o eroare interna." — the message
+		// already carries DA's reason + the fix (see sync-packages.ts).
+		throw svelteError(502, e instanceof Error ? e.message : String(e));
+	}
 	return {
 		synced: result.synced,
 		updated: result.updated,

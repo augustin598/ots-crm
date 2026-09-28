@@ -16,6 +16,7 @@ import { encodeBase32LowerCase } from '@oslojs/encoding';
 import { logInfo, logError, serializeError } from '$lib/server/logger';
 import { createDAClient } from './factory';
 import { runWithAudit } from './audit';
+import { daErrorDetails } from './error-message';
 
 function generateId(): string {
 	return encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
@@ -61,7 +62,8 @@ export async function syncDAPackagesForServer(
 			tenantId,
 			metadata: { serverId }
 		});
-		throw new Error(`Nu am putut lista pachetele de pe DA: ${message}`);
+		// daErrorDetails keeps DA's wording and adds the fix (e.g. 2FA → Login Key).
+		throw new Error(daErrorDetails(e, 'Nu am putut lista pachetele de pe DA.').message);
 	}
 
 	logInfo('directadmin', 'sync.list_ok', {

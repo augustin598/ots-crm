@@ -652,6 +652,10 @@
 							</div>
 						</div>
 
+						{#if s.lastError}
+							<p class="hst-server-error" role="status">⚠ {s.lastError}</p>
+						{/if}
+
 						<div class="hst-server-foot">
 							<div class="hst-server-foot-info">
 								<strong>{s.accountsCount}</strong> conturi · <strong>{s.packagesCount}</strong> pachete
@@ -1699,6 +1703,18 @@
 	 */
 	.hst-metric-bar-fill.traffic {
 		background: linear-gradient(90deg, #60a5fa, #6366f1, #8b5cf6);
+	}
+
+	.hst-server-error {
+		margin: 0;
+		padding: 8px 10px;
+		border-radius: 8px;
+		background: #fffbeb;
+		border: 1px solid #fde68a;
+		color: #92400e;
+		font-size: 11.5px;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
 	}
 
 	.hst-server-foot {
