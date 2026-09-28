@@ -100,7 +100,7 @@ function ots_connector_verify_request( WP_REST_Request $request ) {
 class OTS_Connector_Sentinel {
 	const MAX_BYTES = 8388608; // 8 MB, apoi rotire
 	const MAX_EVENTS_PER_PAGE = 5000;
-	const SCAN_BUDGET_SEC = 20;
+	const SCAN_BUDGET_SEC = 15;
 	const SCAN_RETURN_MAX = 200;
 	const KEEP_ROTATED = 5;
 
@@ -271,13 +271,18 @@ class OTS_Connector_Sentinel {
 	 * cel vechi al mu-plugin-ului și rotirile lor), cele mai vechi primele.
 	 * Liniile fără id (mu-plugin) primesc sha1(linie)-n, n = a câta apariție a
 	 * liniei identice în fișierul ei — stabil, fișierele sunt append-only.
+	 * Doi pași pe chei compacte + offset, ca să nu ținem tot jurnalul decodat
+	 * în memorie deodată (~2 KB/eveniment decodat vs. ~100 B/cheie).
 	 */
 	public static function read_events( ?string $since, int $skip, array &$errors ): array {
 		$since_ts = $since ? strtotime( $since ) : 0;
 		$files    = glob( self::dir() . '/sentinel*.log' ) ?: [];
-		$events   = [];
 		$bytes    = 0;
-		foreach ( $files as $f ) {
+		// Pasul 1: doar chei compacte (t|index|fișier|offset|n) — un jurnal întreg decodat
+		// în PHP costă ~2 KB/eveniment și ar depăși memory_limit pe hosting partajat.
+		$keys = [];
+		$i    = 0;
+		foreach ( $files as $fi => $f ) {
 			$bytes += (int) @filesize( $f );
 			if ( $since_ts && @filemtime( $f ) < $since_ts ) {
 				continue; // fișier rotit înainte de since: nimic nou în el
@@ -287,46 +292,70 @@ class OTS_Connector_Sentinel {
 				$errors[] = 'Nu pot citi ' . basename( $f );
 				continue;
 			}
-			$seen = [];
-			while ( ( $line = fgets( $fh ) ) !== false ) {
+			$seen     = [];
+			$bad_line = false;
+			while ( ( $pos = ftell( $fh ) ) !== false && ( $line = fgets( $fh ) ) !== false ) {
 				$line = rtrim( $line, "\r\n" );
 				if ( '' === $line ) {
 					continue;
 				}
 				$ev = json_decode( $line, true );
-				if ( ! is_array( $ev ) || empty( $ev['t'] ) ) {
+				if ( ! is_array( $ev ) || empty( $ev['t'] ) || ! is_string( $ev['t'] ) ) {
+					$bad_line = true;
 					continue;
 				}
-				if ( empty( $ev['id'] ) ) {
+				$n = 0;
+				if ( empty( $ev['id'] ) || ! is_string( $ev['id'] ) ) {
 					$h          = sha1( $line );
 					$seen[ $h ] = isset( $seen[ $h ] ) ? $seen[ $h ] + 1 : 1;
-					$ev['id']   = $h . '-' . $seen[ $h ];
+					$n          = $seen[ $h ];
 				}
 				if ( $since_ts && strtotime( $ev['t'] ) < $since_ts ) {
 					continue;
 				}
-				$events[] = $ev;
+				// t din gmdate('c') are lățime fixă → sortarea de string e cronologică; indexul păstrează ordinea la t egal
+				$keys[] = $ev['t'] . '|' . sprintf( '%09d', $i++ ) . '|' . $fi . '|' . $pos . '|' . $n;
+			}
+			fclose( $fh );
+			if ( $bad_line ) {
+				$errors[] = 'Linii invalide în ' . basename( $f );
+			}
+		}
+		sort( $keys, SORT_STRING );
+		$total = count( $keys );
+		$page  = array_slice( $keys, $skip, self::MAX_EVENTS_PER_PAGE );
+		unset( $keys );
+
+		// Pasul 2: decodăm doar liniile paginii, pe offset.
+		$by_file = [];
+		foreach ( $page as $order => $key ) {
+			list( , , $fi, $pos, $n ) = explode( '|', $key );
+			$by_file[ (int) $fi ][] = [ (int) $pos, (int) $n, $order ];
+		}
+		$events = [];
+		foreach ( $by_file as $fi => $items ) {
+			$fh = @fopen( $files[ $fi ], 'r' );
+			if ( ! $fh ) {
+				$errors[] = 'Nu pot reciti ' . basename( $files[ $fi ] );
+				continue;
+			}
+			foreach ( $items as $it ) {
+				fseek( $fh, $it[0] );
+				$line = rtrim( (string) fgets( $fh ), "\r\n" );
+				$ev   = json_decode( $line, true );
+				if ( ! is_array( $ev ) ) {
+					continue;
+				}
+				if ( $it[1] > 0 ) {
+					$ev['id'] = sha1( $line ) . '-' . $it[1];
+				}
+				$events[ $it[2] ] = $ev;
 			}
 			fclose( $fh );
 		}
-		// sortare stabilă după t (usort nu e stabil în PHP 7.4)
-		$i = 0;
-		foreach ( $events as &$e ) {
-			$e['_i'] = $i++;
-		}
-		unset( $e );
-		usort( $events, function ( $a, $b ) {
-			$c = strcmp( $a['t'], $b['t'] );
-			return $c !== 0 ? $c : $a['_i'] - $b['_i'];
-		} );
-		$total = count( $events );
-		$page  = array_slice( $events, $skip, self::MAX_EVENTS_PER_PAGE );
-		foreach ( $page as &$e ) {
-			unset( $e['_i'] );
-		}
-		unset( $e );
+		ksort( $events );
 		return [
-			'events'   => $page,
+			'events'   => array_values( $events ),
 			'hasMore'  => ( $skip + count( $page ) ) < $total,
 			'logBytes' => $bytes,
 		];
@@ -337,7 +366,7 @@ class OTS_Connector_Sentinel {
 	 * noi 200 după mtime — un shell nou e mereu printre ele; o limită pe
 	 * „primele 200 găsite” s-ar păcăli cu 200 de fișiere inofensive.
 	 */
-	public static function scan_uploads( array &$errors ): array {
+	public static function scan_uploads( array &$errors, float $deadline ): array {
 		$start = microtime( true );
 		$up    = wp_upload_dir();
 		$out   = [ 'files' => [], 'scannedFiles' => 0, 'truncated' => false, 'durationMs' => 0 ];
@@ -351,7 +380,7 @@ class OTS_Connector_Sentinel {
 			$it = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $base, FilesystemIterator::SKIP_DOTS ), RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD );
 			foreach ( $it as $file ) {
 				$out['scannedFiles']++;
-				if ( 0 === $out['scannedFiles'] % 200 && ( microtime( true ) - $start ) > self::SCAN_BUDGET_SEC ) {
+				if ( 0 === $out['scannedFiles'] % 200 && microtime( true ) > $deadline ) {
 					$out['truncated'] = true;
 					break;
 				}
@@ -373,6 +402,7 @@ class OTS_Connector_Sentinel {
 				];
 			}
 		} catch ( Throwable $e ) {
+			$out['truncated'] = true; // parcurgere întreruptă la mijloc: nu e o scanare completă
 			$errors[] = 'scan: ' . $e->getMessage();
 		}
 		usort( $found, function ( $a, $b ) {
@@ -383,7 +413,7 @@ class OTS_Connector_Sentinel {
 				'path'  => $f['path'],
 				'size'  => $f['size'],
 				'mtime' => gmdate( 'c', $f['mtime'] ),
-				'sha1'  => (string) @sha1_file( $f['full'] ),
+				'sha1'  => $f['size'] > 5 * 1048576 ? '' : (string) @sha1_file( $f['full'] ),
 			];
 		}
 		$out['durationMs'] = (int) round( ( microtime( true ) - $start ) * 1000 );
@@ -508,12 +538,27 @@ function ots_connector_route_sentinel( WP_REST_Request $request ) {
 	$skip   = isset( $body['skip'] ) ? max( 0, (int) $body['skip'] ) : 0;
 	$errors = [];
 	if ( $since && false === strtotime( $since ) ) {
-		return new WP_Error( 'ots_bad_since', 'since must be ISO 8601', [ 'status' => 400 ] );
+		return new WP_Error( 'ots_bad_since', 'since must be a parsable date (ISO 8601)', [ 'status' => 400 ] );
 	}
 	@set_time_limit( 120 );
-	$read = OTS_Connector_Sentinel::read_events( $since, $skip, $errors );
-	// Scanarea doar pe prima pagină — costă până la 20 s.
-	$scan = 0 === $skip ? OTS_Connector_Sentinel::scan_uploads( $errors ) : null;
+	$start = microtime( true );
+	$read  = [ 'events' => [], 'hasMore' => false, 'logBytes' => 0 ];
+	$scan  = null;
+	// Spec §6: o eroare aici nu dă 500 — răspunsul rămâne 200 cu errors[].
+	try {
+		$read = OTS_Connector_Sentinel::read_events( $since, $skip, $errors );
+	} catch ( Throwable $e ) {
+		$errors[] = 'read: ' . $e->getMessage();
+	}
+	// Scanarea doar pe prima pagină, cu buget măsurat de la începutul cererii —
+	// proxy-urile de hosting taie cererile la ~30 s.
+	if ( 0 === $skip ) {
+		try {
+			$scan = OTS_Connector_Sentinel::scan_uploads( $errors, $start + OTS_Connector_Sentinel::SCAN_BUDGET_SEC );
+		} catch ( Throwable $e ) {
+			$errors[] = 'scan: ' . $e->getMessage();
+		}
+	}
 	return rest_ensure_response( [
 		'sentinel' => [
 			'version'        => OTS_CONNECTOR_VERSION,
