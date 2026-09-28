@@ -126,6 +126,7 @@
 	}
 
 	// === Citește acum ===
+	const BUSY_MESSAGE = 'Citire în curs pentru acest site';
 	const pulling = new SvelteSet<string>();
 
 	async function pullNow(site: SiteOverview) {
@@ -138,17 +139,27 @@
 			);
 			// Prima pagină s-a reîmprospătat — paginile extra vechi ar lăsa goluri.
 			resetMore();
+			const summary = `${site.name}: ${r.inserted} evenimente noi, ${r.findings.length} de semnalat`;
 			if (r.status === 'error') {
 				toast.error(`${site.name}: ${r.error ?? 'eroare necunoscută'}`);
 			} else if (r.status === 'unsupported') {
 				toast.warning(`${site.name}: conectorul e mai vechi de 0.9.0`);
+			} else if (r.status === 'busy') {
+				toast.info(`${site.name}: ${BUSY_MESSAGE}`);
+			} else if (r.findings.length > 0) {
+				const shown = r.findings.slice(0, 3).map((f) => f.text);
+				const rest = r.findings.length - shown.length;
+				toast.warning(summary, {
+					description: shown.join(' · ') + (rest > 0 ? ` · și încă ${rest}` : '')
+				});
 			} else {
-				toast.success(
-					`${site.name}: ${r.inserted} evenimente noi, ${r.findings.length} de semnalat`
-				);
+				toast.success(summary);
 			}
 		} catch (err) {
-			toast.error(`${site.name}: ${err instanceof Error ? err.message : String(err)}`);
+			const message = err instanceof Error ? err.message : String(err);
+			// SiteBusyError (citire deja în curs — jobul zilnic sau alt tab) ajunge aici doar ca mesaj.
+			if (message.includes(BUSY_MESSAGE)) toast.info(`${site.name}: ${BUSY_MESSAGE}`);
+			else toast.error(`${site.name}: ${message}`);
 		} finally {
 			pulling.delete(site.id);
 		}
@@ -195,8 +206,10 @@
 
 	function statusBadge(s: SiteOverview): { label: string; variant: BadgeVariant; title?: string } {
 		if (s.paused) return { label: 'Pauzat', variant: 'secondary', title: 'Site-ul e pus pe pauză în CRM' };
-		switch (s.status) {
+		// 'busy' nu se persistă, dar dacă apare vreodată e o citire în desfășurare — ca „ok”.
+		switch (s.status as SiteOverview['status'] | 'busy') {
 			case 'ok':
+			case 'busy':
 				return { label: `Citit ${fmtShort(s.lastPullAt)}`, variant: 'outline' };
 			case 'legacy':
 				return {
@@ -223,10 +236,21 @@
 	}
 
 	function cardTint(s: SiteOverview): string {
-		if (s.counts7d.critical > 0 || s.status === 'error') return 'border-red-300 dark:border-red-900';
-		if (s.counts7d.important > 0 || s.status === 'legacy')
+		const findingCritical = s.recentFindings.some((f) => f.level === 'critical');
+		const findingImportant = s.recentFindings.some((f) => f.level === 'important');
+		if (s.counts7d.critical > 0 || s.status === 'error' || findingCritical)
+			return 'border-red-300 dark:border-red-900';
+		if (s.counts7d.important > 0 || s.status === 'legacy' || findingImportant)
 			return 'border-amber-300 dark:border-amber-800';
 		return '';
+	}
+
+	// Card-uri cu lista completă de findings deschisă (implicit se văd primele 3).
+	const FINDINGS_VISIBLE = 3;
+	const findingsOpen = new SvelteSet<string>();
+	function toggleFindings(siteId: string) {
+		if (findingsOpen.has(siteId)) findingsOpen.delete(siteId);
+		else findingsOpen.add(siteId);
 	}
 
 	function levelVariant(level: string): BadgeVariant {
@@ -375,6 +399,54 @@
 									<dd class="text-lg font-semibold tabular-nums">{site.counts7d.adminLogins}</dd>
 								</div>
 							</dl>
+
+							{#if site.recentFindings.length > 0}
+								{@const allOpen = findingsOpen.has(site.id)}
+								{@const hidden = site.recentFindings.length - FINDINGS_VISIBLE}
+								<div class="flex flex-col gap-1.5">
+									<h3 class="text-xs font-medium text-muted-foreground">De semnalat (7 zile)</h3>
+									<ul id="sec-findings-{site.id}" class="flex flex-col gap-1.5 text-sm">
+										{#each allOpen ? site.recentFindings : site.recentFindings.slice(0, FINDINGS_VISIBLE) as f, i (`${i}:${f.at}`)}
+											<li class="flex min-w-0 gap-1.5">
+												<span aria-hidden="true" class="shrink-0">{LEVEL_EMOJI[f.level]}</span>
+												<span class="sr-only">{LEVEL_LABELS[f.level]}:</span>
+												<span class="min-w-0 break-words">
+													{f.text}
+													<span class="text-xs whitespace-nowrap text-muted-foreground">
+														· {fmtShort(f.at)}
+													</span>
+												</span>
+											</li>
+										{/each}
+									</ul>
+									{#if hidden > 0}
+										<button
+											type="button"
+											class="self-start rounded-sm text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+											aria-expanded={allOpen}
+											aria-controls="sec-findings-{site.id}"
+											onclick={() => toggleFindings(site.id)}
+										>
+											{allOpen ? 'Arată mai puține' : `+${hidden} de semnalat`}
+										</button>
+									{/if}
+								</div>
+							{/if}
+
+							{#if site.lastScan}
+								<p class="text-xs text-muted-foreground">
+									Uploads: {site.lastScan.scannedFiles} fișiere verificate, {site.lastScan.files} PHP
+									{#if site.lastScan.truncated}
+										·
+										<span
+											class="text-amber-700 dark:text-amber-400"
+											title="Site-ul are multe fișiere în uploads: scanarea s-a oprit la limita de timp și a verificat doar o parte din ele."
+										>
+											scanare incompletă (timp depășit)
+										</span>
+									{/if}
+								</p>
+							{/if}
 
 							{#if site.pendingCount > 0}
 								<p class="text-xs text-muted-foreground">
