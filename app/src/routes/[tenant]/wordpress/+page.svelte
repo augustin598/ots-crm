@@ -39,6 +39,7 @@
 	import NewspaperIcon from '@lucide/svelte/icons/newspaper';
 	import PlugIcon from '@lucide/svelte/icons/plug';
 	import LibraryBigIcon from '@lucide/svelte/icons/library-big';
+	import ShieldIcon from '@lucide/svelte/icons/shield';
 	import {
 		continueSiteBackup,
 		nextJobView,
@@ -1071,6 +1072,12 @@
 				<Button variant="outline" title="Dashboard live cu status per site">
 					<ServerIcon class="mr-2 size-4" />
 					Diagnostics
+				</Button>
+			</a>
+			<a href="/{tenantSlug}/wordpress/security">
+				<Button variant="outline" title="Jurnal de securitate Sentinel: logări, useri, plugin-uri, PHP în uploads">
+					<ShieldIcon class="mr-2 size-4" />
+					Securitate
 				</Button>
 			</a>
 			<!-- Bulk connector update: same logic as the daily cron, on demand.
