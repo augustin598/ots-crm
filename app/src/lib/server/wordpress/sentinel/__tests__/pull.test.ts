@@ -107,8 +107,8 @@ const NOW = new Date('2026-09-28T09:00:00Z');
 // conector nou care trimite ambele câmpuri.
 const fail = (id: string, t: string, ip = '1.1.1.1') => ({ id, t, sev: 'INFO', ev: 'login_esuat', user: '-', uid: 0, ip, uri: '/wp-login.php', ua: '', date: { login: 'adm', exista: true, admin: true } });
 const scan = { files: [], scannedFiles: 0, truncated: false, durationMs: 1 };
-const page = (events: unknown[], hasMore = false, legacy = false, withScan = true) => ({
-	sentinel: { version: '0.9.0', legacyMuPlugin: legacy, logBytes: 10 },
+const page = (events: unknown[], hasMore = false, legacy = false, withScan = true, readComplete?: boolean) => ({
+	sentinel: { version: '0.9.0', legacyMuPlugin: legacy, logBytes: 10, readComplete },
 	events,
 	hasMore,
 	scan: withScan ? scan : null,
@@ -278,7 +278,7 @@ describe('pullSite', () => {
 		};
 		try {
 			const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
-			expect(r.status).toBe('error');
+			expect(r.status).toBe('busy');
 			expect(r.error).toBe('citire în curs');
 			expect(r.failures).toBe(0);
 			expect(updated).toHaveLength(0);
@@ -341,6 +341,98 @@ describe('pullSite', () => {
 		expect(r.status).toBe('error');
 		expect(updated[0].sentinelFailures).toBeUndefined();
 		expect(r.failures).toBe(1);
+	});
+
+	// --- I3: readComplete === false pe o pagină → tratat ca trunchiere -------
+	test('readComplete: false pe o pagină, cu evenimente primite → sentinelLastPullAt = t-ul ultimului eveniment, lastError menționează fișierul ilizibil', async () => {
+		pages = [page([fail('a', '2026-09-27T10:00:00Z'), fail('b', '2026-09-27T11:00:00Z')], false, false, true, false)];
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r.status).toBe('ok'); // nu e o eroare de citire
+		expect(updated[0].sentinelLastPullAt).toEqual(new Date('2026-09-27T11:00:00Z'));
+		const st = lastState();
+		expect(st.lastError).toContain('fișier ilizibil');
+	});
+
+	test('readComplete: false, fără evenimente primite → sentinelLastPullAt rămâne neschimbat (nu now, nu null dacă exista deja o valoare)', async () => {
+		siteRow.sentinelLastPullAt = new Date('2026-09-27T08:00:00Z');
+		pages = [page([], false, false, true, false)];
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r.status).toBe('ok');
+		expect(updated[0].sentinelLastPullAt).toEqual(new Date('2026-09-27T08:00:00Z'));
+	});
+
+	test('readComplete: false la prima citire (sentinelLastPullAt încă null), fără evenimente → rămâne null', async () => {
+		pages = [page([], false, false, true, false)];
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r.status).toBe('ok');
+		expect(updated[0].sentinelLastPullAt).toBeNull();
+	});
+
+	test('readComplete lipsă (conector 0.9.0 vechi) → tratat ca citire completă, sentinelLastPullAt = now', async () => {
+		pages = [page([fail('a', '2026-09-27T10:00:00Z')])]; // fără al 5-lea argument → readComplete undefined
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r.status).toBe('ok');
+		expect(updated[0].sentinelLastPullAt).toEqual(NOW);
+	});
+
+	// --- recentFindings: istoric pentru pagină, 7 zile / 100 intrări ---------
+	test('recentFindings: findings-urile citirii se adaugă cu `at`, cele mai vechi de 7 zile se taie', async () => {
+		const oldAt = new Date(NOW.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString(); // > 7 zile
+		const recentAt = new Date(NOW.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(); // < 7 zile
+		siteRow.sentinelState = JSON.stringify({
+			baselineDone: true, uploadsBaseline: {}, adminIps: {}, failedLogins: {},
+			pendingFindings: [],
+			recentFindings: [
+				{ level: 'critical', kind: 'php_in_uploads', text: 'prea vechi', at: oldAt },
+				{ level: 'important', kind: 'plugin_change', text: 'recent', at: recentAt }
+			],
+			lastScan: null, lastFailureDay: null, lastError: null
+		});
+		pages = [page([{ id: 'p', t: '2026-09-28T08:00:00Z', sev: 'WARN', ev: 'plugin_activated', user: 'x', uid: 1, ip: '5.5.5.5', ip_remote: '5.5.5.5', uri: '/', ua: '', date: { plugin: 'akismet/akismet.php' } }])];
+		await pullSite('s1', { now: NOW, trigger: 'daily' });
+		const st = lastState();
+		expect(st.recentFindings.map((f: { text: string }) => f.text)).toEqual(['recent', expect.stringContaining('akismet')]);
+		expect(st.recentFindings.every((f: { at: string }) => typeof f.at === 'string')).toBe(true);
+	});
+
+	test('recentFindings: plafonat la 100 de intrări, cele mai noi păstrate', async () => {
+		const many = Array.from({ length: 100 }, (_, i) => ({
+			level: 'important' as const,
+			kind: 'plugin_change' as const,
+			text: `veche-${i}`,
+			at: new Date(NOW.getTime() - 1000 * (100 - i)).toISOString()
+		}));
+		siteRow.sentinelState = JSON.stringify({
+			baselineDone: true, uploadsBaseline: {}, adminIps: {}, failedLogins: {},
+			pendingFindings: [], recentFindings: many, lastScan: null, lastFailureDay: null, lastError: null
+		});
+		pages = [page([{ id: 'p', t: '2026-09-28T08:00:00Z', sev: 'WARN', ev: 'plugin_activated', user: 'x', uid: 1, ip: '5.5.5.5', ip_remote: '5.5.5.5', uri: '/', ua: '', date: { plugin: 'akismet/akismet.php' } }])];
+		await pullSite('s1', { now: NOW, trigger: 'daily' });
+		const st = lastState();
+		expect(st.recentFindings).toHaveLength(100);
+		expect(st.recentFindings[0].text).toBe('veche-1'); // veche-0 a căzut, noul finding e ultimul
+		expect(st.recentFindings[st.recentFindings.length - 1].text).toContain('akismet');
+	});
+
+	// --- M4: un brute_force nou înlocuiește pending-ul vechi pe ACELAȘI subiect --
+	test('brute_force nou pentru „adm” înlocuiește pending-ul vechi pe „adm”, alte findings rămân', async () => {
+		siteRow.sentinelState = JSON.stringify({
+			baselineDone: true, uploadsBaseline: {}, adminIps: {},
+			failedLogins: { adm: [{ t: '2026-09-22T10:00:00Z', ip: '1.1.1.1' }, { t: '2026-09-24T10:00:00Z', ip: '1.1.1.1' }] },
+			pendingFindings: [
+				{ level: 'important', kind: 'brute_force', text: '2 logări eșuate pe adm în 7 zile (1 IP-uri)' },
+				{ level: 'critical', kind: 'php_in_uploads', text: 'neatins' }
+			],
+			lastError: null
+		});
+		pages = [page([fail('newfail', '2026-09-27T10:00:00Z')])]; // al 3-lea eșec în fereastră → prag atins
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r.findings.map((f) => f.kind)).toEqual(['brute_force']);
+		const st = lastState();
+		const bruteLines = st.pendingFindings.filter((f: { kind: string }) => f.kind === 'brute_force');
+		expect(bruteLines).toHaveLength(1);
+		expect(bruteLines[0].text).toContain('3 logări eșuate pe adm în 7 zile');
+		expect(st.pendingFindings.map((f: { text: string }) => f.text)).toContain('neatins');
 	});
 });
 

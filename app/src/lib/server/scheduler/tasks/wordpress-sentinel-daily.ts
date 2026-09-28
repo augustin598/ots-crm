@@ -206,9 +206,12 @@ export async function processWordpressSentinelDaily(
 							: { level: 'important', kind: 'pull_failed', text: 'nu răspunde (prima zi)' }
 					);
 				}
+				// 'busy' (lock ocupat de altă citire): raportăm findings-urile deja în așteptare, dar
+				// fără linie „nu răspunde” (site-ul răspunde, doar era ocupat) — și, dacă n-are nimic
+				// în așteptare, nu-l numărăm nici liniștit (nu știm dacă e liniștit, doar n-am apucat).
 
 				if (findings.length === 0) {
-					quietSites++;
+					if (result.status !== 'busy') quietSites++;
 					continue;
 				}
 

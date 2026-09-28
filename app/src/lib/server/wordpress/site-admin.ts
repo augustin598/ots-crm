@@ -12,6 +12,13 @@ import { syncHealth } from './sync';
  * otherwise the SEO hub keeps reporting "WP connected" and the publisher
  * targets a site that no longer exists.
  *
+ * `wordpress_security_event.site_id` has a FK to `wordpress_site.id` WITHOUT
+ * ON DELETE CASCADE (schema.ts documents the intent, but the applied
+ * migration predates it — SQLite can't add it retroactively without a table
+ * rebuild, so we're not writing a migration for it). A site with any Sentinel
+ * events would otherwise fail this delete with a FK violation, so its events
+ * are deleted explicitly first, tenant-scoped like everything else here.
+ *
  * Returns false when the site does not belong to this tenant.
  */
 export async function deleteWordpressSite(tenantId: string, siteId: string): Promise<boolean> {
@@ -32,6 +39,14 @@ export async function deleteWordpressSite(tenantId: string, siteId: string): Pro
 		.set({ targetWpSiteId: null })
 		.where(
 			and(eq(table.contentArticle.tenantId, tenantId), eq(table.contentArticle.targetWpSiteId, site.id))
+		);
+	await db
+		.delete(table.wordpressSecurityEvent)
+		.where(
+			and(
+				eq(table.wordpressSecurityEvent.tenantId, tenantId),
+				eq(table.wordpressSecurityEvent.siteId, site.id)
+			)
 		);
 	await db.delete(table.wordpressSite).where(eq(table.wordpressSite.id, site.id));
 	return true;

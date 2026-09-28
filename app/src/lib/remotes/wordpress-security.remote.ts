@@ -71,6 +71,12 @@ export const getSecurityOverview = query(async () => {
 			failures: s.failures,
 			lastError: st.lastError,
 			pendingCount: st.pendingFindings.length,
+			// cele mai noi 10, pentru card — istoricul complet (7 zile) e în st.recentFindings.
+			recentFindings: st.recentFindings
+				.slice(-10)
+				.reverse()
+				.map((f) => ({ level: f.level, kind: f.kind, text: f.text, at: f.at })),
+			lastScan: st.lastScan,
 			counts7d: {
 				critical: Number(c?.critical ?? 0),
 				important: Number(c?.important ?? 0),

@@ -633,4 +633,127 @@ describe('processWordpressSentinelDaily', () => {
 		expect(redisSetCalls).toHaveLength(0); // a aruncat, dar nu a blocat restul
 		expect(updateCalls).toHaveLength(1); // golirea pending tot a avut loc
 	});
+
+	// --- M1: lastFailureDay e parte din SentinelState — golirea trece prin parseState și-l păstrează ---
+	test('golirea pending-ului păstrează lastFailureDay (parte din SentinelState, nu se pierde la round-trip)', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+
+		selectQueue.push([{ id: 's-nevada', tenantId: 't1', name: 'nevada' }]);
+		selectQueue.push([{ id: 't1', slug: 'ots' }]);
+		selectQueue.push([{ userId: 'u1' }]);
+		selectQueue.push([
+			{
+				sentinelState: JSON.stringify({
+					baselineDone: true,
+					uploadsBaseline: {},
+					adminIps: {},
+					failedLogins: {},
+					pendingFindings: pending('important', 'x'),
+					recentFindings: [],
+					lastScan: null,
+					lastFailureDay: '2026-09-27',
+					lastError: null
+				})
+			}
+		]);
+
+		pullResultsById.set('s-nevada', {
+			siteId: 's-nevada',
+			siteName: 'nevada',
+			status: 'ok',
+			inserted: 0,
+			findings: pending('important', 'x'),
+			pending: pending('important', 'x'),
+			failures: 0
+		});
+
+		await processWordpressSentinelDaily({}, now);
+
+		expect(updateCalls).toHaveLength(1);
+		const state = JSON.parse(updateCalls[0].values.sentinelState as string);
+		expect(state.lastFailureDay).toBe('2026-09-27');
+		expect(state.pendingFindings).toEqual([]);
+	});
+
+	// --- M3: site 'busy' (lock ocupat) — findings pending intră în digest, fără „nu răspunde”, nu se numără liniștit ---
+	test('site busy cu pending: intră în digest cu findings-urile deja în așteptare, fără linie „nu răspunde”', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+
+		selectQueue.push([
+			{ id: 's-busy', tenantId: 't10', name: 'busysite' },
+			{ id: 's-quiet', tenantId: 't10', name: 'quietsite' }
+		]);
+		selectQueue.push([{ id: 't10', slug: 'ots10' }]);
+		selectQueue.push([{ userId: 'u10' }]);
+		selectQueue.push([{ sentinelState: JSON.stringify({ baselineDone: true, uploadsBaseline: {}, adminIps: {}, failedLogins: {}, pendingFindings: pending('important', 'ceva găsit înainte de blocare'), lastError: null }) }]); // clear pentru busysite
+
+		pullResultsById.set('s-busy', {
+			siteId: 's-busy',
+			siteName: 'busysite',
+			status: 'busy',
+			inserted: 0,
+			findings: [],
+			pending: pending('important', 'ceva găsit înainte de blocare'),
+			failures: 0,
+			error: 'citire în curs'
+		});
+		pullResultsById.set('s-quiet', {
+			siteId: 's-quiet',
+			siteName: 'quietsite',
+			status: 'ok',
+			inserted: 0,
+			findings: [],
+			pending: [],
+			failures: 0
+		});
+
+		const res = await processWordpressSentinelDaily({}, now);
+
+		expect(telegramCalls).toHaveLength(1);
+		expect(telegramCalls[0].text).toContain('busysite: ceva găsit înainte de blocare');
+		expect(telegramCalls[0].text).not.toContain('nu răspunde');
+		expect(telegramCalls[0].text).toContain('✅ 1 site-uri liniștite'); // doar quietsite
+		expect(res.sent).toBe(1);
+	});
+
+	test('site busy fără pending: nu apare în digest și NU se numără liniștit', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+
+		selectQueue.push([
+			{ id: 's-busy', tenantId: 't11', name: 'busysite' },
+			{ id: 's-quiet', tenantId: 't11', name: 'quietsite' }
+		]);
+		selectQueue.push([{ id: 't11', slug: 'ots11' }]);
+		selectQueue.push([{ userId: 'u11' }]);
+
+		pullResultsById.set('s-busy', {
+			siteId: 's-busy',
+			siteName: 'busysite',
+			status: 'busy',
+			inserted: 0,
+			findings: [],
+			pending: [],
+			failures: 0,
+			error: 'citire în curs'
+		});
+		pullResultsById.set('s-quiet', {
+			siteId: 's-quiet',
+			siteName: 'quietsite',
+			status: 'ok',
+			inserted: 0,
+			findings: [],
+			pending: [],
+			failures: 0
+		});
+
+		const res = await processWordpressSentinelDaily({}, now);
+
+		expect(telegramCalls).toHaveLength(1);
+		expect(telegramCalls[0].text).not.toContain('busysite');
+		expect(telegramCalls[0].text).toContain('✅ 1 site-uri liniștite'); // NU 2 — busysite nu se numără liniștit
+		expect(res.sent).toBe(1);
+	});
 });

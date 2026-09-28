@@ -21,13 +21,14 @@ mock.module('drizzle-orm', () => ({
 mock.module('$lib/server/db/schema', () => ({
 	wordpressSite: { _: 'wordpress_site', id: 'id', tenantId: 'tenant_id', paused: 'paused' },
 	clientWebsite: { _: 'client_website', wpSiteId: 'wp_site_id', tenantId: 'tenant_id' },
-	contentArticle: { _: 'content_article', targetWpSiteId: 'target_wp_site_id', tenantId: 'tenant_id' }
+	contentArticle: { _: 'content_article', targetWpSiteId: 'target_wp_site_id', tenantId: 'tenant_id' },
+	wordpressSecurityEvent: { _: 'wordpress_security_event', siteId: 'site_id', tenantId: 'tenant_id' }
 }));
 
 type Row = Record<string, unknown>;
 type Tbl = { _: string };
 let selectRows: Row[] = [];
-const ops: Array<{ op: 'update' | 'delete'; table: string; set?: Row }> = [];
+const ops: Array<{ op: 'update' | 'delete'; table: string; set?: Row; where?: unknown }> = [];
 const dbMock = {
 	select: () => {
 		const chain: Record<string, unknown> = {
@@ -46,8 +47,8 @@ const dbMock = {
 		})
 	}),
 	delete: (t: Tbl) => ({
-		where: async () => {
-			ops.push({ op: 'delete', table: t._ });
+		where: async (cond?: unknown) => {
+			ops.push({ op: 'delete', table: t._, where: cond });
 		}
 	})
 };
@@ -81,11 +82,31 @@ describe('deleteWordpressSite', () => {
 	test('dezleagă website-urile și articolele (fără FK în DB), apoi șterge site-ul', async () => {
 		selectRows = [{ id: 's1' }];
 		expect(await deleteWordpressSite('tn', 's1')).toBe(true);
-		expect(ops).toEqual([
-			{ op: 'update', table: 'client_website', set: expect.objectContaining({ wpSiteId: null }) },
-			{ op: 'update', table: 'content_article', set: expect.objectContaining({ targetWpSiteId: null }) },
+		expect(ops.map((o) => ({ op: o.op, table: o.table }))).toEqual([
+			{ op: 'update', table: 'client_website' },
+			{ op: 'update', table: 'content_article' },
+			{ op: 'delete', table: 'wordpress_security_event' },
 			{ op: 'delete', table: 'wordpress_site' }
 		]);
+	});
+
+	// C1: wordpress_security_event.site_id n-are ON DELETE CASCADE aplicat (migrația 0569 e dinaintea
+	// adnotării) — fără ștergerea explicită de mai jos, orice site cu evenimente ar pica pe FK.
+	test('C1: șterge evenimentele de securitate ale site-ului ÎNAINTE de site, scopat pe tenant', async () => {
+		selectRows = [{ id: 's1' }];
+		expect(await deleteWordpressSite('tn', 's1')).toBe(true);
+
+		const eventsDeleteIdx = ops.findIndex((o) => o.op === 'delete' && o.table === 'wordpress_security_event');
+		const siteDeleteIdx = ops.findIndex((o) => o.op === 'delete' && o.table === 'wordpress_site');
+		expect(eventsDeleteIdx).toBeGreaterThanOrEqual(0);
+		expect(siteDeleteIdx).toBeGreaterThan(eventsDeleteIdx);
+
+		// scopat pe tenant + site (nu doar pe site.id) — și(eq(tenantId,'tn'), eq(siteId,'s1'))
+		const eventsWhere = ops[eventsDeleteIdx].where as { kind: string; conds: Array<{ kind: string; val: unknown }> };
+		expect(eventsWhere.kind).toBe('and');
+		const vals = eventsWhere.conds.map((c) => c.val);
+		expect(vals).toContain('tn');
+		expect(vals).toContain('s1');
 	});
 });
 

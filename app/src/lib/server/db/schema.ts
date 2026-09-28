@@ -5310,9 +5310,12 @@ export const wordpressSecurityEvent = sqliteTable(
 		tenantId: text('tenant_id')
 			.notNull()
 			.references(() => tenant.id),
+		// { onDelete: 'cascade' } documents intent only — the applied migration (0569) predates
+		// this annotation and doesn't enforce it in SQLite. deleteWordpressSite() in
+		// site-admin.ts deletes a site's events explicitly before deleting the site.
 		siteId: text('site_id')
 			.notNull()
-			.references(() => wordpressSite.id),
+			.references(() => wordpressSite.id, { onDelete: 'cascade' }),
 		eventUid: text('event_uid').notNull(), // id-ul venit de pe site
 		occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
 		sentinelSev: text('sentinel_sev').notNull(), // INFO | WARN | ALERT

@@ -13,7 +13,7 @@ import { loadSiteAndClient } from '../sync';
 import { compareConnectorVersions } from '../connector-release';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { detectFindings } from './rules';
-import { parseState, type Finding, type SentinelEvent, type SentinelScan, type WpSentinelResponse } from './types';
+import { parseState, type Finding, type SentinelEvent, type SentinelScan, type SentinelState, type WpSentinelResponse } from './types';
 
 export const SENTINEL_MIN_CONNECTOR = '0.9.0';
 /** Suprapunere cu citirea anterioară (ceasuri decalate, rotiri); evenimentele deja salvate se filtrează. */
@@ -25,13 +25,16 @@ const MAX_PENDING = 200;
 /** Evenimentele mai vechi decât atât nu se mai inserează (ar fi oricum purjate la jobul zilnic); tot intră în reguli pentru baseline. */
 export const SENTINEL_RETENTION_DAYS = 7;
 const RETENTION_MS = SENTINEL_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+/** `recentFindings` (pentru pagină): fereastră + plafon, cele mai noi păstrate. */
+const RECENT_FINDINGS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const RECENT_FINDINGS_MAX = 100;
 
 /** Lock per site (Redis `SET NX EX`) — evită o citire manuală și jobul zilnic suprapunându-se pe același site. */
 const SITE_LOCK_TTL_SEC = 960; // 16 min — generos față de bugetul de 45 s × 20 pagini
 const SITE_LOCK_POLL_MS = 1000;
 const DAILY_LOCK_WAIT_MS = 60_000;
 
-export type PullStatus = 'ok' | 'legacy' | 'unsupported' | 'error';
+export type PullStatus = 'ok' | 'legacy' | 'unsupported' | 'error' | 'busy';
 export type PullTrigger = 'daily' | 'manual';
 
 export interface PullResult {
@@ -69,32 +72,49 @@ function bucharestDate(now: Date): string {
 	return bucharestDateFmt.format(now);
 }
 
-/**
- * `lastFailureDay` nu face parte din `SentinelState` (types.ts nu e al meu) —
- * e o proprietate în plus în JSON-ul din `sentinel_state`, ignorată de
- * `parseState`. O citim direct din raw și o re-atașăm la fiecare scriere.
- */
-function readLastFailureDay(raw: string | null | undefined): string | undefined {
-	if (!raw) return undefined;
-	try {
-		const p = JSON.parse(raw) as { lastFailureDay?: string };
-		return typeof p.lastFailureDay === 'string' ? p.lastFailureDay : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 /** Incrementează `sentinelFailures` cel mult o dată pe zi calendaristică (ora României), doar pentru `trigger: 'daily'`. */
 function nextDailyFailure(
 	trigger: PullTrigger,
 	priorFailures: number,
-	lastFailureDay: string | undefined,
+	lastFailureDay: string | null,
 	now: Date
-): { failures: number; lastFailureDay: string | undefined } {
+): { failures: number; lastFailureDay: string | null } {
 	if (trigger !== 'daily') return { failures: priorFailures, lastFailureDay };
 	const today = bucharestDate(now);
 	if (lastFailureDay === today) return { failures: priorFailures, lastFailureDay };
 	return { failures: priorFailures + 1, lastFailureDay: today };
+}
+
+/** `recentFindings` (pentru pagină): adaugă findings-urile citirii cu `at`, taie la 7 zile / 100 intrări. */
+function appendRecentFindings(state: SentinelState, findings: Finding[], now: Date): SentinelState['recentFindings'] {
+	const withNew = [...state.recentFindings, ...findings.map((f) => ({ ...f, at: now.toISOString() }))];
+	const cutoff = now.getTime() - RECENT_FINDINGS_WINDOW_MS;
+	return withNew.filter((f) => Date.parse(f.at) >= cutoff).slice(-RECENT_FINDINGS_MAX);
+}
+
+/** Subiectul unui finding `brute_force` — vezi `mergePendingFindings`. `null` pentru orice alt tip. */
+const ADMIN_BRUTE_FORCE_SUBJECT_RE = / pe (\S+) în 7 zile/;
+const CUSTOMER_BRUTE_FORCE_RE = /conturi de client/;
+function bruteForceSubject(f: Finding): string | null {
+	if (f.kind !== 'brute_force') return null;
+	if (CUSTOMER_BRUTE_FORCE_RE.test(f.text)) return 'clienți';
+	const m = ADMIN_BRUTE_FORCE_SUBJECT_RE.exec(f.text);
+	return m ? m[1] : null;
+}
+
+/**
+ * Adaugă findings-urile acestei citiri la `pendingFindings` — dar un `brute_force` nou pentru
+ * un subiect (username de admin, sau `'clienți'` pentru agregatul de conturi client) înlocuiește
+ * orice `brute_force` mai vechi, încă netrimis, pentru ACELAȘI subiect, în loc să se adune la
+ * infinit (fiecare citire din fereastra de 7 zile ar re-emite câte unul, cu numărul tot mai mare).
+ */
+function mergePendingFindings(current: Finding[], fresh: Finding[]): Finding[] {
+	const freshSubjects = new Set(fresh.map(bruteForceSubject).filter((s): s is string => s !== null));
+	const kept = current.filter((f) => {
+		const subject = bruteForceSubject(f);
+		return subject === null || !freshSubjects.has(subject);
+	});
+	return [...kept, ...fresh].slice(-MAX_PENDING);
 }
 
 async function storedUids(siteId: string, uids: string[]): Promise<Set<string>> {
@@ -204,14 +224,13 @@ async function loadFailureResult(siteId: string, trigger: PullTrigger, now: Date
 	const { message } = serializeError(err);
 	const row = await selectSiteRow(siteId);
 	const priorState = parseState(row?.sentinelState);
-	const lastFailureDay = readLastFailureDay(row?.sentinelState);
-	const { failures, lastFailureDay: newDay } = nextDailyFailure(trigger, row?.sentinelFailures ?? 0, lastFailureDay, now);
+	const { failures, lastFailureDay } = nextDailyFailure(trigger, row?.sentinelFailures ?? 0, priorState.lastFailureDay, now);
 	await db
 		.update(table.wordpressSite)
 		.set({
 			sentinelLastPullStatus: 'error',
 			...(trigger === 'daily' ? { sentinelFailures: failures } : {}),
-			sentinelState: JSON.stringify({ ...priorState, lastError: message, lastFailureDay: newDay }),
+			sentinelState: JSON.stringify({ ...priorState, lastError: message, lastFailureDay }),
 			updatedAt: now
 		})
 		.where(eq(table.wordpressSite.id, siteId));
@@ -238,7 +257,7 @@ async function busyResult(siteId: string): Promise<PullResult> {
 	return {
 		siteId,
 		siteName: row?.name ?? siteId,
-		status: 'error',
+		status: 'busy',
 		inserted: 0,
 		findings: [],
 		pending: state.pendingFindings,
@@ -271,7 +290,6 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 	}
 
 	const state = parseState(site.sentinelState);
-	const lastFailureDay = readLastFailureDay(site.sentinelState);
 	const base = {
 		siteId: site.id,
 		siteName: site.name,
@@ -296,6 +314,7 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 		const events: SentinelEvent[] = [];
 		let scan: SentinelScan | null = null;
 		let legacy = false;
+		let readIncomplete = false;
 		const errors: string[] = [];
 		let lastResp: WpSentinelResponse | null = null;
 		for (let pageNo = 0; pageNo < MAX_PAGES; pageNo++) {
@@ -306,16 +325,24 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 				scan = resp.scan ?? null;
 				legacy = resp.sentinel?.legacyMuPlugin === true;
 			}
+			// `readComplete` lipsă = conector 0.9.0 vechi, tratat ca „complet” (nu poate raporta altfel).
+			if (resp.sentinel?.readComplete === false) readIncomplete = true;
 			errors.push(...(resp.errors ?? []));
 			lastResp = resp;
 			if (!resp.hasMore || resp.events.length === 0) break;
 		}
 
-		// S-a atins plafonul de pagini cu încă evenimente de citit: continuăm de unde am rămas
-		// data viitoare (suprapunerea de 1 h deduplică prin event_uid), nu sărim peste ce n-am apucat.
+		// S-a atins plafonul de pagini cu încă evenimente de citit, SAU conectorul a raportat un
+		// fișier ilizibil pe o pagină: în ambele cazuri nu ne prefacem că am prins totul până la
+		// `now` — continuăm de la ultimul eveniment primit data viitoare (suprapunerea de 1 h
+		// deduplică prin event_uid), sau păstrăm ultima citire reușită dacă n-a venit niciun
+		// eveniment nou.
 		const truncated = !!lastResp?.hasMore && events.length > 0;
 		if (truncated) errors.push('citire incompletă: continuă la următoarea citire');
-		const pulledAt = truncated ? (safeDate(events[events.length - 1]?.t) ?? now) : now;
+		if (readIncomplete) errors.push('citire incompletă pe site (fișier ilizibil)');
+		const partial = truncated || readIncomplete;
+		const lastEventAt = safeDate(events[events.length - 1]?.t);
+		const pulledAt: Date | null = partial ? (lastEventAt ?? site.sentinelLastPullAt ?? null) : now;
 
 		// Doar evenimentele noi: suprapunerea de 1 h le retrimite pe cele deja salvate.
 		const stored = await storedUids(site.id, [...new Set(events.map((e) => e.id))]);
@@ -358,7 +385,8 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 		}
 
 		const status: PullStatus = legacy ? 'legacy' : 'ok';
-		nextState.pendingFindings = [...state.pendingFindings, ...findings].slice(-MAX_PENDING);
+		nextState.pendingFindings = mergePendingFindings(state.pendingFindings, findings);
+		nextState.recentFindings = appendRecentFindings(state, findings, now);
 		nextState.lastError = errors.length ? errors.join('; ') : null;
 		await db
 			.update(table.wordpressSite)
@@ -366,14 +394,14 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 				sentinelLastPullAt: pulledAt,
 				sentinelLastPullStatus: status,
 				sentinelFailures: 0,
-				sentinelState: JSON.stringify({ ...nextState, lastFailureDay }),
+				sentinelState: JSON.stringify(nextState),
 				updatedAt: now
 			})
 			.where(eq(table.wordpressSite.id, site.id));
 
 		logInfo(
 			'wordpress',
-			`Sentinel ${site.siteUrl}: ${fresh.length} evenimente noi (${events.length} primite), ${findings.length} findings${legacy ? ', mu-plugin vechi prezent' : ''}${truncated ? ', citire trunchiată' : ''}`,
+			`Sentinel ${site.siteUrl}: ${fresh.length} evenimente noi (${events.length} primite), ${findings.length} findings${legacy ? ', mu-plugin vechi prezent' : ''}${truncated ? ', citire trunchiată' : ''}${readIncomplete ? ', fișier ilizibil' : ''}`,
 			{
 				tenantId: site.tenantId,
 				metadata: {
@@ -382,6 +410,7 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 					findings: findings.map((f) => f.kind),
 					scan: scan ? { files: scan.files.length, truncated: scan.truncated } : null,
 					truncated,
+					readIncomplete,
 					errors
 				}
 			}
@@ -398,13 +427,13 @@ async function pullSiteLocked(siteId: string, trigger: PullTrigger, now: Date): 
 		};
 	} catch (err) {
 		const { message } = serializeError(err);
-		const { failures, lastFailureDay: newDay } = nextDailyFailure(trigger, site.sentinelFailures ?? 0, lastFailureDay, now);
+		const { failures, lastFailureDay } = nextDailyFailure(trigger, site.sentinelFailures ?? 0, state.lastFailureDay, now);
 		await db
 			.update(table.wordpressSite)
 			.set({
 				sentinelLastPullStatus: 'error',
 				...(trigger === 'daily' ? { sentinelFailures: failures } : {}),
-				sentinelState: JSON.stringify({ ...state, lastError: message, lastFailureDay: newDay }),
+				sentinelState: JSON.stringify({ ...state, lastError: message, lastFailureDay }),
 				updatedAt: now
 			})
 			.where(eq(table.wordpressSite.id, site.id));
