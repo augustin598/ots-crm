@@ -126,44 +126,48 @@ class OTS_Connector_Sentinel {
 	}
 
 	public static function boot(): void {
-		if ( self::legacy_present() ) {
-			return;
-		}
-		// Cronul rămas de la mu-plugin după ștergerea lui.
-		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( 'ots_sentinel_scan' ) ) {
-			wp_clear_scheduled_hook( 'ots_sentinel_scan' );
-		}
-		self::ensure_dir();
+		try {
+			if ( self::legacy_present() ) {
+				return;
+			}
+			// Cronul rămas de la mu-plugin după ștergerea lui.
+			if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( 'ots_sentinel_scan' ) ) {
+				wp_clear_scheduled_hook( 'ots_sentinel_scan' );
+			}
+			self::ensure_dir();
 
-		$safe = function ( $method ) {
-			return function () use ( $method ) {
-				try {
-					call_user_func_array( [ __CLASS__, $method ], func_get_args() );
-				} catch ( Throwable $e ) {
-					self::note_error( $e );
-				}
+			$safe = function ( $method ) {
+				return function () use ( $method ) {
+					try {
+						call_user_func_array( [ __CLASS__, $method ], func_get_args() );
+					} catch ( Throwable $e ) {
+						self::note_error( $e );
+					}
+				};
 			};
-		};
 
-		add_action( 'wp_insert_post', $safe( 'on_insert_post' ), 10, 3 );
-		add_action( 'user_register', $safe( 'on_user_register' ) );
-		add_action( 'set_user_role', $safe( 'on_set_role' ), 10, 3 );
-		add_action( 'profile_update', $safe( 'on_profile_update' ), 10, 2 );
-		add_action( 'deleted_user', $safe( 'on_deleted_user' ) );
-		add_action( 'wp_login', $safe( 'on_login' ), 10, 2 );
-		add_action( 'wp_login_failed', $safe( 'on_login_failed' ) );
-		add_action( 'activated_plugin', $safe( 'on_plugin_activated' ) );
-		add_action( 'deactivated_plugin', $safe( 'on_plugin_deactivated' ) );
-		add_action( 'switch_theme', $safe( 'on_switch_theme' ) );
-		add_action( 'upgrader_process_complete', $safe( 'on_upgrader' ), 10, 2 );
-		foreach ( [ 'siteurl', 'home', 'users_can_register', 'default_role', 'admin_email' ] as $opt ) {
-			add_action( "update_option_{$opt}", function ( $old, $new ) use ( $opt ) {
-				try {
-					self::log( 'option_changed', [ 'option' => $opt, 'vechi' => $old, 'nou' => $new ], 'ALERT' );
-				} catch ( Throwable $e ) {
-					self::note_error( $e );
-				}
-			}, 10, 2 );
+			add_action( 'wp_insert_post', $safe( 'on_insert_post' ), 10, 3 );
+			add_action( 'user_register', $safe( 'on_user_register' ) );
+			add_action( 'set_user_role', $safe( 'on_set_role' ), 10, 3 );
+			add_action( 'profile_update', $safe( 'on_profile_update' ), 10, 2 );
+			add_action( 'deleted_user', $safe( 'on_deleted_user' ) );
+			add_action( 'wp_login', $safe( 'on_login' ), 10, 2 );
+			add_action( 'wp_login_failed', $safe( 'on_login_failed' ) );
+			add_action( 'activated_plugin', $safe( 'on_plugin_activated' ) );
+			add_action( 'deactivated_plugin', $safe( 'on_plugin_deactivated' ) );
+			add_action( 'switch_theme', $safe( 'on_switch_theme' ) );
+			add_action( 'upgrader_process_complete', $safe( 'on_upgrader' ), 10, 2 );
+			foreach ( [ 'siteurl', 'home', 'users_can_register', 'default_role', 'admin_email' ] as $opt ) {
+				add_action( "update_option_{$opt}", function ( $old, $new ) use ( $opt ) {
+					try {
+						self::log( 'option_changed', [ 'option' => $opt, 'vechi' => $old, 'nou' => $new ], 'ALERT' );
+					} catch ( Throwable $e ) {
+						self::note_error( $e );
+					}
+				}, 10, 2 );
+			}
+		} catch ( Throwable $e ) {
+			self::note_error( $e );
 		}
 	}
 
@@ -240,9 +244,16 @@ class OTS_Connector_Sentinel {
 	}
 
 	public static function on_login_failed( $login ): void {
-		$login  = (string) $login;
-		$exista = username_exists( $login ) || ( is_email( $login ) && email_exists( $login ) );
-		self::log( 'login_esuat', [ 'login' => self::cut( $login, 100 ), 'exista' => (bool) $exista ], 'INFO' );
+		$login = (string) $login;
+		$user  = get_user_by( 'login', $login );
+		if ( ! $user && is_email( $login ) ) {
+			$user = get_user_by( 'email', $login );
+		}
+		self::log( 'login_esuat', [
+			'login'  => self::cut( $login, 100 ),
+			'exista' => (bool) $user,
+			'admin'  => $user ? user_can( $user, 'manage_options' ) : false,
+		], 'INFO' );
 	}
 
 	public static function on_plugin_activated( $p ): void {
@@ -278,6 +289,7 @@ class OTS_Connector_Sentinel {
 		$since_ts = $since ? strtotime( $since ) : 0;
 		$files    = glob( self::dir() . '/sentinel*.log' ) ?: [];
 		$bytes    = 0;
+		$complete = true; // false dacă vreun fișier n-a putut fi (re)citit — CRM-ul știe că pagina e parțială
 		// Pasul 1: doar chei compacte (t|index|fișier|offset|n) — un jurnal întreg decodat
 		// în PHP costă ~2 KB/eveniment și ar depăși memory_limit pe hosting partajat.
 		$keys = [];
@@ -290,6 +302,7 @@ class OTS_Connector_Sentinel {
 			$fh = @fopen( $f, 'r' );
 			if ( ! $fh ) {
 				$errors[] = 'Nu pot citi ' . basename( $f );
+				$complete = false;
 				continue;
 			}
 			$seen     = [];
@@ -337,6 +350,7 @@ class OTS_Connector_Sentinel {
 			$fh = @fopen( $files[ $fi ], 'r' );
 			if ( ! $fh ) {
 				$errors[] = 'Nu pot reciti ' . basename( $files[ $fi ] );
+				$complete = false;
 				continue;
 			}
 			foreach ( $items as $it ) {
@@ -355,14 +369,15 @@ class OTS_Connector_Sentinel {
 		}
 		ksort( $events );
 		return [
-			'events'   => array_values( $events ),
-			'hasMore'  => ( $skip + count( $page ) ) < $total,
-			'logBytes' => $bytes,
+			'events'       => array_values( $events ),
+			'hasMore'      => ( $skip + count( $page ) ) < $total,
+			'logBytes'     => $bytes,
+			'readComplete' => $complete,
 		];
 	}
 
 	/**
-	 * PHP executabil în uploads. Parcurge TOT (buget 20 s), întoarce cele mai
+	 * PHP executabil în uploads. Parcurge TOT (buget 15 s), întoarce cele mai
 	 * noi 200 după mtime — un shell nou e mereu printre ele; o limită pe
 	 * „primele 200 găsite” s-ar păcăli cu 200 de fișiere inofensive.
 	 */
@@ -542,7 +557,7 @@ function ots_connector_route_sentinel( WP_REST_Request $request ) {
 	}
 	@set_time_limit( 120 );
 	$start = microtime( true );
-	$read  = [ 'events' => [], 'hasMore' => false, 'logBytes' => 0 ];
+	$read  = [ 'events' => [], 'hasMore' => false, 'logBytes' => 0, 'readComplete' => false ];
 	$scan  = null;
 	// Spec §6: o eroare aici nu dă 500 — răspunsul rămâne 200 cu errors[].
 	try {
@@ -564,6 +579,7 @@ function ots_connector_route_sentinel( WP_REST_Request $request ) {
 			'version'        => OTS_CONNECTOR_VERSION,
 			'legacyMuPlugin' => OTS_Connector_Sentinel::legacy_present(),
 			'logBytes'       => $read['logBytes'],
+			'readComplete'   => $read['readComplete'],
 		],
 		'events'   => $read['events'],
 		'hasMore'  => $read['hasMore'],

@@ -14,14 +14,18 @@ and exposes a manual "Update connector" button per site.
   `wp-content/ots-sentinel/sentinel-<hash>.log` (hash derivat din secret —
   `.htaccess` nu protejează pe Nginx; fără secret nu se scrie nimic). Aceleași
   evenimente ca mu-plugin-ul `ots-sentinel.php` 1.0, plus `id` unic și
-  `ip_remote` (REMOTE_ADDR brut) pe fiecare linie, `exista` la `login_esuat`,
+  `ip_remote` (REMOTE_ADDR brut) pe fiecare linie, `exista` și `admin` la
+  `login_esuat` (un singur `get_user_by()` pe login, apoi pe email; `admin` e
+  `manage_options` al userului găsit — pe magazinele WooCommerce `exista` e
+  adevărat pentru orice client, CRM-ul alertează doar pe conturile admin),
   `attachment`/`auto-draft` ignorate la `post_created`. Rotire la 8 MB, se
   păstrează cele mai noi 5 rotiri. Dacă mu-plugin-ul e încă instalat,
   hook-urile nu se înregistrează (fără dubluri) și ruta raportează
   `legacyMuPlugin: true`.
 - Rută nouă `POST /sentinel` `{ since, skip }`: evenimentele din toate
-  fișierele `sentinel*.log` (max 5000/pagină) + scanarea `uploads` după PHP
-  executabil (parcurge tot în buget de 20 s, întoarce cele mai noi 200).
+  fișierele `sentinel*.log` (max 5000/pagină, `sentinel.readComplete: false`
+  dacă vreun fișier n-a putut fi (re)citit) + scanarea `uploads` după PHP
+  executabil (parcurge tot în buget de 15 s, întoarce cele mai noi 200).
 - Scanarea zilnică pe wp-cron dispare; CRM-ul o cere când citește.
 
 ## 0.8.5 — 2026-09-25
