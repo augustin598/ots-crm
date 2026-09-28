@@ -516,7 +516,8 @@ function looksLikeId(seg: string): boolean {
 // Segmente fără intrare în nav care merită o etichetă în română în loc de
 // „Plugin Library" (umanizarea brută a URL-ului).
 const SEGMENT_LABELS: Record<string, string> = {
-	'plugin-library': 'Bibliotecă plugin-uri'
+	'plugin-library': 'Bibliotecă plugin-uri',
+	security: 'Securitate'
 };
 
 function humaniseSegment(seg: string): string {

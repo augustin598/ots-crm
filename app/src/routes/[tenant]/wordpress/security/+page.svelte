@@ -213,9 +213,9 @@
 				};
 			case 'unsupported':
 				return {
-					label: `Conector prea vechi (v${s.connectorVersion ?? '?'})`,
+					label: `Conector vechi (v${s.connectorVersion ?? '?'})`,
 					variant: 'secondary',
-					title: 'Jurnalul de securitate cere OTS Connector 0.9.0 sau mai nou'
+					title: 'Sentinel cere conectorul ≥ 0.9.0'
 				};
 			default:
 				return { label: 'Necitit', variant: 'outline' };
@@ -289,7 +289,7 @@
 	<section aria-label="Site-uri">
 		<svelte:boundary>
 			{#snippet pending()}
-				<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+				<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
 					{#each [0, 1, 2] as i (i)}
 						<Skeleton class="h-52 w-full rounded-xl" />
 					{/each}
@@ -324,19 +324,23 @@
 					Niciun site WordPress conectat.
 				</Card.Root>
 			{:else}
-				<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+				<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
 					{#each overview as site (site.id)}
 						{@const badge = statusBadge(site)}
 						{@const isPulling = pulling.has(site.id)}
-						<Card.Root class="gap-3 p-4 {cardTint(site)}">
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0">
+						<Card.Root class="min-w-0 gap-3 p-4 {cardTint(site)}">
+							<div class="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
+								<div class="min-w-0 flex-1 basis-40">
 									<div class="truncate font-medium" title={site.name}>{site.name}</div>
 									<div class="truncate text-xs text-muted-foreground" title={site.siteUrl}>
 										{site.siteUrl}
 									</div>
 								</div>
-								<Badge variant={badge.variant} title={badge.title} class="shrink-0">
+								<Badge
+									variant={badge.variant}
+									title={badge.title ? `${badge.label} — ${badge.title}` : badge.label}
+									class="max-w-full text-left whitespace-normal"
+								>
 									{badge.label}
 								</Badge>
 							</div>
