@@ -235,8 +235,8 @@ tenantul din sesiune):
 - **Concurență:** lock Redis per site (`sentinel:pull:<siteId>`, 960 s): „Citește acum” pe un site deja în
   citire → „Citire în curs”; jobul așteaptă 60 s, apoi îl raportează ca ocupat (nu „nu răspunde”).
   `pendingFindings` se golesc după identitate, sub același lock — nu se pierde ce a apărut între timp.
-- **Job:** tenant fără niciun site compatibil (toate `unsupported`) → niciun mesaj. Destinatari: utilizatorii
-  **activi** ai tenantului (restricția la owner/admin rămâne decizie de produs, `TODO(user)` în cod).
+- **Job:** tenant fără niciun site compatibil (toate `unsupported`) → niciun mesaj. Destinatari: doar
+  **owner-ul** activ al tenantului (decizia userului, 28.09) — mesajul conține username-uri de admin și IP-uri.
 - **Ștergerea unui site** șterge întâi evenimentele lui (FK fără cascade în migrarea 0569, deja aplicată).
 - **Pilot:** după prima citire reușită, șterge și jurnalul vechi `wp-content/ots-sentinel/sentinel.log`
   (+ rotiri) — are nume previzibil și pe Nginx e public.

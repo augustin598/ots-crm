@@ -250,11 +250,18 @@ export async function processWordpressSentinelDaily(
 			const url = `${getAppBaseUrl()}/${tenantSlug}/wordpress/security`;
 			const messages = buildDigest({ date: now, sites: digestSites, quietSites, url });
 
-			// TODO(user): doar owner/admin? Momentan trimitem la toți membrii activi ai tenantului.
+			// Rezumatul conține username-uri de admin și IP-uri: îl primește doar owner-ul
+			// tenantului (decizia userului, 28.09.2026), nu toți membrii.
 			const users = await db
 				.select({ userId: table.tenantUser.userId })
 				.from(table.tenantUser)
-				.where(and(eq(table.tenantUser.tenantId, tenantId), eq(table.tenantUser.status, 'active')));
+				.where(
+					and(
+						eq(table.tenantUser.tenantId, tenantId),
+						eq(table.tenantUser.status, 'active'),
+						eq(table.tenantUser.role, 'owner')
+					)
+				);
 
 			let delivered = 0;
 			for (const u of users) {

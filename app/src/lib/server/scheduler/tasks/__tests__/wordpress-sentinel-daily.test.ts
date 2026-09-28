@@ -61,7 +61,7 @@ mock.module('$lib/server/db/schema', () => ({
 	wordpressSite: { id: {}, tenantId: {}, name: {}, paused: {}, sentinelState: {}, updatedAt: {} },
 	wordpressSecurityEvent: { occurredAt: {} },
 	tenant: { id: {}, slug: {} },
-	tenantUser: { tenantId: {}, userId: {}, status: {} }
+	tenantUser: { tenantId: {}, userId: {}, status: {}, role: {} }
 }));
 
 mock.module('$lib/server/db', () => ({
@@ -555,6 +555,8 @@ describe('processWordpressSentinelDaily', () => {
 		);
 		expect(usersCall).toBeDefined();
 		expect(referencesColumn(usersCall!.where, table.tenantUser.status)).toBe(true);
+		// Rezumatul conține username-uri de admin și IP-uri → doar owner-ul tenantului îl primește.
+		expect(referencesColumn(usersCall!.where, table.tenantUser.role)).toBe(true);
 	});
 
 	// --- Fix 9: Redis aruncă la verificarea/setarea idempotenței ----------------

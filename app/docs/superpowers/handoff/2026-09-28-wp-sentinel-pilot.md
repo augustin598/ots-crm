@@ -59,8 +59,8 @@ niciun site nu are 0.9.0 → pagina arată toate site-urile „Conector vechi”
   pot apărea ca 🔴 („… raportat de mu-plugin”). Șterge mu-plugin-ul pe ele odată cu release-ul.
 - **Wow Agency** e după Cloudflare, care blochează IP-ul clusterului (vezi handoff-ul din 25.09) — va apărea
   „nu răspunde” până la regula WAF pentru `/wp-json/ots-connector/*`.
-- **Destinatarii** mesajului: toți utilizatorii **activi** ai tenantului (`TODO(user)` în jobul zilnic:
-  doar owner/admin?). Mesajul conține username-uri de admin și IP-uri.
+- **Destinatarul** mesajului: doar owner-ul activ al tenantului (la `ots`: office@…, cu Telegram legat).
+  Mesajul conține username-uri de admin și IP-uri.
 
 ## Unelte
 
