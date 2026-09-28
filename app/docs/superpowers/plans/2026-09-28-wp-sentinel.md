@@ -802,6 +802,8 @@ export interface SentinelEvent {
 	user: string; // '-' când nu e logat
 	uid: number;
 	ip: string;
+	/** REMOTE_ADDR brut (conector ≥ 0.9.0); lipsește pe liniile mu-plugin-ului */
+	ip_remote?: string;
 	uri: string;
 	ua: string;
 	date: Record<string, unknown>;
@@ -1081,12 +1083,26 @@ describe('reguli sintetice', () => {
 	});
 
 	test('login admin de pe IP nou = important; IP OTS = normal; după citire IP-ul e cunoscut', () => {
-		const admin = (ip: string, t: string) => ev({ ev: 'login_ok', t, ip, user: 'adm', date: { login: 'adm', roluri: ['administrator'] } });
-		const { findings, nextState, levels } = run([admin('5.6.7.8', '2026-09-28T08:00:00Z'), admin('5.6.7.8', '2026-09-28T08:30:00Z'), admin('82.77.19.195', '2026-09-28T08:40:00Z')], knownState());
+		const admin = (ip: string, t: string, ip_remote?: string) => ev({ ev: 'login_ok', t, ip, ip_remote, user: 'adm', date: { login: 'adm', roluri: ['administrator'] } });
+		const { findings, nextState, levels } = run(
+			[
+				admin('5.6.7.8', '2026-09-28T08:00:00Z', '5.6.7.8'),
+				admin('5.6.7.8', '2026-09-28T08:30:00Z', '5.6.7.8'),
+				admin('82.77.19.195', '2026-09-28T08:40:00Z', '82.77.19.195'), // OTS real
+				admin('82.77.19.195', '2026-09-28T08:41:00Z') // linie veche, fără ip_remote
+			],
+			knownState()
+		);
 		expect(findings.filter((f) => f.kind === 'admin_new_ip')).toHaveLength(1); // un finding per (user, ip)
 		expect(nextState.adminIps.adm['5.6.7.8']).toBe('2026-09-28T08:30:00Z');
 		expect(nextState.adminIps.adm['82.77.19.195']).toBeUndefined();
 		expect([...levels.values()].filter((l) => l === 'important')).toHaveLength(2);
+	});
+
+	test('X-Forwarded-For falsificat cu IP OTS de pe un remote străin = important, cu remote-ul în text', () => {
+		const spoof = ev({ ev: 'login_ok', t: '2026-09-28T08:00:00Z', ip: '82.77.19.195', ip_remote: '203.0.113.9', user: 'adm', date: { login: 'adm', roluri: ['administrator'] } });
+		const { findings } = run([spoof], knownState());
+		expect(findings).toEqual([expect.objectContaining({ kind: 'admin_new_ip', text: expect.stringContaining('remote 203.0.113.9') })]);
 	});
 
 	test('IP-urile de admin mai vechi de 90 zile se uită', () => {
@@ -1175,6 +1191,14 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v) || 0)
 const roles = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 const isAdminRoles = (v: unknown) => roles(v).includes('administrator');
 const login = (e: SentinelEvent) => str(e.date.login) || (e.user !== '-' ? e.user : '');
+const PRIVATE_IP = /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|fc|fd)/i;
+/**
+ * `ip` vine din X-Forwarded-For, pe care oricine îl poate falsifica pe un site
+ * fără proxy. Excludem IP-ul OTS doar dacă și `ip_remote` (REMOTE_ADDR) e OTS,
+ * privat (proxy local) sau lipsește (linie veche de mu-plugin).
+ */
+const isOtsIp = (e: SentinelEvent) =>
+	OTS_IPS.has(e.ip) && (e.ip_remote === undefined || e.ip_remote === '' || OTS_IPS.has(e.ip_remote) || PRIVATE_IP.test(e.ip_remote));
 
 function isAdminProfile(e: SentinelEvent, state: SentinelState): boolean {
 	if (Array.isArray(e.date.roluri)) return isAdminRoles(e.date.roluri);
@@ -1200,7 +1224,7 @@ export function classify(e: SentinelEvent, state: SentinelState): SentinelLevel 
 		case 'profile_update':
 			return isAdminProfile(e, state) ? 'important' : 'normal';
 		case 'login_ok': {
-			if (!isAdminRoles(e.date.roluri) || OTS_IPS.has(e.ip)) return 'normal';
+			if (!isAdminRoles(e.date.roluri) || isOtsIp(e)) return 'normal';
 			return state.adminIps[login(e)]?.[e.ip] ? 'normal' : 'important';
 		}
 		default:
@@ -1241,12 +1265,13 @@ export function detectFindings({ events, scan, state, now }: DetectInput): Detec
 		const level = classify(e, state);
 		levels.set(e.id, level);
 
-		if (e.ev === 'login_ok' && isAdminRoles(e.date.roluri) && !OTS_IPS.has(e.ip) && e.ip) {
+		if (e.ev === 'login_ok' && isAdminRoles(e.date.roluri) && !isOtsIp(e) && e.ip) {
 			const u = login(e);
 			const key = `${u}|${e.ip}`;
 			if (level === 'important' && !firstPull && !seenNewIp.has(key)) {
 				seenNewIp.add(key);
-				findings.push({ level: 'important', kind: 'admin_new_ip', text: `logare admin ${u} de pe IP nou ${e.ip}` });
+				const remote = e.ip_remote && e.ip_remote !== e.ip && !PRIVATE_IP.test(e.ip_remote) ? ` (remote ${e.ip_remote})` : '';
+				findings.push({ level: 'important', kind: 'admin_new_ip', text: `logare admin ${u} de pe IP nou ${e.ip}${remote}` });
 			}
 			nextState.adminIps[u] = { ...(nextState.adminIps[u] ?? {}), [e.ip]: e.t };
 			continue;
