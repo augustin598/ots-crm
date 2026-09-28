@@ -44,23 +44,46 @@ export interface WpSentinelResponse {
 /** Memoria lungă a unui site (wordpress_site.sentinel_state). */
 export interface SentinelState {
 	baselineDone: boolean;
+	/**
+	 * Separat de `baselineDone`: dacă prima citire n-a avut `scan` (conector vechi,
+	 * eroare de scanare), nu vrem ca a doua citire cu scan să marcheze tot ce găsește
+	 * drept fișiere PHP „noi”. Devine `true` abia după primul scan primit efectiv.
+	 */
+	scanBaselineDone: boolean;
 	/** path → sha1 al fișierelor PHP din uploads cunoscute */
 	uploadsBaseline: Record<string, string>;
 	/** user → ip → ultima logare de admin (ISO); intrările > 90 zile se curăță */
 	adminIps: Record<string, Record<string, string>>;
 	/** user → eșecuri de logare din ultimele 7 zile (pentru brute-force lent, câte unul pe zi) */
-	failedLogins: Record<string, Array<{ t: string; ip: string }>>;
+	failedLogins: Record<string, Array<{ t: string; ip: string; id?: string }>>;
 	/** findings încă netrimise pe Telegram (citiri manuale + jobul); golite după o trimitere reușită */
 	pendingFindings: Finding[];
 	lastError: string | null;
 }
 
+/**
+ * Dicționar fără prototip: username-uri venite din evenimente (`constructor`,
+ * `toString`, `__proto__`...) nu trebuie să atingă `Object.prototype` — nici la
+ * citire (altfel `x['toString']` „găsește" funcția moștenită și pare cunoscut),
+ * nici la scriere (`x['__proto__'] = v` pe un obiect normal schimbă prototipul
+ * în loc să creeze o proprietate).
+ */
+export function dict<T>(src?: Record<string, T> | null): Record<string, T> {
+	return Object.assign(Object.create(null) as Record<string, T>, src);
+}
+
+/** Citire sigură pe cheie dinamică: `undefined` dacă nu e proprietate PROPRIE (nu moștenită). */
+export function getOwn<T>(obj: Record<string, T> | undefined, key: string): T | undefined {
+	return obj && Object.hasOwn(obj, key) ? obj[key] : undefined;
+}
+
 export function emptyState(): SentinelState {
 	return {
 		baselineDone: false,
-		uploadsBaseline: {},
-		adminIps: {},
-		failedLogins: {},
+		scanBaselineDone: false,
+		uploadsBaseline: dict(),
+		adminIps: dict(),
+		failedLogins: dict(),
 		pendingFindings: [],
 		lastError: null
 	};
@@ -70,11 +93,14 @@ export function parseState(raw: string | null | undefined): SentinelState {
 	if (!raw) return emptyState();
 	try {
 		const p = JSON.parse(raw) as Partial<SentinelState>;
+		const adminIps = dict<Record<string, string>>(p.adminIps);
+		for (const u of Object.keys(adminIps)) adminIps[u] = dict(adminIps[u]);
 		return {
 			baselineDone: p.baselineDone === true,
-			uploadsBaseline: p.uploadsBaseline ?? {},
-			adminIps: p.adminIps ?? {},
-			failedLogins: p.failedLogins ?? {},
+			scanBaselineDone: p.scanBaselineDone === true,
+			uploadsBaseline: dict(p.uploadsBaseline),
+			adminIps,
+			failedLogins: dict(p.failedLogins),
 			pendingFindings: Array.isArray(p.pendingFindings) ? p.pendingFindings : [],
 			lastError: p.lastError ?? null
 		};

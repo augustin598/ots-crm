@@ -169,4 +169,126 @@ describe('reguli sintetice', () => {
 		const pending = [{ level: 'critical' as const, kind: 'php_in_uploads' as const, text: 'x' }];
 		expect(run([], known({ pendingFindings: pending })).nextState.pendingFindings).toEqual(pending);
 	});
+
+	test('option_changed → 🔴 finding; valoare obiect devine JSON, tăiată la 80 caractere (M5)', () => {
+		const nou = { a: 'x'.repeat(100) };
+		const { findings } = run([ev({ ev: 'option_changed', t: '2026-09-28T08:00:00Z', date: { option: 'siteurl', nou } })], known());
+		expect(findings).toHaveLength(1);
+		expect(findings[0].level).toBe('critical');
+		expect(findings[0].kind).toBe('option_changed');
+		expect(findings[0].text).toContain('opțiunea siteurl schimbată în');
+		expect(findings[0].text).toContain('{"a":"x');
+		expect(findings[0].text).toContain('…'); // tăiat, nu cele 100+ caractere brute
+		expect(findings[0].text.length).toBeLessThan(120);
+	});
+
+	test('profile_update pe cont cu rol administrator = 🟠', () => {
+		const { findings } = run(
+			[ev({ ev: 'profile_update', t: '2026-09-28T08:00:00Z', user: 'adm', date: { roluri: ['administrator'], modificari: { email: 'x' } } })],
+			known()
+		);
+		expect(findings).toEqual([expect.objectContaining({ level: 'important', kind: 'admin_profile' })]);
+	});
+
+	test('user_registered cu rol editor → 🟠 user_registered', () => {
+		const { findings } = run(
+			[ev({ ev: 'user_registered', t: '2026-09-28T08:00:00Z', date: { id: 9, login: 'ed', email: 'ed@x.ro', roluri: ['editor'] } })],
+			known()
+		);
+		expect(findings).toEqual([expect.objectContaining({ level: 'important', kind: 'user_registered' })]);
+	});
+
+	test('dezactivarea conectorului OTS → text fix', () => {
+		const { findings } = run(
+			[ev({ ev: 'plugin_deactivated', t: '2026-09-28T08:00:00Z', ip: '82.77.19.195', date: { plugin: 'ots-wp-connector/ots-connector.php' } })],
+			known()
+		);
+		expect(findings).toEqual([{ level: 'critical', kind: 'connector_deactivated', text: 'conectorul OTS a fost dezactivat' }]);
+	});
+
+	test('fisiere_modificate (mu-plugin 1.1) → finding legacy_alert', () => {
+		const { findings } = run([ev({ ev: 'fisiere_modificate', t: '2026-09-28T08:00:00Z' })], known());
+		expect(findings).toEqual([expect.objectContaining({ level: 'critical', kind: 'legacy_alert', text: expect.stringContaining('fisiere_modificate') })]);
+	});
+
+	test('M4: mass_insert raportează maximul din citire, nu ultimul eveniment', () => {
+		const post = (n: number) => ev({ ev: 'post_created', t: '2026-09-28T08:00:00Z', date: { nr_in_request: n, sursa: { context: 'rest' } } });
+		const { findings } = run([post(23), post(21)], known());
+		expect(findings).toEqual([expect.objectContaining({ kind: 'mass_insert', text: expect.stringContaining('23 articole') })]);
+	});
+
+	test('M1: eșecuri cu același t+ip dar id diferit nu se elimină reciproc (dedup pe id, nu pe t+ip)', () => {
+		const mk = (id: string) => ev({ id, ev: 'login_esuat', t: '2026-09-27T20:00:00Z', ip: '1.1.1.1', date: { login: 'adm', exista: true } });
+		const { findings } = run([mk('a'), mk('b'), mk('c')], known());
+		expect(findings).toEqual([expect.objectContaining({ kind: 'brute_force', text: '3 logări eșuate pe adm în 7 zile (1 IP-uri)' })]);
+	});
+
+	test('starea de intrare nu e mutată (M6 + clonare pe adminIps/failedLogins)', () => {
+		const state = known({
+			adminIps: { adm: { '9.9.9.9': '2026-06-01T00:00:00Z' } }, // uitat: > 90 zile din NOW
+			failedLogins: { adm: [{ t: '2026-09-20T00:00:00Z', ip: '1.1.1.1' }] },
+			pendingFindings: [{ level: 'important', kind: 'plugin_change', text: 'x' }]
+		});
+		const snapshot = JSON.stringify(state);
+		run([admin('5.6.7.8', '2026-09-28T08:00:00Z', '5.6.7.8'), fail('adm', '2.2.2.2', '2026-09-28T01:00:00Z', true)], state);
+		expect(JSON.stringify(state)).toBe(snapshot);
+	});
+});
+
+describe('fixe din code review (0cd95e1e)', () => {
+	test('I1: XFF falsificat cu IP OTS din remote-uri diferite — fiecare pull alertează; cheia e remote-ul, nu IP-ul OTS falsificat', () => {
+		const spoof1 = admin('82.77.19.195', '2026-09-28T08:00:00Z', '203.0.113.9');
+		const r1 = run([spoof1], known());
+		expect(r1.findings).toEqual([expect.objectContaining({ kind: 'admin_new_ip', text: expect.stringContaining('remote 203.0.113.9') })]);
+		expect(r1.nextState.adminIps.adm).toEqual({ '203.0.113.9': '2026-09-28T08:00:00Z' });
+
+		const spoof2 = admin('82.77.19.195', '2026-09-28T09:00:00Z', '198.51.100.7');
+		const r2 = run([spoof2], r1.nextState);
+		expect(r2.findings).toEqual([expect.objectContaining({ kind: 'admin_new_ip', text: expect.stringContaining('remote 198.51.100.7') })]);
+		expect(r2.nextState.adminIps.adm).toEqual({
+			'203.0.113.9': '2026-09-28T08:00:00Z',
+			'198.51.100.7': '2026-09-28T09:00:00Z'
+		});
+		expect(r2.nextState.adminIps.adm['82.77.19.195']).toBeUndefined();
+	});
+
+	test('I2: username-uri periculoase (constructor/toString/__proto__) nu ating Object.prototype', () => {
+		const mkFail = (login: string, id: string, t: string) => ev({ id, ev: 'login_esuat', t, ip: '9.9.9.9', date: { login, exista: true } });
+		const { findings: f1 } = run(
+			[mkFail('constructor', 'c1', '2026-09-27T01:00:00Z'), mkFail('constructor', 'c2', '2026-09-27T02:00:00Z'), mkFail('constructor', 'c3', '2026-09-27T03:00:00Z')],
+			known()
+		);
+		expect(f1).toEqual([expect.objectContaining({ kind: 'brute_force', text: '3 logări eșuate pe constructor în 7 zile (1 IP-uri)' })]);
+
+		// profile_update pe linie veche (fără roluri), user 'toString', cu adminIps gol (literal, nu null-proto) → normal
+		const profileEvent = ev({ ev: 'profile_update', t: '2026-09-28T08:00:00Z', user: 'toString', date: {} });
+		expect(classify(profileEvent, known({ adminIps: {} }))).toBe('normal');
+
+		// logare admin pentru username '__proto__' → devine cheie proprie, nu prototip
+		const adminLogin = admin('5.5.5.5', '2026-09-28T08:00:00Z', '5.5.5.5', '__proto__');
+		const r = run([adminLogin], known());
+		expect(Object.hasOwn(r.nextState.adminIps, '__proto__')).toBe(true);
+		expect(() => JSON.stringify(r.nextState)).not.toThrow();
+		expect(JSON.stringify(r.nextState)).toContain('__proto__');
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined(); // nimic scurs pe Object.prototype
+	});
+
+	test('I3: baseline de scanare separată de baselineDone — scan null la prima citire nu creează findings false la a doua', () => {
+		const scanOf = (files: Array<[string, string]>) => ({
+			files: files.map(([path, sha1]) => ({ path, sha1, size: 1, mtime: '2026-09-28T00:00:00Z' })),
+			scannedFiles: 10,
+			truncated: false,
+			durationMs: 1
+		});
+		const first = run([], emptyState(), null); // prima citire fără scan deloc (conector vechi/eroare)
+		expect(first.nextState.baselineDone).toBe(true);
+		expect(first.nextState.scanBaselineDone).toBe(false);
+
+		const second = run([], first.nextState, scanOf([['/sucuri/x.php', 'a']]));
+		expect(second.findings).toHaveLength(0); // primul scan văzut efectiv = baseline, nu 🔴 fals
+		expect(second.nextState.scanBaselineDone).toBe(true);
+
+		const third = run([], second.nextState, scanOf([['/sucuri/x.php', 'a'], ['/2026/09/shell.php', 'c']]));
+		expect(third.findings).toEqual([expect.objectContaining({ level: 'critical', kind: 'php_in_uploads' })]);
+	});
 });
