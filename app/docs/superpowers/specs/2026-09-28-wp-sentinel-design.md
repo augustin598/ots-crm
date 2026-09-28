@@ -66,7 +66,8 @@ de 60 s se putea rejuca cu alt `since`/`skip`.
 ```
 
 - Evenimente cu `t >= since`, cele mai vechi primele, din **toate** fișierele `sentinel*.log` din director cu `mtime >= since` (un val de brute-force poate roti de mai multe ori între două citiri), în ordinea numelui; maximum 5000/răspuns (`hasMore`). `skip` = câte evenimente din setul filtrat se sar — paginare stabilă și când multe evenimente au același `t` (un `since = t_ultim` ar bate pasul pe loc la un val de login-uri).
-- Scanare: PHP executabil (`.php|.phtml|.php[0-9]|.phar`) în uploads, `index.php` < 40 octeți ignorat; se parcurg **toate** fișierele (buget 20 s → `truncated: true`), se întorc cele mai noi 200 după `mtime` + `scannedFiles` (total). Un shell nou e mereu printre cele mai noi; o limită pe primele 200 găsite s-ar fi păcălit cu 200 de fișiere PHP inofensive.
+- Citirea e în doi pași: întâi chei compacte (`t|index|fișier|offset`, ~100 B/eveniment), sortare, pagină; apoi se decodează pe offset doar liniile paginii. Un jurnal decodat integral costă ~2 KB/eveniment (prima citire ≈ 170k evenimente ≈ 330 MB) — fatal pe `memory_limit` 128 MB. Liniile cu `t`/`id` care nu sunt string se sar și se raportează în `errors[]`; ruta prinde `Throwable` și răspunde 200 cu `errors[]`.
+- Scanare: PHP executabil (`.php|.phtml|.php[0-9]|.phar`) în uploads, `index.php` < 40 octeți ignorat; se parcurg **toate** fișierele cu buget **15 s măsurat de la începutul cererii** (proxy-urile de hosting taie la ~30 s) → `truncated: true`; se întorc cele mai noi 200 după `mtime` + `scannedFiles` (total); fără sha1 peste 5 MB. Un shell nou e mereu printre cele mai noi; o limită pe primele 200 găsite s-ar fi păcălit cu 200 de fișiere PHP inofensive.
 - Erori parțiale → în `errors[]`, răspunsul rămâne 200.
 - `CHANGELOG.md` + bump `Version:` și `OTS_CONNECTOR_VERSION` (0.8.5 → 0.9.0).
 
