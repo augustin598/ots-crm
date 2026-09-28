@@ -48,11 +48,13 @@ export interface SentinelState {
 	uploadsBaseline: Record<string, string>;
 	/** user → ip → ultima logare de admin (ISO); intrările > 90 zile se curăță */
 	adminIps: Record<string, Record<string, string>>;
+	/** user → eșecuri de logare din ultimele 7 zile (pentru brute-force lent, câte unul pe zi) */
+	failedLogins: Record<string, Array<{ t: string; ip: string }>>;
 	lastError: string | null;
 }
 
 export function emptyState(): SentinelState {
-	return { baselineDone: false, uploadsBaseline: {}, adminIps: {}, lastError: null };
+	return { baselineDone: false, uploadsBaseline: {}, adminIps: {}, failedLogins: {}, lastError: null };
 }
 
 export function parseState(raw: string | null | undefined): SentinelState {
@@ -63,6 +65,7 @@ export function parseState(raw: string | null | undefined): SentinelState {
 			baselineDone: p.baselineDone === true,
 			uploadsBaseline: p.uploadsBaseline ?? {},
 			adminIps: p.adminIps ?? {},
+			failedLogins: p.failedLogins ?? {},
 			lastError: p.lastError ?? null
 		};
 	} catch {
