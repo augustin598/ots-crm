@@ -11,6 +11,8 @@
  * reușită (≥ 1 utilizator notificat) — dacă Telegram e jos sau nimeni nu are
  * cont legat, cheia rămâne nesetată și `pendingFindings` rămâne populat, deci
  * rularea de mâine reia automat (self-healing, fără coadă de retry separată).
+ * Un eșec Redis la verificarea/setarea acestei chei nu blochează trimiterea —
+ * mai bine un digest duplicat decât niciunul.
  *
  * Fiecare site se citește secvențial (ca la `wordpress-updates-check`, ca să
  * nu bombardăm hosting-uri shared); un `pullSite` care aruncă (eroare de
@@ -19,19 +21,21 @@
  */
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
-import { eq, inArray, lt } from 'drizzle-orm';
+import { and, eq, inArray, lt } from 'drizzle-orm';
 import { logInfo, logWarning, serializeError } from '$lib/server/logger';
 import { getRedis } from '$lib/server/redis';
 import { sendTelegramMessage } from '$lib/server/telegram/sender';
 import { getAppBaseUrl } from '$lib/server/app-url';
-import { pullSite, type PullResult } from '$lib/server/wordpress/sentinel/pull';
+import { pullSite, withSiteLock, SiteBusyError, SENTINEL_RETENTION_DAYS, type PullResult } from '$lib/server/wordpress/sentinel/pull';
 import { buildDigest, type DigestSite } from '$lib/server/wordpress/sentinel/digest';
 import { parseState, type Finding } from '$lib/server/wordpress/sentinel/types';
 
-export const SENTINEL_RETENTION_DAYS = 7;
+export { SENTINEL_RETENTION_DAYS };
 
 /** 36h — puțin peste o zi, ca o rulare întârziată sau reluată azi să nu retrimită digestul de ieri. */
 const DIGEST_KEY_TTL_SEC = 36 * 60 * 60;
+/** Golirea pending-ului la sfârșit așteaptă lock-ul de site ca o citire manuală concurentă. */
+const CLEAR_LOCK_WAIT_MS = 60_000;
 
 const bucharestDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bucharest' });
 
@@ -54,19 +58,67 @@ async function purgeOldEvents(now: Date): Promise<number> {
 	return (result as { rowsAffected?: number })?.rowsAffected ?? 0;
 }
 
-/** Golește `pendingFindings` pentru un site, păstrând restul memoriei lungi (`SentinelState`). */
-async function clearPendingFindings(siteId: string, now: Date): Promise<void> {
-	const [row] = await db
-		.select({ sentinelState: table.wordpressSite.sentinelState })
-		.from(table.wordpressSite)
-		.where(eq(table.wordpressSite.id, siteId));
-	if (!row) return;
-	const state = parseState(row.sentinelState);
-	state.pendingFindings = [];
-	await db
-		.update(table.wordpressSite)
-		.set({ sentinelState: JSON.stringify(state), updatedAt: now })
-		.where(eq(table.wordpressSite.id, siteId));
+/** Cheia unui finding pentru golire pe identitate (nivel + tip + text) — nu poziție. */
+function findingKey(f: Finding): string {
+	return JSON.stringify([f.level, f.kind, f.text]);
+}
+
+/**
+ * Scoate din `current` findings-urile trimise în digest (multiset, pe identitate) — nu
+ * înlocuiește tot cu `[]`. Un finding adăugat de o citire manuală concurentă, DUPĂ ce am
+ * citit `result.pending` dar înainte de golire, nu era în digestul trimis, deci rămâne.
+ */
+function removeSent(current: Finding[], sent: Finding[]): Finding[] {
+	const toRemove = new Map<string, number>();
+	for (const f of sent) toRemove.set(findingKey(f), (toRemove.get(findingKey(f)) ?? 0) + 1);
+	const kept: Finding[] = [];
+	for (const f of current) {
+		const key = findingKey(f);
+		const remaining = toRemove.get(key) ?? 0;
+		if (remaining > 0) {
+			toRemove.set(key, remaining - 1);
+			continue;
+		}
+		kept.push(f);
+	}
+	return kept;
+}
+
+/**
+ * Golește din `pendingFindings` doar findings-urile efectiv trimise în digest (pe identitate),
+ * sub lock-ul de site — ca o citire manuală concurentă să nu-și piardă findings-ul proaspăt
+ * adăugat între citirea de mai sus și golirea de-acum. Dacă lock-ul e ocupat, sărim golirea:
+ * findings-urile rămân în coadă și se retrimit mâine (duplicat acceptabil, mai bine decât o
+ * scriere care le-ar suprascrie pe cele proaspete).
+ */
+async function clearSentFindings(siteId: string, sentFindings: Finding[], now: Date): Promise<void> {
+	try {
+		await withSiteLock(
+			siteId,
+			async () => {
+				const [row] = await db
+					.select({ sentinelState: table.wordpressSite.sentinelState })
+					.from(table.wordpressSite)
+					.where(eq(table.wordpressSite.id, siteId));
+				if (!row) return;
+				const state = parseState(row.sentinelState);
+				state.pendingFindings = removeSent(state.pendingFindings, sentFindings);
+				await db
+					.update(table.wordpressSite)
+					.set({ sentinelState: JSON.stringify(state), updatedAt: now })
+					.where(eq(table.wordpressSite.id, siteId));
+			},
+			{ waitMs: CLEAR_LOCK_WAIT_MS }
+		);
+	} catch (err) {
+		if (err instanceof SiteBusyError) {
+			logWarning('wordpress', `Sentinel daily: golire pending amânată (lock ocupat) pentru site ${siteId}`, {
+				metadata: { siteId }
+			});
+			return;
+		}
+		throw err;
+	}
 }
 
 export interface WordpressSentinelDailyResult {
@@ -139,7 +191,7 @@ export async function processWordpressSentinelDaily(
 			}
 
 			const digestSites: DigestSite[] = [];
-			const sitesToClear: SiteRow[] = [];
+			const sitesToClear: { site: SiteRow; sentFindings: Finding[] }[] = [];
 			let quietSites = 0;
 			let withFindings = 0;
 
@@ -162,11 +214,27 @@ export async function processWordpressSentinelDaily(
 
 				withFindings++;
 				digestSites.push({ name: site.name, findings });
-				if (result.pending.length > 0) sitesToClear.push(site);
+				if (result.pending.length > 0) sitesToClear.push({ site, sentFindings: result.pending });
+			}
+
+			// Toate site-urile tenantului sunt unsupported (conector vechi peste tot):
+			// nimic de raportat — nici măcar Redis nu-l atingem (nu e nimic de-a devenit idempotent).
+			if (digestSites.length === 0 && quietSites === 0) {
+				logInfo('wordpress', `Sentinel daily: tenant ${tenantId} — toate site-urile unsupported, nimic de trimis`, {
+					tenantId
+				});
+				continue;
 			}
 
 			const key = `sentinel:digest:${tenantId}:${dateStr}`;
-			const alreadySent = await redis.get(key);
+			let alreadySent: string | null = null;
+			try {
+				alreadySent = await redis.get(key);
+			} catch (err) {
+				logWarning('wordpress', `Sentinel daily: Redis GET a aruncat la ${key}: ${serializeError(err).message} — trimit oricum`, {
+					tenantId
+				});
+			}
 			if (alreadySent) {
 				logInfo('wordpress', `Sentinel daily: tenant ${tenantId} — digest deja trimis azi, skip`, {
 					tenantId,
@@ -179,10 +247,11 @@ export async function processWordpressSentinelDaily(
 			const url = `${getAppBaseUrl()}/${tenantSlug}/wordpress/security`;
 			const messages = buildDigest({ date: now, sites: digestSites, quietSites, url });
 
+			// TODO(user): doar owner/admin? Momentan trimitem la toți membrii activi ai tenantului.
 			const users = await db
 				.select({ userId: table.tenantUser.userId })
 				.from(table.tenantUser)
-				.where(eq(table.tenantUser.tenantId, tenantId));
+				.where(and(eq(table.tenantUser.tenantId, tenantId), eq(table.tenantUser.status, 'active')));
 
 			let delivered = 0;
 			for (const u of users) {
@@ -204,9 +273,15 @@ export async function processWordpressSentinelDaily(
 
 			if (delivered > 0) {
 				sent++;
-				await redis.set(key, '1', 'EX', DIGEST_KEY_TTL_SEC, 'NX');
-				for (const site of sitesToClear) {
-					await clearPendingFindings(site.id, now);
+				try {
+					await redis.set(key, '1', 'EX', DIGEST_KEY_TTL_SEC, 'NX');
+				} catch (err) {
+					logWarning('wordpress', `Sentinel daily: Redis SET a aruncat la ${key}: ${serializeError(err).message}`, {
+						tenantId
+					});
+				}
+				for (const { site, sentFindings } of sitesToClear) {
+					await clearSentFindings(site.id, sentFindings, now);
 				}
 			}
 

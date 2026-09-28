@@ -5,8 +5,12 @@ const inserted: Row[][] = [];
 const updated: Row[] = [];
 let existingUids: string[] = [];
 let siteRow: Row = {};
+let siteRowQueryResult: Row | undefined;
 let pages: Array<unknown> = [];
 let calls: Array<{ since: string | null; skip: number }> = [];
+let loadSiteAndClientThrows: Error | null = null;
+const redisStore = new Map<string, string>();
+let redisThrows = false;
 
 mock.module('$env/dynamic/private', () => ({ env: {} }));
 mock.module('$env/static/private', () => ({}));
@@ -17,16 +21,31 @@ mock.module('$lib/server/logger', () => ({
 	serializeError: (e: unknown) => ({ message: e instanceof Error ? e.message : String(e), stack: '' })
 }));
 mock.module('$lib/server/db/schema', () => ({
-	wordpressSite: { id: {}, tenantId: {}, sentinelLastPullAt: {}, sentinelLastPullStatus: {}, sentinelFailures: {}, sentinelState: {}, updatedAt: {} },
+	wordpressSite: {
+		id: {},
+		tenantId: {},
+		name: {},
+		sentinelLastPullAt: {},
+		sentinelLastPullStatus: {},
+		sentinelFailures: {},
+		sentinelState: {},
+		updatedAt: {}
+	},
 	wordpressSecurityEvent: { id: {}, siteId: {}, eventUid: {} }
 }));
 mock.module('$lib/server/db', () => ({
 	db: {
-		select: () => {
+		select: (cols?: Record<string, unknown>) => {
 			const c: Record<string, unknown> = {
 				from: () => c,
 				where: () => c,
-				then: (r: (rows: Row[]) => unknown) => r(existingUids.map((eventUid) => ({ eventUid })))
+				then: (r: (rows: Row[]) => unknown) => {
+					if (cols && 'eventUid' in cols) {
+						return r(existingUids.map((eventUid) => ({ eventUid })));
+					}
+					// selectSiteRow / handleLoadFailure — lookup direct al rândului de site
+					return r(siteRowQueryResult ? [siteRowQueryResult] : []);
+				}
 			};
 			return c;
 		},
@@ -35,17 +54,20 @@ mock.module('$lib/server/db', () => ({
 	}
 }));
 mock.module('../../sync', () => ({
-	loadSiteAndClient: async () => ({
-		site: siteRow,
-		client: {
-			sentinel: async (args: { since: string | null; skip: number }) => {
-				calls.push(args);
-				const p = pages.shift();
-				if (p instanceof Error) throw p;
-				return p;
+	loadSiteAndClient: async () => {
+		if (loadSiteAndClientThrows) throw loadSiteAndClientThrows;
+		return {
+			site: siteRow,
+			client: {
+				sentinel: async (args: { since: string | null; skip: number }) => {
+					calls.push(args);
+					const p = pages.shift();
+					if (p instanceof Error) throw p;
+					return p;
+				}
 			}
-		}
-	})
+		};
+	}
 }));
 mock.module('../../connector-release', () => ({
 	compareConnectorVersions: (a: string, b: string) => {
@@ -58,8 +80,26 @@ mock.module('../../connector-release', () => ({
 		return 0;
 	}
 }));
+mock.module('$lib/server/redis', () => ({
+	getRedis: () => ({
+		get: async (key: string) => {
+			if (redisThrows) throw new Error('redis indisponibil');
+			return redisStore.get(key) ?? null;
+		},
+		set: async (key: string, value: string, ...flags: string[]) => {
+			if (redisThrows) throw new Error('redis indisponibil');
+			if (flags.includes('NX') && redisStore.has(key)) return null;
+			redisStore.set(key, value);
+			return 'OK';
+		},
+		del: async (key: string) => {
+			if (redisThrows) throw new Error('redis indisponibil');
+			redisStore.delete(key);
+		}
+	})
+}));
 
-const { pullSite, supportsSentinel } = await import('../pull');
+const { pullSite, supportsSentinel, withSiteLock, SiteBusyError, SENTINEL_RETENTION_DAYS } = await import('../pull');
 
 const NOW = new Date('2026-09-28T09:00:00Z');
 const fail = (id: string, t: string, ip = '1.1.1.1') => ({ id, t, sev: 'INFO', ev: 'login_esuat', user: '-', uid: 0, ip, uri: '/wp-login.php', ua: '', date: { login: 'adm', exista: true } });
@@ -77,8 +117,12 @@ beforeEach(() => {
 	inserted.length = 0;
 	updated.length = 0;
 	existingUids = [];
+	siteRowQueryResult = undefined;
 	calls = [];
 	pages = [];
+	loadSiteAndClientThrows = null;
+	redisStore.clear();
+	redisThrows = false;
 	siteRow = { id: 's1', tenantId: 't1', name: 'nevada', siteUrl: 'https://x.ro', connectorVersion: '0.9.0', sentinelLastPullAt: null, sentinelFailures: 0, sentinelState: null };
 });
 
@@ -175,4 +219,160 @@ describe('pullSite', () => {
 		expect(updated[0].sentinelFailures).toBeUndefined();
 		expect(r.failures).toBe(1);
 	});
+
+	// --- Fix 1: trunchiere la MAX_PAGES -------------------------------------
+	test('trunchiere la MAX_PAGES (20 pagini, toate hasMore=true): sentinelLastPullAt = t-ul ultimului eveniment, lastError menționează', async () => {
+		const base = Date.parse('2026-09-20T00:00:00Z');
+		pages = Array.from({ length: 20 }, (_, i) =>
+			page([fail(`e${i}`, new Date(base + i * 3600_000).toISOString())], true, false, i === 0)
+		);
+		const lastT = new Date(base + 19 * 3600_000);
+
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+
+		expect(calls).toHaveLength(20);
+		expect(r.status).toBe('ok'); // trunchierea nu e o eroare
+		expect(updated[0].sentinelLastPullAt).toEqual(lastT);
+		const st = lastState();
+		expect(st.lastError).toContain('incompletă');
+	});
+
+	// --- Fix 2: retenție 7 zile ----------------------------------------------
+	test('retenție 7 zile: eveniment vechi nu se inserează, dar IP-ul de admin intră în baseline', async () => {
+		const oldT = '2026-09-19T08:00:00Z'; // > 7 zile înainte de NOW (28 sept, 09:00)
+		pages = [
+			page([{ id: 'old1', t: oldT, sev: 'INFO', ev: 'login_ok', user: 'adm', uid: 1, ip: '9.9.9.9', uri: '/wp-admin/', ua: '', date: { roluri: ['administrator'] } }])
+		];
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r.status).toBe('ok');
+		expect(r.inserted).toBe(0);
+		expect(inserted.flat().map((x) => x.eventUid)).not.toContain('old1');
+		const st = lastState();
+		expect(st.adminIps.adm['9.9.9.9']).toBe(oldT);
+	});
+
+	// --- Fix 3: lock per site -------------------------------------------------
+	test('citire manuală: lock ocupat de altă citire → SiteBusyError se propagă imediat (waitMs 0), fără scriere', async () => {
+		redisStore.set('sentinel:pull:s1', 'alt-token');
+		await expect(pullSite('s1', { now: NOW, trigger: 'manual' })).rejects.toBeInstanceOf(SiteBusyError);
+		expect(updated).toHaveLength(0);
+		expect(calls).toHaveLength(0);
+	});
+
+	test('job zilnic: lock ocupat pe toată durata așteptării → status error „citire în curs”, fără scriere în DB', async () => {
+		redisStore.set('sentinel:pull:s1', 'alt-token'); // nimeni nu-l eliberează
+		siteRowQueryResult = { id: 's1', tenantId: 't1', name: 'nevada', sentinelFailures: 0, sentinelState: null };
+
+		const realDateNow = Date.now;
+		const realSetTimeout = globalThis.setTimeout;
+		let fakeNow = realDateNow();
+		Date.now = () => fakeNow;
+		// @ts-expect-error stub minimal pentru ceas virtual în test
+		globalThis.setTimeout = (cb: () => void, ms?: number) => {
+			fakeNow += ms ?? 0;
+			cb();
+			return 0 as unknown as ReturnType<typeof setTimeout>;
+		};
+		try {
+			const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+			expect(r.status).toBe('error');
+			expect(r.error).toBe('citire în curs');
+			expect(r.failures).toBe(0);
+			expect(updated).toHaveLength(0);
+			expect(calls).toHaveLength(0);
+		} finally {
+			Date.now = realDateNow;
+			globalThis.setTimeout = realSetTimeout;
+		}
+	});
+
+	// --- Fix 4: contor eșecuri o dată pe zi (ora României) --------------------
+	test('două eșecuri zilnice în aceeași zi (ora României) → contorul crește o singură dată', async () => {
+		pages = [new Error('boom1')];
+		const r1 = await pullSite('s1', { now: NOW, trigger: 'daily' });
+		expect(r1.failures).toBe(1);
+
+		// simulăm persistarea scrierii anterioare înainte de a doua rulare
+		siteRow.sentinelFailures = updated[updated.length - 1].sentinelFailures;
+		siteRow.sentinelState = updated[updated.length - 1].sentinelState;
+
+		pages = [new Error('boom2')];
+		const r2 = await pullSite('s1', { now: NOW, trigger: 'daily' }); // aceeași zi
+		expect(r2.failures).toBe(1);
+		expect(updated[updated.length - 1].sentinelFailures).toBe(1);
+	});
+
+	test('a treia zi de eșec (zi calendaristică nouă) → contorul crește din nou', async () => {
+		pages = [new Error('boom1')];
+		await pullSite('s1', { now: NOW, trigger: 'daily' });
+		siteRow.sentinelFailures = updated[updated.length - 1].sentinelFailures;
+		siteRow.sentinelState = updated[updated.length - 1].sentinelState;
+
+		const nextDay = new Date('2026-09-29T09:00:00Z');
+		pages = [new Error('boom2')];
+		const r = await pullSite('s1', { now: nextDay, trigger: 'daily' });
+		expect(r.failures).toBe(2);
+	});
+
+	// --- Fix 5: loadSiteAndClient aruncă (decrypt/DB) --------------------------
+	test('loadSiteAndClient aruncă (decrypt/DB) → status error, actualizare persistată direct din rândul de site', async () => {
+		loadSiteAndClientThrows = new Error('decrypt failed');
+		siteRowQueryResult = { id: 's1', tenantId: 't1', name: 'nevada', sentinelFailures: 1, sentinelState: null };
+
+		const r = await pullSite('s1', { now: NOW, trigger: 'daily' });
+
+		expect(r.status).toBe('error');
+		expect(r.error).toContain('decrypt failed');
+		expect(r.siteName).toBe('nevada');
+		expect(updated).toHaveLength(1);
+		expect(updated[0].sentinelLastPullStatus).toBe('error');
+		expect(updated[0].sentinelFailures).toBe(2);
+	});
+
+	test('loadSiteAndClient aruncă la citire manuală → status error, contorul de zile nu crește', async () => {
+		loadSiteAndClientThrows = new Error('timeout DB');
+		siteRowQueryResult = { id: 's1', tenantId: 't1', name: 'nevada', sentinelFailures: 1, sentinelState: null };
+
+		const r = await pullSite('s1', { now: NOW, trigger: 'manual' });
+
+		expect(r.status).toBe('error');
+		expect(updated[0].sentinelFailures).toBeUndefined();
+		expect(r.failures).toBe(1);
+	});
+});
+
+// --- withSiteLock: teste directe -------------------------------------------
+describe('withSiteLock', () => {
+	test('a doua achiziție concurentă (waitMs 0) aruncă SiteBusyError imediat', async () => {
+		redisStore.set('sentinel:pull:siteX', 'other-token');
+		await expect(withSiteLock('siteX', async () => 'ok', { waitMs: 0 })).rejects.toBeInstanceOf(SiteBusyError);
+	});
+
+	test('release șterge doar propriul token — nu-l atinge pe al altcuiva', async () => {
+		let sawTokenDuringFn = false;
+		const result = await withSiteLock(
+			'siteY',
+			async () => {
+				sawTokenDuringFn = redisStore.has('sentinel:pull:siteY');
+				// simulăm un alt proces care preia cheia înainte de eliberare (ex. TTL expirat + reachiziție)
+				redisStore.set('sentinel:pull:siteY', 'someone-elses-token');
+				return 'done';
+			},
+			{ waitMs: 0 }
+		);
+		expect(result).toBe('done');
+		expect(sawTokenDuringFn).toBe(true);
+		expect(redisStore.get('sentinel:pull:siteY')).toBe('someone-elses-token'); // nu s-a șters tokenul altcuiva
+	});
+
+	test('Redis aruncă la achiziție → rulează fără lock (disponibilitate > strictețe)', async () => {
+		redisThrows = true;
+		const result = await withSiteLock('siteZ', async () => 'ran-unlocked', { waitMs: 0 });
+		expect(result).toBe('ran-unlocked');
+	});
+});
+
+// SENTINEL_RETENTION_DAYS trebuie exportat din pull.ts (jobul zilnic îl importă de aici, nu-și mai definește propria copie).
+test('SENTINEL_RETENTION_DAYS = 7', () => {
+	expect(SENTINEL_RETENTION_DAYS).toBe(7);
 });

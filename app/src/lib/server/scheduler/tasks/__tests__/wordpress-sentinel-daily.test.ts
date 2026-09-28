@@ -5,6 +5,7 @@ import { describe, test, expect, mock } from 'bun:test';
 // tura cu `reset()`, deci ordinea testelor nu contează.
 // ---------------------------------------------------------------------------
 const selectQueue: unknown[][] = [];
+const selectCalls: { cols: unknown; where?: unknown }[] = [];
 const updateCalls: { values: Record<string, unknown> }[] = [];
 const deleteCalls: unknown[] = [];
 const redisStore = new Map<string, string>();
@@ -13,10 +14,22 @@ const telegramCalls: { tenantId: string; userId: string; text: string }[] = [];
 const pullSiteCalls: { siteId: string; opts: unknown }[] = [];
 const pullResultsById = new Map<string, unknown>();
 const throwForSiteIds = new Set<string>();
+const busySiteIds = new Set<string>(); // withSiteLock aruncă SiteBusyError pentru aceste site-uri
 let telegramResultFor: (userId: string) => { ok: boolean; reason?: string } = () => ({ ok: true });
+let redisGetThrows = false;
+let redisSetThrows = false;
+
+/** Aceeași clasă e exportată de mock-ul `$lib/server/wordpress/sentinel/pull` — instanceof funcționează în cod ca-n producție. */
+class SiteBusyErrorForTest extends Error {
+	constructor(message = 'Citire în curs pentru acest site') {
+		super(message);
+		this.name = 'SiteBusyError';
+	}
+}
 
 function reset() {
 	selectQueue.length = 0;
+	selectCalls.length = 0;
 	updateCalls.length = 0;
 	deleteCalls.length = 0;
 	redisStore.clear();
@@ -25,7 +38,10 @@ function reset() {
 	pullSiteCalls.length = 0;
 	pullResultsById.clear();
 	throwForSiteIds.clear();
+	busySiteIds.clear();
 	telegramResultFor = () => ({ ok: true });
+	redisGetThrows = false;
+	redisSetThrows = false;
 }
 
 mock.module('$env/dynamic/private', () => ({ env: {} }));
@@ -45,15 +61,20 @@ mock.module('$lib/server/db/schema', () => ({
 	wordpressSite: { id: {}, tenantId: {}, name: {}, paused: {}, sentinelState: {}, updatedAt: {} },
 	wordpressSecurityEvent: { occurredAt: {} },
 	tenant: { id: {}, slug: {} },
-	tenantUser: { tenantId: {}, userId: {} }
+	tenantUser: { tenantId: {}, userId: {}, status: {} }
 }));
 
 mock.module('$lib/server/db', () => ({
 	db: {
-		select: () => {
+		select: (cols?: unknown) => {
+			const rec: { cols: unknown; where?: unknown } = { cols };
+			selectCalls.push(rec);
 			const c: Record<string, unknown> = {
 				from: () => c,
-				where: () => c,
+				where: (cond: unknown) => {
+					rec.where = cond;
+					return c;
+				},
 				innerJoin: () => c,
 				then: (resolve: (v: unknown[]) => unknown) => resolve(selectQueue.shift() ?? [])
 			};
@@ -77,8 +98,12 @@ mock.module('$lib/server/db', () => ({
 
 mock.module('$lib/server/redis', () => ({
 	getRedis: () => ({
-		get: async (key: string) => redisStore.get(key) ?? null,
+		get: async (key: string) => {
+			if (redisGetThrows) throw new Error('redis indisponibil (get)');
+			return redisStore.get(key) ?? null;
+		},
 		set: async (...args: unknown[]) => {
+			if (redisSetThrows) throw new Error('redis indisponibil (set)');
 			redisSetCalls.push(args);
 			const [key, value] = args as [string, string];
 			redisStore.set(key, value);
@@ -101,13 +126,36 @@ mock.module('$lib/server/wordpress/sentinel/pull', () => ({
 		const cfg = pullResultsById.get(siteId);
 		if (!cfg) throw new Error(`test setup: no pull result configured for ${siteId}`);
 		return cfg;
+	},
+	SENTINEL_RETENTION_DAYS: 7,
+	SiteBusyError: SiteBusyErrorForTest,
+	// Simulăm doar orchestrarea din daily.ts (skip la SiteBusyError) — lock-ul Redis real e testat în pull.test.ts.
+	withSiteLock: async <T>(siteId: string, fn: () => Promise<T>): Promise<T> => {
+		if (busySiteIds.has(siteId)) throw new SiteBusyErrorForTest();
+		return fn();
 	}
 }));
 
 const { processWordpressSentinelDaily, SENTINEL_RETENTION_DAYS } = await import('../wordpress-sentinel-daily');
+const table = await import('$lib/server/db/schema');
 
 function pending(level: 'critical' | 'important', text: string) {
 	return [{ level, kind: 'admin_new_ip' as const, text }];
+}
+
+/** Caută recursiv o referință exactă (`===`) în graful drizzle SQL produs de `eq`/`and` — folosit ca să verificăm ce coloană a intrat în `.where()` fără a depinde de mock-uirea drizzle-orm. */
+function referencesColumn(cond: unknown, col: unknown, depth = 0, seen = new Set<unknown>()): boolean {
+	if (depth > 12 || cond == null || typeof cond !== 'object' || seen.has(cond)) return false;
+	seen.add(cond);
+	if (cond === col) return true;
+	for (const k of Object.keys(cond as Record<string, unknown>)) {
+		try {
+			if (referencesColumn((cond as Record<string, unknown>)[k], col, depth + 1, seen)) return true;
+		} catch {
+			// proprietăți getter care aruncă — ignorăm
+		}
+	}
+	return false;
 }
 
 describe('processWordpressSentinelDaily', () => {
@@ -380,5 +428,209 @@ describe('processWordpressSentinelDaily', () => {
 		expect(telegramCalls).toHaveLength(1);
 		expect(telegramCalls[0].text).toContain('🟠 brokensite: nu răspunde (prima zi)');
 		expect(telegramCalls[0].text).toContain('✅ 1 site-uri liniștite');
+	});
+
+	// --- Fix 6: golire pe identitate, sub lock ----------------------------------
+	test('golirea pending e pe identitate: un finding adăugat concurent după citire rămâne', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+
+		selectQueue.push([{ id: 's-nevada', tenantId: 't1', name: 'nevada' }]);
+		selectQueue.push([{ id: 't1', slug: 'ots' }]);
+		selectQueue.push([{ userId: 'u1' }]);
+		selectQueue.push([
+			{
+				sentinelState: JSON.stringify({
+					baselineDone: true,
+					uploadsBaseline: {},
+					adminIps: {},
+					failedLogins: {},
+					pendingFindings: [
+						{ level: 'important', kind: 'admin_new_ip', text: 'trimis1' },
+						{ level: 'critical', kind: 'php_in_uploads', text: 'trimis2' },
+						{ level: 'important', kind: 'plugin_change', text: 'adăugat concurent' }
+					],
+					lastError: null
+				})
+			}
+		]);
+
+		pullResultsById.set('s-nevada', {
+			siteId: 's-nevada',
+			siteName: 'nevada',
+			status: 'ok',
+			inserted: 0,
+			findings: [],
+			pending: [
+				{ level: 'important', kind: 'admin_new_ip', text: 'trimis1' },
+				{ level: 'critical', kind: 'php_in_uploads', text: 'trimis2' }
+			],
+			failures: 0
+		});
+
+		await processWordpressSentinelDaily({}, now);
+
+		expect(updateCalls).toHaveLength(1);
+		const state = JSON.parse(updateCalls[0].values.sentinelState as string);
+		expect(state.pendingFindings).toEqual([{ level: 'important', kind: 'plugin_change', text: 'adăugat concurent' }]);
+	});
+
+	test('golirea pending e omisă dacă lock-ul de site e ocupat (SiteBusyError) — nu aruncă, digestul tot pleacă', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+		busySiteIds.add('s-nevada');
+
+		selectQueue.push([{ id: 's-nevada', tenantId: 't1', name: 'nevada' }]);
+		selectQueue.push([{ id: 't1', slug: 'ots' }]);
+		selectQueue.push([{ userId: 'u1' }]);
+		// fără al 4-lea select — clear-ul e omis înainte de a citi starea
+
+		pullResultsById.set('s-nevada', {
+			siteId: 's-nevada',
+			siteName: 'nevada',
+			status: 'ok',
+			inserted: 0,
+			findings: pending('important', 'x'),
+			pending: pending('important', 'x'),
+			failures: 0
+		});
+
+		const res = await processWordpressSentinelDaily({}, now);
+
+		expect(telegramCalls).toHaveLength(1); // digestul tot pleacă
+		expect(res.sent).toBe(1);
+		expect(updateCalls).toHaveLength(0); // dar nimic scris pentru golirea pending-ului
+	});
+
+	// --- Fix 7: tenant cu toate site-urile unsupported --------------------------
+	test('tenant cu toate site-urile unsupported → nu trimite nimic, nu atinge Redis', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+
+		selectQueue.push([{ id: 's-legacy', tenantId: 't9', name: 'legacysite' }]);
+		selectQueue.push([{ id: 't9', slug: 'legacy9' }]);
+		// niciun select de tenantUser — nu trebuie ajuns
+
+		pullResultsById.set('s-legacy', {
+			siteId: 's-legacy',
+			siteName: 'legacysite',
+			status: 'unsupported',
+			inserted: 0,
+			findings: [],
+			pending: [],
+			failures: 0
+		});
+
+		const res = await processWordpressSentinelDaily({}, now);
+
+		expect(telegramCalls).toHaveLength(0);
+		expect(redisSetCalls).toHaveLength(0);
+		expect(updateCalls).toHaveLength(0);
+		expect(res.sent).toBe(0);
+	});
+
+	// --- Fix 8: destinatari doar tenantUser.status = 'active' -------------------
+	test('destinatarii digestului: interogarea filtrează pe tenantUser.status', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+
+		selectQueue.push([{ id: 's-nevada', tenantId: 't1', name: 'nevada' }]);
+		selectQueue.push([{ id: 't1', slug: 'ots' }]);
+		selectQueue.push([{ userId: 'u1' }]);
+
+		pullResultsById.set('s-nevada', {
+			siteId: 's-nevada',
+			siteName: 'nevada',
+			status: 'ok',
+			inserted: 0,
+			findings: pending('important', 'x'),
+			pending: pending('important', 'x'),
+			failures: 0
+		});
+
+		await processWordpressSentinelDaily({}, now);
+
+		const usersCall = selectCalls.find(
+			(c) => c.cols && typeof c.cols === 'object' && 'userId' in (c.cols as object) && !('id' in (c.cols as object))
+		);
+		expect(usersCall).toBeDefined();
+		expect(referencesColumn(usersCall!.where, table.tenantUser.status)).toBe(true);
+	});
+
+	// --- Fix 9: Redis aruncă la verificarea/setarea idempotenței ----------------
+	test('Redis GET aruncă la verificarea idempotenței → trimite oricum', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+		redisGetThrows = true;
+
+		selectQueue.push([{ id: 's-nevada', tenantId: 't1', name: 'nevada' }]);
+		selectQueue.push([{ id: 't1', slug: 'ots' }]);
+		selectQueue.push([{ userId: 'u1' }]);
+		selectQueue.push([
+			{
+				sentinelState: JSON.stringify({
+					baselineDone: true,
+					uploadsBaseline: {},
+					adminIps: {},
+					failedLogins: {},
+					pendingFindings: pending('important', 'x'),
+					lastError: null
+				})
+			}
+		]);
+
+		pullResultsById.set('s-nevada', {
+			siteId: 's-nevada',
+			siteName: 'nevada',
+			status: 'ok',
+			inserted: 0,
+			findings: pending('important', 'x'),
+			pending: pending('important', 'x'),
+			failures: 0
+		});
+
+		const res = await processWordpressSentinelDaily({}, now);
+
+		expect(telegramCalls).toHaveLength(1);
+		expect(res.sent).toBe(1);
+	});
+
+	test('Redis SET aruncă la marcarea idempotenței → mesajele tot au fost trimise, golirea pending tot are loc', async () => {
+		reset();
+		const now = new Date('2026-09-28T06:00:00Z');
+		redisSetThrows = true;
+
+		selectQueue.push([{ id: 's-nevada', tenantId: 't1', name: 'nevada' }]);
+		selectQueue.push([{ id: 't1', slug: 'ots' }]);
+		selectQueue.push([{ userId: 'u1' }]);
+		selectQueue.push([
+			{
+				sentinelState: JSON.stringify({
+					baselineDone: true,
+					uploadsBaseline: {},
+					adminIps: {},
+					failedLogins: {},
+					pendingFindings: pending('important', 'x'),
+					lastError: null
+				})
+			}
+		]);
+
+		pullResultsById.set('s-nevada', {
+			siteId: 's-nevada',
+			siteName: 'nevada',
+			status: 'ok',
+			inserted: 0,
+			findings: pending('important', 'x'),
+			pending: pending('important', 'x'),
+			failures: 0
+		});
+
+		const res = await processWordpressSentinelDaily({}, now);
+
+		expect(telegramCalls).toHaveLength(1);
+		expect(res.sent).toBe(1);
+		expect(redisSetCalls).toHaveLength(0); // a aruncat, dar nu a blocat restul
+		expect(updateCalls).toHaveLength(1); // golirea pending tot a avut loc
 	});
 });
