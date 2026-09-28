@@ -56,7 +56,11 @@ export class DirectAdminApiError extends Error {
 	) {
 		super(message);
 		this.name = 'DirectAdminApiError';
-		this.kind = classifyDaError(message, daCode);
+		// A 401 is always DA's login handler. The modern `/api/*` form is
+		// `{"type":"UNAUTHORIZED"}` with no `error` text, so the message-based
+		// classifier alone left it `unknown` (Server1, Sep 2026: 2FA on `admin`
+		// → password rejected, only Login Keys work).
+		this.kind = statusCode === 401 ? 'not_authenticated' : classifyDaError(message, daCode);
 	}
 }
 
@@ -1377,6 +1381,16 @@ export class DirectAdminClient {
 			await this.request('GET', '/api/admin-usage');
 			return { online: true, responseMs: Date.now() - start };
 		} catch (adminErr) {
+			// Same credential → same 401 on the session endpoint. Skipping it halves
+			// the failed logins LFD counts (5/hour = permanent block).
+			if (adminErr instanceof DirectAdminApiError && adminErr.kind === 'not_authenticated') {
+				return {
+					online: false,
+					responseMs: Date.now() - start,
+					error: adminErr.message,
+					kind: adminErr.kind
+				};
+			}
 			try {
 				await this.request('GET', '/api/session/user-usage');
 				return { online: true, responseMs: Date.now() - start };

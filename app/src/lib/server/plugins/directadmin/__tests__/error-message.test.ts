@@ -28,6 +28,14 @@ describe('classifyDaError — not_authenticated', () => {
 		expect(classifyDaError('Session expired')).toBe('not_authenticated');
 	});
 
+	it('orice 401 e autentificare respinsă, și în forma modernă /api/*', () => {
+		// `/api/users/x/config` cu parola lui admin după activarea 2FA:
+		// `401 {"type":"UNAUTHORIZED"}` — fără câmp `error`, deci mesajul rămâne
+		// cel generic și regex-ul pe text nu-l prindea (ieșea `unknown`).
+		const err = new DirectAdminApiError('DirectAdmin API error: 401 Unauthorized', 401, 'UNAUTHORIZED');
+		expect(err.kind).toBe('not_authenticated');
+	});
+
 	it('nu fură clasificările existente', () => {
 		expect(classifyDaError('Access denied')).toBe('access_denied');
 		expect(classifyDaError('Username already exists')).toBe('username_exists');

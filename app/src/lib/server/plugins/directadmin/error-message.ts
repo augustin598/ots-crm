@@ -16,7 +16,7 @@ import { DirectAdminApiError, classifyDaError, type DaErrorKind } from './client
 
 const HINTS: Partial<Record<DaErrorKind, string>> = {
 	not_authenticated:
-		'DirectAdmin a refuzat autentificarea pentru această comandă (contul de serviciu nu are drept pe ea sau POST-ul e blocat de panou). Verifică login key-ul serverului în DirectAdmin → Login Keys.',
+		'DirectAdmin a refuzat autentificarea. Dacă pe cont e activă autentificarea în doi pași, API-ul nu mai acceptă parola — creează o cheie în DirectAdmin → Login Keys și pune-o în CRM la server. Altfel cheia a expirat sau nu are dreptul pe această comandă.',
 	access_denied:
 		'Contul de serviciu DirectAdmin nu are permisiunea necesară (comanda cere admin/reseller).',
 	license_restricted: 'Licența DirectAdmin nu permite această operațiune.',
@@ -42,4 +42,16 @@ export function daErrorDetails(
 		(s): s is string => !!s
 	);
 	return { status: statusFor(kind), message: parts.join(' '), kind };
+}
+
+/**
+ * `da_server.last_error` for a credential DA refused. The prefix doubles as a
+ * marker: the servers page clears an error carrying it as soon as a live call
+ * authenticates again, so a replaced key turns the card green without waiting
+ * for the 6h cron or a manual "Testează".
+ */
+export const DA_AUTH_REJECTED_PREFIX = 'Credențial respins de DirectAdmin';
+
+export function daAuthRejectedLastError(raw: string | undefined): string {
+	return `${DA_AUTH_REJECTED_PREFIX}${raw ? ` (${raw})` : ''}. ${HINTS.not_authenticated}`;
 }

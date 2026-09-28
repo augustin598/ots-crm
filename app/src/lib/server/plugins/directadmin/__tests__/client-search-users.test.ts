@@ -121,3 +121,27 @@ describe('searchUsersExtended — real DA shape', () => {
 		expect(urls[0]).toContain('/api/search/users-extended');
 	});
 });
+
+describe('ping — credențial respins', () => {
+	it('la 401 pe endpoint-ul admin nu mai încearcă și fallback-ul de sesiune', async () => {
+		// Fiecare cerere cu parola greșită e o logare eșuată în LFD (5/oră = blocare).
+		// Același credențial dă 401 și pe /api/session/user-usage, deci a doua
+		// cerere doar dublează alarma fără să schimbe diagnosticul.
+		const urls: string[] = [];
+		globalThis.fetch = mock(async (url: string | URL) => {
+			urls.push(String(url));
+			return new Response(JSON.stringify({ type: 'UNAUTHORIZED' }), {
+				status: 401,
+				statusText: 'Unauthorized',
+				headers: { 'content-type': 'application/json' }
+			});
+		}) as unknown as typeof fetch;
+
+		const r = await client().ping();
+
+		expect(r.online).toBe(false);
+		expect(r.kind).toBe('not_authenticated');
+		expect(urls).toHaveLength(1);
+		expect(urls[0]).toContain('/api/admin-usage');
+	});
+});

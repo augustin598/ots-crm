@@ -12,6 +12,8 @@ import { classifyKeezError } from './error-classification';
 import { reconcileMissingKeezInvoices } from './sync-reconcile';
 import { withTursoBusyRetry } from './db-retry';
 import { hasPaymentReference, resolveKeezInvoiceStatus } from './invoice-status';
+import { emitKeezPaidTransition } from './paid-transition';
+import { getHooksManager } from '../hooks';
 
 function generateId() {
 	const bytes = crypto.getRandomValues(new Uint8Array(15));
@@ -484,6 +486,19 @@ async function _syncKeezInvoicesForTenantInner(
 					{ tenantId, label: `update invoice ${existing.id} + line items` }
 				);
 
+				// Încasarea înregistrată în Keez → `invoice.paid.synced` (creditul de ore),
+				// doar la tranziția în `paid`; fără hook-ul complet `invoice.paid`. Imediat
+				// după tranzacție: dacă scrierile de mai jos (rândul de sync) pică, factura
+				// e deja `paid` și tranziția nu s-ar mai vedea niciodată.
+				await emitKeezPaidTransition({
+					tenantId,
+					invoiceId: existing.id,
+					invoiceNumber: updateData.invoiceNumber ?? existing.invoiceNumber,
+					previousStatus: existing.status,
+					newStatus: invoiceStatus,
+					emit: (e) => getHooksManager().emit(e)
+				});
+
 				// Update or create sync record
 				const [existingSync] = await db
 					.select()
@@ -587,6 +602,17 @@ async function _syncKeezInvoicesForTenantInner(
 				}),
 				{ tenantId, label: `atomic create invoice ${invoiceId}` }
 			);
+
+			// Factură emisă direct în Keez și încasată înainte de primul sync: nu va mai
+			// avea nicio tranziție ulterioară, deci creditul de ore se alimentează acum.
+			await emitKeezPaidTransition({
+				tenantId,
+				invoiceId,
+				invoiceNumber: invoiceInsertData.invoiceNumber || invoiceHeader.externalId,
+				previousStatus: null,
+				newStatus: invoiceInsertData.status || 'sent',
+				emit: (e) => getHooksManager().emit(e)
+			});
 
 			// Create sync record
 			await db.insert(table.keezInvoiceSync).values({

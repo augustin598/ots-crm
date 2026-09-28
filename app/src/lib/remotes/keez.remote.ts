@@ -6,6 +6,8 @@ import * as table from '$lib/server/db/schema';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { KeezClient, type KeezPartner } from '$lib/server/plugins/keez/client';
 import { resolveKeezInvoiceStatus } from '$lib/server/plugins/keez/invoice-status';
+import { emitKeezPaidTransition } from '$lib/server/plugins/keez/paid-transition';
+import { getHooksManager } from '$lib/server/plugins/hooks';
 import { statusAfterKeezValidation } from '$lib/server/plugins/keez/auto-validate-policy';
 import { encrypt, decrypt, encryptVerified, DecryptionError } from '$lib/server/plugins/keez/crypto';
 import { createKeezClientForTenant, KeezCredentialsCorruptError } from '$lib/server/plugins/keez/factory';
@@ -776,6 +778,16 @@ export const syncInvoiceToKeez = command(v.object({ invoiceId: v.pipe(v.string()
 		.update(table.invoice)
 		.set(updateData)
 		.where(eq(table.invoice.id, invoiceId));
+
+	// Dacă Keez avea deja încasarea, factura devine `paid` aici → creditul de ore.
+	await emitKeezPaidTransition({
+		tenantId: event.locals.tenant.id,
+		invoiceId,
+		invoiceNumber: invoice.invoiceNumber,
+		previousStatus: invoice.status,
+		newStatus: updateData.status,
+		emit: (e) => getHooksManager().emit(e)
+	});
 
 	// Create/update sync record
 	const [existingSync] = await db
