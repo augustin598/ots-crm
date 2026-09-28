@@ -8,6 +8,8 @@ import {
 	WpSiteDownError
 } from './errors';
 import type { CachePurgeItem, CachePurgeScope } from '$lib/logic/wordpress-cache-purge';
+import type { WpSentinelResponse } from './sentinel/types';
+export type { WpSentinelResponse };
 
 /** `POST /cache/purge` (connector ≥ 0.8.4): one entry per cache found on the site. */
 export interface WpCachePurgeResponse {
@@ -244,6 +246,20 @@ export class WpClient {
 			method: 'GET',
 			path: '/health',
 			timeoutMs: opts?.timeoutMs ?? 10_000,
+			siteId: opts?.siteId
+		});
+	}
+
+	/** `POST /sentinel` (connector ≥ 0.9.0): evenimente cu t ≥ since, paginate cu skip; scanarea uploads doar la skip = 0. */
+	async sentinel(
+		args: { since: string | null; skip: number },
+		opts?: { timeoutMs?: number; siteId?: string }
+	): Promise<WpSentinelResponse> {
+		return this.request<WpSentinelResponse>({
+			method: 'POST',
+			path: '/sentinel',
+			body: args,
+			timeoutMs: opts?.timeoutMs ?? 45_000, // scanarea singură are buget 15 s, plus citirea
 			siteId: opts?.siteId
 		});
 	}

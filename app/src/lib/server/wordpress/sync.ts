@@ -17,7 +17,7 @@ function newId() {
  * decrypt failures per the Turso truncated-read pattern), and return a
  * ready-to-use HTTP client plus the row.
  */
-async function loadSiteAndClient(siteId: string) {
+export async function loadSiteAndClient(siteId: string) {
 	const [site] = await db
 		.select()
 		.from(table.wordpressSite)
