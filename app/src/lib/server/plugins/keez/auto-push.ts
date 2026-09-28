@@ -581,7 +581,9 @@ export async function pushInvoiceToKeez(
 			if (keezTaxRate !== null) updateData.taxRate = Math.round(keezTaxRate * 100);
 		}
 
-		// Persist
+		// Persist. Fără `invoice.paid.synced` aici (spre deosebire de sync.ts): apelanții
+		// împing facturi de hosting, comenzi de ore și „Adaugă ore", pe care
+		// `invoiceCreditEligibility` le exclude oricum din creditul de ore.
 		await db.update(table.invoice).set(updateData).where(eq(table.invoice.id, invoiceId));
 
 		// Sync record

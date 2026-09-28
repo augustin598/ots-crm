@@ -188,6 +188,13 @@ async function isHoursOrderInvoice(tenantId: string, invoiceId: string): Promise
 	return !!row;
 }
 
+/** Sufixul notei rândului de ledger, după canalul care a adus încasarea. */
+const TRIGGER_NOTE_SUFFIX = {
+	hook: '',
+	manual: ' (creditată manual)',
+	'keez-sync': ' (încasare înregistrată în Keez)'
+} as const;
+
 /**
  * Creditează o factură plătită (spec §5.1). Idempotent: a doua chemare pe aceeași
  * factură întoarce `already_credited`. `trigger` ajunge în nota rândului.
@@ -195,7 +202,7 @@ async function isHoursOrderInvoice(tenantId: string, invoiceId: string): Promise
 export async function creditPaidInvoice(params: {
 	tenantId: string;
 	invoiceId: string;
-	trigger: 'hook' | 'manual';
+	trigger: 'hook' | 'manual' | 'keez-sync';
 	userId?: string | null;
 }): Promise<CreditResult> {
 	const { tenantId, invoiceId } = params;
@@ -259,7 +266,7 @@ export async function creditPaidInvoice(params: {
 		kind: 'invoice_credit',
 		sourceType: 'invoice',
 		sourceId: invoiceId,
-		note: `Factura ${invoice.invoiceNumber ?? invoiceId} — ${eurLabel} € la ${reference.rateEur} €/h${params.trigger === 'manual' ? ' (creditată manual)' : ''}`,
+		note: `Factura ${invoice.invoiceNumber ?? invoiceId} — ${eurLabel} € la ${reference.rateEur} €/h${TRIGGER_NOTE_SUFFIX[params.trigger]}`,
 		createdByUserId: params.userId ?? null,
 		referenceRateEurSnapshot: reference.rateEur,
 		netCentsSnapshot: invoice.amount!,

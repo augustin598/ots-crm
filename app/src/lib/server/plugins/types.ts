@@ -47,6 +47,19 @@ export type InvoicePaidEvent = {
 	userId: string;
 };
 
+/**
+ * Încasare adusă de o sincronizare externă (Keez), nu înregistrată în CRM.
+ * Deliberat mai îngust decât `invoice.paid`: nu-l ascultă DirectAdmin (scadența
+ * hostingului) și nici notificările staff — doar creditul de ore.
+ */
+export type InvoicePaidSyncedEvent = {
+	type: 'invoice.paid.synced';
+	tenantId: string;
+	invoiceId: string;
+	invoiceNumber: string | null;
+	source: 'keez';
+};
+
 export type TaskCreatedEvent = {
 	type: 'task.created';
 	taskId: string;
@@ -170,6 +183,7 @@ export type HookEvent =
 	| InvoiceDeletedEvent
 	| InvoiceStatusChangedEvent
 	| InvoicePaidEvent
+	| InvoicePaidSyncedEvent
 	| TaskCreatedEvent
 	| TaskAssignedEvent
 	| TaskCompletedEvent

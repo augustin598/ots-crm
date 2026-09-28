@@ -63,6 +63,17 @@ cod:
    `invoiceCreditEligibility`: nu alimentează facturile de hosting, cele din
    surse ads, cele de depășire, cele ale comenzilor de ore și nici cele emise
    din „Adaugă ore".
+   Alimentarea pornește din hook-ul `invoice.paid` (card Stripe, OP/cash marcat
+   în CRM) **și** din sincronizarea Keez: când contabilul înregistrează încasarea
+   în Keez, sync-ul (job-ul zilnic de la 04:00 sau butonul de sincronizare din
+   Setări → Keez / Facturi) aduce factura pe `paid` și emite evenimentul îngust
+   `invoice.paid.synced` (`plugins/keez/paid-transition.ts`), pe care îl ascultă
+   doar creditul de ore (nota rândului: „încasare înregistrată în Keez"). Același
+   eveniment pleacă și la importul unei facturi emise direct în Keez și încasate
+   înainte de primul sync. Sync-ul NU emite hook-ul complet `invoice.paid`, ca
+   să nu declanșeze DirectAdmin și notificările staff. Facturile deja `paid`
+   înainte de fix (ex. OTS 561) rămân în „Facturi necreditate" și se creditează
+   manual.
 2. **Comenzi de ore de pe `/servicii`** — `ore × 60`, orice specializare sau
    regim; orele intră după confirmarea plății.
 3. **„Adaugă ore" din admin** — creditul intră **la emitere**, apoi se emite
