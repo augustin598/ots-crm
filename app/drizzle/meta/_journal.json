@@ -3961,6 +3961,62 @@
       "when": 1788786476918026,
       "tag": "0568_client_portal_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 569,
+      "version": "6",
+      "when": 1788786476919026,
+      "tag": "0569_wordpress_security_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 570,
+      "version": "6",
+      "when": 1788786476920026,
+      "tag": "0570_wordpress_security_event_tenant_occurred_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 571,
+      "version": "6",
+      "when": 1788786476921026,
+      "tag": "0571_wordpress_security_event_site_event_occurred_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 572,
+      "version": "6",
+      "when": 1788786476922026,
+      "tag": "0572_wordpress_security_event_site_uid_uidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 573,
+      "version": "6",
+      "when": 1788786476923026,
+      "tag": "0573_wordpress_site_sentinel_last_pull_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 574,
+      "version": "6",
+      "when": 1788786476924026,
+      "tag": "0574_wordpress_site_sentinel_last_pull_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 575,
+      "version": "6",
+      "when": 1788786476925026,
+      "tag": "0575_wordpress_site_sentinel_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 576,
+      "version": "6",
+      "when": 1788786476926026,
+      "tag": "0576_wordpress_site_sentinel_state",
+      "breakpoints": true
     }
   ]
 }

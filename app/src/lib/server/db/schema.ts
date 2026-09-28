@@ -5274,6 +5274,11 @@ export const wordpressSite = sqliteTable('wordpress_site', {
 	lastError: text('last_error'),
 	consecutiveFailures: integer('consecutive_failures').notNull().default(0),
 	paused: integer('paused').notNull().default(0), // 1 = scheduler skips this site
+	// Sentinel (jurnal de securitate prin conector ≥ 0.9.0)
+	sentinelLastPullAt: timestamp('sentinel_last_pull_at', { withTimezone: true, mode: 'date' }),
+	sentinelLastPullStatus: text('sentinel_last_pull_status'), // 'ok' | 'error' | 'unsupported' | 'legacy'
+	sentinelFailures: integer('sentinel_failures').notNull().default(0),
+	sentinelState: text('sentinel_state'), // JSON: SentinelState (sentinel/types.ts)
 	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
 		.notNull()
 		.default(sql`current_timestamp`),
@@ -5295,6 +5300,39 @@ export const wordpressSiteRelations = relations(wordpressSite, ({ one, many }) =
 	updateJobs: many(wordpressUpdateJob),
 	backups: many(wordpressBackup)
 }));
+
+// Evenimente Sentinel citite de pe site-uri (7 zile). Memoria lungă (IP-uri
+// admin, baseline uploads) stă în wordpress_site.sentinel_state.
+export const wordpressSecurityEvent = sqliteTable(
+	'wordpress_security_event',
+	{
+		id: text('id').primaryKey(),
+		tenantId: text('tenant_id')
+			.notNull()
+			.references(() => tenant.id),
+		siteId: text('site_id')
+			.notNull()
+			.references(() => wordpressSite.id),
+		eventUid: text('event_uid').notNull(), // id-ul venit de pe site
+		occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+		sentinelSev: text('sentinel_sev').notNull(), // INFO | WARN | ALERT
+		level: text('level').notNull(), // critical | important | normal (calculat în CRM)
+		event: text('event').notNull(),
+		username: text('username'),
+		ip: text('ip'),
+		uri: text('uri'),
+		userAgent: text('user_agent'),
+		data: text('data'), // JSON: `date` de pe site
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+			.notNull()
+			.default(sql`current_timestamp`)
+	},
+	(t) => ({
+		tenantOccurredIdx: index('wordpress_security_event_tenant_occurred_idx').on(t.tenantId, t.occurredAt),
+		siteEventOccurredIdx: index('wordpress_security_event_site_event_occurred_idx').on(t.siteId, t.event, t.occurredAt),
+		siteUidUidx: uniqueIndex('wordpress_security_event_site_uid_uidx').on(t.siteId, t.eventUid)
+	})
+);
 
 // Cache of available core/plugin/theme updates per site. Populated by the
 // daily `wordpress_updates_check` scheduler task or by the user hitting
