@@ -39,6 +39,7 @@ import { processTaskOverdueNotifications } from './tasks/task-overdue-notificati
 import { processWordpressUptimePing } from './tasks/wordpress-uptime-ping';
 import { processWordpressUpdatesCheck } from './tasks/wordpress-updates-check';
 import { processWordpressConnectorAutoUpdate } from './tasks/wordpress-connector-auto-update';
+import { processWordpressSentinelDaily } from './tasks/wordpress-sentinel-daily';
 import { processAdsOptimizationTaskCreator } from './tasks/ads-optimization-task-creator';
 import { processAdsOptimizationTaskReaper } from './tasks/ads-optimization-task-reaper';
 import { processAdsOptimizerOutcomeEvaluator } from './tasks/ads-optimizer-outcome-evaluator';
@@ -211,6 +212,7 @@ const taskHandlers: Record<string, TaskHandler> = {
 	wordpress_uptime_ping: processWordpressUptimePing,
 	wordpress_updates_check: processWordpressUpdatesCheck,
 	wordpress_connector_auto_update: processWordpressConnectorAutoUpdate,
+	wordpress_sentinel_daily: processWordpressSentinelDaily,
 	directadmin_sync_accounts: processDirectAdminSyncAccounts,
 	directadmin_sync_packages: processDirectAdminSyncPackages,
 	hosting_renewal_reminder: processHostingRenewalReminder,
@@ -408,6 +410,7 @@ export const startScheduler = async () => {
 		'db-write-health-check', 'pdf-report-send', 'email-retry',
 		'notification-cleanup', 'invoice-reminder-notifications', 'task-overdue-notifications',
 		'wordpress-uptime-ping', 'wordpress-updates-check', 'wordpress-connector-auto-update',
+		'wordpress-sentinel-daily',
 		'whmcs-invoice-reconcile',
 		'ads-optimization-task-creator', 'ads-optimization-task-reaper',
 		'ads-optimizer-outcome-evaluator',
@@ -1049,6 +1052,14 @@ export const startScheduler = async () => {
 		}
 	);
 
+	// Sentinel WordPress — 09:00: citește jurnalele de securitate de pe toate
+	// site-urile și trimite un singur rezumat Telegram per tenant.
+	await schedulerQueue.add(
+		'wordpress-sentinel-daily',
+		{ type: 'wordpress_sentinel_daily', params: {} },
+		{ repeat: { pattern: '0 9 * * *', tz: 'Europe/Bucharest' }, jobId: 'wordpress-sentinel-daily' }
+	);
+
 	// Ads optimization task creator — daily at 07:30 RO, 30min after performance monitor (07:00).
 	// Ensures snapshots are written before tasks are created, avoiding race conditions.
 	await schedulerQueue.add(
@@ -1315,6 +1326,8 @@ export const JOB_LABELS: Record<string, string> = {
 	task_overdue_notifications: 'Notificari Taskuri Intarziate',
 	wordpress_uptime_ping: 'Ping Uptime WordPress',
 	wordpress_updates_check: 'Verificare Update-uri WordPress',
+	wordpress_connector_auto_update: 'Auto-update Conector WordPress',
+	wordpress_sentinel_daily: 'Sentinel WordPress (jurnal securitate + Telegram)',
 	ads_optimizer_outcome_evaluator: 'Evaluator Outcome CPL 7z — Optimizare Ads',
 	ads_optimization_task_creator: 'Creator Task-uri Optimizare Ads',
 	ads_optimization_task_reaper: 'Reaper Task-uri Optimizare Ads (revert stale, expire vechi)',
