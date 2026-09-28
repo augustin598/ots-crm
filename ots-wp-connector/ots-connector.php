@@ -3,7 +3,7 @@
  * Plugin Name:       OTS Connector
  * Plugin URI:        https://clients.onetopsolution.ro
  * Description:       Allows OTS CRM to manage this WordPress site (health, updates, posts) over an HMAC-signed REST API.
- * Version:           0.8.5
+ * Version:           0.9.0
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            One Top Solution
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OTS_CONNECTOR_VERSION', '0.8.5' );
+define( 'OTS_CONNECTOR_VERSION', '0.9.0' );
 define( 'OTS_CONNECTOR_NAMESPACE', 'ots-connector/v1' );
 define( 'OTS_CONNECTOR_TIMESTAMP_WINDOW', 60 ); // seconds
 define( 'OTS_CONNECTOR_SECRET_OPTION', 'ots_connector_secret' );
@@ -89,6 +89,248 @@ function ots_connector_verify_request( WP_REST_Request $request ) {
 
 	return true;
 }
+
+/**
+ * Sentinel — jurnal de securitate (NDJSON) în wp-content/ots-sentinel/.
+ * Portat din mu-plugin-ul OTS_Sentinel 1.0. Dacă mu-plugin-ul e încă
+ * instalat, nu înregistrăm hook-urile (ar dubla evenimentele), dar ruta
+ * /sentinel servește jurnalul lui și raportează legacyMuPlugin = true.
+ * Fiecare callback e protejat cu try/catch — o eroare aici nu oprește site-ul.
+ */
+class OTS_Connector_Sentinel {
+	const MAX_BYTES = 8388608; // 8 MB, apoi rotire
+	const MAX_EVENTS_PER_PAGE = 5000;
+	const SCAN_BUDGET_SEC = 20;
+	const SCAN_RETURN_MAX = 200;
+
+	private static $posts_this_request = 0;
+
+	public static function dir(): string {
+		return WP_CONTENT_DIR . '/ots-sentinel';
+	}
+
+	/** Numele fișierului derivă din secret: .htaccess nu ajută pe Nginx, numele neghicit da. */
+	public static function log_file(): string {
+		$secret = (string) get_option( OTS_CONNECTOR_SECRET_OPTION, '' );
+		$hash   = substr( hash_hmac( 'sha256', 'sentinel-log', $secret ), 0, 16 );
+		return self::dir() . '/sentinel-' . $hash . '.log';
+	}
+
+	public static function legacy_present(): bool {
+		return class_exists( 'OTS_Sentinel', false );
+	}
+
+	public static function boot(): void {
+		if ( self::legacy_present() ) {
+			return;
+		}
+		// Cronul rămas de la mu-plugin după ștergerea lui.
+		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( 'ots_sentinel_scan' ) ) {
+			wp_clear_scheduled_hook( 'ots_sentinel_scan' );
+		}
+		self::ensure_dir();
+
+		$safe = function ( $method ) {
+			return function () use ( $method ) {
+				try {
+					call_user_func_array( [ __CLASS__, $method ], func_get_args() );
+				} catch ( Throwable $e ) {
+					// Sentinel nu are voie să strice site-ul.
+				}
+			};
+		};
+
+		add_action( 'wp_insert_post', $safe( 'on_insert_post' ), 10, 3 );
+		add_action( 'user_register', $safe( 'on_user_register' ) );
+		add_action( 'set_user_role', $safe( 'on_set_role' ), 10, 3 );
+		add_action( 'profile_update', $safe( 'on_profile_update' ), 10, 2 );
+		add_action( 'deleted_user', $safe( 'on_deleted_user' ) );
+		add_action( 'wp_login', $safe( 'on_login' ), 10, 2 );
+		add_action( 'wp_login_failed', $safe( 'on_login_failed' ) );
+		add_action( 'activated_plugin', $safe( 'on_plugin_activated' ) );
+		add_action( 'deactivated_plugin', $safe( 'on_plugin_deactivated' ) );
+		add_action( 'switch_theme', $safe( 'on_switch_theme' ) );
+		add_action( 'upgrader_process_complete', $safe( 'on_upgrader' ), 10, 2 );
+		foreach ( [ 'siteurl', 'home', 'users_can_register', 'default_role', 'admin_email' ] as $opt ) {
+			add_action( "update_option_{$opt}", function ( $old, $new ) use ( $opt ) {
+				try {
+					self::log( 'option_changed', [ 'option' => $opt, 'vechi' => $old, 'nou' => $new ], 'ALERT' );
+				} catch ( Throwable $e ) {
+				}
+			}, 10, 2 );
+		}
+	}
+
+	/* ---- callback-uri ---- */
+
+	public static function on_insert_post( $post_id, $post, $update ): void {
+		if ( $update || ! $post ) {
+			return;
+		}
+		if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+			return;
+		}
+		// attachment: un upload de galerie nu e inserare în masă
+		$ignored = [ 'revision', 'nav_menu_item', 'customize_changeset', 'oembed_cache', 'scheduled-action', 'attachment' ];
+		if ( in_array( $post->post_type, $ignored, true ) ) {
+			return;
+		}
+		self::$posts_this_request++;
+		$sev = ( self::$posts_this_request > 5 ) ? 'ALERT' : 'INFO';
+		self::log( 'post_created', [
+			'id'            => $post_id,
+			'tip'           => $post->post_type,
+			'status'        => $post->post_status,
+			'titlu'         => self::cut( $post->post_title, 80 ),
+			'autor'         => (int) $post->post_author,
+			'nr_in_request' => self::$posts_this_request,
+			'sursa'         => self::caller(),
+		], $sev );
+	}
+
+	public static function on_user_register( $user_id ): void {
+		$u = get_userdata( $user_id );
+		self::log( 'user_registered', [
+			'id'     => $user_id,
+			'login'  => $u ? $u->user_login : '?',
+			'email'  => $u ? $u->user_email : '?',
+			'roluri' => $u ? $u->roles : [],
+		], 'WARN' );
+	}
+
+	public static function on_set_role( $user_id, $role, $old_roles ): void {
+		$sev = ( 'administrator' === $role ) ? 'ALERT' : 'WARN';
+		self::log( 'role_changed', [ 'id' => $user_id, 'rol_nou' => $role, 'roluri_vechi' => $old_roles ], $sev );
+	}
+
+	public static function on_profile_update( $user_id, $old ): void {
+		$u = get_userdata( $user_id );
+		if ( ! $u || ! $old ) {
+			return;
+		}
+		$diff = [];
+		if ( $u->user_email !== $old->user_email ) {
+			$diff['email'] = [ $old->user_email, $u->user_email ];
+		}
+		if ( $u->user_pass !== $old->user_pass ) {
+			$diff['parola'] = 'schimbata';
+		}
+		if ( $diff ) {
+			self::log( 'profile_update', [ 'id' => $user_id, 'login' => $u->user_login, 'roluri' => $u->roles, 'modificari' => $diff ], 'WARN' );
+		}
+	}
+
+	public static function on_deleted_user( $id ): void {
+		self::log( 'user_deleted', [ 'id' => $id ] );
+	}
+
+	public static function on_login( $login, $user = null ): void {
+		$roles = ( $user instanceof WP_User ) ? $user->roles : [];
+		$sev   = in_array( 'administrator', (array) $roles, true ) ? 'WARN' : 'INFO';
+		self::log( 'login_ok', [ 'login' => $login, 'roluri' => $roles ], $sev );
+	}
+
+	public static function on_login_failed( $login ): void {
+		$login  = (string) $login;
+		$exista = username_exists( $login ) || ( is_email( $login ) && email_exists( $login ) );
+		self::log( 'login_esuat', [ 'login' => $login, 'exista' => (bool) $exista ], 'INFO' );
+	}
+
+	public static function on_plugin_activated( $p ): void {
+		self::log( 'plugin_activated', [ 'plugin' => $p ], 'WARN' );
+	}
+
+	public static function on_plugin_deactivated( $p ): void {
+		self::log( 'plugin_deactivated', [ 'plugin' => $p ], 'WARN' );
+	}
+
+	public static function on_switch_theme( $t ): void {
+		self::log( 'theme_switched', [ 'theme' => $t ], 'WARN' );
+	}
+
+	public static function on_upgrader( $u, $h ): void {
+		self::log( 'upgrader', [
+			'type'   => isset( $h['type'] ) ? $h['type'] : '?',
+			'action' => isset( $h['action'] ) ? $h['action'] : '?',
+		], 'WARN' );
+	}
+
+	/* ---- jurnal ---- */
+
+	public static function log( string $eveniment, array $date = [], string $sev = 'INFO' ): void {
+		$f = self::log_file();
+		if ( file_exists( $f ) && filesize( $f ) > self::MAX_BYTES ) {
+			@rename( $f, preg_replace( '/\.log$/', '-' . gmdate( 'Ymd-His' ) . '.log', $f ) );
+		}
+		$u     = function_exists( 'wp_get_current_user' ) ? wp_get_current_user() : null;
+		$linie = [
+			'id'   => bin2hex( random_bytes( 6 ) ),
+			't'    => gmdate( 'c' ),
+			'sev'  => $sev,
+			'ev'   => $eveniment,
+			'user' => ( $u && $u->ID ) ? $u->user_login : '-',
+			'uid'  => ( $u && $u->ID ) ? (int) $u->ID : 0,
+			'ip'   => self::ip(),
+			'uri'  => isset( $_SERVER['REQUEST_URI'] ) ? self::cut( $_SERVER['REQUEST_URI'], 200 ) : '',
+			'ua'   => isset( $_SERVER['HTTP_USER_AGENT'] ) ? self::cut( $_SERVER['HTTP_USER_AGENT'], 160 ) : '',
+			'date' => $date,
+		];
+		@file_put_contents( $f, wp_json_encode( $linie ) . "\n", FILE_APPEND | LOCK_EX );
+	}
+
+	private static function caller(): array {
+		$ctx = 'web';
+		if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
+			$ctx = 'rest';
+		} elseif ( defined( 'XMLRPC_REQUEST' ) && XMLRPC_REQUEST ) {
+			$ctx = 'xmlrpc';
+		} elseif ( defined( 'DOING_CRON' ) && DOING_CRON ) {
+			$ctx = 'cron';
+		} elseif ( defined( 'WP_CLI' ) && WP_CLI ) {
+			$ctx = 'wp-cli';
+		} elseif ( is_admin() ) {
+			$ctx = 'wp-admin';
+		}
+		$origin = '';
+		foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 25 ) as $fr ) {
+			if ( empty( $fr['file'] ) ) {
+				continue;
+			}
+			$fl = wp_normalize_path( $fr['file'] );
+			if ( false === strpos( $fl, '/wp-includes/' ) && false === strpos( $fl, '/wp-admin/' ) && false === strpos( $fl, 'ots-connector' ) ) {
+				$origin = str_replace( wp_normalize_path( ABSPATH ), '', $fl ) . ':' . ( isset( $fr['line'] ) ? $fr['line'] : '?' );
+				break;
+			}
+		}
+		return [ 'context' => $ctx, 'fisier' => $origin ];
+	}
+
+	private static function cut( $s, int $n ): string {
+		$s = (string) $s;
+		return function_exists( 'mb_substr' ) ? mb_substr( $s, 0, $n ) : substr( $s, 0, $n );
+	}
+
+	private static function ip(): string {
+		foreach ( [ 'HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR' ] as $k ) {
+			if ( ! empty( $_SERVER[ $k ] ) ) {
+				$v = explode( ',', (string) $_SERVER[ $k ] );
+				return trim( $v[0] );
+			}
+		}
+		return '';
+	}
+
+	private static function ensure_dir(): void {
+		$dir = self::dir();
+		if ( is_dir( $dir ) ) {
+			return;
+		}
+		wp_mkdir_p( $dir );
+		@file_put_contents( $dir . '/.htaccess', "Require all denied\n<IfModule !mod_authz_core.c>\nOrder deny,allow\nDeny from all\n</IfModule>\n" );
+		@file_put_contents( $dir . '/index.php', "<?php // Silence is golden.\n" );
+	}
+}
+add_action( 'plugins_loaded', [ 'OTS_Connector_Sentinel', 'boot' ], 5 );
 
 /**
  * GET /health — returns WP/PHP versions, SSL expiry (best effort), and the
