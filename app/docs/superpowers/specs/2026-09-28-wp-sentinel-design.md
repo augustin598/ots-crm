@@ -102,12 +102,19 @@ Coloane noi pe `wordpress_site`: `sentinel_last_pull_at`, `sentinel_last_pull_st
   "baselineDone": true,
   "uploadsBaseline": { "/sucuri/x.php": "sha1…" },
   "adminIps": { "admin_y7a8w2a4": { "5.6.7.8": "2026-09-28T07:12:00Z" } },
+  "failedLogins": { "admin_y7a8w2a4": [ { "t": "2026-09-27T05:19:00Z", "ip": "186.233.17.105" } ] },
   "lastError": null
 }
 ```
 
 `adminIps[user][ip]` = ultima logare reușită a unui administrator de pe acel IP; intrările mai vechi
-de 90 de zile se curăță la fiecare citire.
+de 90 de zile se curăță la fiecare citire. `failedLogins` = eșecurile pe username-uri existente din
+ultimele 7 zile. `pendingFindings` = findings încă netrimise pe Telegram: orice citire (jobul sau
+„Citește acum”) le adaugă, jobul zilnic le trimite pe toate și le golește doar după o trimitere
+reușită — altfel un 🔴 găsit la o citire manuală de la 15:00 n-ar mai ajunge în mesajul de a doua zi.
+
+Suprapunerea de 1 h dintre citiri retrimite evenimente deja salvate: `pullSite` le scoate (după
+`event_uid` deja existent în tabel) înainte de reguli, ca să nu dubleze findings-urile.
 
 Migrări **scrise de mână** (`drizzle-kit generate` e stricat; `fix-migrations.ts` ar adăuga
 `IF NOT EXISTS`, interzis): 0569–0576, un statement per fișier (tabel, 2 indexuri, unique, 4 coloane),
@@ -126,8 +133,12 @@ fără `IF NOT EXISTS`, intrări în `_journal.json` cu `when` = ultimul + 1, +2
 
 **Niveluri**
 
-- 🔴 **critical**: `role_changed` spre administrator; `user_registered` cu rol administrator; `option_changed`; `post_created` cu `nr_in_request > 20` (constantă în `rules.ts`; site-ul marchează ALERT de la 6, dar un import CSV WooCommerce sau un meniu salvat trec de 5); fișier PHP în uploads nou sau cu sha1 schimbat față de `uploadsBaseline`; `plugin_deactivated` al conectorului însuși (plugin care începe cu `ots-wp-connector/`); `php_in_uploads`, `fisiere_modificate`, `upload_blocat` venite de la mu-plugin-ul vechi; citire eșuată **2 zile la rând**.
-- 🟠 **important**: `login_ok` cu rol administrator (`date.roluri` conține `administrator`) de pe un IP absent din `sentinel_state.adminIps[user]` — un singur finding per (site, user, IP) per citire. IP-urile OTS (`82.77.19.195`, `213.157.186.85`, constantă în `rules.ts`) sunt excluse doar când `ip_remote` e tot IP OTS, e privat (proxy local) sau lipsește (linie veche) — un `X-Forwarded-For` falsificat cu IP OTS de pe un `ip_remote` public străin NU e exclus; `plugin_activated` / `plugin_deactivated`; `theme_switched`; `user_registered` cu alt rol decât `customer`/`subscriber`; `profile_update` (email sau parolă) pe un administrator; **≥ 3 `login_esuat` cu `exista: true` pe același username în 24 h** (un singur finding per username, cu numărul de IP-uri distincte); prima zi de citire eșuată.
+- 🔴 **critical**: `role_changed` spre administrator; `user_registered` cu rol administrator; `option_changed`; `post_created` cu `nr_in_request > 20` (constantă în `rules.ts`; site-ul marchează ALERT de la 6, dar un import CSV WooCommerce sau un meniu salvat trec de 5); fișier PHP în uploads nou sau cu sha1 schimbat față de `uploadsBaseline`; `plugin_deactivated` al conectorului însuși (plugin care începe cu `ots-wp-connector/`); `fisiere_modificate`, `upload_blocat` venite de la mu-plugin-ul 1.1; citire eșuată **2 zile la rând**.
+- 🟠 **important**: `login_ok` cu rol administrator (`date.roluri` conține `administrator`) de pe un IP absent din `sentinel_state.adminIps[user]` — un singur finding per (site, user, IP) per citire. IP-urile OTS (`82.77.19.195`, `213.157.186.85`, constantă în `rules.ts`) sunt excluse doar când `ip_remote` e tot IP OTS, e privat (proxy local) sau lipsește (linie veche) — un `X-Forwarded-For` falsificat cu IP OTS de pe un `ip_remote` public străin NU e exclus; `plugin_activated` / `plugin_deactivated` / `theme_switched` **de pe un IP care nu e OTS** (aceeași verificare cu `ip_remote`; activarea conectorului OTS e mereu ⚪); `user_registered` cu alt rol decât `customer`/`subscriber`; `profile_update` (email sau parolă) pe un administrator; **≥ 3 `login_esuat` pe același username în 7 zile**, unde username-ul există (`exista: true`) sau e un administrator cunoscut (în `adminIps` ori cu `login_ok` de admin în același lot — liniile vechi n-au `exista`). Eșecurile se țin în `sentinel_state.failedLogins` (7 zile); finding-ul apare doar când citirea aduce cel puțin un eșec nou, unul per username, cu numărul de eșecuri și de IP-uri distincte din fereastră; prima zi de citire eșuată.
+
+Motivul ferestrei de 7 zile: pe nevada, 23–27.09, trei eșecuri pe username-ul real de admin (negenerabil, deci scurs) de pe trei IP-uri, câte unul la două zile — un brute-force lent pe care fereastra de 24 h nu-l vede.
+
+`php_in_uploads` venit de la mu-plugin-ul vechi e ⚪: scanarea conectorului (cu baseline) acoperă același lucru, iar mu-plugin-ul raportează zilnic aceleași fișiere Sucuri.
 
 Un singur finding per (site, user id) când același user apare și în `user_registered`, și în `role_changed` în aceeași citire.
 - ⚪ **normal**: restul (logări de pe IP cunoscut, comenzi, update-uri, scanare curată) și orice eveniment necunoscut.
