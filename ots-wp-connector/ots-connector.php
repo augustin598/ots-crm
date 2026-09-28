@@ -264,6 +264,132 @@ class OTS_Connector_Sentinel {
 		], 'WARN' );
 	}
 
+	/* ---- citire pentru CRM ---- */
+
+	/**
+	 * Evenimente cu t >= $since din TOATE fișierele sentinel*.log (jurnalul nou,
+	 * cel vechi al mu-plugin-ului și rotirile lor), cele mai vechi primele.
+	 * Liniile fără id (mu-plugin) primesc sha1(linie)-n, n = a câta apariție a
+	 * liniei identice în fișierul ei — stabil, fișierele sunt append-only.
+	 */
+	public static function read_events( ?string $since, int $skip, array &$errors ): array {
+		$since_ts = $since ? strtotime( $since ) : 0;
+		$files    = glob( self::dir() . '/sentinel*.log' ) ?: [];
+		$events   = [];
+		$bytes    = 0;
+		foreach ( $files as $f ) {
+			$bytes += (int) @filesize( $f );
+			if ( $since_ts && @filemtime( $f ) < $since_ts ) {
+				continue; // fișier rotit înainte de since: nimic nou în el
+			}
+			$fh = @fopen( $f, 'r' );
+			if ( ! $fh ) {
+				$errors[] = 'Nu pot citi ' . basename( $f );
+				continue;
+			}
+			$seen = [];
+			while ( ( $line = fgets( $fh ) ) !== false ) {
+				$line = rtrim( $line, "\r\n" );
+				if ( '' === $line ) {
+					continue;
+				}
+				$ev = json_decode( $line, true );
+				if ( ! is_array( $ev ) || empty( $ev['t'] ) ) {
+					continue;
+				}
+				if ( empty( $ev['id'] ) ) {
+					$h          = sha1( $line );
+					$seen[ $h ] = isset( $seen[ $h ] ) ? $seen[ $h ] + 1 : 1;
+					$ev['id']   = $h . '-' . $seen[ $h ];
+				}
+				if ( $since_ts && strtotime( $ev['t'] ) < $since_ts ) {
+					continue;
+				}
+				$events[] = $ev;
+			}
+			fclose( $fh );
+		}
+		// sortare stabilă după t (usort nu e stabil în PHP 7.4)
+		$i = 0;
+		foreach ( $events as &$e ) {
+			$e['_i'] = $i++;
+		}
+		unset( $e );
+		usort( $events, function ( $a, $b ) {
+			$c = strcmp( $a['t'], $b['t'] );
+			return $c !== 0 ? $c : $a['_i'] - $b['_i'];
+		} );
+		$total = count( $events );
+		$page  = array_slice( $events, $skip, self::MAX_EVENTS_PER_PAGE );
+		foreach ( $page as &$e ) {
+			unset( $e['_i'] );
+		}
+		unset( $e );
+		return [
+			'events'   => $page,
+			'hasMore'  => ( $skip + count( $page ) ) < $total,
+			'logBytes' => $bytes,
+		];
+	}
+
+	/**
+	 * PHP executabil în uploads. Parcurge TOT (buget 20 s), întoarce cele mai
+	 * noi 200 după mtime — un shell nou e mereu printre ele; o limită pe
+	 * „primele 200 găsite” s-ar păcăli cu 200 de fișiere inofensive.
+	 */
+	public static function scan_uploads( array &$errors ): array {
+		$start = microtime( true );
+		$up    = wp_upload_dir();
+		$out   = [ 'files' => [], 'scannedFiles' => 0, 'truncated' => false, 'durationMs' => 0 ];
+		if ( empty( $up['basedir'] ) || ! is_dir( $up['basedir'] ) ) {
+			$errors[] = 'uploads lipsă';
+			return $out;
+		}
+		$base  = wp_normalize_path( $up['basedir'] );
+		$found = [];
+		try {
+			$it = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $base, FilesystemIterator::SKIP_DOTS ), RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD );
+			foreach ( $it as $file ) {
+				$out['scannedFiles']++;
+				if ( 0 === $out['scannedFiles'] % 200 && ( microtime( true ) - $start ) > self::SCAN_BUDGET_SEC ) {
+					$out['truncated'] = true;
+					break;
+				}
+				if ( ! $file->isFile() ) {
+					continue;
+				}
+				$name = $file->getFilename();
+				if ( ! preg_match( '/\.(php|phtml|php[0-9]|phar)$/i', $name ) ) {
+					continue;
+				}
+				if ( 'index.php' === $name && $file->getSize() < 40 ) {
+					continue;
+				}
+				$found[] = [
+					'path'  => substr( wp_normalize_path( $file->getPathname() ), strlen( $base ) ),
+					'size'  => $file->getSize(),
+					'mtime' => $file->getMTime(),
+					'full'  => $file->getPathname(),
+				];
+			}
+		} catch ( Throwable $e ) {
+			$errors[] = 'scan: ' . $e->getMessage();
+		}
+		usort( $found, function ( $a, $b ) {
+			return $b['mtime'] <=> $a['mtime'];
+		} );
+		foreach ( array_slice( $found, 0, self::SCAN_RETURN_MAX ) as $f ) {
+			$out['files'][] = [
+				'path'  => $f['path'],
+				'size'  => $f['size'],
+				'mtime' => gmdate( 'c', $f['mtime'] ),
+				'sha1'  => (string) @sha1_file( $f['full'] ),
+			];
+		}
+		$out['durationMs'] = (int) round( ( microtime( true ) - $start ) * 1000 );
+		return $out;
+	}
+
 	/* ---- jurnal ---- */
 
 	public static function log( string $eveniment, array $date = [], string $sev = 'INFO' ): void {
@@ -371,6 +497,35 @@ class OTS_Connector_Sentinel {
 	}
 }
 add_action( 'plugins_loaded', [ 'OTS_Connector_Sentinel', 'boot' ], 5 );
+
+/**
+ * POST /sentinel — body { since?: ISO 8601, skip?: int }. POST (nu GET) pentru
+ * că query string-ul nu intră în semnătura HMAC, body-ul da.
+ */
+function ots_connector_route_sentinel( WP_REST_Request $request ) {
+	$body   = $request->get_json_params();
+	$since  = isset( $body['since'] ) && is_string( $body['since'] ) && '' !== $body['since'] ? $body['since'] : null;
+	$skip   = isset( $body['skip'] ) ? max( 0, (int) $body['skip'] ) : 0;
+	$errors = [];
+	if ( $since && false === strtotime( $since ) ) {
+		return new WP_Error( 'ots_bad_since', 'since must be ISO 8601', [ 'status' => 400 ] );
+	}
+	@set_time_limit( 120 );
+	$read = OTS_Connector_Sentinel::read_events( $since, $skip, $errors );
+	// Scanarea doar pe prima pagină — costă până la 20 s.
+	$scan = 0 === $skip ? OTS_Connector_Sentinel::scan_uploads( $errors ) : null;
+	return rest_ensure_response( [
+		'sentinel' => [
+			'version'        => OTS_CONNECTOR_VERSION,
+			'legacyMuPlugin' => OTS_Connector_Sentinel::legacy_present(),
+			'logBytes'       => $read['logBytes'],
+		],
+		'events'   => $read['events'],
+		'hasMore'  => $read['hasMore'],
+		'scan'     => $scan,
+		'errors'   => $errors,
+	] );
+}
 
 /**
  * GET /health — returns WP/PHP versions, SSL expiry (best effort), and the
@@ -3218,6 +3373,12 @@ add_action( 'rest_api_init', function () {
 	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/health', [
 		'methods'             => WP_REST_Server::READABLE,
 		'callback'            => 'ots_connector_route_health',
+		'permission_callback' => 'ots_connector_verify_request',
+	] );
+
+	register_rest_route( OTS_CONNECTOR_NAMESPACE, '/sentinel', [
+		'methods'             => WP_REST_Server::CREATABLE,
+		'callback'            => 'ots_connector_route_sentinel',
 		'permission_callback' => 'ots_connector_verify_request',
 	] );
 

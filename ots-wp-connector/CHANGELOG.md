@@ -8,6 +8,22 @@ with `bun run connector:release` from the CRM repo.
 The CRM auto-updates sites to the latest release daily at 04:30 EEST
 and exposes a manual "Update connector" button per site.
 
+## 0.9.0 — 2026-09-28
+
+- Sentinel intră în conector: jurnal de securitate NDJSON în
+  `wp-content/ots-sentinel/sentinel-<hash>.log` (hash derivat din secret —
+  `.htaccess` nu protejează pe Nginx; fără secret nu se scrie nimic). Aceleași
+  evenimente ca mu-plugin-ul `ots-sentinel.php` 1.0, plus `id` unic și
+  `ip_remote` (REMOTE_ADDR brut) pe fiecare linie, `exista` la `login_esuat`,
+  `attachment`/`auto-draft` ignorate la `post_created`. Rotire la 8 MB, se
+  păstrează cele mai noi 5 rotiri. Dacă mu-plugin-ul e încă instalat,
+  hook-urile nu se înregistrează (fără dubluri) și ruta raportează
+  `legacyMuPlugin: true`.
+- Rută nouă `POST /sentinel` `{ since, skip }`: evenimentele din toate
+  fișierele `sentinel*.log` (max 5000/pagină) + scanarea `uploads` după PHP
+  executabil (parcurge tot în buget de 20 s, întoarce cele mai noi 200).
+- Scanarea zilnică pe wp-cron dispare; CRM-ul o cere când citește.
+
 ## 0.8.5 — 2026-09-25
 
 - Plugin-urile care opresc toate update-urile (ASE „Disable All Updates",
