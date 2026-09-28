@@ -36,7 +36,7 @@ per request, >5 = ALERT), `user_register`, `set_user_role`, `profile_update` (em
 
 Modificări față de mu-plugin:
 - Fiecare linie nouă primește `id` = `bin2hex(random_bytes(6))`. Liniile vechi (fără `id`) primesc la citire `id = sha1(linia brută) . '-' . n`, unde `n` = a câta apariție a liniei identice în fișier (două eșecuri de login identice în aceeași secundă rămân două evenimente, altfel regula „≥ 3” subnumără).
-- `login_esuat` adaugă `exista: bool` (`username_exists || email_exists`) — necesar pentru regula de brute-force.
+- `login_esuat` adaugă `exista: bool` și `admin: bool` (un singur `get_user_by` după login, apoi după email; `admin = user_can(…, 'manage_options')`) — pe magazinele WooCommerce `exista` e adevărat pentru orice client, deci regula de brute-force se uită la `admin`.
 - Fiecare linie nouă are și `ip_remote` = `REMOTE_ADDR` brut. `ip` (CF-Connecting-IP / X-Forwarded-For / REMOTE_ADDR) rămâne pentru continuitate, dar pe un site fără proxy oricine poate trimite `X-Forwarded-For: <IP OTS>`; regulile din CRM verifică `ip_remote` (§3).
 - Rotirile se curăță: se păstrează cele mai noi 5 fișiere rotite (8 MB fiecare — hosting partajat cu cotă). Fără secret (opțiunea goală) nu se scrie nimic — altfel numele fișierului ar fi calculabil public.
 - Scanarea uploads **nu mai e pe wp-cron**; rulează la cererea CRM-ului. Modulul face `wp_clear_scheduled_hook('ots_sentinel_scan')` doar când clasa `OTS_Sentinel` lipsește (cronul rămas după ștergerea mu-plugin-ului); cât timp mu-plugin-ul există, el își reprogramează hook-ul la fiecare `plugins_loaded`, deci ștergerea ar fi inutilă.
@@ -123,7 +123,7 @@ fără `IF NOT EXISTS`, intrări în `_journal.json` cu `when` = ultimul + 1, +2
 
 ## 3. CRM — citire și reguli
 
-`WpClient.sentinel({ since, skip })` în `src/lib/server/wordpress/client.ts` (`POST /sentinel`, timeout 45 s — scanarea singură are buget 20 s).
+`WpClient.sentinel({ since, skip })` în `src/lib/server/wordpress/client.ts` (`POST /sentinel`, timeout 45 s — scanarea singură are buget 15 s).
 
 `src/lib/server/wordpress/sentinel/`:
 - `pull.ts` — `pullSite(site)`: `since = sentinel_last_pull_at − 1h` (sau fără `since` la prima citire), paginează cu `skip` cât timp `hasMore`, inserează cu ignore pe conflict, actualizează coloanele `sentinel_*`. Conector < 0.9.0 (`compareConnectorVersions` din `connector-release.ts`, ca `supportsCachePurge()`) → status `unsupported`, fără eroare. Ordinea contează: `detectFindings` primește `sentinel_state` **de dinainte** de citire (altfel orice IP e deja „cunoscut”), apoi starea se actualizează cu IP-urile și fișierele din lot.
@@ -171,8 +171,8 @@ Ziua fără findings: `🛡 Sentinel · 29 sept — ✅ 16 site-uri liniștite`.
 
 **Idempotență:** cheie Redis `sentinel:digest:<tenantId>:<YYYY-MM-DD>`, TTL 36 h. `GET` înainte de
 trimitere (există → sari), `SET NX EX` **după prima trimitere reușită** — dacă Telegram pică pentru
-toți userii, cheia lipsește și reîncercarea jobului retrimite. Pattern-ul Bun
-`redis.send('SET', [key, '1', 'NX', 'EX', ttl])` din `tasks/token-refresh.ts`.
+toți userii, cheia lipsește și reîncercarea jobului retrimite. `getRedis().set(key, '1', 'EX', ttl, 'NX')`
+(ioredis); o eroare Redis nu oprește trimiterea (un mesaj dublat e mai bun decât niciunul).
 
 ## 5. Pagina `/[tenant]/wordpress/security`
 
@@ -183,7 +183,7 @@ toți userii, cheia lipsește și reîncercarea jobului retrimite. Pattern-ul Bu
 „Bibliotecă plugin-uri” și „Diagnostics”.
 
 - **Carduri per site**: stare (`ok` cu data ultimei citiri / nu răspunde / conector prea vechi / „șterge mu-plugin-ul vechi” când `legacy`), contoare pe 7 zile (critice, importante, logări eșuate, logări admin), buton **„Citește acum”**.
-- **Tabel evenimente**: filtre site, nivel, tip, perioadă (24 h / 7 z / 30 z), căutare IP/user; coloane ora RO, site, nivel (badge), eveniment (etichetă RO), user, IP; rând expandabil cu uri, user-agent, `data`. Paginare 100/pagină.
+- **Tabel evenimente**: filtre site, nivel, tip, perioadă (24 h / 7 z — retenția e 7 zile), căutare IP/user; coloane ora RO, site, nivel (badge), eveniment (etichetă RO), user, IP; rând expandabil cu uri, user-agent, `data`. Cursor pe `occurred_at`, „Încă 100”.
 
 `src/lib/remotes/wordpress-security.remote.ts` (fiecare funcție cu `requireStaff` — F8 — și scoping pe
 tenantul din sesiune):
@@ -194,7 +194,7 @@ tenantul din sesiune):
 ## 6. Erori
 
 - Site: `try/catch (Throwable)` pe fiecare callback și în rută; limite de timp și volum ca mai sus.
-- CRM: eșec la citire → `sentinel_last_pull_status = 'error'`, `sentinel_failures++`, `lastError` în `sentinel_state`; succes → `sentinel_failures = 0`.
+- CRM: eșec la citire → `sentinel_last_pull_status = 'error'`, `lastError` în `sentinel_state`; `sentinel_failures++` doar la jobul zilnic și cel mult o dată pe zi (data din Europe/Bucharest, `lastFailureDay`) — o citire manuală eșuată nu înseamnă „încă o zi”; succes → `sentinel_failures = 0`.
 - Trimitere Telegram eșuată → logWarning per user, jobul nu cade.
 
 ## 7. Testare
@@ -212,3 +212,31 @@ tenantul din sesiune):
 2. CRM: schema + migrare, `getSentinel`, `pull/rules/digest`, job, API, pagină.
 3. Pilot pe areni + nevada (conectate în CRM de utilizator): întâi confirmă că `wordpress-connector-auto-update` nu face **downgrade** (0.9.0 instalat manual vs 0.8.5 publicat), apoi instalare manuală 0.9.0, ștergere `mu-plugins/ots-sentinel.php`, „Citește acum”, verificare pagină, rulare manuală a jobului o dată.
 4. Abia după pilot: `bun run connector:release` → auto-update-ul de la 04:30 îl duce pe toate site-urile.
+
+## 9. Implementare — ce s-a schimbat față de textul de mai sus (review-uri + jurnalele reale)
+
+- **Brute-force:** per cont de **admin** (`date.admin`, sau — pe liniile vechi fără `admin` — admin cunoscut)
+  ≥ 3 în 7 zile → 🟠 cu numele contului. Conturile de **client** (`admin: false`, `exista: true`) ≥ 10 în
+  7 zile → o singură linie agregată „N conturi de client…”, fără username/email (Telegram). Un finding nou
+  de brute-force pentru același cont îl înlocuiește pe cel vechi din `pendingFindings`.
+- **IP-uri:** Cloudflare (intervalele publicate) e proxy de încredere, ca IP-urile private. Un
+  `X-Forwarded-For` falsificat cu IP OTS mută cheia de urmărire pe `ip_remote`, iar IP-ul OTS nu intră
+  niciodată în `adminIps`. Limită cunoscută: un XFF falsificat cu alt IP decât OTS se urmărește după `ip`
+  (prima logare tot alertează).
+- **Scanare:** baseline-ul e complet abia după o scanare **netrunchiată** (`scanBaselineDone`); o scanare
+  trunchiată compară doar fișierele întoarse și nu scoate nimic din baseline. Limită cunoscută: `mtime`
+  se poate falsifica, iar cu peste 200 de fișiere PHP în uploads un shell „îmbătrânit” iese din top 200.
+- **Stare** (`sentinel_state`, JSON): în plus față de §2 — `scanBaselineDone`, `pendingFindings`,
+  `recentFindings` (7 zile, pentru pagină), `lastScan`, `lastFailureDay`; `failedLogins` ține și `id`-ul
+  evenimentului (dedupe). Dicționarele sunt fără prototip (username-uri ca `constructor`, `__proto__`).
+- **Citire:** evenimentele mai vechi de 7 zile trec prin reguli (baseline), dar nu se salvează. Dacă
+  citirea se oprește la 20 de pagini sau conectorul raportează `readComplete: false`, `sentinel_last_pull_at`
+  rămâne la ultimul eveniment primit, ca citirea următoare să continue de acolo.
+- **Concurență:** lock Redis per site (`sentinel:pull:<siteId>`, 960 s): „Citește acum” pe un site deja în
+  citire → „Citire în curs”; jobul așteaptă 60 s, apoi îl raportează ca ocupat (nu „nu răspunde”).
+  `pendingFindings` se golesc după identitate, sub același lock — nu se pierde ce a apărut între timp.
+- **Job:** tenant fără niciun site compatibil (toate `unsupported`) → niciun mesaj. Destinatari: utilizatorii
+  **activi** ai tenantului (restricția la owner/admin rămâne decizie de produs, `TODO(user)` în cod).
+- **Ștergerea unui site** șterge întâi evenimentele lui (FK fără cascade în migrarea 0569, deja aplicată).
+- **Pilot:** după prima citire reușită, șterge și jurnalul vechi `wp-content/ots-sentinel/sentinel.log`
+  (+ rotiri) — are nume previzibil și pe Nginx e public.

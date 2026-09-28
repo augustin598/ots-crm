@@ -43,6 +43,8 @@ niciun site nu are 0.9.0 → pagina arată toate site-urile „Conector vechi”
    (`legacy`); evenimentele vechi (23–28.09) apar în tabel; prima citire = baseline.
    Așteptat din datele reale: nevada → un 🟠 „3 logări eșuate pe <admin> în 7 zile (3 IP-uri)”; areni → nimic.
 5. Șterge `wp-content/mu-plugins/ots-sentinel.php` pe ambele (FTP). „Citește acum” → status „Citit …”.
+   Apoi șterge și jurnalul vechi `wp-content/ots-sentinel/sentinel.log` (+ `sentinel-2026*.log`): numele
+   lui e previzibil, iar pe Nginx `.htaccess` nu-l protejează. Evenimentele lui sunt deja în CRM.
 6. Fă o logare eșuată de test pe un username inexistent și una pe cel real → „Citește acum” →
    evenimentele apar; cea pe username real are `exista: true`.
 7. Rulează jobul o dată manual (pagina de scheduler, `wordpress_sentinel_daily`) → mesaj Telegram.
