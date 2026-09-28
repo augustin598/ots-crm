@@ -34,7 +34,8 @@ export interface SentinelScan {
 }
 
 export interface WpSentinelResponse {
-	sentinel: { version: string; legacyMuPlugin: boolean; logBytes: number };
+	/** `readComplete` lipsește pe conectoare 0.9.0 vechi — tratat ca necunoscut, nu ca `false`. */
+	sentinel: { version: string; legacyMuPlugin: boolean; logBytes: number; readComplete?: boolean };
 	events: SentinelEvent[];
 	hasMore: boolean;
 	scan: SentinelScan | null; // doar pe prima pagină
@@ -58,6 +59,12 @@ export interface SentinelState {
 	failedLogins: Record<string, Array<{ t: string; ip: string; id?: string }>>;
 	/** findings încă netrimise pe Telegram (citiri manuale + jobul); golite după o trimitere reușită */
 	pendingFindings: Finding[];
+	/** findings din ultimele 7 zile, pentru pagină (pull.ts le adaugă cu `at`) */
+	recentFindings: Array<Finding & { at: string }>;
+	/** ultima scanare uploads, pentru card */
+	lastScan: { at: string; files: number; scannedFiles: number; truncated: boolean } | null;
+	/** ziua (Europe/Bucharest, YYYY-MM-DD) ultimei creșteri a contorului de eșecuri */
+	lastFailureDay: string | null;
 	lastError: string | null;
 }
 
@@ -85,6 +92,9 @@ export function emptyState(): SentinelState {
 		adminIps: dict(),
 		failedLogins: dict(),
 		pendingFindings: [],
+		recentFindings: [],
+		lastScan: null,
+		lastFailureDay: null,
 		lastError: null
 	};
 }
@@ -102,6 +112,9 @@ export function parseState(raw: string | null | undefined): SentinelState {
 			adminIps,
 			failedLogins: dict(p.failedLogins),
 			pendingFindings: Array.isArray(p.pendingFindings) ? p.pendingFindings : [],
+			recentFindings: Array.isArray(p.recentFindings) ? p.recentFindings : [],
+			lastScan: p.lastScan ?? null,
+			lastFailureDay: p.lastFailureDay ?? null,
 			lastError: p.lastError ?? null
 		};
 	} catch {

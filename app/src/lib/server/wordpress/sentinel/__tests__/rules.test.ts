@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { detectFindings, classify, isOtsIp, MASS_INSERT_THRESHOLD } from '../rules';
+import { detectFindings, classify, isOtsIp, isCloudflareIp, MASS_INSERT_THRESHOLD, CUSTOMER_BRUTE_FORCE_MIN } from '../rules';
 import { emptyState, type SentinelState } from '../types';
 import { loadFixture, ev } from './fixtures/load';
 
@@ -9,8 +9,11 @@ const run = (events: ReturnType<typeof loadFixture>, state: SentinelState = empt
 const known = (over: Partial<SentinelState> = {}): SentinelState => ({ ...emptyState(), baselineDone: true, ...over });
 const admin = (ip: string, t: string, ip_remote?: string, u = 'adm') =>
 	ev({ ev: 'login_ok', t, ip, ip_remote, date: { login: u, roluri: ['administrator'] } });
+// exista undefined → linie veche mu-plugin (fără `admin`, cade pe fallback-ul „admin cunoscut").
+// exista dat explicit → simulează conector nou; toate apelurile din fișier țintesc conturi de
+// admin (`adm`/`constructor`) sau conturi inexistente (`ghost`), deci `admin` urmează `exista`.
 const fail = (login: string, ip: string, t: string, exista?: boolean) =>
-	ev({ ev: 'login_esuat', t, ip, date: exista === undefined ? { login } : { login, exista } });
+	ev({ ev: 'login_esuat', t, ip, date: exista === undefined ? { login } : { login, exista, admin: exista === true } });
 
 describe('fixture nevada (date reale)', () => {
 	test('prima citire: exact un finding — 🟠 brute-force lent, 3 eșecuri, 3 IP-uri', () => {
@@ -218,7 +221,7 @@ describe('reguli sintetice', () => {
 	});
 
 	test('M1: eșecuri cu același t+ip dar id diferit nu se elimină reciproc (dedup pe id, nu pe t+ip)', () => {
-		const mk = (id: string) => ev({ id, ev: 'login_esuat', t: '2026-09-27T20:00:00Z', ip: '1.1.1.1', date: { login: 'adm', exista: true } });
+		const mk = (id: string) => ev({ id, ev: 'login_esuat', t: '2026-09-27T20:00:00Z', ip: '1.1.1.1', date: { login: 'adm', exista: true, admin: true } });
 		const { findings } = run([mk('a'), mk('b'), mk('c')], known());
 		expect(findings).toEqual([expect.objectContaining({ kind: 'brute_force', text: '3 logări eșuate pe adm în 7 zile (1 IP-uri)' })]);
 	});
@@ -253,7 +256,7 @@ describe('fixe din code review (0cd95e1e)', () => {
 	});
 
 	test('I2: username-uri periculoase (constructor/toString/__proto__) nu ating Object.prototype', () => {
-		const mkFail = (login: string, id: string, t: string) => ev({ id, ev: 'login_esuat', t, ip: '9.9.9.9', date: { login, exista: true } });
+		const mkFail = (login: string, id: string, t: string) => ev({ id, ev: 'login_esuat', t, ip: '9.9.9.9', date: { login, exista: true, admin: true } });
 		const { findings: f1 } = run(
 			[mkFail('constructor', 'c1', '2026-09-27T01:00:00Z'), mkFail('constructor', 'c2', '2026-09-27T02:00:00Z'), mkFail('constructor', 'c3', '2026-09-27T03:00:00Z')],
 			known()
@@ -290,5 +293,114 @@ describe('fixe din code review (0cd95e1e)', () => {
 
 		const third = run([], second.nextState, scanOf([['/sucuri/x.php', 'a'], ['/2026/09/shell.php', 'c']]));
 		expect(third.findings).toEqual([expect.objectContaining({ level: 'critical', kind: 'php_in_uploads' })]);
+	});
+});
+
+describe('fixe din review-ul final de branch', () => {
+	test('I1: o scanare trunchiată nu marchează baseline-ul gata — se termină abia la un scan complet', () => {
+		const scanOf = (files: Array<[string, string]>, truncated: boolean) => ({
+			files: files.map(([path, sha1]) => ({ path, sha1, size: 1, mtime: '2026-09-28T00:00:00Z' })),
+			scannedFiles: files.length,
+			truncated,
+			durationMs: 1
+		});
+		// 1) primul scan, trunchiat: fără findings, baseline încă nu e gata
+		const first = run([], emptyState(), scanOf([['/a.php', '1']], true));
+		expect(first.findings).toHaveLength(0);
+		expect(first.nextState.scanBaselineDone).toBe(false);
+		expect(first.nextState.uploadsBaseline).toEqual({ '/a.php': '1' });
+
+		// 2) al doilea scan, complet, cu fișierul vechi + unul „nou pentru noi" (dar existent dintotdeauna):
+		//    tot fără findings — asta completează baseline-ul, nu raportează
+		const second = run([], first.nextState, scanOf([['/a.php', '1'], ['/b.php', '2']], false));
+		expect(second.findings).toHaveLength(0);
+		expect(second.nextState.scanBaselineDone).toBe(true);
+		expect(second.nextState.uploadsBaseline).toEqual({ '/a.php': '1', '/b.php': '2' });
+
+		// 3) al treilea scan, trunchiat, doar un subset neschimbat: nimic (fișierele neîntoarse nu se ating)
+		const third = run([], second.nextState, scanOf([['/a.php', '1']], true));
+		expect(third.findings).toHaveLength(0);
+		expect(third.nextState.uploadsBaseline).toEqual({ '/a.php': '1', '/b.php': '2' });
+
+		// 4) un fișier chiar nou, într-un scan trunchiat → 🔴; baseline rămâne uniune (nu scoate /b.php)
+		const fourth = run([], third.nextState, scanOf([['/a.php', '1'], ['/shell.php', 'x']], true));
+		expect(fourth.findings).toEqual([expect.objectContaining({ level: 'critical', kind: 'php_in_uploads' })]);
+		expect(fourth.nextState.uploadsBaseline).toEqual({ '/a.php': '1', '/b.php': '2', '/shell.php': 'x' });
+	});
+
+	test('I4: eșec cu date.admin=true → finding pe user (ca înainte)', () => {
+		const failNew = (login: string, ip: string, t: string, admin: boolean) => ev({ ev: 'login_esuat', t, ip, date: { login, admin, exista: true } });
+		const { findings } = run(
+			[
+				failNew('adm', '1.1.1.1', '2026-09-27T01:00:00Z', true),
+				failNew('adm', '2.2.2.2', '2026-09-27T02:00:00Z', true),
+				failNew('adm', '3.3.3.3', '2026-09-27T03:00:00Z', true)
+			],
+			known()
+		);
+		expect(findings).toEqual([expect.objectContaining({ kind: 'brute_force', text: '3 logări eșuate pe adm în 7 zile (3 IP-uri)' })]);
+	});
+
+	test('I4: eșec cu date.admin=false (client) ×3 → nimic (sub pragul de 10, fără finding individual)', () => {
+		const failNew = (login: string, ip: string, t: string) => ev({ ev: 'login_esuat', t, ip, date: { login, admin: false, exista: true } });
+		const { findings } = run(
+			[
+				failNew('client1', '1.1.1.1', '2026-09-27T01:00:00Z'),
+				failNew('client1', '2.2.2.2', '2026-09-27T02:00:00Z'),
+				failNew('client1', '3.3.3.3', '2026-09-27T03:00:00Z')
+			],
+			known()
+		);
+		expect(findings).toHaveLength(0);
+	});
+
+	test('I4: doi clienți cu ≥10 eșecuri fiecare → UN finding agregat, fără username/email (PII)', () => {
+		const t0 = Date.parse('2026-09-27T00:00:00Z');
+		const failNew = (login: string, i: number) =>
+			ev({ ev: 'login_esuat', t: new Date(t0 + i * 60_000).toISOString(), ip: `1.1.1.${i % 250}`, date: { login, admin: false, exista: true } });
+		const events = [
+			...Array.from({ length: CUSTOMER_BRUTE_FORCE_MIN }, (_, i) => failNew('client1', i)),
+			...Array.from({ length: CUSTOMER_BRUTE_FORCE_MIN }, (_, i) => failNew('client2', i + 100))
+		];
+		const { findings } = run(events, known());
+		expect(findings).toEqual([{ level: 'important', kind: 'brute_force', text: '2 conturi de client cu ≥10 logări eșuate în 7 zile' }]);
+		expect(findings[0].text).not.toContain('client1');
+		expect(findings[0].text).not.toContain('client2');
+		expect(findings[0].text).not.toContain('@');
+	});
+
+	test('I4: fixture nevada — tot exact un finding (linii vechi, fără date.admin)', () => {
+		const { findings } = run(loadFixture('nevada'));
+		expect(findings).toHaveLength(1);
+		expect(findings[0]).toEqual(expect.objectContaining({ level: 'important', kind: 'brute_force' }));
+	});
+
+	test('I5: isCloudflareIp acoperă intervalele IPv4 și prefixele IPv6', () => {
+		expect(isCloudflareIp('104.16.1.1')).toBe(true);
+		expect(isCloudflareIp('162.158.255.255')).toBe(true);
+		expect(isCloudflareIp('8.8.8.8')).toBe(false);
+		expect(isCloudflareIp('2606:4700:1234::1')).toBe(true);
+		expect(isCloudflareIp('2001:4860:4860::8888')).toBe(false);
+	});
+
+	test('I5: IP OTS cu ip_remote Cloudflare = verificat (proxy de încredere, ca unul privat)', () => {
+		const otsViaCf = admin('82.77.19.195', '2026-09-28T08:00:00Z', '104.16.1.1');
+		expect(isOtsIp(otsViaCf)).toBe(true);
+		expect(
+			classify(
+				ev({ ev: 'plugin_activated', t: '2026-09-28T08:00:00Z', ip: '82.77.19.195', ip_remote: '104.16.1.1', date: { plugin: 'akismet/akismet.php' } }),
+				known()
+			)
+		).toBe('normal');
+	});
+
+	test('I5: client din spatele CF cu edge rotativ — cheia rămâne IP-ul clientului, nu edge-ul', () => {
+		const r1 = run([admin('5.6.7.8', '2026-09-28T08:00:00Z', '162.158.1.1', 'clientadmin')], known());
+		expect(r1.findings).toEqual([expect.objectContaining({ kind: 'admin_new_ip' })]);
+		expect(Object.keys(r1.nextState.adminIps.clientadmin)).toEqual(['5.6.7.8']);
+
+		const r2 = run([admin('5.6.7.8', '2026-09-28T09:00:00Z', '104.16.5.5', 'clientadmin')], r1.nextState);
+		expect(r2.findings).toHaveLength(0); // IP-ul clientului neschimbat, doar edge-ul CF s-a rotit
+		expect(Object.keys(r2.nextState.adminIps.clientadmin)).toEqual(['5.6.7.8']);
 	});
 });

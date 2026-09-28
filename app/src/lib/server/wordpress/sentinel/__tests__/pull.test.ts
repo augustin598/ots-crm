@@ -102,7 +102,10 @@ mock.module('$lib/server/redis', () => ({
 const { pullSite, supportsSentinel, withSiteLock, SiteBusyError, SENTINEL_RETENTION_DAYS } = await import('../pull');
 
 const NOW = new Date('2026-09-28T09:00:00Z');
-const fail = (id: string, t: string, ip = '1.1.1.1') => ({ id, t, sev: 'INFO', ev: 'login_esuat', user: '-', uid: 0, ip, uri: '/wp-login.php', ua: '', date: { login: 'adm', exista: true } });
+// admin:true — de la I4 (rules.ts), un eșec cu exista:true dar fără `admin` explicit nu mai
+// contează spre pragul de admin decât dacă userul e deja cunoscut ca admin; aici simulăm un
+// conector nou care trimite ambele câmpuri.
+const fail = (id: string, t: string, ip = '1.1.1.1') => ({ id, t, sev: 'INFO', ev: 'login_esuat', user: '-', uid: 0, ip, uri: '/wp-login.php', ua: '', date: { login: 'adm', exista: true, admin: true } });
 const scan = { files: [], scannedFiles: 0, truncated: false, durationMs: 1 };
 const page = (events: unknown[], hasMore = false, legacy = false, withScan = true) => ({
 	sentinel: { version: '0.9.0', legacyMuPlugin: legacy, logBytes: 10 },

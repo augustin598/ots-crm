@@ -10,9 +10,18 @@
  * XFF falsificat identic dar de pe altă mașină, s-ar ascunde în spatele primului
  * (IP-ul falsificat „devenea cunoscut” definitiv). Limită cunoscută: un XFF
  * falsificat spre un IP NON-OTS rămâne cheiat pe `ip` (nu putem ști ce e falsificat
- * fără o listă de IP-uri de încredere); pe site-uri din spatele Cloudflare, `ip_remote`
- * e un IP de edge rotativ, deci nu-l putem folosi ca cheie generală — prima logare
- * tot alertează, doar reluările de pe alt edge nu se disting de una „cunoscută”.
+ * fără o listă de IP-uri de încredere).
+ *
+ * Cloudflare: pe un site din spatele CF (azi doar wow-agency.ro), `ip_remote`
+ * (REMOTE_ADDR) e IP-ul edge-ului CF, nu al clientului — `isOtsIp` îl tratează ca
+ * proxy de încredere (ca un IP privat). `adminIpKey` NU trece pe `ip_remote` pentru
+ * CF: cum acel edge se rotește la fiecare cerere, ar însemna „cunoscut” la infinit
+ * de puțin timp. Rămâne cheiat pe `ip` (CF-Connecting-IP, stabil per client) — exact
+ * comportamentul de bază, fără cod suplimentar (`adminIpKey` trece pe `ip_remote`
+ * DOAR când `ip`-ul e unul OTS falsificat, nu și pentru clienți obișnuiți din spatele CF).
+ *
+ * Limită cunoscută (scanare uploads): `mtime` poate fi trucat de un atacator care
+ * scrie fișierul — nu ne bazăm pe el pentru „nou vs. vechi”, doar pe sha1 vs. baseline.
  */
 import { dict, getOwn, type Finding, type SentinelEvent, type SentinelLevel, type SentinelScan, type SentinelState } from './types';
 
@@ -22,9 +31,13 @@ export const OTS_IPS = new Set(['82.77.19.195', '213.157.186.85']);
 /** Site-ul marchează ALERT de la 6; un import CSV WooCommerce sau un meniu salvat trec de 5. */
 export const MASS_INSERT_THRESHOLD = 20;
 export const BRUTE_FORCE_MIN = 3;
+/** Eșecuri pe cont de client (nu admin): agregat, fără username, în digest — vezi mai jos. */
+export const CUSTOMER_BRUTE_FORCE_MIN = 10;
 /** 7 zile: pe nevada, trei eșecuri pe username-ul real de admin au venit la câte două zile distanță. */
 export const BRUTE_FORCE_WINDOW_MS = 7 * DAY_MS;
 export const ADMIN_IP_MEMORY_MS = 90 * DAY_MS;
+/** Prefixul cheii din `failedLogins` pentru eșecuri pe conturi de client (nu admin) — vezi `CUSTOMER_BRUTE_FORCE_MIN`. */
+const CUSTOMER_FAIL_PREFIX = 'cust:';
 /** Text tăiat la atât caractere într-un finding (ex. valoarea unei opțiuni WP). */
 const TEXT_VALUE_MAX = 80;
 const CONNECTOR_PLUGIN_PREFIX = 'ots-wp-connector/';
@@ -32,6 +45,50 @@ const HARMLESS_ROLES = new Set(['customer', 'subscriber']);
 /** Evenimente ale mu-plugin-ului 1.1 (neportate) care merită 🔴. php_in_uploads nu: scanarea conectorului îl acoperă. */
 const LEGACY_CRITICAL = new Set(['fisiere_modificate', 'upload_blocat']);
 const PRIVATE_IP = /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|f[cd])/i;
+
+/** Intervale IPv4 publicate de Cloudflare (https://www.cloudflare.com/ips/). */
+const CF_IPV4_RANGES: Array<[base: string, bits: number]> = [
+	['173.245.48.0', 20],
+	['103.21.244.0', 22],
+	['103.22.200.0', 22],
+	['103.31.4.0', 22],
+	['141.101.64.0', 18],
+	['108.162.192.0', 18],
+	['190.93.240.0', 20],
+	['188.114.96.0', 20],
+	['197.234.240.0', 22],
+	['198.41.128.0', 17],
+	['162.158.0.0', 15],
+	['104.16.0.0', 13],
+	['104.24.0.0', 14],
+	['172.64.0.0', 13],
+	['131.0.72.0', 22]
+];
+/** Prefixe IPv6 Cloudflare (lowercase); unele sunt trunchiate intenționat (bloc mai mare decât /32). */
+const CF_IPV6_PREFIXES = ['2400:cb00:', '2606:4700:', '2803:f800:', '2405:b500:', '2405:8100:', '2a06:98c', '2c0f:f248:'];
+
+function ipv4ToInt(ip: string): number | null {
+	const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+	if (!m) return null;
+	const parts = [m[1], m[2], m[3], m[4]].map(Number);
+	if (parts.some((p) => p > 255)) return null;
+	return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+/** IP de edge Cloudflare (IPv4 sau IPv6) — azi doar wow-agency.ro e din spatele CF. */
+export function isCloudflareIp(ip: string): boolean {
+	if (ip.includes(':')) {
+		const lower = ip.toLowerCase();
+		return CF_IPV6_PREFIXES.some((p) => lower.startsWith(p));
+	}
+	const n = ipv4ToInt(ip);
+	if (n === null) return false;
+	return CF_IPV4_RANGES.some(([base, bits]) => {
+		const baseInt = ipv4ToInt(base);
+		const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+		return baseInt !== null && (n & mask) === (baseInt & mask);
+	});
+}
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v) || 0);
@@ -54,7 +111,7 @@ function fmtValue(v: unknown): string {
 export function isOtsIp(e: SentinelEvent): boolean {
 	if (!OTS_IPS.has(e.ip)) return false;
 	const r = e.ip_remote;
-	return r === undefined || r === '' || OTS_IPS.has(r) || PRIVATE_IP.test(r);
+	return r === undefined || r === '' || OTS_IPS.has(r) || PRIVATE_IP.test(r) || isCloudflareIp(r);
 }
 
 /** Cheia de urmărire a IP-ului de admin — vezi header-ul fișierului (XFF falsificat). */
@@ -143,6 +200,9 @@ export function detectFindings({ events, scan, state, now }: DetectInput): Detec
 		adminIps: cloneIps(ctx.adminIps),
 		failedLogins,
 		pendingFindings: [...state.pendingFindings], // copie: nu mutăm starea de intrare
+		recentFindings: [...state.recentFindings], // pull.ts adaugă findings-urile astei citiri cu `at`
+		lastScan: scan ? { at: now.toISOString(), files: scan.files.length, scannedFiles: scan.scannedFiles, truncated: scan.truncated } : state.lastScan,
+		lastFailureDay: state.lastFailureDay,
 		lastError: null
 	};
 	const findings: Finding[] = [];
@@ -178,15 +238,22 @@ export function detectFindings({ events, scan, state, now }: DetectInput): Detec
 
 		if (e.ev === 'login_esuat') {
 			const u = login(e);
-			const exists = e.date.exista === true || (e.date.exista === undefined && knownAdmins.has(u));
-			if (u && exists && now.getTime() - Date.parse(e.t) <= BRUTE_FORCE_WINDOW_MS) {
-				const list = Object.hasOwn(next.failedLogins, u) ? next.failedLogins[u] : (next.failedLogins[u] = []);
+			// Conector nou: `date.admin` spune direct dacă username-ul e administrator. Linie veche
+			// (`admin` absent): cădem pe comportamentul dinainte — `exista !== false` + admin cunoscut.
+			const isAdminTarget = e.date.admin === true || (e.date.admin === undefined && e.date.exista !== false && knownAdmins.has(u));
+			// Cont de client, confirmat existent — nu un „admin”/„test” încercat la întâmplare.
+			const isCustomerTarget = e.date.admin === false && e.date.exista === true;
+			if (u && (isAdminTarget || isCustomerTarget) && now.getTime() - Date.parse(e.t) <= BRUTE_FORCE_WINDOW_MS) {
+				// Clienții au propria cheie (prefix), ca să nu apară cu username în digest și ca
+				// pragul lor (10) să nu se amestece cu cel de admin (3) — vezi `CUSTOMER_BRUTE_FORCE_MIN`.
+				const key = isCustomerTarget ? `${CUSTOMER_FAIL_PREFIX}${u}` : u;
+				const list = Object.hasOwn(next.failedLogins, key) ? next.failedLogins[key] : (next.failedLogins[key] = []);
 				// dedup pe id (evenimente reale distincte pot avea același t+ip, ex. cereri simultane);
 				// intrările vechi fără `id` (stare dinainte de migrare) cad pe fallback-ul t+ip.
 				const dup = list.some((f) => (f.id && e.id ? f.id === e.id : f.t === e.t && f.ip === e.ip));
 				if (!dup) {
 					list.push({ t: e.t, ip: e.ip, id: e.id });
-					newFailUsers.add(u);
+					newFailUsers.add(key);
 				}
 			}
 			continue;
@@ -253,11 +320,26 @@ export function detectFindings({ events, scan, state, now }: DetectInput): Detec
 		if (kept.length === 0) delete next.failedLogins[u];
 		else next.failedLogins[u] = kept;
 	}
-	for (const u of newFailUsers) {
-		const list = getOwn(next.failedLogins, u) ?? [];
+	for (const key of newFailUsers) {
+		if (key.startsWith(CUSTOMER_FAIL_PREFIX)) continue; // clienții se agregă mai jos, fără username
+		const list = getOwn(next.failedLogins, key) ?? [];
 		if (list.length < BRUTE_FORCE_MIN) continue;
 		const ips = new Set(list.map((f) => f.ip).filter(Boolean)).size;
-		findings.push({ level: 'important', kind: 'brute_force', text: `${list.length} logări eșuate pe ${u} în 7 zile (${ips} IP-uri)` });
+		findings.push({ level: 'important', kind: 'brute_force', text: `${list.length} logări eșuate pe ${key} în 7 zile (${ips} IP-uri)` });
+	}
+	// clienți: UN singur finding agregat pe citire, fără username/email (PII pe Telegram) — doar
+	// dacă citirea asta a adus un eșec nou pentru cel puțin un cont de client peste prag.
+	if ([...newFailUsers].some((k) => k.startsWith(CUSTOMER_FAIL_PREFIX))) {
+		const overThreshold = Object.keys(next.failedLogins).filter(
+			(k) => k.startsWith(CUSTOMER_FAIL_PREFIX) && next.failedLogins[k].length >= CUSTOMER_BRUTE_FORCE_MIN
+		).length;
+		if (overThreshold > 0) {
+			findings.push({
+				level: 'important',
+				kind: 'brute_force',
+				text: `${overThreshold} conturi de client cu ≥${CUSTOMER_BRUTE_FORCE_MIN} logări eșuate în 7 zile`
+			});
+		}
 	}
 
 	// uită IP-urile de admin mai vechi de 90 de zile
@@ -270,18 +352,33 @@ export function detectFindings({ events, scan, state, now }: DetectInput): Detec
 	}
 
 	if (scan) {
-		if (state.scanBaselineDone) {
+		const seen = dict<string>();
+		for (const f of scan.files) seen[f.path] = f.sha1;
+
+		if (!state.scanBaselineDone) {
+			// Baseline încă în construcție (eventual pe mai multe citiri, dacă tot trunchiază):
+			// unim ce am văzut, FĂRĂ findings — nu știm încă ce e „nou” cât nu am văzut totul.
+			// Devine gata abia la un scan care NU a trunchiat (a văzut tot uploads/).
+			next.uploadsBaseline = Object.assign(dict(state.uploadsBaseline), seen);
+			next.scanBaselineDone = !scan.truncated;
+		} else if (scan.truncated) {
+			// Baseline gata, dar citirea asta a trunchiat: comparăm DOAR ce am primit; restul
+			// baseline-ului rămâne neatins (uniune, nu se scot niciodată intrări pe o trunchiere).
 			for (const f of scan.files) {
 				const knownSha = getOwn(state.uploadsBaseline, f.path);
 				if (knownSha === f.sha1) continue;
 				findings.push({ level: 'critical', kind: 'php_in_uploads', text: knownSha ? `PHP modificat în uploads ${f.path}` : `PHP nou în uploads ${f.path}` });
 			}
+			next.uploadsBaseline = Object.assign(dict(state.uploadsBaseline), seen);
+		} else {
+			// Baseline gata, scanare completă: comparăm tot, apoi înlocuim autoritar.
+			for (const f of scan.files) {
+				const knownSha = getOwn(state.uploadsBaseline, f.path);
+				if (knownSha === f.sha1) continue;
+				findings.push({ level: 'critical', kind: 'php_in_uploads', text: knownSha ? `PHP modificat în uploads ${f.path}` : `PHP nou în uploads ${f.path}` });
+			}
+			next.uploadsBaseline = seen;
 		}
-		// scanare trunchiată: păstrăm ce știam, adăugăm ce am văzut
-		const seen = dict<string>();
-		for (const f of scan.files) seen[f.path] = f.sha1;
-		next.uploadsBaseline = scan.truncated ? Object.assign(dict(state.uploadsBaseline), seen) : seen;
-		next.scanBaselineDone = true;
 	}
 
 	return { findings, nextState: next, levels };
