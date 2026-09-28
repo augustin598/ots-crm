@@ -50,11 +50,20 @@ export interface SentinelState {
 	adminIps: Record<string, Record<string, string>>;
 	/** user → eșecuri de logare din ultimele 7 zile (pentru brute-force lent, câte unul pe zi) */
 	failedLogins: Record<string, Array<{ t: string; ip: string }>>;
+	/** findings încă netrimise pe Telegram (citiri manuale + jobul); golite după o trimitere reușită */
+	pendingFindings: Finding[];
 	lastError: string | null;
 }
 
 export function emptyState(): SentinelState {
-	return { baselineDone: false, uploadsBaseline: {}, adminIps: {}, failedLogins: {}, lastError: null };
+	return {
+		baselineDone: false,
+		uploadsBaseline: {},
+		adminIps: {},
+		failedLogins: {},
+		pendingFindings: [],
+		lastError: null
+	};
 }
 
 export function parseState(raw: string | null | undefined): SentinelState {
@@ -66,6 +75,7 @@ export function parseState(raw: string | null | undefined): SentinelState {
 			uploadsBaseline: p.uploadsBaseline ?? {},
 			adminIps: p.adminIps ?? {},
 			failedLogins: p.failedLogins ?? {},
+			pendingFindings: Array.isArray(p.pendingFindings) ? p.pendingFindings : [],
 			lastError: p.lastError ?? null
 		};
 	} catch {
