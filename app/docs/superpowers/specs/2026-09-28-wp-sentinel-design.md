@@ -237,6 +237,10 @@ tenantul din sesiune):
   `pendingFindings` se golesc după identitate, sub același lock — nu se pierde ce a apărut între timp.
 - **Job:** tenant fără niciun site compatibil (toate `unsupported`) → niciun mesaj. Destinatari: doar
   **owner-ul** activ al tenantului (decizia userului, 28.09) — mesajul conține username-uri de admin și IP-uri.
+- **Mu-plugin 1.1 (site-urile Liepsnele) rămâne instalat** — blochează upload-ul de PHP și verifică orar
+  fișierele, lucruri pe care conectorul nu le face. `fisiere_modificate` cu `dupa_update: true` sau de pe
+  IP-ul biroului și `upload_blocat` de pe IP-ul biroului sunt ⚪; restul 🔴, cu fișierul în text. Pe areni și
+  nevada mu-plugin-ul 1.0 (doar jurnal) a fost șters pe 28.09 (backup local).
 - **Ștergerea unui site** șterge întâi evenimentele lui (FK fără cascade în migrarea 0569, deja aplicată).
 - **Pilot:** după prima citire reușită, șterge și jurnalul vechi `wp-content/ots-sentinel/sentinel.log`
   (+ rotiri) — are nume previzibil și pe Nginx e public.

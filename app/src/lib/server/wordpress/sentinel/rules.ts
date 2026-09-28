@@ -147,9 +147,28 @@ export function classify(e: SentinelEvent, state: SentinelState): SentinelLevel 
 		case 'login_ok':
 			if (!isAdminRoles(e.date.roluri) || isOtsIp(e)) return 'normal';
 			return getOwn(getOwn(state.adminIps, login(e)), adminIpKey(e)) ? 'normal' : 'important';
+		case 'fisiere_modificate':
+			// mu-plugin 1.1: un update de plugin atinge sute de fișiere, iar testele OTS vin de pe IP-ul biroului.
+			return e.date.dupa_update === true || isOtsIp(e) ? 'normal' : 'critical';
+		case 'upload_blocat':
+			return isOtsIp(e) ? 'normal' : 'critical';
 		default:
 			return LEGACY_CRITICAL.has(e.ev) ? 'critical' : 'normal';
 	}
+}
+
+/** Textul unui finding 🔴 venit de la mu-plugin-ul 1.1 — cu fișierul, nu doar numele evenimentului. */
+function legacyAlertText(e: SentinelEvent): string {
+	if (e.ev === 'fisiere_modificate') {
+		const first = (key: string) => {
+			const list = e.date[key];
+			return Array.isArray(list) && list[0] && typeof list[0] === 'object' ? str((list[0] as Record<string, unknown>).f) : '';
+		};
+		const example = first('lista_noi') || first('lista_modificate');
+		return `fișiere modificate pe disc: ${num(e.date.noi)} noi, ${num(e.date.modificate)} modificate, ${num(e.date.sterse)} șterse${example ? ` (${example})` : ''}`;
+	}
+	if (e.ev === 'upload_blocat') return `upload PHP blocat: ${str(e.date.fisier) || '?'} (${e.ip})`;
+	return `${e.ev} raportat de mu-plugin`;
 }
 
 export interface DetectInput {
@@ -309,7 +328,7 @@ export function detectFindings({ events, scan, state, now }: DetectInput): Detec
 				findings.push({ level: 'important', kind: 'admin_profile', text: `profil admin ${login(e)} modificat: ${Object.keys((e.date.modificari as object) ?? {}).join(', ')}` });
 				break;
 			default:
-				if (level === 'critical') findings.push({ level: 'critical', kind: 'legacy_alert', text: `${e.ev} raportat de mu-plugin` });
+				if (level === 'critical') findings.push({ level: 'critical', kind: 'legacy_alert', text: legacyAlertText(e) });
 		}
 	}
 	if (massInsert) findings.push(massInsert);

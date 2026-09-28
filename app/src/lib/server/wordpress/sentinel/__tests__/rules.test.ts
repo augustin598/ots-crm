@@ -211,7 +211,37 @@ describe('reguli sintetice', () => {
 
 	test('fisiere_modificate (mu-plugin 1.1) → finding legacy_alert', () => {
 		const { findings } = run([ev({ ev: 'fisiere_modificate', t: '2026-09-28T08:00:00Z' })], known());
-		expect(findings).toEqual([expect.objectContaining({ level: 'critical', kind: 'legacy_alert', text: expect.stringContaining('fisiere_modificate') })]);
+		expect(findings).toEqual([expect.objectContaining({ level: 'critical', kind: 'legacy_alert', text: expect.stringContaining('fișiere modificate') })]);
+	});
+
+	// Date reale Liepsnele, 28.09: update de plugin (428 fișiere, dupa_update) și testele OTS de pe IP-ul biroului.
+	test('mu-plugin 1.1: fisiere_modificate după un update de plugin = ⚪', () => {
+		const e = ev({ ev: 'fisiere_modificate', t: '2026-09-28T11:34:06Z', ip: '46.4.159.108', date: { noi: 3, modificate: 428, dupa_update: true } });
+		expect(classify(e, known())).toBe('normal');
+		expect(run([e], known()).findings).toHaveLength(0);
+	});
+
+	test('mu-plugin 1.1: fisiere_modificate / upload_blocat de pe IP-ul biroului = ⚪', () => {
+		const files = ev({ ev: 'fisiere_modificate', t: '2026-09-28T08:34:32Z', ip: '82.77.19.195', date: { noi: 2, dupa_update: false } });
+		const blocked = ev({ ev: 'upload_blocat', t: '2026-09-28T08:34:28Z', ip: '82.77.19.195', date: { fisier: 'shell.php' } });
+		expect(classify(files, known())).toBe('normal');
+		expect(classify(blocked, known())).toBe('normal');
+	});
+
+	test('mu-plugin 1.1: modificare reală = 🔴 cu fișierul în text', () => {
+		const files = ev({
+			ev: 'fisiere_modificate',
+			t: '2026-09-28T09:38:49Z',
+			ip: '46.4.159.108',
+			date: { noi: 1, modificate: 2, sterse: 0, dupa_update: false, lista_noi: [{ f: 'wp-content/uploads/2026/09/x.php' }], lista_modificate: [{ f: '.htaccess' }] }
+		});
+		const blocked = ev({ ev: 'upload_blocat', t: '2026-09-28T09:40:00Z', ip: '5.5.5.5', ip_remote: '5.5.5.5', date: { fisier: 'shell.php' } });
+		const { findings } = run([files, blocked], known());
+		expect(findings.map((f) => f.text)).toEqual([
+			'fișiere modificate pe disc: 1 noi, 2 modificate, 0 șterse (wp-content/uploads/2026/09/x.php)',
+			'upload PHP blocat: shell.php (5.5.5.5)'
+		]);
+		expect(findings.every((f) => f.level === 'critical' && f.kind === 'legacy_alert')).toBe(true);
 	});
 
 	test('M4: mass_insert raportează maximul din citire, nu ultimul eveniment', () => {
