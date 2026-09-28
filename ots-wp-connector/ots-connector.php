@@ -102,8 +102,10 @@ class OTS_Connector_Sentinel {
 	const MAX_EVENTS_PER_PAGE = 5000;
 	const SCAN_BUDGET_SEC = 20;
 	const SCAN_RETURN_MAX = 200;
+	const KEEP_ROTATED = 5;
 
 	private static $posts_this_request = 0;
+	private static $error_noted = false;
 
 	public static function dir(): string {
 		return WP_CONTENT_DIR . '/ots-sentinel';
@@ -112,7 +114,10 @@ class OTS_Connector_Sentinel {
 	/** Numele fișierului derivă din secret: .htaccess nu ajută pe Nginx, numele neghicit da. */
 	public static function log_file(): string {
 		$secret = (string) get_option( OTS_CONNECTOR_SECRET_OPTION, '' );
-		$hash   = substr( hash_hmac( 'sha256', 'sentinel-log', $secret ), 0, 16 );
+		if ( '' === $secret ) {
+			return '';
+		}
+		$hash = substr( hash_hmac( 'sha256', 'sentinel-log', $secret ), 0, 16 );
 		return self::dir() . '/sentinel-' . $hash . '.log';
 	}
 
@@ -135,7 +140,7 @@ class OTS_Connector_Sentinel {
 				try {
 					call_user_func_array( [ __CLASS__, $method ], func_get_args() );
 				} catch ( Throwable $e ) {
-					// Sentinel nu are voie să strice site-ul.
+					self::note_error( $e );
 				}
 			};
 		};
@@ -156,6 +161,7 @@ class OTS_Connector_Sentinel {
 				try {
 					self::log( 'option_changed', [ 'option' => $opt, 'vechi' => $old, 'nou' => $new ], 'ALERT' );
 				} catch ( Throwable $e ) {
+					self::note_error( $e );
 				}
 			}, 10, 2 );
 		}
@@ -173,6 +179,9 @@ class OTS_Connector_Sentinel {
 		// attachment: un upload de galerie nu e inserare în masă
 		$ignored = [ 'revision', 'nav_menu_item', 'customize_changeset', 'oembed_cache', 'scheduled-action', 'attachment' ];
 		if ( in_array( $post->post_type, $ignored, true ) ) {
+			return;
+		}
+		if ( 'auto-draft' === $post->post_status ) {
 			return;
 		}
 		self::$posts_this_request++;
@@ -233,7 +242,7 @@ class OTS_Connector_Sentinel {
 	public static function on_login_failed( $login ): void {
 		$login  = (string) $login;
 		$exista = username_exists( $login ) || ( is_email( $login ) && email_exists( $login ) );
-		self::log( 'login_esuat', [ 'login' => $login, 'exista' => (bool) $exista ], 'INFO' );
+		self::log( 'login_esuat', [ 'login' => self::cut( $login, 100 ), 'exista' => (bool) $exista ], 'INFO' );
 	}
 
 	public static function on_plugin_activated( $p ): void {
@@ -259,21 +268,29 @@ class OTS_Connector_Sentinel {
 
 	public static function log( string $eveniment, array $date = [], string $sev = 'INFO' ): void {
 		$f = self::log_file();
+		if ( '' === $f ) {
+			return;
+		}
 		if ( file_exists( $f ) && filesize( $f ) > self::MAX_BYTES ) {
-			@rename( $f, preg_replace( '/\.log$/', '-' . gmdate( 'Ymd-His' ) . '.log', $f ) );
+			$rotated = preg_replace( '/\.log$/', '-' . gmdate( 'Ymd-His' ) . '.log', $f );
+			if ( ! file_exists( $rotated ) ) { // două cereri în aceeași secundă: nu suprascrie o rotire plină
+				@rename( $f, $rotated );
+			}
+			self::prune_rotated();
 		}
 		$u     = function_exists( 'wp_get_current_user' ) ? wp_get_current_user() : null;
 		$linie = [
-			'id'   => bin2hex( random_bytes( 6 ) ),
-			't'    => gmdate( 'c' ),
-			'sev'  => $sev,
-			'ev'   => $eveniment,
-			'user' => ( $u && $u->ID ) ? $u->user_login : '-',
-			'uid'  => ( $u && $u->ID ) ? (int) $u->ID : 0,
-			'ip'   => self::ip(),
-			'uri'  => isset( $_SERVER['REQUEST_URI'] ) ? self::cut( $_SERVER['REQUEST_URI'], 200 ) : '',
-			'ua'   => isset( $_SERVER['HTTP_USER_AGENT'] ) ? self::cut( $_SERVER['HTTP_USER_AGENT'], 160 ) : '',
-			'date' => $date,
+			'id'        => bin2hex( random_bytes( 6 ) ),
+			't'         => gmdate( 'c' ),
+			'sev'       => $sev,
+			'ev'        => $eveniment,
+			'user'      => ( $u && $u->ID ) ? $u->user_login : '-',
+			'uid'       => ( $u && $u->ID ) ? (int) $u->ID : 0,
+			'ip'        => self::ip(),
+			'ip_remote' => isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '',
+			'uri'       => isset( $_SERVER['REQUEST_URI'] ) ? self::cut( $_SERVER['REQUEST_URI'], 200 ) : '',
+			'ua'        => isset( $_SERVER['HTTP_USER_AGENT'] ) ? self::cut( $_SERVER['HTTP_USER_AGENT'], 160 ) : '',
+			'date'      => $date,
 		];
 		@file_put_contents( $f, wp_json_encode( $linie ) . "\n", FILE_APPEND | LOCK_EX );
 	}
@@ -328,6 +345,29 @@ class OTS_Connector_Sentinel {
 		wp_mkdir_p( $dir );
 		@file_put_contents( $dir . '/.htaccess', "Require all denied\n<IfModule !mod_authz_core.c>\nOrder deny,allow\nDeny from all\n</IfModule>\n" );
 		@file_put_contents( $dir . '/index.php', "<?php // Silence is golden.\n" );
+	}
+
+	/** Păstrează doar cele mai noi KEEP_ROTATED fișiere rotite (8 MB fiecare) — hosting partajat cu cotă. */
+	private static function prune_rotated(): void {
+		$files = glob( self::dir() . '/sentinel-*-*.log' ) ?: [];
+		if ( count( $files ) <= self::KEEP_ROTATED ) {
+			return;
+		}
+		usort( $files, function ( $a, $b ) {
+			return @filemtime( $b ) <=> @filemtime( $a );
+		} );
+		foreach ( array_slice( $files, self::KEEP_ROTATED ) as $old ) {
+			@unlink( $old );
+		}
+	}
+
+	/** O singură linie în error_log per cerere, doar cu WP_DEBUG — ca un Sentinel stricat să nu fie invizibil luni întregi. */
+	private static function note_error( Throwable $e ): void {
+		if ( self::$error_noted || ! defined( 'WP_DEBUG' ) || ! WP_DEBUG ) {
+			return;
+		}
+		self::$error_noted = true;
+		error_log( 'ots-connector sentinel: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine() );
 	}
 }
 add_action( 'plugins_loaded', [ 'OTS_Connector_Sentinel', 'boot' ], 5 );
