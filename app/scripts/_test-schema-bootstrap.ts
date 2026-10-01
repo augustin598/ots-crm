@@ -88,6 +88,10 @@ export async function bootstrapTestSchema(): Promise<void> {
 		client_since text,
 		tier text DEFAULT 'standard',
 		ltv_cents integer NOT NULL DEFAULT 0,
+		portal_scope text NOT NULL DEFAULT 'full',
+		hour_credit_minutes integer NOT NULL DEFAULT 0,
+		hour_credit_from_invoices integer NOT NULL DEFAULT 0,
+		low_credit_notified_at timestamp,
 		created_at timestamp DEFAULT current_date NOT NULL,
 		updated_at timestamp DEFAULT current_date NOT NULL
 	)`);
@@ -261,6 +265,7 @@ export async function bootstrapTestSchema(): Promise<void> {
 		currency text,
 		unit_of_measure text,
 		keez_item_external_id text,
+		task_id text,
 		created_at timestamp NOT NULL DEFAULT current_date,
 		updated_at timestamp NOT NULL DEFAULT current_date
 	)`);
